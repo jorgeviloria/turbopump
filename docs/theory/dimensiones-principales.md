@@ -12,154 +12,207 @@ medias en tres secciones del rodete:
 Todas las magnitudes están en SI. Los ángulos se miden desde la dirección
 circunferencial, la convención usual en bombas.
 
-> **Estado:** varias correlaciones están marcadas *pendientes de verificar* (ver §9).
-> Los resultados son plausibles y coinciden con tamaños de catálogo, pero falta comprobar
-> los coeficientes contra la edición original de cada libro antes de usarlos en una
-> máquina real.
+**Fuente principal:** J. F. Gülich, *Centrifugal Pumps*, 2.ª ed., Springer 2010. Cada
+correlación de esta nota se comprobó ecuación por ecuación contra esa edición; los números
+de ecuación y de página se refieren a ella. Las demás ediciones numeran distinto.
 
-## 1. Velocidad específica
+## 1. Velocidad específica y tipo de bomba
 
-$n_q$ se calcula **por etapa y por boca**: con $Q/f_q$ y $H/n_{etapas}$
+$n_q$ se calcula **por etapa y por boca**
 ([velocidad-especifica.md](velocidad-especifica.md)). En un proyecto multietapa la
 altura se reparte por igual entre los rodetes.
 
-## 2. Rendimientos
+El tipo de bomba decide qué correlaciones de rendimiento se aplican:
 
-| Magnitud | Valor automático | Fuente |
+| Tipo | Condición | Válida hasta |
 |---|---|---|
-| $\eta_h$ | $1 - 0{,}055\,(Q_{ref}/Q)^m - 0{,}2\,(0{,}26 - \log_{10}(n_q/25))^2 (Q_{ref}/Q)^{0,1}$ | Gülich, tabla 3.9 |
-| $\eta$ | $1 - 0{,}095\,(Q_{ref}/Q)^m - 0{,}3\,(0{,}35 - \log_{10}(n_q/23))^2 (Q_{ref}/Q)^{0,05}$ | Gülich, tabla 3.9 |
-| $m$ | $0{,}08\,a\,(Q_{ref}/Q)^{0,15}(45/n_q)^{0,06}$, con $a = 1$ si $Q \le 1$ m³/s y $a = 0{,}5$ si es mayor | Gülich, tabla 3.9 |
-| $\eta_v$ | 0,97 | valor típico |
-| $\eta_m$ | $\eta / (\eta_h \eta_v)$; incluye el rozamiento de disco | derivado |
+| Una etapa, simple aspiración | 1 rodete, simple aspiración | $n_q \le 100$ |
+| Multietapa | más de un rodete | $n_q \le 60$ |
+| Doble aspiración | 1 rodete de doble aspiración | $n_q \le 50$ |
 
-Con estos rendimientos:
+Todas las correlaciones de rendimiento valen para $Q \ge 0{,}005$ m³/s. Fuera de estos
+rangos el programa avisa.
 
-- el caudal por el rodete, con fugas, es $Q_{La} = Q/\eta_v$;
-- la altura teórica es $H_{th} = H/\eta_h$.
+## 2. Rendimientos (tabla 3.9)
 
-## 3. Eje
+Con $Q$ el caudal de la bomba, $Q_{ref} = 1$ m³/s y $r = Q_{ref}/Q$:
 
-$$T = \frac{\rho g Q H_{máquina}}{\eta\,\omega}, \qquad d_{eje} = \left(\frac{16\,T}{\pi\,\tau_{adm}}\right)^{1/3}$$
+**Exponente**, con $a = 1$ si $Q \le 1$ m³/s y $a = 0{,}5$ si es mayor:
 
-- $T$ es el par de toda la máquina en el acoplamiento.
-- La fórmula es la de torsión de un eje macizo.
+$$m = b \cdot a \cdot r^{0,15}\,(45/n_q)^{0,06}$$
+
+- $b = 0{,}1$ para el rendimiento total;
+- $b = 0{,}08$ para el hidráulico.
+
+**Rendimiento total:**
+
+| Tipo | Fórmula | Ec. |
+|---|---|---|
+| Una etapa | $1 - 0{,}095\,r^m - 0{,}3\,[0{,}35 - \log(n_q/23)]^2\,r^{0,05}$ | 3.9.1 |
+| Multietapa | $1 - 0{,}116\,r^m - 0{,}4\,[0{,}26 - \log(n_q/25)]^2$ | 3.9.2 |
+| Doble aspiración | $1 - 0{,}095\,r^m - 0{,}35\,[0{,}35 - \log(n_q/17{,}7)]^2\,r^{0,05}$ | 3.9.4 |
+
+**Rendimiento hidráulico:**
+
+| Tipo | Fórmula | Ec. |
+|---|---|---|
+| Una etapa | $1 - 0{,}055\,r^m - 0{,}2\,[0{,}26 - \log(n_q/25)]^2\,r^{0,1}$ | 3.9.6 |
+| Multietapa | $1 - 0{,}065\,r^m - 0{,}23\,[0{,}3 - \log(n_q/23)]^2\,r^{0,05}$ | 3.9.8 |
+
+La tabla no trae rendimiento hidráulico para doble aspiración. En ese caso usamos la
+ecuación de una etapa con el caudal de una boca; es una decisión propia.
+
+**Tolerancia:** el informe muestra la dispersión de estas correlaciones,
+$\Delta\eta = \pm 0{,}2\,(1 - \eta)$ (ec. 3.9.10).
+
+**Rendimientos derivados:**
+
+- $\eta_v = 0{,}97$ es un valor típico. Más adelante se calculará con las fugas por los
+  anillos de desgaste (cap. 3.6).
+- $\eta_m = \eta / (\eta_h \eta_v)$ incluye el rozamiento de disco.
+- El caudal por el rodete es $Q_{La} = Q/\eta_v$ y la altura teórica, $H_{th} = H/\eta_h$.
+
+## 3. Eje (ec. 7.1.2)
+
+$$d_{eje} = \left(\frac{16\,P}{\pi\,\omega\,\tau_{adm}}\right)^{1/3}$$
+
+- El libro usa la **potencia máxima** del rango de operación. Nosotros usamos la del punto
+  de diseño de toda la máquina, así que conviene dejar margen en $\tau_{adm}$ o fijar el
+  diámetro a mano.
 - $\tau_{adm}$ vale 25 MPa por defecto: es un valor preliminar típico para acero.
 - El diámetro de cubo en la boca es, por defecto, igual al del eje.
 
-## 4. Diámetro de salida
+## 4. Diámetro de salida (ec. 3.26 y 7.1.3)
 
-$$\psi_{opt} = 1{,}21\,e^{-0{,}77\,n_q/100}, \qquad u_2 = \sqrt{\frac{2 g H}{\psi}}, \qquad d_2 = \frac{2 u_2}{\omega}$$
+$$\psi_{opt} = 1{,}21\,e^{-0{,}77\,n_q/100}, \qquad u_2 = \sqrt{2 g H/\psi}, \qquad d_2 = 2u_2/\omega$$
 
-Fuente: Gülich, ec. 3.26 con $f_T = 1$, donde $\psi = 2gH/u_2^2$. Si el usuario fija
-$d_2$, ψ se recalcula a partir de él.
+Si el usuario fija $d_2$, ψ se recalcula a partir de él.
 
 ## 5. Boca de entrada y ancho de salida
 
-**Diámetro de boca de mínima velocidad relativa.** Sin prerrotación ($c_{u1} = 0$), en la
-cubierta:
+**Diámetro de boca** (tabla 7.1, ec. 7.1.4): $d_1 = f_{d1} \cdot d_{1,min}$, donde
+$d_{1,min}$ minimiza la velocidad relativa en la cubierta con entrada sin prerrotación:
 
-$$w_1^2 = c_{m1}^2 + u_1^2, \qquad c_{m1} = \frac{4 Q_{La}}{\pi (d_1^2 - d_n^2)}, \qquad u_1 = \frac{\omega d_1}{2}$$
+$$d_{1,min}^2 = d_n^2 + 2\left(\frac{4 Q_{La}}{\pi \omega}\right)^{2/3}$$
 
-Derivando respecto de $d_1$ e igualando a cero:
+Es la forma exacta de la ecuación 7.1.4: la del libro está escrita con coeficientes
+redondeados y da 72,0 mm frente a nuestros 72,3 mm.
 
-$$d_1^2 = d_n^2 + 2\left(\frac{4 Q_{La}}{\pi \omega}\right)^{2/3}$$
+**Factor $f_{d1}$** (tabla 7.1): baja linealmente entre $n_q = 15$ y $40$ y se mantiene
+constante fuera de ese rango.
 
-Sin cubo, este óptimo da $\tan\beta_1 = 1/\sqrt 2$ ($\beta_1 \approx 35{,}3°$). La
-constante 2,9 de la fórmula de Gülich, $d_1 = 2{,}9\,(Q/(n\,k_n \tan\beta_1))^{1/3}$, es
-$(240/\pi^2)^{1/3}$: la misma relación escrita con $n$ en rpm. El usuario puede escalar
-$d_1$ con un factor mayor que 1 para bajar $c_{m1}$ y mejorar la aspiración.
+| Tipo de rodete | $n_q \le 15$ | $n_q \ge 40$ |
+|---|---|---|
+| Normal (por defecto) | 1,15 | 1,05 |
+| De aspiración (`--set inlet=suction`) | 1,25 | 1,15 |
 
-**Ancho de salida:**
+**Ancho de salida** (ec. 7.1):
 
 $$b_2/d_2 = 0{,}017 + 0{,}262\,x - 0{,}08\,x^2 + 0{,}0093\,x^3, \qquad x = n_q/100$$
 
-Fuente: Gülich, ec. 7.1. En un rodete de doble aspiración, $b_2$ total = $2 \cdot (b_2/d_2)(n_q) \cdot d_2$.
+En un rodete de doble aspiración, $b_2$ total = $2 \cdot (b_2/d_2)(n_q) \cdot d_2$. Se
+avisa si el ancho de salida de cada lado no queda por debajo del de entrada,
+$b_1 = (d_1 - d_n)/2$ (p. 345).
 
 ## 6. Álabes y triángulos de velocidad
 
-**Bloqueo:**
+**Bloqueo** (ecs. 3.1.7 y 3.2.3), con $\lambda = 90°$:
 
 $$\tau = \left(1 - \frac{z\,e}{\pi d \sin\beta_B \sin\lambda}\right)^{-1}$$
 
-$\lambda = 90°$ (álabes perpendiculares a cubo y cubierta).
+**Entrada** (ec. 7.1.7):
 
-**Entrada:** $\beta_{1B} = \arctan(\tau_1 c_{m1}/u_1) + i$, resuelto por punto fijo.
+$$\beta_{1B} = \arctan\frac{\tau_1 c_{m1}}{u_1} + i$$
 
-**Salida:** con entrada sin prerrotación, $c_{u2} = g H_{th}/u_2$. El ángulo $\beta_{2B}$
-se obtiene con el método de Brent de
+La incidencia $i$ vale 0° por defecto. El libro recomienda de 0° a 4°, y se avisa si se
+sale de ese rango.
 
-$$\frac{c_{u2}}{u_2} = \gamma(\beta_{2B}) - \frac{c_{m2}\,\tau_2}{u_2 \tan\beta_{2B}}$$
+**Salida** (ecs. 3.2.4-3.2.7). El ángulo $\beta_{2B}$ se obtiene con el método de Brent de
 
-**Deslizamiento:** Wiesner, con el factor $f_1 = 0{,}98$ de Gülich:
+$$\frac{c_{u2}}{u_2} = \gamma - \frac{c_{m2}\,\tau_2}{u_2 \tan\beta_{2B}}$$
+
+con el deslizamiento
 
 $$\gamma = f_1\left(1 - \frac{\sqrt{\sin\beta_{2B}}}{z^{0,7}}\right) k_w, \qquad \varepsilon_{lim} = e^{-8{,}16 \sin\beta_{2B}/z}$$
 
-$k_w$ corrige los canales cortos cuando $d_{1m}/d_2 > \varepsilon_{lim}$.
+- $f_1 = 0{,}98$ en rodetes radiales.
+- $f_1 = 1{,}02 + 1{,}2\cdot10^{-3}(n_q - 50)$ en rodetes semiaxiales.
+- $k_w$ corrige los canales cortos cuando $d_{1m}/d_2 > \varepsilon_{lim}$.
 
-**Número de álabes** (Pfleiderer):
+**Número de álabes.** Gülich desaconseja las fórmulas empíricas y da criterios
+(pp. 342-343):
 
-$$z = 6{,}5\,\frac{d_2 + d_{1m}}{d_2 - d_{1m}} \sin\frac{\beta_{1B} + \beta_{2B}}{2}$$
+- de 5 a 7 álabes para $10 < n_q < 120$;
+- nunca 8 o más, por la estabilidad de la curva Q-H;
+- no menos de 5 si la altura por etapa supera 100 m.
 
-Se itera con los ángulos resultantes hasta que $z$ redondeado no cambia, dentro del
-intervalo 3–12.
+El valor automático usa la estimación de Pfleiderer, $z = 6{,}5\,(d_2 + d_{1m})/(d_2 - d_{1m})\,\sin\beta_m$,
+redondeada y **limitada a 5-7**. Después se comprueba con el criterio de carga del álabe
+([geometria-rodete.md](geometria-rodete.md)).
 
-## 7. Cavitación
+**Espesor.** Por defecto, $\max(3\text{ mm};\ 0{,}016\,d_2)$. El libro recomienda
+$e/d_2$ = 0,016-0,022, con un mínimo de 3 a 5 mm en piezas fundidas (p. 347).
+
+## 7. Comprobaciones (p. 346)
+
+| Comprobación | Límite |
+|---|---|
+| Ángulo de salida $\beta_{2B}$ | 15°-45° (a menudo 20°-27°) |
+| Desviación $\delta_2 = \beta_{2B} - \beta_2$ | ≤ 10°-14° (se avisa por encima de 14°) |
+| De Haller, $w_2/w_1$ en la cubierta | ≥ 0,7 |
+| Ancho de salida | $b_2 < b_1$ |
+| Incidencia | 0°-4° |
+
+## 8. Cavitación
 
 $$NPSH_3 \approx \left(\frac{n\sqrt{Q/f_q}}{n_{ss}}\right)^{4/3}, \qquad NPSH_d = \frac{p_{t,entrada} - p_v}{\rho g}$$
 
-$n_{ss} = 200$ (rpm, m³/s, m) por defecto: es un valor típico de rodetes convencionales.
-Se avisa si $NPSH_d < NPSH_3$, y también si el margen es menor del 30 %.
+$n_{ss} = 200$ por defecto: es un valor típico de rodetes convencionales. Se avisa si
+$NPSH_d < NPSH_3$, y también si el margen es menor del 30 %.
 
-## 8. Comprobaciones automáticas
+## 9. Bomba de referencia
 
-- **Euler:** $u_2 c_{u2} - u_1 c_{u1} = g H_{th}$.
-- **Continuidad en la salida:** $c_{m2}\,\pi d_2 b_2 = Q_{La}$.
-- **Rendimientos:** $\eta_h \eta_v \eta_m = \eta$.
-- **Bomba de referencia** (100 m³/h, 32 m, 2900 rpm, agua a 20 °C):
+Datos: 100 m³/h, 32 m, 2900 rpm, agua a 20 °C, todos los valores automáticos.
 
-  | Magnitud | Resultado |
-  |---|---|
-  | $n_q$ | 35,9 |
-  | $d_2$ | 172 mm |
-  | $d_1$ | 72 mm |
-  | $b_2$ | 17,4 mm |
-  | $z$ | 7 |
-  | $\beta_{2B}$ | 22,0° |
-  | $NPSH_3$ | 3,2 m |
-  | $\eta$ | 0,835 |
-
-  Estos valores corresponden a una bomba normalizada 65-160.
-
-## 9. Estado de verificación
-
-| Correlación | Estado |
+| Magnitud | Valor |
 |---|---|
-| Relaciones de Euler, continuidad, bloqueo y torsión | física estándar |
-| Diámetro de boca de mínima $w_1$ | derivación propia (§5) |
-| Número de álabes de Pfleiderer, $k = 6{,}5$ | estándar, reproducida igual en toda la bibliografía |
-| ψ_opt, $\eta_h$, $\eta$ y $b_2/d_2$ | **pendiente de verificar** con Gülich, 4.ª ed. |
-| Deslizamiento: forma de Wiesner | estándar |
-| Deslizamiento: factor $f_1$ de Gülich | **pendiente de verificar** |
-| $\eta_v$, $\tau_{adm}$, $n_{ss}$ y espesor de álabe | valores típicos, no correlaciones publicadas |
+| $n_q$ | 35,9 |
+| $\eta_h$ | 0,907 |
+| $\eta$ | 0,814 ± 0,037 |
+| $P$ | 10,7 kW |
+| $d_{eje}$ | 19,3 mm |
+| $f_{d1}$ | 1,066 |
+| $d_1$ | 77,2 mm |
+| $d_2$ | 172,2 mm |
+| $b_2$ | 17,4 mm |
+| $z$ | 7 |
+| $\beta_{2B}$ | 22,0° |
+| $\delta_2$ | 8,8° |
+| $w_2/w_1$ | 0,99 |
+| $NPSH_3$ | 3,2 m |
 
-El registro está en código, en `tp_design::pump::correlations::CORRELATIONS`, para que la
-interfaz pueda mostrarlo junto a cada valor automático.
+Las pruebas automáticas comprueban:
 
-## 10. Limitaciones de esta fase
+- la ecuación de Euler, $u_2 c_{u2} - u_1 c_{u1} = g H_{th}$;
+- la continuidad en la salida;
+- que $\eta_h \eta_v \eta_m = \eta$;
+- el valor de $\eta$ calculado a mano con la ecuación 3.9.1.
 
-- El borde de ataque se sitúa en el plano de la boca, así que los ángulos en el cubo
-  salen altos. En la Fase 2 su posición vendrá del contorno meridional.
-- No hay prerrotación en la entrada.
-- $\eta_v$ es constante; más adelante se sustituirá por un cálculo de fugas en los anillos
-  de desgaste.
-- Solo están implementados los rodetes radiales de bomba. El resto de máquinas llega en la
-  Fase 6.
+## 10. Estado de verificación
 
-## Referencias
+| Elemento | Estado |
+|---|---|
+| ψ_opt, η_h, η, tolerancia, $b_2/d_2$, deslizamiento, bloqueos, $d_1$ y $f_{d1}$, eje, límites de diseño | **verificado** con la 2.ª ed. |
+| Número de álabes | Pfleiderer, estándar, limitado al rango de Gülich |
+| $\eta_v$, $\tau_{adm}$, $n_{ss}$ | valores típicos, no correlaciones publicadas |
 
-- J. F. Gülich, *Centrifugal Pumps*, 4.ª ed., Springer 2020.
-- F. J. Wiesner, "A review of slip factors for centrifugal impellers", *J. Eng. Power* 89
-  (1967) 558–572.
-- C. Pfleiderer, *Die Kreiselpumpen für Flüssigkeiten und Gase*, 5.ª ed., Springer 1961.
-- A. J. Stepanoff, *Centrifugal and Axial Flow Pumps*, 2.ª ed., Wiley 1957.
+El registro está en código, en `tp_design::pump::correlations::CORRELATIONS`.
+
+## 11. Limitaciones
+
+- No hay prerrotación a la entrada. La ecuación 7.1.9 ya tiene el término para cuando se
+  añada.
+- $\eta_v$ es constante.
+- El eje usa la potencia del punto de diseño.
+- Solo están implementados los rodetes radiales. El rendimiento de bombas semiaxiales y
+  axiales (ecs. 3.9.3 y 3.9.7) llega con esas máquinas.

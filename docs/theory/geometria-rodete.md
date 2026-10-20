@@ -141,12 +141,42 @@ Esto da exactamente el espesor normal $e$ y mantiene ambas caras sobre el mismo 
 
 | Tipo | Forma | Uso por defecto |
 |---|---|---|
-| Elipse de relación $k$ | longitud de la nariz $k\,e/2$ sobre la línea media; espesor $\propto \sqrt{1 - ((a-s)/a)^2}$ | borde de ataque, $k = 2$ |
+| Elipse de relación $k$ | longitud de la nariz $L_p = k\,e/2$ sobre la línea media; espesor $\propto \sqrt{1 - ((a-s)/a)^2}$ | borde de ataque, $k = 4$ |
 | Cortado | espesor completo hasta el borde | borde de salida |
 
-Es la forma habitual de los rodetes de bomba fundidos.
+**Borde de ataque.** Gülich valora el perfil por su coeficiente de presión mínima con
+entrada sin choque (ec. 7.1a):
 
-## 6. Salidas
+$$c_{p,min} = 2x + x^2, \qquad x = 0{,}373\,e/L_p$$
+
+| Perfil | $c_{p,min}$ |
+|---|---|
+| Semicírculo, $k = 1$ | 2,05 (desfavorable) |
+| Elipse 2:1 | 0,89 |
+| Elipse 4:1 (por defecto) | 0,41 |
+| Elipse 10:1 | 0,155 |
+
+Las elipses largas, en forma de cuña, solo funcionan bien con incidencia nula y son
+frágiles en fundición. Por eso el valor por defecto se queda en 4:1; es una elección
+propia, y el informe muestra el $c_{p,min}$ resultante.
+
+**Borde de salida.** El espesor completo hasta el borde deja material para limarlo por
+debajo si falta altura (pp. 348-349).
+
+## 6. Carga del álabe (tabla 7.1, ecs. 7.1.10-7.1.11)
+
+$$\xi_{ef} = \frac{2\pi\,\psi_{opt}}{\eta_h\,z\,L^*\,(w_1^* + w_2^*)}, \qquad \xi_{adm} = \left(\frac{40}{n_q}\right)^{0,77}$$
+
+- Las magnitudes con asterisco se refieren a $d_2$ (longitudes) y a $u_2$ (velocidades).
+- Según la convención del libro, las magnitudes sin subíndice son de la línea de
+  corriente exterior. Por eso $L$ (longitud del álabe) y $w_1$ se toman en la sección de
+  la cubierta.
+- El número y la longitud de los álabes son adecuados si $\xi_{ef}$ queda en la banda de
+  ±15 % alrededor de $\xi_{adm}$. Gülich recomienda quedarse un 10 % por debajo.
+- Se avisa si el álabe está poco cargado (sobran álabes o longitud) o sobrecargado
+  (faltan).
+
+## 7. Salidas
 
 `turbopump geometry proyecto.tpj --export carpeta` escribe:
 
@@ -157,17 +187,23 @@ Es la forma habitual de los rodetes de bomba fundidos.
 | `meridional.svg` | Contorno, spans, cuasi-ortogonales y bordes |
 | `front.svg` | Vista desde la entrada con las secciones de cubo y carcasa |
 
-## 7. Resultados de referencia
+## 8. Resultados de referencia
 
-| Span | $r_{LE}$ | $c_m$ | $\beta_1$ | $\beta_{1B}$ | Envolvimiento |
-|---|---|---|---|---|---|
-| cubo | 19,3 mm | 6,58 m/s | 48,4° | 55,0° | 112,8° |
-| medio | 29,1 mm | 7,14 m/s | 38,9° | 44,1° | 110,4° |
-| carcasa | 36,5 mm | 7,45 m/s | 33,9° | 38,3° | 103,2° |
+Valores automáticos, con $d_1 = 77{,}2$ mm por el factor $f_{d1}$ de la tabla 7.1:
 
-- $c_m$ baja de 7,49 a 3,04 m/s sin repuntes. Coincide con la $c_{m1}$ y la $c_{m2}$ de
-  las dimensiones principales.
-- El envolvimiento entre 100° y 115° es el rango habitual para $n_q \approx 36$.
+| Span | $r_{LE}$ | $c_m$ | $\beta_1$ | $\beta_{1B}$ | Envolvimiento | Longitud |
+|---|---|---|---|---|---|---|
+| cubo | 18,9 mm | 5,89 m/s | 45,7° | 52,8° | 120,7° | 128,0 mm |
+| medio | 30,4 mm | 6,27 m/s | 34,2° | 39,5° | 120,5° | 130,8 mm |
+| carcasa | 38,9 mm | 6,50 m/s | 28,8° | 33,2° | 111,6° | 126,7 mm |
+
+- **Longitud axial:** 46,4 mm. Coincide con la estimación $z_E$ de la ecuación 7.2 del
+  libro (46 mm), aunque falta confirmar desde dónde se mide esa cota.
+- **Velocidad meridional:** $c_m$ baja de 6,53 a 3,04 m/s sin repuntes.
+- **Carga del álabe:** $\xi_{ef}/\xi_{adm} = 1{,}21/1{,}09 = 1{,}11$, dentro de la banda
+  pero algo por encima del 0,9 recomendado. Con 5 álabes la carga sale de la banda y el
+  programa avisa.
+- **Borde de ataque:** $c_{p,min} = 0{,}41$.
 
 ## Limitaciones
 

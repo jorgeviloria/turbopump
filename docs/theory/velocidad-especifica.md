@@ -56,7 +56,7 @@ Los tests de `specific_speed.rs` comprueban estos tres factores.
 
 ## Referencias
 
-- J. F. Gülich, *Centrifugal Pumps*, Springer, cap. 3.
+- J. F. Gülich, *Centrifugal Pumps*, 2.ª ed., Springer 2010, §3.4.
 - O. Cordier, "Ähnlichkeitsbedingungen für Strömungsmaschinen", *Brennstoff-Wärme-Kraft*
   5 (1953).
 - S. L. Dixon, C. A. Hall, *Fluid Mechanics and Thermodynamics of Turbomachinery*,
