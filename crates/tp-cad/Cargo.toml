@@ -1,0 +1,26 @@
+[package]
+name = "tp-cad"
+description = "CAD solids of Turbopump designs with Open CASCADE: B-spline surfaces, impeller and flow-domain solids, STEP/IGES/STL"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+build = "build.rs"
+
+[dependencies]
+cxx.workspace = true
+thiserror.workspace = true
+tp-design.workspace = true
+tp-math.workspace = true
+
+[build-dependencies]
+cxx-build.workspace = true
+# Builds OCCT 7.8.1 from source as static libraries (LGPL-2.1 with exception).
+occt-sys.workspace = true
+
+[dev-dependencies]
+approx.workspace = true
+
+[lints]
+workspace = true

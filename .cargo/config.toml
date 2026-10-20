@@ -1,0 +1,4 @@
+[env]
+# OCCT 7.8 declares cmake_minimum_required(VERSION 3.1); CMake 4 refuses that unless a
+# minimum policy version is set. Harmless for older CMake.
+CMAKE_POLICY_VERSION_MINIMUM = "3.5"
