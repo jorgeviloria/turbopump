@@ -458,3 +458,39 @@ fn cad_exports_impeller_and_flow_domain() {
     );
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn performance_predicts_the_characteristic() {
+    let (dir, file) = reference_project("performance");
+    let file_arg = file.to_str().unwrap();
+    let out = turbopump(&["performance", file_arg]);
+    let text = stdout(&out);
+    assert_eq!(out.status.code(), Some(0), "{text}");
+    assert!(
+        text.contains("Design     Q 100.0 m³/h   H 32.00 m"),
+        "{text}"
+    );
+    assert!(text.contains("Shut-off   H"), "{text}");
+    // CSV of the curve, with a manual collector and range.
+    let csv = dir.join("curve.csv");
+    let out = turbopump(&[
+        "performance",
+        file_arg,
+        "--set",
+        "collector=diffuser",
+        "--set",
+        "max=1.3",
+        "--set",
+        "points=11",
+        "--csv",
+        csv.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(0), "{}", stdout(&out));
+    let rows = std::fs::read_to_string(&csv).unwrap();
+    // Header, 11 points and the onset of recirculation.
+    assert_eq!(rows.lines().count(), 13, "{rows}");
+    assert!(rows.starts_with("flow_m3_s,head_m"));
+    let bad = turbopump(&["performance", file_arg, "--set", "onset=7"]);
+    assert_eq!(bad.status.code(), Some(2));
+    std::fs::remove_dir_all(&dir).unwrap();
+}

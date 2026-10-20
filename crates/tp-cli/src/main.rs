@@ -8,6 +8,7 @@ mod cad;
 mod design;
 mod diffuser;
 mod geometry;
+mod performance;
 mod volute;
 
 use std::path::{Path, PathBuf};
@@ -83,6 +84,9 @@ enum Command {
     Volute(volute::VoluteArgs),
     /// Design the stators after the impellers: vaneless rings or vaned diffusers.
     Diffuser(diffuser::DiffuserArgs),
+    /// Predict the characteristic of the impellers: head, power and efficiency against
+    /// flow, from shut-off to overload, and optionally write it as CSV.
+    Performance(performance::PerformanceArgs),
     /// Build the CAD solids of the impellers, stators and volutes and their flow domains
     /// with Open CASCADE and export them to STEP, IGES or STL.
     #[cfg(feature = "cad")]
@@ -185,6 +189,7 @@ fn main() -> ExitCode {
         Command::Geometry(args) => geometry::run(args),
         Command::Volute(args) => volute::run(args),
         Command::Diffuser(args) => diffuser::run(args),
+        Command::Performance(args) => performance::run(args),
         #[cfg(feature = "cad")]
         Command::Cad(args) => cad::run(args),
         Command::Info { file, units } => info(&file, units),
