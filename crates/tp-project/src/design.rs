@@ -317,11 +317,25 @@ impl Project {
             )));
         }
         let upstream = &self.components()[index - 1];
-        if upstream.kind() != ComponentKind::Impeller {
-            return Err(ProjectError::Unsupported(format!(
-                "a {what} after a {} (planned for a later phase)",
-                upstream.kind().label().to_lowercase()
-            )));
+        match upstream.kind() {
+            ComponentKind::Impeller => {}
+            // A diffuser hands on its own outlet (Gülich Chap. 7.11).
+            ComponentKind::Stator { vaned } => {
+                let inlet = self.impeller_outlet_before(index - 1)?;
+                let d = DiffuserDesign::new(&inlet, &self.diffuser_input(upstream.id())?, vaned)?;
+                return Ok(ImpellerOutlet {
+                    impeller_diameter: d.outlet_diameter,
+                    impeller_width: d.outlet_width,
+                    cu: d.outlet.cu,
+                    cm: d.outlet.cm,
+                    ..inlet
+                });
+            }
+            ComponentKind::Volute => {
+                return Err(ProjectError::Unsupported(format!(
+                    "a {what} after a volute (planned for a later phase)"
+                )));
+            }
         }
         let impeller = upstream.id();
         let main = self.compute_main_dimensions(impeller)?;
@@ -706,6 +720,22 @@ mod tests {
                 .status(DesignStep::MainDimensions),
             StepStatus::Stale
         );
+    }
+
+    #[test]
+    fn volute_after_a_diffuser_takes_its_outlet() {
+        let mut p = pump();
+        p.add_component(ComponentKind::Impeller, None).unwrap();
+        let diffuser = p
+            .add_component(ComponentKind::Stator { vaned: true }, None)
+            .unwrap();
+        let volute = p.add_component(ComponentKind::Volute, None).unwrap();
+        let d = p.compute_diffuser(diffuser).unwrap();
+        let basis = p.volute_basis(volute).unwrap();
+        assert_relative_eq!(basis.impeller_diameter, d.outlet_diameter);
+        assert_relative_eq!(basis.cu, d.outlet.cu);
+        let v = p.compute_volute(volute).unwrap();
+        assert!(v.design.cutwater_diameter > d.outlet_diameter);
     }
 
     #[test]
