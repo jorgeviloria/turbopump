@@ -21,6 +21,7 @@ use crate::steps::AcceptState;
 use crate::theme::{self, Palette, icon};
 use crate::tree::StageParts;
 use crate::viewer::Viewer;
+use crate::views::performance::PerformanceView;
 use crate::views::{blade, front, meridional::MeridionalView, report};
 use crate::{default_project, steps, tree, widgets};
 
@@ -103,15 +104,17 @@ pub enum View {
     Blade,
     FrontView,
     View3d,
+    Performance,
     Report,
 }
 
 impl View {
-    pub const ALL: [View; 5] = [
+    pub const ALL: [View; 6] = [
         View::Meridional,
         View::Blade,
         View::FrontView,
         View::View3d,
+        View::Performance,
         View::Report,
     ];
 
@@ -121,6 +124,7 @@ impl View {
             View::Blade => "Blade",
             View::FrontView => "Front view",
             View::View3d => "3D view",
+            View::Performance => "Performance curves",
             View::Report => "Report",
         }
     }
@@ -132,6 +136,7 @@ impl View {
             View::Blade => "Blade",
             View::FrontView => "Front",
             View::View3d => "3D",
+            View::Performance => "Curves",
             View::Report => "Report",
         }
     }
@@ -142,6 +147,7 @@ impl View {
             View::Blade => icon::WAVE_SINE,
             View::FrontView => icon::FAN,
             View::View3d => icon::CUBE,
+            View::Performance => icon::CHART_LINE,
             View::Report => icon::TABLE,
         }
     }
@@ -253,6 +259,7 @@ pub struct TurbopumpApp {
     /// Where the step dialog was last frame, to keep the 3D overlays clear of it.
     dialog_rect: Option<egui::Rect>,
     meridional: MeridionalView,
+    performance: PerformanceView,
     viewer: Viewer,
     exports: Exports,
     status: Option<Status>,
@@ -302,6 +309,7 @@ impl TurbopumpApp {
             tree_open: true,
             dialog_rect: None,
             meridional: MeridionalView::default(),
+            performance: PerformanceView::default(),
             viewer: Viewer::default(),
             exports: Exports::default(),
             status: None,
@@ -539,6 +547,10 @@ impl TurbopumpApp {
                         &units,
                         cover,
                     ),
+                    View::Performance => {
+                        self.performance
+                            .show(ui, cx.doc.project(), cx.derived, id, &units);
+                    }
                     View::Report => {
                         report::show(ui, cx.doc.project(), cx.derived, id, stator, volute, &units)
                     }
@@ -604,7 +616,7 @@ impl TurbopumpApp {
                     {
                         self.tree_open = !self.tree_open;
                     }
-                    const TAB: f32 = 118.0;
+                    const TAB: f32 = 104.0;
                     let total = TAB * View::ALL.len() as f32;
                     let free = ui.available_width() - total - 150.0;
                     ui.add_space((free / 2.0).max(8.0));

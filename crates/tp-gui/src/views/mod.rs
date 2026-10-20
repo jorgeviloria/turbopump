@@ -1,8 +1,9 @@
-//! Dockable views of the active impeller.
+//! The views of the active stage, one at a time in the main area.
 
 pub(crate) mod blade;
 pub(crate) mod front;
 pub(crate) mod meridional;
+pub(crate) mod performance;
 pub(crate) mod report;
 
 use eframe::egui::{Color32, Id, Ui};
@@ -78,6 +79,25 @@ pub(crate) fn settle(
         ui.ctx().data_mut(|d| d.insert_temp(key, current));
         ui.ctx().request_repaint();
     }
+}
+
+/// Grid steps of 1, 2 or 5 times a power of ten, about a quarter of the visible range
+/// apart, so that every plot labels a few values whatever its height.
+pub(crate) fn nice_grid(input: egui_plot::GridInput) -> [f64; 3] {
+    let range = (input.bounds.1 - input.bounds.0).abs().max(f64::EPSILON);
+    let target = range / 4.0;
+    let power = 10f64.powf(target.log10().floor());
+    let mantissa = target / power;
+    let step = if mantissa < 1.5 {
+        1.0
+    } else if mantissa < 3.5 {
+        2.0
+    } else if mantissa < 7.5 {
+        5.0
+    } else {
+        10.0
+    } * power;
+    [step / 5.0, step, step * 5.0]
 }
 
 /// Message shown instead of a view when the geometry is missing.

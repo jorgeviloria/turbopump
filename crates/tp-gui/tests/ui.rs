@@ -136,6 +136,10 @@ fn every_view_draws_without_a_gpu() {
             View::Report => {
                 harness.get_by_label("Blade sections");
             }
+            View::Performance => {
+                harness.get_by_label("Best efficiency");
+                harness.get_by_label_contains("(estimate)");
+            }
             _ => {}
         }
     }

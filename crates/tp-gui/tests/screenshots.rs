@@ -45,7 +45,12 @@ fn main_window() {
         harness.get_by_label_contains("Accept step").click();
         harness.run();
         save(&mut harness, &format!("main-{suffix}"));
-        for view in [View::Report, View::Blade, View::FrontView] {
+        for view in [
+            View::Report,
+            View::Blade,
+            View::FrontView,
+            View::Performance,
+        ] {
             harness.state_mut().focus_view(view);
             harness.run();
             let name = view.title().to_lowercase().replace(' ', "-");
