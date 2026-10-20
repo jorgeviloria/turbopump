@@ -84,10 +84,11 @@ pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
 mod tests {
     use super::*;
     use std::f64::consts::PI;
-    use tp_design::volute::{SectionShape, VoluteBasis, VoluteInput};
+    use tp_design::outlet::ImpellerOutlet;
+    use tp_design::volute::{SectionShape, VoluteInput};
 
-    fn basis() -> VoluteBasis {
-        VoluteBasis {
+    fn basis() -> ImpellerOutlet {
+        ImpellerOutlet {
             flow: 100.0 / 3600.0,
             impeller_diameter: 0.172,
             impeller_width: 0.0174,
@@ -98,6 +99,7 @@ mod tests {
             density: 998.2,
             midplane: 0.0378,
             rotation_sign: 1.0,
+            impeller_blades: 7,
         }
     }
 

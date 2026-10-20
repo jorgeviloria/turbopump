@@ -18,64 +18,11 @@ use std::f64::consts::{PI, TAU};
 use serde::{Deserialize, Serialize};
 use tp_math::roots;
 
+use crate::outlet::ImpellerOutlet;
 use crate::pump::correlations::{CorrelationInfo, Verification};
-use crate::pump::{CentrifugalPumpDesign, PumpDuty};
 use crate::{DesignError, Param};
 
 pub use geometry::{NozzleSection, VoluteGeometry, VoluteSection};
-
-/// What the volute receives from the impeller upstream, in SI units.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct VoluteBasis {
-    /// Flow through the machine at the design point, m³/s. The leakage at the impeller
-    /// eye returns to the suction side and does not pass the volute.
-    pub flow: f64,
-    /// Impeller outlet diameter d₂, m.
-    pub impeller_diameter: f64,
-    /// Outlet width of the whole impeller b₂, m.
-    pub impeller_width: f64,
-    /// Circumferential velocity at the impeller outlet c₂u, m/s.
-    pub cu: f64,
-    /// Meridional velocity at the impeller outlet c₂m, m/s.
-    pub cm: f64,
-    /// Specific speed of the stage.
-    pub nq: f64,
-    /// Head of the stage, m.
-    pub stage_head: f64,
-    /// kg/m³
-    pub density: f64,
-    /// Axial position of the midplane of the impeller outlet, m.
-    pub midplane: f64,
-    /// +1 when the impeller turns in the positive sense about +z, −1 otherwise.
-    pub rotation_sign: f64,
-}
-
-impl VoluteBasis {
-    /// The basis of a volute fed by a radial pump impeller.
-    pub fn from_pump(
-        design: &CentrifugalPumpDesign,
-        duty: &PumpDuty,
-        midplane: f64,
-        rotation_sign: f64,
-    ) -> Self {
-        Self {
-            flow: duty.flow,
-            impeller_diameter: design.outlet_diameter,
-            impeller_width: design.outlet_width,
-            cu: design.outlet.triangle.cu,
-            cm: design.outlet.triangle.cm,
-            nq: design.nq,
-            stage_head: duty.head,
-            density: duty.density,
-            midplane,
-            rotation_sign,
-        }
-    }
-
-    fn impeller_radius(&self) -> f64 {
-        self.impeller_diameter / 2.0
-    }
-}
 
 /// Shape of the volute cross sections (Gülich Fig. 7.40).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -413,9 +360,9 @@ fn require(ok: bool, message: impl FnOnce() -> String) -> Result<(), DesignError
 
 impl VoluteDesign {
     /// Designs the volute for `basis` with the given inputs.
-    pub fn new(basis: &VoluteBasis, input: &VoluteInput) -> Result<Self, DesignError> {
+    pub fn new(basis: &ImpellerOutlet, input: &VoluteInput) -> Result<Self, DesignError> {
         let d2 = basis.impeller_diameter;
-        let r2 = basis.impeller_radius();
+        let r2 = basis.impeller_diameter / 2.0;
         require(basis.flow > 0.0 && basis.cu > 0.0 && d2 > 0.0, || {
             "the volute needs a positive flow, c₂u and d₂ from the impeller".into()
         })?;
@@ -560,7 +507,7 @@ impl VoluteDesign {
     }
 
     fn discharge(
-        basis: &VoluteBasis,
+        basis: &ImpellerOutlet,
         input: &DischargeInput,
         flow: f64,
         throat_area: f64,
@@ -694,8 +641,8 @@ mod tests {
     use tp_math::quad::gauss_legendre;
 
     /// Volute basis of the reference pump: 100 m³/h, 32 m, 2900 rpm, d₂ = 172 mm.
-    pub(crate) fn reference_basis() -> VoluteBasis {
-        VoluteBasis {
+    pub(crate) fn reference_basis() -> ImpellerOutlet {
+        ImpellerOutlet {
             flow: 100.0 / 3600.0,
             impeller_diameter: 0.172,
             impeller_width: 0.0174,
@@ -706,6 +653,7 @@ mod tests {
             density: 998.2,
             midplane: 0.0378,
             rotation_sign: 1.0,
+            impeller_blades: 7,
         }
     }
 

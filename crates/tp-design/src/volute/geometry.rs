@@ -9,8 +9,9 @@ use std::f64::consts::TAU;
 
 use tp_math::{DVec2, DVec3};
 
-use super::{SectionShape, SectionSize, VoluteBasis, VoluteDesign, VoluteInput};
+use super::{SectionShape, SectionSize, VoluteDesign, VoluteInput};
 use crate::DesignError;
+use crate::outlet::ImpellerOutlet;
 
 /// Points on each straight edge of a rectangular or trapezoidal outline.
 const EDGE_POINTS: usize = 10;
@@ -58,7 +59,7 @@ pub struct NozzleSection {
 /// Complete volute geometry.
 #[derive(Debug, Clone)]
 pub struct VoluteGeometry {
-    pub basis: VoluteBasis,
+    pub basis: ImpellerOutlet,
     pub design: VoluteDesign,
     /// Wrap angle of the first section, rad; the cutwater fills the space before it.
     pub start_angle: f64,
@@ -223,7 +224,7 @@ fn centroid(points: &[DVec2]) -> DVec2 {
 }
 
 impl VoluteGeometry {
-    pub fn build(basis: &VoluteBasis, input: &VoluteInput) -> Result<Self, DesignError> {
+    pub fn build(basis: &ImpellerOutlet, input: &VoluteInput) -> Result<Self, DesignError> {
         let design = VoluteDesign::new(basis, input)?;
         let count = input.spiral.sections.resolve(|| DEFAULT_SECTIONS);
         if count < 4 {

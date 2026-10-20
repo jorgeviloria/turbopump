@@ -3,7 +3,8 @@
 use tp_design::MainDimensionsInput;
 use tp_design::impeller::{self, ImpellerBasis, ImpellerGeometry, ImpellerGeometryInput};
 use tp_design::pump::{self, CentrifugalPumpDesign, CentrifugalPumpInput, PumpDuty, Suction};
-use tp_design::volute::{VoluteBasis, VoluteGeometry, VoluteInput};
+use tp_design::outlet::ImpellerOutlet;
+use tp_design::volute::{VoluteGeometry, VoluteInput};
 use tp_fluids::LiquidProperties;
 use tp_units::STANDARD_GRAVITY;
 
@@ -268,7 +269,7 @@ impl Project {
     }
 
     /// What volute `id` receives from the impeller just upstream.
-    pub fn volute_basis(&self, id: ComponentId) -> Result<VoluteBasis, ProjectError> {
+    pub fn volute_basis(&self, id: ComponentId) -> Result<ImpellerOutlet, ProjectError> {
         let index = self
             .components()
             .iter()
@@ -300,7 +301,7 @@ impl Project {
             Suction::Single => length - geometry.basis.outlet_width / 2.0,
             Suction::Double => length,
         };
-        Ok(VoluteBasis::from_pump(
+        Ok(ImpellerOutlet::from_pump(
             &main,
             &duty,
             midplane,

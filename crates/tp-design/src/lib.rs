@@ -5,6 +5,7 @@
 
 mod error;
 pub mod impeller;
+pub mod outlet;
 mod param;
 pub mod pump;
 pub mod slip;

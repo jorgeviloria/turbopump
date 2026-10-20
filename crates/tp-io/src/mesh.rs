@@ -217,8 +217,9 @@ pub(crate) mod tests {
 
     #[test]
     fn volute_mesh_is_closed_and_encloses_the_channel() {
-        use tp_design::volute::{VoluteBasis, VoluteInput};
-        let basis = VoluteBasis {
+        use tp_design::outlet::ImpellerOutlet;
+        use tp_design::volute::VoluteInput;
+        let basis = ImpellerOutlet {
             flow: 100.0 / 3600.0,
             impeller_diameter: 0.172,
             impeller_width: 0.0174,
@@ -229,6 +230,7 @@ pub(crate) mod tests {
             density: 998.2,
             midplane: 0.0378,
             rotation_sign: 1.0,
+            impeller_blades: 7,
         };
         let g = VoluteGeometry::build(&basis, &VoluteInput::default()).unwrap();
         let tris = volute_triangles(&g);
