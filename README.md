@@ -4,9 +4,10 @@ Turbopump es una aplicación libre y multiplataforma (Windows, macOS y Linux), e
 Rust, para el diseño preliminar e interactivo de turbomáquinas: bombas, ventiladores,
 compresores y turbinas.
 
-> **Estado:** Fase 4, versión 0.1: diseño completo del rodete de una bomba centrífuga,
-> desde el punto de diseño hasta los sólidos CAD (STEP, IGES, STL), con interfaz gráfica
-> y línea de comandos. La hoja de ruta completa está en [PLAN.md](PLAN.md).
+> **Estado:** Fase 5, versión 0.2: bomba centrífuga completa, con rodete, difusor con o
+> sin álabes y voluta. Va desde el punto de diseño hasta los sólidos CAD (STEP, IGES,
+> STL), con interfaz gráfica y línea de comandos. La hoja de ruta completa está en
+> [PLAN.md](PLAN.md).
 
 ![Editor de Turbopump](docs/img/editor.jpg)
 
@@ -17,9 +18,9 @@ compresores y turbinas.
 | [`tp-units`](crates/tp-units) | Magnitudes físicas, unidades SI/US, conversión y lectura de texto (`"2900 rpm"`), y velocidad específica (nq, ns US, ωs, σ de Cordier) |
 | [`tp-math`](crates/tp-math) | Curvas Bézier y B-spline (evaluación, derivadas, subdivisión, interpolación), polilíneas, interpolación 1D monótona, raíces y cuadratura |
 | [`tp-fluids`](crates/tp-fluids) | Propiedades de líquidos con CoolProp, cargado al ejecutar, y un modelo propio del agua (IAPWS) para cuando falta |
-| [`tp-design`](crates/tp-design) | Triángulos de velocidad, deslizamiento (Wiesner), correlaciones de bomba, dimensiones principales y geometría del rodete: contorno meridional, flujo meridional, álabes y espesores |
+| [`tp-design`](crates/tp-design) | Triángulos de velocidad, deslizamiento (Wiesner), correlaciones de bomba, dimensiones principales y geometría del rodete (contorno meridional, flujo meridional, álabes y espesores), voluta y difusores con o sin álabes |
 | [`tp-io`](crates/tp-io) | Exportación: lista de puntos, malla STL y dibujos SVG |
-| [`tp-cad`](crates/tp-cad) | Sólidos del rodete y del dominio fluido con Open CASCADE, y exportación STEP, IGES y STL |
+| [`tp-cad`](crates/tp-cad) | Sólidos del rodete, los difusores, la voluta y sus dominios fluidos con Open CASCADE, y exportación STEP, IGES y STL |
 | [`tp-project`](crates/tp-project) | Modelo de proyecto, parámetros automáticos o manuales, componentes y sus reglas, pasos de diseño, archivo `.tpj` y deshacer/rehacer |
 | [`tp-cli`](crates/tp-cli) | Ejecutable `turbopump` para la línea de comandos |
 | [`tp-gui`](crates/tp-gui) | Ejecutable `turbopump-gui`: editor gráfico con egui y vista 3D con wgpu |
@@ -63,20 +64,22 @@ También abre un proyecto existente:
 cargo run --release -p tp-gui -- bomba.tpj
 ```
 
-Arranca con una bomba de 100 m³/h, 32 m y 2900 rpm. El trabajo sigue los pasos de diseño
-del rodete:
+Arranca con una bomba de 100 m³/h, 32 m y 2900 rpm, con un rodete y una voluta. El
+trabajo sigue los pasos de diseño de cada componente:
 
 - **Árbol del proyecto** (izquierda): configuración global y pasos de cada componente,
   con su estado: pendiente (○), hecho (⏺) o desactualizado (⟲) porque cambió un dato
-  anterior.
+  anterior. *Add component* añade un difusor con o sin álabes, que se coloca delante de
+  la voluta.
 - **Panel del paso** (derecha): los datos del paso seleccionado. Cada valor es
   automático (propuesto por una correlación) o manual. *Accept step* marca el paso como
   hecho y pasa al siguiente.
 - **Vistas** (centro, acoplables):
   - vista meridional, donde los puntos de control de Bézier, el borde de ataque y la
-    longitud axial se arrastran con el ratón;
+    longitud axial se arrastran con el ratón, con las paredes del difusor y las
+    secciones de la voluta;
   - gráficas del álabe (β, θ y espesor);
-  - vista frontal;
+  - vista frontal de la etapa, con los álabes del difusor y la espiral;
   - vista 3D;
   - informe con las mismas cifras que la línea de comandos.
 - **Edición:** todo se puede deshacer y rehacer (Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z). Un
@@ -140,6 +143,37 @@ cargo run -p tp-cli -- cad bomba.tpj --format step,iges,stl
 | Rodete | Dominio fluido |
 |---|---|
 | ![rodete](docs/img/rodete-referencia-cad.jpg) | ![fluido](docs/img/fluido-referencia-cad.jpg) |
+
+Una bomba completa se crea con sus componentes de la entrada a la salida: rodete,
+estator con álabes (`stator`) o sin ellos (`vaneless-stator`) y voluta. Cada uno se
+diseña con su orden, y `cad` construye los sólidos de todos:
+
+```bash
+cargo run -p tp-cli -- new etapa.tpj --machine pump --flow "100 m3/h" --head "32 m" --speed "2900 rpm" --components impeller,stator,volute
+```
+
+```bash
+cargo run -p tp-cli -- design etapa.tpj
+```
+
+```bash
+cargo run -p tp-cli -- geometry etapa.tpj
+```
+
+```bash
+cargo run -p tp-cli -- diffuser etapa.tpj
+```
+
+```bash
+cargo run -p tp-cli -- volute etapa.tpj --set shape=circle --export salida
+```
+
+```bash
+cargo run -p tp-cli -- cad etapa.tpj --format step
+```
+
+La teoría y las cifras de la bomba de referencia están en
+[docs/theory/voluta-y-difusores.md](docs/theory/voluta-y-difusores.md).
 
 Propiedades de un líquido:
 
