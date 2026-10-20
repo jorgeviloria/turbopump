@@ -33,6 +33,9 @@ pub enum ProjectError {
     #[error("{0} is not a volute")]
     NotAVolute(ComponentId),
 
+    #[error("{0} is not a stator")]
+    NotAStator(ComponentId),
+
     #[error("not available yet: {0}")]
     Unsupported(String),
 

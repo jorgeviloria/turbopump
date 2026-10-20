@@ -3,6 +3,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 use tp_design::MainDimensionsInput;
+use tp_design::diffuser::DiffuserInput;
 use tp_design::impeller::ImpellerGeometryInput;
 use tp_design::volute::VoluteInput;
 
@@ -161,6 +162,9 @@ pub struct Component {
     /// Inputs of the volute steps.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     volute: Option<VoluteInput>,
+    /// Inputs of the diffuser steps of a stator.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    diffuser: Option<DiffuserInput>,
 }
 
 impl Component {
@@ -174,7 +178,49 @@ impl Component {
             main_dimensions: None,
             geometry: None,
             volute: None,
+            diffuser: None,
         }
+    }
+
+    /// Inputs of the diffuser steps, if any were set.
+    pub fn diffuser(&self) -> Option<&DiffuserInput> {
+        self.diffuser.as_ref()
+    }
+
+    /// Replaces the diffuser inputs of a stator. Each step whose inputs changed, and
+    /// every step after it, becomes stale.
+    pub fn set_diffuser(&mut self, input: DiffuserInput) -> Result<(), ProjectError> {
+        let ComponentKind::Stator { vaned } = self.kind else {
+            return Err(ProjectError::NotAStator(self.id));
+        };
+        let old = self.diffuser.clone().unwrap_or_default();
+        let mut changes = vec![
+            (old.main != input.main, DesignStep::MainDimensions),
+            (old.contour != input.contour, DesignStep::MeridionalContour),
+        ];
+        if vaned {
+            changes.extend([
+                (
+                    old.properties != input.properties,
+                    DesignStep::BladeProperties,
+                ),
+                (
+                    old.mean_lines != input.mean_lines,
+                    DesignStep::BladeMeanLines,
+                ),
+                (old.profiles != input.profiles, DesignStep::BladeProfiles),
+                (old.edges != input.edges, DesignStep::BladeEdges),
+            ]);
+        }
+        let first_changed = changes
+            .into_iter()
+            .find(|(changed, _)| *changed)
+            .map(|(_, step)| step);
+        self.diffuser = Some(input);
+        if let Some(step) = first_changed {
+            self.invalidate_from(step)?;
+        }
+        Ok(())
     }
 
     /// Inputs of the volute steps, if any were set.

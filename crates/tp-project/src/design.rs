@@ -1,9 +1,10 @@
 //! Running design calculations on the components of a project.
 
 use tp_design::MainDimensionsInput;
+use tp_design::diffuser::{DiffuserDesign, DiffuserInput};
 use tp_design::impeller::{self, ImpellerBasis, ImpellerGeometry, ImpellerGeometryInput};
-use tp_design::pump::{self, CentrifugalPumpDesign, CentrifugalPumpInput, PumpDuty, Suction};
 use tp_design::outlet::ImpellerOutlet;
+use tp_design::pump::{self, CentrifugalPumpDesign, CentrifugalPumpInput, PumpDuty, Suction};
 use tp_design::volute::{VoluteGeometry, VoluteInput};
 use tp_fluids::LiquidProperties;
 use tp_units::STANDARD_GRAVITY;
@@ -15,6 +16,20 @@ use crate::{
 
 /// Design steps completed by [`Project::design_impeller_geometry`], in order.
 pub const GEOMETRY_STEPS: [DesignStep; 5] = [
+    DesignStep::MeridionalContour,
+    DesignStep::BladeProperties,
+    DesignStep::BladeMeanLines,
+    DesignStep::BladeProfiles,
+    DesignStep::BladeEdges,
+];
+
+/// Design steps of a vaneless stator that the program can compute, in order.
+pub const VANELESS_STEPS: [DesignStep; 2] =
+    [DesignStep::MainDimensions, DesignStep::MeridionalContour];
+
+/// Design steps of a vaned stator (radial diffuser) that the program can compute.
+pub const VANED_STEPS: [DesignStep; 6] = [
+    DesignStep::MainDimensions,
     DesignStep::MeridionalContour,
     DesignStep::BladeProperties,
     DesignStep::BladeMeanLines,
@@ -178,6 +193,14 @@ impl Project {
                 self.compute_volute(id)?;
                 self.component_mut(id)?.complete(step)?;
             }
+            ComponentKind::Stator { vaned: false } if VANELESS_STEPS.contains(&step) => {
+                self.compute_diffuser(id)?;
+                self.component_mut(id)?.complete(step)?;
+            }
+            ComponentKind::Stator { vaned: true } if VANED_STEPS.contains(&step) => {
+                self.compute_diffuser(id)?;
+                self.component_mut(id)?.complete(step)?;
+            }
             _ => {
                 return Err(ProjectError::Unsupported(format!(
                     "the {step} step of a {} (planned for a later phase)",
@@ -241,6 +264,22 @@ impl Project {
         self.component_mut(id)?.set_volute(input)
     }
 
+    /// Replaces the diffuser inputs of stator `id`. Its outlet feeds the next component,
+    /// so a change of the main dimensions or contour makes the components after it stale.
+    pub fn set_diffuser(
+        &mut self,
+        id: ComponentId,
+        input: DiffuserInput,
+    ) -> Result<(), ProjectError> {
+        let old = self.diffuser_input(id)?;
+        let outlet_moved = old.main != input.main || old.contour != input.contour;
+        self.component_mut(id)?.set_diffuser(input)?;
+        if outlet_moved {
+            self.invalidate_downstream(id)?;
+        }
+        Ok(())
+    }
+
     /// Builds the geometry of impeller `id` and marks the geometry steps as done.
     /// The main dimensions must be done first.
     pub fn design_impeller_geometry(
@@ -268,25 +307,19 @@ impl Project {
         Ok(component.volute().cloned().unwrap_or_default())
     }
 
-    /// What volute `id` receives from the impeller just upstream.
-    pub fn volute_basis(&self, id: ComponentId) -> Result<ImpellerOutlet, ProjectError> {
-        let index = self
-            .components()
-            .iter()
-            .position(|c| c.id() == id)
-            .ok_or(ProjectError::UnknownComponent(id))?;
-        if self.components()[index].kind() != ComponentKind::Volute {
-            return Err(ProjectError::NotAVolute(id));
-        }
+    /// What the component at `index` receives from the impeller just before it.
+    fn impeller_outlet_before(&self, index: usize) -> Result<ImpellerOutlet, ProjectError> {
+        let component = &self.components()[index];
+        let what = component.kind().label().to_lowercase();
         if index == 0 {
-            return Err(ProjectError::Unsupported(
-                "inlet volutes (planned for a later phase)".into(),
-            ));
+            return Err(ProjectError::Unsupported(format!(
+                "a {what} at the inlet (planned for a later phase)"
+            )));
         }
         let upstream = &self.components()[index - 1];
         if upstream.kind() != ComponentKind::Impeller {
             return Err(ProjectError::Unsupported(format!(
-                "a volute after a {} (planned for a later phase)",
+                "a {what} after a {} (planned for a later phase)",
                 upstream.kind().label().to_lowercase()
             )));
         }
@@ -309,10 +342,54 @@ impl Project {
         ))
     }
 
+    fn index_of(&self, id: ComponentId) -> Result<usize, ProjectError> {
+        self.components()
+            .iter()
+            .position(|c| c.id() == id)
+            .ok_or(ProjectError::UnknownComponent(id))
+    }
+
+    /// What volute `id` receives from the impeller just upstream.
+    pub fn volute_basis(&self, id: ComponentId) -> Result<ImpellerOutlet, ProjectError> {
+        let index = self.index_of(id)?;
+        if self.components()[index].kind() != ComponentKind::Volute {
+            return Err(ProjectError::NotAVolute(id));
+        }
+        self.impeller_outlet_before(index)
+    }
+
     /// Builds volute `id` without changing the project.
     pub fn compute_volute(&self, id: ComponentId) -> Result<VoluteGeometry, ProjectError> {
         let basis = self.volute_basis(id)?;
         Ok(VoluteGeometry::build(&basis, &self.volute_input(id)?)?)
+    }
+}
+
+impl Project {
+    /// The diffuser inputs of stator `id`, all automatic if never set.
+    pub fn diffuser_input(&self, id: ComponentId) -> Result<DiffuserInput, ProjectError> {
+        let component = self
+            .component(id)
+            .ok_or(ProjectError::UnknownComponent(id))?;
+        if !matches!(component.kind(), ComponentKind::Stator { .. }) {
+            return Err(ProjectError::NotAStator(id));
+        }
+        Ok(component.diffuser().cloned().unwrap_or_default())
+    }
+
+    /// Designs the diffuser of stator `id` from the impeller before it, without
+    /// changing the project.
+    pub fn compute_diffuser(&self, id: ComponentId) -> Result<DiffuserDesign, ProjectError> {
+        let index = self.index_of(id)?;
+        let ComponentKind::Stator { vaned } = self.components()[index].kind() else {
+            return Err(ProjectError::NotAStator(id));
+        };
+        let outlet = self.impeller_outlet_before(index)?;
+        Ok(DiffuserDesign::new(
+            &outlet,
+            &self.diffuser_input(id)?,
+            vaned,
+        )?)
     }
 }
 
@@ -588,6 +665,79 @@ mod tests {
         assert!(matches!(
             p.volute_input(impeller),
             Err(ProjectError::NotAVolute(_))
+        ));
+    }
+
+    #[test]
+    fn multistage_pump_with_diffuser_and_volute() {
+        let mut p = pump();
+        let first = p.add_component(ComponentKind::Impeller, None).unwrap();
+        let diffuser = p
+            .add_component(ComponentKind::Stator { vaned: true }, None)
+            .unwrap();
+        let second = p.add_component(ComponentKind::Impeller, None).unwrap();
+        let volute = p.add_component(ComponentKind::Volute, None).unwrap();
+
+        // Each stage takes half the head; the diffuser sees the first impeller.
+        let d = p.compute_diffuser(diffuser).unwrap();
+        let main = p.compute_main_dimensions(first).unwrap();
+        assert!(d.inlet_diameter > main.outlet_diameter);
+        assert!(d.vanes.is_some());
+        assert_relative_eq!(p.pump_duty(second).unwrap().head, 16.0);
+        p.compute_volute(volute).unwrap();
+
+        for step in VANED_STEPS {
+            p.design_step(diffuser, step).unwrap();
+        }
+        assert_eq!(
+            p.component(diffuser).unwrap().next_step(),
+            Some(DesignStep::CfdSetup)
+        );
+        // A new first impeller makes everything after it stale.
+        let input = CentrifugalPumpInput {
+            blade_count: Param::Manual(6),
+            ..Default::default()
+        };
+        p.set_main_dimensions(first, MainDimensionsInput::CentrifugalPump(input))
+            .unwrap();
+        assert_eq!(
+            p.component(diffuser)
+                .unwrap()
+                .status(DesignStep::MainDimensions),
+            StepStatus::Stale
+        );
+    }
+
+    #[test]
+    fn diffuser_inputs_invalidate_from_their_step() {
+        let mut p = pump();
+        p.add_component(ComponentKind::Impeller, None).unwrap();
+        let ring = p
+            .add_component(ComponentKind::Stator { vaned: false }, None)
+            .unwrap();
+        for step in VANELESS_STEPS {
+            p.design_step(ring, step).unwrap();
+        }
+        let mut input = p.diffuser_input(ring).unwrap();
+        input.contour.outlet_width = Param::Manual(0.02);
+        p.set_diffuser(ring, input.clone()).unwrap();
+        let c = p.component(ring).unwrap();
+        assert_eq!(c.status(DesignStep::MainDimensions), StepStatus::Done);
+        assert_eq!(c.status(DesignStep::MeridionalContour), StepStatus::Stale);
+        let loaded = Project::from_json(&p.to_json().unwrap()).unwrap();
+        assert_eq!(loaded.diffuser_input(ring).unwrap(), input);
+        assert!(matches!(
+            p.design_step(ring, DesignStep::BladeProperties),
+            Err(ProjectError::StepNotApplicable { .. } | ProjectError::Unsupported(_))
+        ));
+
+        let mut q = pump();
+        let lone = q
+            .add_component(ComponentKind::Stator { vaned: true }, None)
+            .unwrap();
+        assert!(matches!(
+            q.compute_diffuser(lone),
+            Err(ProjectError::Unsupported(_))
         ));
     }
 
