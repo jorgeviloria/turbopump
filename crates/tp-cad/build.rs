@@ -54,6 +54,8 @@ fn main() {
     let target = std::env::var("TARGET").unwrap_or_default();
     if target.contains("windows") {
         println!("cargo:rustc-link-lib=dylib=user32");
+        // TKernel's OSD layer uses the Win32 security and registry API.
+        println!("cargo:rustc-link-lib=dylib=advapi32");
     } else if target.contains("linux") {
         println!("cargo:rustc-link-lib=dylib=pthread");
         println!("cargo:rustc-link-lib=dylib=dl");
