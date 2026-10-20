@@ -30,6 +30,10 @@ para que sus excepciones lleguen a Rust como errores.
 
 - El código, los identificadores y la documentación de la API van en inglés. Los
   documentos para usuarios pueden ir en español o en inglés.
+- Los textos de la interfaz se escriben en inglés dentro de `tr("…")` o, con valores,
+  `tf("… {} …", &[…])`, y llevan su traducción en `crates/tp-gui/src/i18n/es.rs`. Los
+  avisos y errores nuevos del diseño necesitan su plantilla en la lista `MESSAGES` del
+  mismo archivo. Una prueba falla si un texto se queda sin versión en español.
 - Todas las magnitudes internas se guardan en **SI**. Las unidades de usuario solo se usan
   al leer valores y al mostrarlos (crate `tp-units`).
 - Antes de abrir una pull request, ejecuta:

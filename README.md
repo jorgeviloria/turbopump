@@ -74,7 +74,8 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
     exportar;
   - la pestaña del componente seleccionado, con sus pasos de diseño, el estado de cada
     uno y los botones para aceptar o restablecer el paso;
-  - *View*: vistas, cámara, modo de dibujo, paneles (árbol, diálogo y mensajes) y tema;
+  - *View*: vistas, cámara, modo de dibujo, paneles (árbol, propiedades y mensajes),
+    tema e idioma;
   - *Help*.
 
   El menú *File* abre, guarda y exporta.
@@ -105,14 +106,18 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
 
   Al abrir un paso, la vista cambia a la que mejor lo muestra (se puede desactivar en
   la pestaña *View*).
-- **Diálogo del paso**: al elegir un paso o la configuración global se abre un diálogo
-  flotante con sus datos. Cada valor es automático (propuesto por una correlación) o
+- **Panel de propiedades** (derecha): al elegir un paso o la configuración global se
+  abre con sus datos. Cada valor es automático (propuesto por una correlación) o
   manual. *Accept step* marca el paso como hecho y pasa al siguiente, y los errores y
-  avisos salen en tarjetas. El diálogo se pliega a su barra de título, se mueve o se
-  cierra, y no bloquea las vistas: con él abierto se siguen arrastrando los puntos del
-  contorno, y las vistas se ajustan a la parte que deja libre.
+  avisos salen en tarjetas. El panel flota sobre la vista sin reducirla: se pliega a una
+  franja estrecha (con su flecha, con Esc o con el botón *Properties*), se ensancha
+  arrastrando su borde izquierdo y no bloquea las vistas, así que con él abierto se
+  siguen arrastrando los puntos del contorno. La vista 3D centra la pieza en la parte
+  que queda libre.
 - **Barra de estado** (abajo): el último mensaje, las unidades y el contador de errores
   y avisos, que abre el panel de mensajes de todo el proyecto.
+- **Idioma:** inglés o español, en la pestaña *View*. La elección se guarda, y la
+  primera vez se toma la del sistema. Los avisos del diseño también se traducen.
 - **Edición:** todo se puede deshacer y rehacer (Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z). Un
   arrastre completo cuenta como un solo paso.
 - **Exportación:** puntos, malla STL, dibujos SVG y sólidos CAD STEP, IGES o STL, que se
