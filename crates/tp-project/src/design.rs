@@ -146,6 +146,27 @@ impl Project {
         Ok(impeller::build(&basis, &self.impeller_geometry_input(id)?)?)
     }
 
+    /// Computes step `step` of impeller `id` with the current inputs and marks it done.
+    /// Every earlier step must be done. A geometry step builds the whole geometry, so
+    /// it fails if any geometry input is invalid.
+    pub fn design_impeller_step(
+        &mut self,
+        id: ComponentId,
+        step: DesignStep,
+    ) -> Result<(), ProjectError> {
+        if step == DesignStep::MainDimensions {
+            self.design_main_dimensions(id)?;
+        } else if GEOMETRY_STEPS.contains(&step) {
+            self.compute_impeller_geometry(id)?;
+            self.component_mut(id)?.complete(step)?;
+        } else {
+            return Err(ProjectError::Unsupported(format!(
+                "the {step} step (planned for a later phase)"
+            )));
+        }
+        Ok(())
+    }
+
     /// Builds the geometry of impeller `id` and marks the geometry steps as done.
     /// The main dimensions must be done first.
     pub fn design_impeller_geometry(
@@ -264,6 +285,38 @@ mod tests {
             assert_eq!(c.status(step), StepStatus::Done);
         }
         assert_eq!(c.next_step(), Some(DesignStep::CfdSetup));
+    }
+
+    #[test]
+    fn steps_are_designed_one_at_a_time() {
+        let mut p = pump();
+        let id = p.add_component(ComponentKind::Impeller, None).unwrap();
+        assert!(matches!(
+            p.design_impeller_step(id, DesignStep::BladeProperties),
+            Err(ProjectError::PreviousStepIncomplete { .. })
+        ));
+        for step in [DesignStep::MainDimensions, DesignStep::MeridionalContour] {
+            p.design_impeller_step(id, step).unwrap();
+        }
+        let c = p.component(id).unwrap();
+        assert_eq!(c.next_step(), Some(DesignStep::BladeProperties));
+        assert!(matches!(
+            p.design_impeller_step(id, DesignStep::CfdSetup),
+            Err(ProjectError::Unsupported(_))
+        ));
+
+        // Invalid geometry inputs keep the step from completing.
+        let mut input = p.impeller_geometry_input(id).unwrap();
+        input.properties.spans = Param::Manual(1);
+        p.component_mut(id).unwrap().set_geometry(input).unwrap();
+        assert!(
+            p.design_impeller_step(id, DesignStep::BladeProperties)
+                .is_err()
+        );
+        assert_eq!(
+            p.component(id).unwrap().status(DesignStep::BladeProperties),
+            StepStatus::Pending
+        );
     }
 
     #[test]

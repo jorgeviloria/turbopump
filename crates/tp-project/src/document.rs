@@ -12,6 +12,8 @@ pub struct Document {
     path: Option<PathBuf>,
     /// The project as last saved or loaded; `None` if it was never written.
     saved: Option<Project>,
+    /// Label of the gesture whose edits are merging into the last undo step.
+    gesture: Option<String>,
 }
 
 impl Document {
@@ -22,6 +24,7 @@ impl Document {
             history: History::new(UNDO_LIMIT),
             path: None,
             saved: None,
+            gesture: None,
         }
     }
 
@@ -33,6 +36,7 @@ impl Document {
             project,
             history: History::new(UNDO_LIMIT),
             path: Some(path.to_owned()),
+            gesture: None,
         })
     }
 
@@ -60,10 +64,44 @@ impl Document {
         label: &str,
         edit: impl FnOnce(&mut Project) -> Result<R, ProjectError>,
     ) -> Result<R, ProjectError> {
+        self.gesture = None;
+        self.apply(label, false, edit)
+    }
+
+    /// Like [`edit`](Self::edit), for continuous gestures such as dragging a point or a
+    /// value: consecutive edits with the same `label` merge into one undo step until
+    /// [`end_gesture`](Self::end_gesture), another kind of edit, an undo or a redo.
+    pub fn edit_gesture<R>(
+        &mut self,
+        label: &str,
+        edit: impl FnOnce(&mut Project) -> Result<R, ProjectError>,
+    ) -> Result<R, ProjectError> {
+        let merge = self.gesture.as_deref() == Some(label);
+        if !merge {
+            self.gesture = None;
+        }
+        let result = self.apply(label, merge, edit);
+        if result.is_ok() && !merge && self.history.undo_label() == Some(label) {
+            self.gesture = Some(label.to_owned());
+        }
+        result
+    }
+
+    /// Ends the current gesture: the next edit starts a new undo step.
+    pub fn end_gesture(&mut self) {
+        self.gesture = None;
+    }
+
+    fn apply<R>(
+        &mut self,
+        label: &str,
+        merge: bool,
+        edit: impl FnOnce(&mut Project) -> Result<R, ProjectError>,
+    ) -> Result<R, ProjectError> {
         let before = self.project.clone();
         match edit(&mut self.project) {
             Ok(result) => {
-                if self.project != before {
+                if self.project != before && !merge {
                     self.history.record(label, before);
                 }
                 Ok(result)
@@ -76,10 +114,12 @@ impl Document {
     }
 
     pub fn undo(&mut self) -> Option<String> {
+        self.gesture = None;
         self.history.undo(&mut self.project)
     }
 
     pub fn redo(&mut self) -> Option<String> {
+        self.gesture = None;
         self.history.redo(&mut self.project)
     }
 
@@ -137,6 +177,40 @@ mod tests {
         let mut doc = Document::new(pump());
         doc.edit("nothing", |_| Ok(())).unwrap();
         assert!(!doc.history().can_undo());
+    }
+
+    #[test]
+    fn gestures_merge_into_one_undo_step() {
+        let mut doc = Document::new(pump());
+        let rename = |doc: &mut Document, name: &str| {
+            doc.edit_gesture("rename", |p| {
+                p.info.name = name.into();
+                Ok(())
+            })
+            .unwrap();
+        };
+        rename(&mut doc, "A");
+        rename(&mut doc, "AB");
+        rename(&mut doc, "ABC");
+        assert_eq!(doc.undo().as_deref(), Some("rename"));
+        assert_eq!(doc.project().info.name, "Test pump");
+        assert!(!doc.history().can_undo());
+
+        // Ending the gesture, or a different label, starts a new step.
+        doc.redo();
+        rename(&mut doc, "D");
+        doc.end_gesture();
+        rename(&mut doc, "E");
+        doc.edit_gesture("other", |p| {
+            p.info.author = "me".into();
+            Ok(())
+        })
+        .unwrap();
+        doc.undo();
+        doc.undo();
+        assert_eq!(doc.project().info.name, "D");
+        doc.undo();
+        assert_eq!(doc.project().info.name, "ABC");
     }
 
     #[test]
