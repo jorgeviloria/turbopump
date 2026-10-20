@@ -494,3 +494,21 @@ fn performance_predicts_the_characteristic() {
     assert_eq!(bad.status.code(), Some(2));
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn analysis_reports_potential_flow_and_blade_velocities() {
+    let (dir, file) = reference_project("analysis");
+    let file_arg = file.to_str().unwrap();
+    let csv = dir.join("analysis");
+    let out = turbopump(&["analysis", file_arg, "--csv", csv.to_str().unwrap()]);
+    let text = stdout(&out);
+    assert_eq!(out.status.code(), Some(0), "{text}");
+    assert!(text.contains("Potential flow   mesh"), "{text}");
+    assert!(text.contains("Blade faces"), "{text}");
+    let walls = std::fs::read_to_string(csv.join("potential-walls.csv")).unwrap();
+    assert!(walls.starts_with("fraction,cm_hub_m_s"));
+    assert!(walls.lines().count() > 50);
+    let faces = std::fs::read_to_string(csv.join("blade-velocities.csv")).unwrap();
+    assert!(faces.lines().count() > 100);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
