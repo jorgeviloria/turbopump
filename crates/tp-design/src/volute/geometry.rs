@@ -302,7 +302,9 @@ impl VoluteGeometry {
 }
 
 /// Sections of the discharge diffuser: the throat outline blends into a circle while
-/// the equivalent radius grows linearly to the outlet radius.
+/// the equivalent radius grows linearly to the outlet radius. The wall on the cutwater
+/// side stays straight and the whole widening goes outward, so the diffuser never
+/// closes in on the start of the spiral.
 fn nozzle(
     design: &VoluteDesign,
     throat: &VoluteSection,
@@ -324,6 +326,9 @@ fn nozzle(
     );
     let u = (radial - axis * radial.dot(axis)).normalize();
     let v = DVec3::Z;
+    // Offset across the axis of the line from the cutwater along the diffuser axis.
+    let tip = radial * design.stagnation_radius;
+    let inner = (tip - start).dot(u);
     let circle: Vec<DVec2> = throat_points
         .iter()
         .map(|p| r1 * DVec2::new(p.x, p.y).normalize())
@@ -350,7 +355,8 @@ fn nozzle(
                 .collect();
             let radius = r1 + (r2 - r1) * s;
             let scale = radius / r1 * (circle_area / polygon_area(&blend).abs()).sqrt();
-            let center = start + axis * (length * s);
+            let lowest = blend.iter().map(|p| p.x).fold(f64::INFINITY, f64::min) * scale;
+            let center = start + axis * (length * s) + u * (inner - lowest);
             NozzleSection {
                 center,
                 points: blend
@@ -447,6 +453,35 @@ mod tests {
         negative.rotation_sign = -1.0;
         let mirrored = VoluteGeometry::build(&negative, &VoluteInput::default()).unwrap();
         assert!(mirrored.nozzle_axis.y < -0.9);
+    }
+
+    #[test]
+    fn diffuser_wall_on_the_cutwater_side_is_straight() {
+        let g = geometry(SectionShape::default());
+        let axis = g.nozzle_axis;
+        let tip = DVec3::new(g.design.stagnation_radius, 0.0, 0.0);
+        // Signed distance from the line through the cutwater along the diffuser axis,
+        // positive on the side of the axis of rotation.
+        let toward_axis = DVec3::new(-axis.y, axis.x, 0.0);
+        let toward_axis = if toward_axis.dot(-tip) > 0.0 {
+            toward_axis
+        } else {
+            -toward_axis
+        };
+        let tolerance = 1e-9 * g.design.diffuser.length;
+        for n in &g.nozzle {
+            let distances: Vec<f64> = n
+                .points
+                .iter()
+                .map(|p| (*p - tip).truncate().dot(toward_axis.truncate()))
+                .collect();
+            let nearest = distances.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+            // Every section touches the line and none crosses it.
+            assert!(
+                nearest.abs() < 1e-6 * g.design.diffuser.length + tolerance,
+                "{nearest}"
+            );
+        }
     }
 
     #[test]
