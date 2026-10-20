@@ -21,7 +21,6 @@ path = "src/main.rs"
 bytemuck = { version = "1.25.2", features = ["derive"] }
 eframe = "0.36.2"
 egui-phosphor = "0.14.0"
-egui_dock = "0.21.1"
 egui_plot = "0.37.0"
 glam.workspace = true
 notosans = "0.1.0"
