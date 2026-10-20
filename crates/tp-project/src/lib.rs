@@ -16,6 +16,7 @@ mod project;
 mod setup;
 
 pub use component::{Component, ComponentId, ComponentKind, Coupling, DesignStep, StepStatus};
+pub use design::GEOMETRY_STEPS;
 pub use document::Document;
 pub use error::ProjectError;
 pub use file::{FILE_EXTENSION, FORMAT_VERSION};

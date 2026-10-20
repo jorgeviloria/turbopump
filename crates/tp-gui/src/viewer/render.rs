@@ -1,0 +1,327 @@
+//! Off-screen rendering of the 3D view with wgpu.
+//!
+//! The scene is drawn into a multisampled texture, resolved into a plain Rgba8Unorm
+//! texture and handed to egui as an image, so the view needs nothing from egui's own
+//! render pass (no depth buffer, no MSAA).
+
+use eframe::egui;
+use eframe::egui_wgpu::RenderState;
+use eframe::wgpu::{self, util::DeviceExt};
+
+use super::mesh::{MeshData, Vertex};
+
+const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+const SAMPLES: u32 = 4;
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub(crate) struct Uniforms {
+    pub view_projection: [[f32; 4]; 4],
+    pub eye: [f32; 4],
+}
+
+struct GpuMesh {
+    vertices: Option<wgpu::Buffer>,
+    opaque: u32,
+    total: u32,
+    lines: Option<wgpu::Buffer>,
+    line_vertices: u32,
+}
+
+struct Target {
+    size: [u32; 2],
+    color: wgpu::TextureView,
+    depth: wgpu::TextureView,
+    resolved: wgpu::TextureView,
+}
+
+/// GPU resources of the 3D view.
+pub(crate) struct Gpu {
+    opaque: wgpu::RenderPipeline,
+    transparent: wgpu::RenderPipeline,
+    lines: wgpu::RenderPipeline,
+    uniforms: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+    mesh: Option<GpuMesh>,
+    target: Option<Target>,
+    texture: Option<egui::TextureId>,
+}
+
+impl std::fmt::Debug for Gpu {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Gpu")
+            .field("size", &self.target.as_ref().map(|t| t.size))
+            .finish_non_exhaustive()
+    }
+}
+
+fn pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    shader: &wgpu::ShaderModule,
+    label: &str,
+    topology: wgpu::PrimitiveTopology,
+    fragment: &str,
+    transparent: bool,
+) -> wgpu::RenderPipeline {
+    let attributes = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x4];
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(label),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: Some("vs_main"),
+            compilation_options: Default::default(),
+            buffers: &[Some(wgpu::VertexBufferLayout {
+                array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &attributes,
+            })],
+        },
+        primitive: wgpu::PrimitiveState {
+            topology,
+            cull_mode: None,
+            ..Default::default()
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: DEPTH_FORMAT,
+            depth_write_enabled: Some(!transparent),
+            depth_compare: Some(wgpu::CompareFunction::LessEqual),
+            stencil: Default::default(),
+            bias: Default::default(),
+        }),
+        multisample: wgpu::MultisampleState {
+            count: SAMPLES,
+            ..Default::default()
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: Some(fragment),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: COLOR_FORMAT,
+                blend: transparent.then_some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
+impl Gpu {
+    pub fn new(device: &wgpu::Device) -> Self {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("impeller shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
+        });
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("impeller uniforms"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("impeller pipeline layout"),
+            bind_group_layouts: &[Some(&bind_group_layout)],
+            immediate_size: 0,
+        });
+        let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("impeller uniforms"),
+            size: std::mem::size_of::<Uniforms>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("impeller uniforms"),
+            layout: &bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniforms.as_entire_binding(),
+            }],
+        });
+        use wgpu::PrimitiveTopology::{LineList, TriangleList};
+        Self {
+            opaque: pipeline(
+                device,
+                &layout,
+                &shader,
+                "opaque",
+                TriangleList,
+                "fs_main",
+                false,
+            ),
+            transparent: pipeline(
+                device,
+                &layout,
+                &shader,
+                "transparent",
+                TriangleList,
+                "fs_main",
+                true,
+            ),
+            lines: pipeline(
+                device, &layout, &shader, "lines", LineList, "fs_line", false,
+            ),
+            uniforms,
+            bind_group,
+            mesh: None,
+            target: None,
+            texture: None,
+        }
+    }
+
+    pub fn upload(&mut self, device: &wgpu::Device, mesh: &MeshData) {
+        let buffer = |label, data: &[Vertex]| {
+            (!data.is_empty()).then(|| {
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(label),
+                    contents: bytemuck::cast_slice(data),
+                    usage: wgpu::BufferUsages::VERTEX,
+                })
+            })
+        };
+        self.mesh = Some(GpuMesh {
+            vertices: buffer("impeller triangles", &mesh.vertices),
+            opaque: mesh.opaque,
+            total: mesh.vertices.len() as u32,
+            lines: buffer("impeller lines", &mesh.lines),
+            line_vertices: mesh.lines.len() as u32,
+        });
+    }
+
+    fn ensure_target(&mut self, state: &RenderState, size: [u32; 2]) -> egui::TextureId {
+        let device = &state.device;
+        if self.target.as_ref().is_none_or(|t| t.size != size) {
+            let texture = |label, format, samples, usage| {
+                device
+                    .create_texture(&wgpu::TextureDescriptor {
+                        label: Some(label),
+                        size: wgpu::Extent3d {
+                            width: size[0],
+                            height: size[1],
+                            depth_or_array_layers: 1,
+                        },
+                        mip_level_count: 1,
+                        sample_count: samples,
+                        dimension: wgpu::TextureDimension::D2,
+                        format,
+                        usage,
+                        view_formats: &[],
+                    })
+                    .create_view(&wgpu::TextureViewDescriptor::default())
+            };
+            let attachment = wgpu::TextureUsages::RENDER_ATTACHMENT;
+            let target = Target {
+                size,
+                color: texture("3d color", COLOR_FORMAT, SAMPLES, attachment),
+                depth: texture("3d depth", DEPTH_FORMAT, SAMPLES, attachment),
+                resolved: texture(
+                    "3d image",
+                    COLOR_FORMAT,
+                    1,
+                    attachment | wgpu::TextureUsages::TEXTURE_BINDING,
+                ),
+            };
+            let mut renderer = state.renderer.write();
+            match self.texture {
+                Some(id) => renderer.update_egui_texture_from_wgpu_texture(
+                    device,
+                    &target.resolved,
+                    wgpu::FilterMode::Linear,
+                    id,
+                ),
+                None => {
+                    self.texture = Some(renderer.register_native_texture(
+                        device,
+                        &target.resolved,
+                        wgpu::FilterMode::Linear,
+                    ));
+                }
+            }
+            self.target = Some(target);
+        }
+        self.texture.expect("registered above")
+    }
+
+    /// Draws the uploaded mesh at `size` pixels and returns the egui texture with the
+    /// image. `background` is the gamma-encoded clear color.
+    pub fn render(
+        &mut self,
+        state: &RenderState,
+        size: [u32; 2],
+        uniforms: &Uniforms,
+        background: egui::Color32,
+    ) -> egui::TextureId {
+        let texture = self.ensure_target(state, size);
+        let target = self.target.as_ref().expect("created above");
+        state
+            .queue
+            .write_buffer(&self.uniforms, 0, bytemuck::bytes_of(uniforms));
+        let mut encoder = state
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("3d view"),
+            });
+        {
+            let [r, g, b, _] = background.to_array();
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("3d view"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &target.color,
+                    depth_slice: None,
+                    resolve_target: Some(&target.resolved),
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: f64::from(r) / 255.0,
+                            g: f64::from(g) / 255.0,
+                            b: f64::from(b) / 255.0,
+                            a: 1.0,
+                        }),
+                        store: wgpu::StoreOp::Discard,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &target.depth,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Discard,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_bind_group(0, &self.bind_group, &[]);
+            if let Some(mesh) = &self.mesh {
+                if let Some(vertices) = &mesh.vertices {
+                    pass.set_vertex_buffer(0, vertices.slice(..));
+                    if mesh.opaque > 0 {
+                        pass.set_pipeline(&self.opaque);
+                        pass.draw(0..mesh.opaque, 0..1);
+                    }
+                    if mesh.total > mesh.opaque {
+                        pass.set_pipeline(&self.transparent);
+                        pass.draw(mesh.opaque..mesh.total, 0..1);
+                    }
+                }
+                if let Some(lines) = &mesh.lines {
+                    pass.set_pipeline(&self.lines);
+                    pass.set_vertex_buffer(0, lines.slice(..));
+                    pass.draw(0..mesh.line_vertices, 0..1);
+                }
+            }
+        }
+        state.queue.submit([encoder.finish()]);
+        texture
+    }
+}

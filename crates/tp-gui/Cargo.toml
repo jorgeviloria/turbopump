@@ -1,0 +1,39 @@
+[package]
+name = "tp-gui"
+description = "Graphical editor of Turbopump"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[features]
+default = ["cad"]
+# CAD solids and STEP/IGES/STL export through Open CASCADE (built from source on the
+# first build, which takes several minutes).
+cad = ["dep:tp-cad"]
+
+[[bin]]
+name = "turbopump-gui"
+path = "src/main.rs"
+
+[dependencies]
+bytemuck = { version = "1.25.2", features = ["derive"] }
+eframe = "0.36.2"
+egui_dock = "0.21.1"
+egui_plot = "0.37.0"
+glam.workspace = true
+rfd = "0.17.2"
+tp-cad = { workspace = true, optional = true }
+tp-design.workspace = true
+tp-fluids.workspace = true
+tp-io.workspace = true
+tp-math.workspace = true
+tp-project.workspace = true
+tp-units.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+egui_kittest = { version = "0.36.2", features = ["eframe", "wgpu", "snapshot"] }
