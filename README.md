@@ -4,10 +4,12 @@ Turbopump es una aplicación libre y multiplataforma (Windows, macOS y Linux), e
 Rust, para el diseño preliminar e interactivo de turbomáquinas: bombas, ventiladores,
 compresores y turbinas.
 
-> **Estado:** Fase 5, versión 0.2: bomba centrífuga completa, con rodete, difusor con o
-> sin álabes y voluta. Va desde el punto de diseño hasta los sólidos CAD (STEP, IGES,
-> STL), con interfaz gráfica y línea de comandos. La hoja de ruta completa está en
-> [PLAN.md](PLAN.md).
+> **Estado:** fases 0 a 5 y 7 hechas; la 6 (el resto de máquinas) queda pendiente.
+> Turbopump diseña una bomba centrífuga completa, con rodete, difusor con o sin álabes y
+> voluta, desde el punto de diseño hasta los sólidos CAD (STEP, IGES, STL). Da además la
+> curva característica prevista, el flujo potencial meridional y las velocidades en las
+> caras del álabe, con interfaz gráfica y línea de comandos. La hoja de ruta completa está
+> en [PLAN.md](PLAN.md).
 
 ![Editor de Turbopump](docs/img/editor.jpg)
 
@@ -16,9 +18,9 @@ compresores y turbinas.
 | Crate | Contenido |
 |---|---|
 | [`tp-units`](crates/tp-units) | Magnitudes físicas, unidades SI/US, conversión y lectura de texto (`"2900 rpm"`), y velocidad específica (nq, ns US, ωs, σ de Cordier) |
-| [`tp-math`](crates/tp-math) | Curvas Bézier y B-spline (evaluación, derivadas, subdivisión, interpolación), polilíneas, interpolación 1D monótona, raíces y cuadratura |
+| [`tp-math`](crates/tp-math) | Curvas Bézier y B-spline (evaluación, derivadas, subdivisión, interpolación), polilíneas, interpolación 1D monótona, raíces, cuadratura y sistemas dispersos con gradiente conjugado |
 | [`tp-fluids`](crates/tp-fluids) | Propiedades de líquidos con CoolProp, cargado al ejecutar, y un modelo propio del agua (IAPWS) para cuando falta |
-| [`tp-design`](crates/tp-design) | Triángulos de velocidad, deslizamiento (Wiesner), correlaciones de bomba, dimensiones principales y geometría del rodete (contorno meridional, flujo meridional, álabes y espesores), voluta y difusores con o sin álabes |
+| [`tp-design`](crates/tp-design) | Triángulos de velocidad, deslizamiento (Wiesner), correlaciones de bomba, dimensiones principales y geometría del rodete (contorno meridional, flujo meridional, álabes y espesores), voluta y difusores con o sin álabes, curva característica, flujo potencial meridional y velocidades en las caras del álabe |
 | [`tp-io`](crates/tp-io) | Exportación: lista de puntos, malla STL y dibujos SVG |
 | [`tp-cad`](crates/tp-cad) | Sólidos del rodete, los difusores, la voluta y sus dominios fluidos con Open CASCADE, y exportación STEP, IGES y STL |
 | [`tp-project`](crates/tp-project) | Modelo de proyecto, parámetros automáticos o manuales, componentes y sus reglas, pasos de diseño, archivo `.tpj` y deshacer/rehacer |
@@ -93,7 +95,13 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
   - vista frontal de la etapa, con los álabes del difusor y la espiral;
   - vista 3D, con aristas de las piezas, secciones de la voluta, cubo de vistas (un clic
     en una cara gira la cámara), ejes y barra de escala;
+  - curvas: altura, rendimiento y potencia previstos frente al caudal, con la zona de
+    recirculación estimada a trazos;
   - informe con las mismas cifras que la línea de comandos.
+
+  La vista meridional muestra también, si se pide, el flujo potencial y la velocidad
+  meridional en cubo y carcasa. La del álabe añade la velocidad relativa en sus dos
+  caras.
 
   Al abrir un paso, la vista cambia a la que mejor lo muestra (se puede desactivar en
   la pestaña *View*).
@@ -197,6 +205,24 @@ cargo run -p tp-cli -- cad etapa.tpj --format step
 
 La teoría y las cifras de la bomba de referencia están en
 [docs/theory/voluta-y-difusores.md](docs/theory/voluta-y-difusores.md).
+
+Curva característica prevista, de válvula cerrada a sobrecarga, también en CSV:
+
+```bash
+cargo run -p tp-cli -- performance bomba.tpj --csv curva.csv
+```
+
+Flujo potencial meridional y velocidades en las caras del álabe:
+
+```bash
+cargo run -p tp-cli -- analysis bomba.tpj
+```
+
+| Curva característica | Flujo potencial |
+|---|---|
+| ![curvas](docs/img/curvas-referencia.jpg) | ![flujo potencial](docs/img/flujo-potencial.jpg) |
+
+El método y sus límites están en [docs/theory/prestaciones.md](docs/theory/prestaciones.md).
 
 Propiedades de un líquido:
 
