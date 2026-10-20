@@ -6,6 +6,7 @@
 pub mod blade;
 pub mod loading;
 pub mod meridian;
+pub mod potential;
 
 use std::f64::consts::PI;
 
