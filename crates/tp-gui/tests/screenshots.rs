@@ -75,6 +75,7 @@ fn documentation() {
         harness.get_by_label_contains("Accept step").click();
         harness.run();
     }
+    harness.state_mut().focus_view(View::View3d);
     harness.remove_cursor();
     harness.run();
     save(&mut harness, "editor");

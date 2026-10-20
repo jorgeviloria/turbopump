@@ -39,7 +39,10 @@ pub(crate) enum Command {
     ExportCad,
     Focus(View),
     Camera(CameraView),
-    ResetLayout,
+    ToggleTree,
+    ToggleDialog,
+    ToggleMessages,
+    FollowStep,
     Theme(ThemePreference),
     About,
     Documentation,
@@ -79,6 +82,10 @@ pub(crate) struct RibbonCx<'a> {
     pub cad_running: bool,
     pub options: &'a mut ViewOptions,
     pub theme: ThemePreference,
+    pub tree_open: bool,
+    pub dialog_open: bool,
+    pub messages_open: bool,
+    pub follow_step: bool,
 }
 
 /// Height of a large button.
@@ -775,20 +782,62 @@ fn view_tab(ui: &mut Ui, cx: &mut RibbonCx<'_>) -> Option<Command> {
             }
         });
     });
-    group(ui, "Window", |ui| {
+    group(ui, "Panels", |ui| {
         if big_button(
             ui,
-            Icon::Glyph(icon::LAYOUT),
-            "Reset layout",
+            Icon::Glyph(icon::SIDEBAR_SIMPLE),
+            "Tree",
             true,
-            false,
+            cx.tree_open,
             None,
         )
-        .on_hover_text("Put the views back where they started")
+        .on_hover_text("The tree of design steps and of the 3D model")
         .clicked()
         {
-            set(Command::ResetLayout);
+            set(Command::ToggleTree);
         }
+        if big_button(
+            ui,
+            Icon::Glyph(icon::SLIDERS_HORIZONTAL),
+            "Properties",
+            true,
+            cx.dialog_open,
+            None,
+        )
+        .on_hover_text("The dialog of the selected step")
+        .clicked()
+        {
+            set(Command::ToggleDialog);
+        }
+        if big_button(
+            ui,
+            Icon::Glyph(icon::WARNING),
+            "Messages",
+            true,
+            cx.messages_open,
+            None,
+        )
+        .on_hover_text("Every error and warning of the project")
+        .clicked()
+        {
+            set(Command::ToggleMessages);
+        }
+        stack(ui, |ui| {
+            if small_button(
+                ui,
+                icon::ARROWS_SPLIT,
+                "View follows step",
+                true,
+                cx.follow_step,
+            )
+            .on_hover_text("Opening a step shows the view that suits it")
+            .clicked()
+            {
+                set(Command::FollowStep);
+            }
+        });
+    });
+    group(ui, "Theme", |ui| {
         stack(ui, |ui| {
             for (glyph, label, theme) in [
                 (icon::SUN, "Light", ThemePreference::Light),

@@ -22,16 +22,28 @@ pub(crate) struct Camera {
 }
 
 impl Camera {
-    /// Looks at a sphere of `radius` around `center` from the inlet side, at an angle.
-    pub fn fit(center: Vec3, radius: f32) -> Self {
-        let radius = radius.max(1e-6);
-        Self {
+    /// Looks at a sphere of `radius` around `center` from the inlet side, at an angle,
+    /// so that it fits a part of the view `aspect` times as wide as it is tall.
+    pub fn fit(center: Vec3, radius: f32, aspect: f32) -> Self {
+        let mut camera = Self {
             target: center,
             yaw: -0.9,
             pitch: 0.55,
-            distance: 0.98 * radius / (FOV / 2.0).sin(),
-            radius,
-        }
+            distance: 1.0,
+            radius: 1.0,
+        };
+        camera.reframe(center, radius, aspect);
+        camera
+    }
+
+    /// Like [`Camera::fit`], but keeps the direction the camera looks from.
+    pub fn reframe(&mut self, center: Vec3, radius: f32, aspect: f32) {
+        let radius = radius.max(1e-6);
+        // Narrower than square: back off until the sphere fits across.
+        let narrow = aspect.clamp(0.2, 1.0);
+        self.target = center;
+        self.distance = 1.12 * radius / (FOV / 2.0).sin() / narrow;
+        self.radius = radius;
     }
 
     /// Keeps the distance and target but looks from the given direction.
@@ -120,7 +132,7 @@ mod tests {
 
     #[test]
     fn target_projects_to_the_centre() {
-        let camera = Camera::fit(Vec3::new(0.0, 0.0, 0.05), 0.15);
+        let camera = Camera::fit(Vec3::new(0.0, 0.0, 0.05), 0.15, 1.5);
         let clip = camera.view_projection(1.5) * camera.target.extend(1.0);
         let ndc = clip.truncate() / clip.w;
         assert!(ndc.x.abs() < 1e-5 && ndc.y.abs() < 1e-5);
@@ -129,7 +141,7 @@ mod tests {
 
     #[test]
     fn the_inlet_is_up_on_screen() {
-        let camera = Camera::fit(Vec3::ZERO, 0.1);
+        let camera = Camera::fit(Vec3::ZERO, 0.1, 1.0);
         let vp = camera.view_projection(1.0);
         let inlet = vp * Vec3::new(0.0, 0.0, -0.05).extend(1.0);
         let outlet = vp * Vec3::new(0.0, 0.0, 0.05).extend(1.0);
@@ -138,7 +150,7 @@ mod tests {
 
     #[test]
     fn whole_model_is_in_view_in_wide_and_narrow_views() {
-        let camera = Camera::fit(Vec3::ZERO, 0.1);
+        let camera = Camera::fit(Vec3::ZERO, 0.1, 1.0);
         for aspect in [0.5, 1.0, 2.0] {
             let vp = camera.view_projection(aspect);
             for p in [
@@ -160,8 +172,15 @@ mod tests {
     }
 
     #[test]
+    fn a_narrow_part_of_the_view_backs_the_camera_off() {
+        let wide = Camera::fit(Vec3::ZERO, 0.1, 1.6);
+        let narrow = Camera::fit(Vec3::ZERO, 0.1, 0.5);
+        assert!((narrow.distance - 2.0 * wide.distance).abs() < 1e-6);
+    }
+
+    #[test]
     fn looking_along_a_direction_puts_the_eye_there() {
-        let mut camera = Camera::fit(Vec3::ZERO, 0.1);
+        let mut camera = Camera::fit(Vec3::ZERO, 0.1, 1.0);
         for d in [Vec3::X, Vec3::NEG_Y, Vec3::new(1.0, 1.0, -1.0)] {
             camera.look_along(d);
             let eye = (camera.eye() - camera.target).normalize();
@@ -174,7 +193,7 @@ mod tests {
 
     #[test]
     fn orbit_and_zoom_stay_in_range() {
-        let mut camera = Camera::fit(Vec3::ZERO, 0.1);
+        let mut camera = Camera::fit(Vec3::ZERO, 0.1, 1.0);
         camera.orbit(0.0, 1e6);
         assert!(camera.pitch <= MAX_PITCH);
         camera.zoom(1e-9);

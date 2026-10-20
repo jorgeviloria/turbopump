@@ -214,7 +214,7 @@ pub(crate) fn component_bar(ui: &mut Ui, cx: &mut EditCtx<'_>) {
         })
         .clicked()
         {
-            *cx.selection = Selection::Setup;
+            cx.open(Selection::Setup);
         }
         let r = ui.cursor();
         ui.painter().hline(
@@ -254,7 +254,7 @@ pub(crate) fn component_bar(ui: &mut Ui, cx: &mut EditCtx<'_>) {
             if response.clicked()
                 && let Some(step) = entry_step(cx, id)
             {
-                *cx.selection = Selection::Step(id, step);
+                cx.open(Selection::Step(id, step));
             }
             response.context_menu(|ui| {
                 if ui
@@ -429,7 +429,7 @@ pub(crate) fn design_tree(ui: &mut Ui, cx: &mut EditCtx<'_>) {
         .on_hover_text("Design point, fluid, inlet conditions and units")
         .clicked()
     {
-        *cx.selection = Selection::Setup;
+        cx.open(Selection::Setup);
     }
 
     let mut remove = None;
@@ -468,7 +468,7 @@ pub(crate) fn design_tree(ui: &mut Ui, cx: &mut EditCtx<'_>) {
                 response.on_hover_text(steps::planned_phase(kind, step))
             };
             if response.clicked() {
-                *cx.selection = Selection::Step(id, step);
+                cx.open(Selection::Step(id, step));
             }
         }
     }

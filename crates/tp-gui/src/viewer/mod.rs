@@ -58,6 +58,12 @@ pub(crate) struct Viewer {
     bounds: Option<(Vec3, f32)>,
     /// Impeller, stator and volute the camera was fitted to.
     fitted: Option<(ComponentId, bool, bool)>,
+    /// Width over height of the part of the view nothing covers, last frame.
+    free_aspect: f32,
+    /// The free aspect the camera was framed for.
+    framed_aspect: f32,
+    /// The user zoomed or panned since the camera was last framed.
+    moved: bool,
 }
 
 /// Faces of the view cube: outward normal and label.
@@ -79,7 +85,9 @@ impl Viewer {
         match view {
             CameraView::Fit => {
                 if let Some((center, radius)) = self.bounds {
-                    *camera = Camera::fit(center, radius);
+                    *camera = Camera::fit(center, radius, self.free_aspect);
+                    self.framed_aspect = self.free_aspect;
+                    self.moved = false;
                 }
             }
             CameraView::Iso => camera.look_from(-0.9, 0.55),
@@ -98,6 +106,7 @@ impl Viewer {
         stator: Option<ComponentId>,
         volute: Option<ComponentId>,
         units: &DisplayUnits,
+        cover: f32,
     ) {
         let stator = stator.and_then(|s| derived.diffuser(s).map(|d| (s, d)));
         let volute = volute.and_then(|v| derived.volute(v).map(|g| (v, g)));
@@ -114,6 +123,10 @@ impl Viewer {
             return;
         };
 
+        let (rect, response) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
+        // A dialog over the right of the view: center the model in the free part.
+        let free = Rect::from_min_max(rect.min, pos2(rect.right() - cover, rect.bottom()));
+        self.free_aspect = free.width() / free.height().max(1.0);
         let gpu = self.gpu.get_or_insert_with(|| Gpu::new(&state.device));
         let key = (
             derived.revision(),
@@ -128,16 +141,26 @@ impl Viewer {
             self.bounds = Some((mesh.center, mesh.radius));
             let content = (id, stator.is_some(), volute.is_some());
             if self.fitted != Some(content) || self.camera.is_none() {
-                self.camera = Some(Camera::fit(mesh.center, mesh.radius));
+                self.camera = Some(Camera::fit(mesh.center, mesh.radius, self.free_aspect));
                 self.fitted = Some(content);
+                self.framed_aspect = self.free_aspect;
+                self.moved = false;
             }
             self.mesh_key = Some(key);
         }
         let Some(camera) = self.camera.as_mut() else {
             return;
         };
+        // Until the user zooms or pans, the framing follows the free part of the view,
+        // which changes as the dialog opens, closes or moves.
+        if !self.moved
+            && (self.free_aspect - self.framed_aspect).abs() > 0.02
+            && let Some((center, radius)) = self.bounds
+        {
+            camera.reframe(center, radius, self.free_aspect);
+            self.framed_aspect = self.free_aspect;
+        }
 
-        let (rect, response) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
         if response.dragged_by(egui::PointerButton::Primary) && !ui.input(|i| i.modifiers.shift) {
             let d = response.drag_delta();
             camera.orbit(d.x, d.y);
@@ -147,20 +170,25 @@ impl Viewer {
         {
             let d = response.drag_delta();
             camera.pan(d.x, d.y, rect.width(), rect.height());
+            self.moved = true;
         }
         if response.hovered() {
             let (scroll, pinch) = ui.input(|i| (i.smooth_scroll_delta().y, i.zoom_delta()));
             if scroll != 0.0 {
                 camera.zoom((-scroll * 0.002).exp());
+                self.moved = true;
             }
             if (pinch - 1.0).abs() > f32::EPSILON {
                 camera.zoom(1.0 / pinch);
+                self.moved = true;
             }
         }
         if response.double_clicked()
             && let Some((center, radius)) = self.bounds
         {
-            *camera = Camera::fit(center, radius);
+            *camera = Camera::fit(center, radius, self.free_aspect);
+            self.framed_aspect = self.free_aspect;
+            self.moved = false;
         }
 
         let ppp = ui.ctx().pixels_per_point();
@@ -168,7 +196,7 @@ impl Viewer {
             ((rect.width() * ppp).round() as u32).max(1),
             ((rect.height() * ppp).round() as u32).max(1),
         ];
-        let uniforms = uniforms(camera, rect, ui.visuals().dark_mode);
+        let uniforms = uniforms(camera, rect, free, ui.visuals().dark_mode);
         let texture = gpu.render(state, size, &uniforms);
         ui.painter().image(
             texture,
@@ -178,14 +206,14 @@ impl Viewer {
         );
 
         let camera = *camera;
-        axes(ui, rect, &camera);
-        scale_bar(ui, rect, &camera, units);
-        if let Some(direction) = view_cube(ui, rect, &camera)
+        axes(ui, free, &camera);
+        scale_bar(ui, free, &camera, units);
+        if let Some(direction) = view_cube(ui, free, &camera)
             && let Some(c) = self.camera.as_mut()
         {
             c.look_along(direction);
         }
-        if let Some(view) = self.toolbar(ui, rect) {
+        if let Some(view) = self.toolbar(ui, free) {
             self.apply(view);
         }
     }
@@ -259,8 +287,9 @@ impl Viewer {
     }
 }
 
-/// Lights fixed to the camera, and the background of the theme.
-fn uniforms(camera: &Camera, rect: Rect, dark: bool) -> Uniforms {
+/// Lights fixed to the camera, and the background of the theme. The model is centered
+/// in `free`, the part of `rect` nothing covers.
+fn uniforms(camera: &Camera, rect: Rect, free: Rect, dark: bool) -> Uniforms {
     let view = camera.view();
     let right = view.row(0).truncate();
     let up = view.row(1).truncate();
@@ -272,10 +301,12 @@ fn uniforms(camera: &Camera, rect: Rect, dark: bool) -> Uniforms {
     } else {
         ([1.0, 1.0, 1.0, 1.0], [0.84, 0.87, 0.91, 1.0])
     };
+    // Normalized device x runs from −1 to 1 across the view.
+    let shift = (free.center().x - rect.center().x) / (rect.width() / 2.0).max(1.0);
+    let projection = glam::Mat4::from_translation(Vec3::new(shift, 0.0, 0.0))
+        * camera.view_projection(rect.width() / rect.height().max(1.0));
     Uniforms {
-        view_projection: camera
-            .view_projection(rect.width() / rect.height().max(1.0))
-            .to_cols_array_2d(),
+        view_projection: projection.to_cols_array_2d(),
         eye: camera.eye().extend(1.0).to_array(),
         key_light: key.extend(0.0).to_array(),
         fill_light: fill.extend(0.0).to_array(),

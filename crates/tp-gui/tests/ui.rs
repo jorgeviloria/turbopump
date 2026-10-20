@@ -125,12 +125,41 @@ fn manual_values_can_be_reset_to_automatic() {
 #[test]
 fn every_view_draws_without_a_gpu() {
     let mut harness = harness();
+    // One view at a time fills the main area.
     for view in View::ALL {
         harness.state_mut().focus_view(view);
         harness.run();
+        match view {
+            View::View3d => {
+                harness.get_by_label("The 3D view needs the wgpu renderer.");
+            }
+            View::Report => {
+                harness.get_by_label("Blade sections");
+            }
+            _ => {}
+        }
     }
-    harness.get_by_label("The 3D view needs the wgpu renderer.");
-    harness.get_by_label("Blade sections");
+}
+
+#[test]
+fn the_step_dialog_opens_with_a_step_and_closes() {
+    let mut harness = harness();
+    assert!(harness.state().dialog_open());
+    harness.get_by_label_contains("Impeller 1 · Main dimensions");
+    harness.key_press(Key::Escape);
+    harness.run();
+    assert!(!harness.state().dialog_open());
+    // Picking a step in the tree opens it again, and the view follows the step.
+    // The toolbar and the tree both list the step.
+    harness
+        .get_all_by_label("Blade properties")
+        .next()
+        .unwrap()
+        .click();
+    harness.run();
+    assert!(harness.state().dialog_open());
+    harness.get_by_label_contains("Impeller 1 · Blade properties");
+    assert_eq!(harness.state().view(), View::Blade);
 }
 
 #[test]

@@ -1,4 +1,4 @@
-//! The application window: menus, panels, dock and dialogs.
+//! The application window: toolbar, panels, the main view and dialogs.
 
 use std::path::{Path, PathBuf};
 
@@ -7,7 +7,6 @@ use eframe::egui::{
     RichText, Ui, ViewportCommand,
 };
 use eframe::egui_wgpu::RenderState;
-use egui_dock::{DockArea, DockState, NodeIndex, Style};
 use tp_project::{
     ComponentId, ComponentKind, DesignPoint, DesignStep, Document, EnergyTransfer, FlowRate,
     GlobalSetup, MachineType, Project, ProjectError,
@@ -51,6 +50,8 @@ pub(crate) struct EditCtx<'a> {
     pub selection: &'a mut Selection,
     pub status: &'a mut Option<Status>,
     pub exports: &'a mut Exports,
+    /// Whether the dialog of the selected step is open.
+    pub dialog: &'a mut bool,
 }
 
 impl EditCtx<'_> {
@@ -87,9 +88,15 @@ impl EditCtx<'_> {
     pub fn units(&self) -> DisplayUnits {
         self.doc.project().display_units.clone()
     }
+
+    /// Selects `selection` and opens its dialog.
+    pub fn open(&mut self, selection: Selection) {
+        *self.selection = selection;
+        *self.dialog = true;
+    }
 }
 
-/// The dockable views.
+/// The views of the main area, one at a time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum View {
     Meridional,
@@ -140,14 +147,26 @@ impl View {
     }
 }
 
-fn default_dock() -> DockState<View> {
-    let mut dock = DockState::new(vec![View::Meridional, View::Blade, View::Report]);
-    dock.main_surface_mut().split_right(
-        NodeIndex::root(),
-        0.45,
-        vec![View::View3d, View::FrontView],
-    );
-    dock
+/// The view that suits a step best, if any.
+fn view_for(kind: ComponentKind, step: DesignStep) -> Option<View> {
+    use DesignStep::*;
+    match (kind, step) {
+        (_, ModelSettings) => Some(View::View3d),
+        (ComponentKind::Impeller, MeridionalContour) => Some(View::Meridional),
+        (
+            ComponentKind::Impeller,
+            BladeProperties | BladeMeanLines | BladeProfiles | BladeEdges,
+        ) => Some(View::Blade),
+        (ComponentKind::Volute, CrossSection | WallThickness) => Some(View::Meridional),
+        (ComponentKind::Volute, VoluteSetup | SpiralDevelopment | Diffuser | CutWater) => {
+            Some(View::FrontView)
+        }
+        (ComponentKind::Stator { .. }, MainDimensions | MeridionalContour) => {
+            Some(View::Meridional)
+        }
+        (ComponentKind::Stator { .. }, _) => Some(View::FrontView),
+        _ => None,
+    }
 }
 
 /// The trees of the left panel.
@@ -221,7 +240,18 @@ pub struct TurbopumpApp {
     doc: Document,
     derived: Derived,
     selection: Selection,
-    dock: DockState<View>,
+    /// The view in the main area.
+    view: View,
+    /// Whether the dialog of the selected step is open.
+    dialog_open: bool,
+    /// The selection the dialog and the view last followed.
+    followed: Option<Selection>,
+    /// The main view changes to suit the step that opens.
+    follow_step: bool,
+    /// Whether the tree panel is open.
+    tree_open: bool,
+    /// Where the step dialog was last frame, to keep the 3D overlays clear of it.
+    dialog_rect: Option<egui::Rect>,
     meridional: MeridionalView,
     viewer: Viewer,
     exports: Exports,
@@ -265,7 +295,12 @@ impl TurbopumpApp {
             doc,
             derived: Derived::default(),
             selection: Selection::Setup,
-            dock: default_dock(),
+            view: View::View3d,
+            dialog_open: true,
+            followed: None,
+            follow_step: true,
+            tree_open: true,
+            dialog_rect: None,
             meridional: MeridionalView::default(),
             viewer: Viewer::default(),
             exports: Exports::default(),
@@ -290,12 +325,19 @@ impl TurbopumpApp {
         self.selection
     }
 
-    /// Brings `view` to the front of its dock panel.
+    /// Shows `view` in the main area.
     pub fn focus_view(&mut self, view: View) {
-        if let Some(path) = self.dock.find_tab(&view) {
-            // The path was just found, so activating it cannot fail.
-            let _ = self.dock.set_active_tab(path);
-        }
+        self.view = view;
+    }
+
+    /// The view in the main area.
+    pub fn view(&self) -> View {
+        self.view
+    }
+
+    /// Whether the dialog of the selected step is open.
+    pub fn dialog_open(&self) -> bool {
+        self.dialog_open
     }
 
     /// Draws the whole window. `render_state` enables the 3D view.
@@ -345,6 +387,10 @@ impl TurbopumpApp {
                     cad_running: self.exports.cad_running(),
                     options: &mut self.viewer.options,
                     theme: ctx.options(|o| o.theme_preference),
+                    tree_open: self.tree_open,
+                    dialog_open: self.dialog_open,
+                    messages_open: self.show_messages,
+                    follow_step: self.follow_step,
                 };
                 command = self.ribbon.show(ui, &mut cx);
             });
@@ -374,9 +420,9 @@ impl TurbopumpApp {
                         });
                     });
                     if let Some(id) = messages::panel(ui, self.doc.project(), &all_messages) {
-                        let cx = self.edit_ctx();
+                        let mut cx = self.edit_ctx();
                         if let Some(step) = tree::entry_step(&cx, id) {
-                            *cx.selection = Selection::Step(id, step);
+                            cx.open(Selection::Step(id, step));
                         }
                     }
                 });
@@ -399,7 +445,7 @@ impl TurbopumpApp {
         Panel::left("project_tree")
             .default_size(250.0)
             .size_range(200.0..=420.0)
-            .show(ui, |ui| {
+            .show_collapsible(ui, &mut self.tree_open, |ui| {
                 ui.add_space(6.0);
                 ui.columns(2, |columns| {
                     let tabs = [
@@ -423,45 +469,83 @@ impl TurbopumpApp {
                             selection: &mut self.selection,
                             status: &mut self.status,
                             exports: &mut self.exports,
+                            dialog: &mut self.dialog_open,
                         };
                         tree::design_tree(ui, &mut cx);
                     }
                     LeftTab::Model => tree::model_tree(ui, &mut self.viewer.options, stage),
                 });
             });
-        Panel::right("step_panel")
-            .default_size(390.0)
-            .size_range(300.0..=600.0)
-            .show(ui, |ui| {
-                let mut cx = self.edit_ctx();
-                steps::show(ui, &mut cx);
-            });
+        let mut main_area = ui.available_rect_before_wrap();
         CentralPanel::no_frame().show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            self.view_bar(ui);
+            main_area = ui.available_rect_before_wrap();
+            // The width the dialog hides on the right of the view.
+            let cover = match self.dialog_rect {
+                Some(r) if self.dialog_open && r.left() > main_area.center().x => {
+                    (main_area.right() - r.left() + 8.0).clamp(0.0, main_area.width() / 2.0)
+                }
+                _ => 0.0,
+            };
             let active = self.active_impeller();
             let stator = self.active_stator();
             let volute = self.active_volute();
-            let mut views = Views {
-                cx: EditCtx {
-                    doc: &mut self.doc,
-                    derived: &self.derived,
-                    selection: &mut self.selection,
-                    status: &mut self.status,
-                    exports: &mut self.exports,
-                },
-                active,
-                stator,
-                volute,
-                meridional: &mut self.meridional,
-                viewer: &mut self.viewer,
-                render_state,
+            let mut cx = EditCtx {
+                doc: &mut self.doc,
+                derived: &self.derived,
+                selection: &mut self.selection,
+                status: &mut self.status,
+                exports: &mut self.exports,
+                dialog: &mut self.dialog_open,
             };
-            DockArea::new(&mut self.dock)
-                .style(Style::from_egui(ui.style().as_ref()))
-                .show_close_buttons(false)
-                .show_leaf_close_all_buttons(false)
-                .show_leaf_collapse_buttons(false)
-                .show_inside(ui, &mut views);
+            let Some(id) = active else {
+                ui.centered_and_justified(|ui| {
+                    ui.weak("Add an impeller to see its geometry (Home > Components).");
+                });
+                return;
+            };
+            let units = cx.units();
+            let area = ui.available_rect_before_wrap();
+            ui.painter()
+                .rect_filled(area, 0, ui.visuals().extreme_bg_color);
+            // Plots and the report fit in the part the dialog leaves free; the 3D view
+            // fills everything and keeps its model clear of the dialog itself.
+            let free =
+                egui::Rect::from_min_max(area.min, egui::pos2(area.right() - cover, area.bottom()))
+                    .shrink2(egui::vec2(6.0, 4.0));
+            let target = if self.view == View::View3d {
+                area
+            } else {
+                free
+            };
+            ui.scope_builder(egui::UiBuilder::new().max_rect(target), |ui| {
+                ui.set_min_size(target.size());
+                match self.view {
+                    View::Meridional => {
+                        self.meridional.show(ui, &mut cx, id, stator, volute);
+                    }
+                    View::Blade => blade::show(ui, cx.derived, id, &units),
+                    View::FrontView => {
+                        front::show(ui, cx.derived, id, stator, volute, &units);
+                    }
+                    View::View3d => self.viewer.show(
+                        ui,
+                        render_state,
+                        cx.derived,
+                        id,
+                        stator,
+                        volute,
+                        &units,
+                        cover,
+                    ),
+                    View::Report => {
+                        report::show(ui, cx.doc.project(), cx.derived, id, stator, volute, &units)
+                    }
+                }
+            });
         });
+        self.step_dialog(&ctx, main_area);
 
         if let Some(command) = command {
             self.run(command, &ctx);
@@ -476,10 +560,110 @@ impl TurbopumpApp {
             self.active_volute(),
         );
 
+        // A new selection opens its dialog and, if asked, the view that suits it.
+        if self.followed != Some(self.selection) {
+            self.dialog_open = true;
+            if self.follow_step
+                && let Selection::Step(id, step) = self.selection
+                && let Some(kind) = self.doc.project().component(id).map(|c| c.kind())
+                && let Some(view) = view_for(kind, step)
+            {
+                self.view = view;
+            }
+            self.followed = Some(self.selection);
+        }
+
         // A gesture ends when the pointer is released and no field is being typed in.
         let idle = !ctx.input(|i| i.pointer.any_down()) && !ctx.text_edit_focused();
         if idle {
             self.doc.end_gesture();
+        }
+    }
+
+    /// The strip above the main view: the tree toggle, the views and the dialog toggle.
+    fn view_bar(&mut self, ui: &mut Ui) {
+        let p = Palette::of(ui);
+        Frame::new()
+            .fill(p.strip)
+            .inner_margin(Margin::symmetric(6, 3))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    let tip = if self.tree_open {
+                        "Hide the tree"
+                    } else {
+                        "Show the tree"
+                    };
+                    if ui
+                        .add(Button::selectable(
+                            self.tree_open,
+                            RichText::new(icon::SIDEBAR_SIMPLE).size(16.0),
+                        ))
+                        .on_hover_text(tip)
+                        .clicked()
+                    {
+                        self.tree_open = !self.tree_open;
+                    }
+                    const TAB: f32 = 118.0;
+                    let total = TAB * View::ALL.len() as f32;
+                    let free = ui.available_width() - total - 150.0;
+                    ui.add_space((free / 2.0).max(8.0));
+                    for view in View::ALL {
+                        let text = format!("{}  {}", view.icon(), view.short_title());
+                        let button = Button::selectable(self.view == view, text)
+                            .min_size(egui::vec2(TAB, 26.0));
+                        if ui.add(button).on_hover_text(view.title()).clicked() {
+                            self.view = view;
+                        }
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let text = format!("{}  Properties", icon::SLIDERS_HORIZONTAL);
+                        if ui
+                            .add(Button::selectable(self.dialog_open, text))
+                            .on_hover_text("Show or hide the dialog of the selected step")
+                            .clicked()
+                        {
+                            self.dialog_open = !self.dialog_open;
+                        }
+                    });
+                });
+            });
+    }
+
+    /// The floating dialog with the inputs of the selected step. It does not block the
+    /// views, so handles can still be dragged while it is open.
+    fn step_dialog(&mut self, ctx: &egui::Context, area: egui::Rect) {
+        if !self.dialog_open {
+            self.dialog_rect = None;
+            return;
+        }
+        let title = steps::title(self.doc.project(), self.selection);
+        let width = 430.0f32.min(area.width() - 24.0);
+        let default = egui::Rect::from_min_size(
+            egui::pos2(area.right() - width - 12.0, area.top() + 12.0),
+            egui::vec2(width, (area.height() - 24.0).max(200.0)),
+        );
+        let mut open = true;
+        let response = egui::Window::new(theme::bold(title))
+            .id(egui::Id::new("step_dialog"))
+            .open(&mut open)
+            .collapsible(true)
+            .resizable(true)
+            .default_rect(default)
+            .constrain_to(area)
+            .show(ctx, |ui| {
+                let mut cx = self.edit_ctx();
+                Panel::bottom("step_dialog_footer")
+                    .frame(Frame::new().inner_margin(Margin::symmetric(0, 6)))
+                    .show(ui, |ui| steps::footer(ui, &mut cx));
+                steps::show(ui, &mut cx);
+            });
+        // A collapsed dialog is only its title bar: it hides nothing worth avoiding.
+        self.dialog_rect = response
+            .filter(|r| r.inner.is_some())
+            .map(|r| r.response.rect);
+        if !open || ctx.input(|i| i.key_pressed(Key::Escape)) && !ctx.text_edit_focused() {
+            self.dialog_open = false;
         }
     }
 
@@ -499,7 +683,7 @@ impl TurbopumpApp {
             Command::Quit => ctx.send_viewport_cmd(ViewportCommand::Close),
             Command::Undo => self.undo(),
             Command::Redo => self.redo(),
-            Command::GlobalSetup => self.selection = Selection::Setup,
+            Command::GlobalSetup => self.edit_ctx().open(Selection::Setup),
             Command::UsUnits(us) => {
                 let preset = if us {
                     DisplayUnits::us()
@@ -513,7 +697,7 @@ impl TurbopumpApp {
             }
             Command::Add(index) => tree::add_component(&mut self.edit_ctx(), index),
             Command::Remove(id) => tree::remove_component(&mut self.edit_ctx(), id),
-            Command::Select(id, step) => self.selection = Selection::Step(id, step),
+            Command::Select(id, step) => self.edit_ctx().open(Selection::Step(id, step)),
             Command::Accept(id, step) => steps::accept(&mut self.edit_ctx(), id, step),
             Command::Reset(id, step) => {
                 let project = self.doc.project().clone();
@@ -540,7 +724,10 @@ impl TurbopumpApp {
                 self.focus_view(View::View3d);
                 self.viewer.apply(view);
             }
-            Command::ResetLayout => self.dock = default_dock(),
+            Command::ToggleTree => self.tree_open = !self.tree_open,
+            Command::ToggleDialog => self.dialog_open = !self.dialog_open,
+            Command::ToggleMessages => self.show_messages = !self.show_messages,
+            Command::FollowStep => self.follow_step = !self.follow_step,
             Command::Theme(preference) => ctx.set_theme(preference),
             Command::About => self.dialog = Some(Dialog::About),
             Command::Documentation => ctx.open_url(egui::OpenUrl::new_tab(PROJECT_PAGE)),
@@ -562,6 +749,7 @@ impl TurbopumpApp {
             selection: &mut self.selection,
             status: &mut self.status,
             exports: &mut self.exports,
+            dialog: &mut self.dialog_open,
         }
     }
 
@@ -1025,78 +1213,6 @@ impl eframe::App for TurbopumpApp {
     }
 }
 
-/// Draws the dock tabs.
-struct Views<'a> {
-    cx: EditCtx<'a>,
-    active: Option<ComponentId>,
-    stator: Option<ComponentId>,
-    volute: Option<ComponentId>,
-    meridional: &'a mut MeridionalView,
-    viewer: &'a mut Viewer,
-    render_state: Option<&'a RenderState>,
-}
-
-impl egui_dock::TabViewer for Views<'_> {
-    type Tab = View;
-
-    fn id(&mut self, tab: &mut View) -> egui::Id {
-        egui::Id::new(*tab)
-    }
-
-    fn title(&mut self, tab: &mut View) -> egui::WidgetText {
-        format!("{}  {}", tab.icon(), tab.title()).into()
-    }
-
-    fn is_closeable(&self, _tab: &View) -> bool {
-        false
-    }
-
-    /// Plots and the 3D view fill the tab; the report scrolls on its own.
-    fn scroll_bars(&self, _tab: &View) -> [bool; 2] {
-        [false, false]
-    }
-
-    fn ui(&mut self, ui: &mut Ui, tab: &mut View) {
-        let Some(id) = self.active else {
-            ui.centered_and_justified(|ui| {
-                ui.weak("Add an impeller to see its geometry (Home > Components).");
-            });
-            return;
-        };
-        let units = self.cx.units();
-        match tab {
-            View::Meridional => {
-                self.meridional
-                    .show(ui, &mut self.cx, id, self.stator, self.volute);
-            }
-            View::Blade => blade::show(ui, self.cx.derived, id, &units),
-            View::FrontView => {
-                front::show(ui, self.cx.derived, id, self.stator, self.volute, &units);
-            }
-            View::View3d => {
-                self.viewer.show(
-                    ui,
-                    self.render_state,
-                    self.cx.derived,
-                    id,
-                    self.stator,
-                    self.volute,
-                    &units,
-                );
-            }
-            View::Report => report::show(
-                ui,
-                self.cx.doc.project(),
-                self.cx.derived,
-                id,
-                self.stator,
-                self.volute,
-                &units,
-            ),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1127,6 +1243,10 @@ mod tests {
             .with_size([1440.0, 900.0])
             .build_eframe(|cc| TurbopumpApp::new(cc, None));
         harness.run();
+        // The dialog stays open: it does not block the views.
+        harness.state_mut().focus_view(View::Meridional);
+        harness.run();
+        assert!(harness.state().dialog_open);
         let id = harness.state().active_impeller().unwrap();
         let tangent = |app: &TurbopumpApp| {
             app.doc
