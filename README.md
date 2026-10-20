@@ -72,21 +72,20 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
     exportar;
   - la pestaña del componente seleccionado, con sus pasos de diseño, el estado de cada
     uno y los botones para aceptar o restablecer el paso;
-  - *View*: vistas, cámara, modo de dibujo, distribución de la ventana y tema;
+  - *View*: vistas, cámara, modo de dibujo, paneles (árbol, diálogo y mensajes) y tema;
   - *Help*.
 
   El menú *File* abre, guarda y exporta.
 - **Columna de componentes** (izquierda): la configuración global y un pictograma por
   componente, con un punto verde si está terminado o naranja si quedó desactualizado.
   El botón + añade un rodete, un difusor con o sin álabes o una voluta.
-- **Panel izquierdo**, con dos pestañas:
+- **Panel izquierdo**, que se pliega con un botón para dejar más sitio a la vista, con
+  dos pestañas:
   - *Design*: los pasos de cada componente, con su estado (pendiente, hecho o
     desactualizado porque cambió un dato anterior) y sus avisos;
   - *3D model*: muestra u oculta cada pieza de la vista 3D o la vuelve translúcida.
-- **Panel del paso** (derecha): los datos del paso seleccionado. Cada valor es
-  automático (propuesto por una correlación) o manual. *Accept step* marca el paso como
-  hecho y pasa al siguiente. Los errores y avisos salen en tarjetas al final.
-- **Vistas** (centro, acoplables):
+- **Vista principal**, una a la vez y a pantalla completa, elegida en la barra de
+  encima:
   - vista meridional, donde los puntos de control de Bézier, el borde de ataque y la
     longitud axial se arrastran con el ratón, con las paredes del difusor y las
     secciones de la voluta;
@@ -95,6 +94,15 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
   - vista 3D, con aristas de las piezas, secciones de la voluta, cubo de vistas (un clic
     en una cara gira la cámara), ejes y barra de escala;
   - informe con las mismas cifras que la línea de comandos.
+
+  Al abrir un paso, la vista cambia a la que mejor lo muestra (se puede desactivar en
+  la pestaña *View*).
+- **Diálogo del paso**: al elegir un paso o la configuración global se abre un diálogo
+  flotante con sus datos. Cada valor es automático (propuesto por una correlación) o
+  manual. *Accept step* marca el paso como hecho y pasa al siguiente, y los errores y
+  avisos salen en tarjetas. El diálogo se pliega a su barra de título, se mueve o se
+  cierra, y no bloquea las vistas: con él abierto se siguen arrastrando los puntos del
+  contorno, y las vistas se ajustan a la parte que deja libre.
 - **Barra de estado** (abajo): el último mensaje, las unidades y el contador de errores
   y avisos, que abre el panel de mensajes de todo el proyecto.
 - **Edición:** todo se puede deshacer y rehacer (Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z). Un
