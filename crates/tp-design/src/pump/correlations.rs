@@ -111,16 +111,17 @@ pub fn pressure_coefficient(nq: f64) -> f64 {
     1.21 * (-0.77 * nq / NQ_REF).exp()
 }
 
-/// Exponent m of the efficiency correlations (Gülich, Table 3.9).
-fn efficiency_exponent(q: f64, nq: f64) -> f64 {
+/// Exponent m of the efficiency correlations: `base` is 0.1 for the overall and 0.08
+/// for the hydraulic efficiency (Gülich 2nd ed., Table 3.9).
+fn efficiency_exponent(base: f64, q: f64, nq: f64) -> f64 {
     let a = if q <= 1.0 { 1.0 } else { 0.5 };
-    0.08 * a * (Q_REF / q).powf(0.15) * (45.0 / nq).powf(0.06)
+    base * a * (Q_REF / q).powf(0.15) * (45.0 / nq).powf(0.06)
 }
 
 /// Best hydraulic efficiency η_h,opt for flow `q` (m³/s, per impeller eye) and `nq`
 /// (Gülich, Table 3.9).
 pub fn hydraulic_efficiency(q: f64, nq: f64) -> f64 {
-    let m = efficiency_exponent(q, nq);
+    let m = efficiency_exponent(0.08, q, nq);
     1.0 - 0.055 * (Q_REF / q).powf(m)
         - 0.2 * (0.26 - (nq / 25.0).log10()).powi(2) * (Q_REF / q).powf(0.1)
 }
@@ -128,7 +129,7 @@ pub fn hydraulic_efficiency(q: f64, nq: f64) -> f64 {
 /// Best overall efficiency η_opt of single-stage, single-entry radial pumps
 /// (Gülich, Table 3.9).
 pub fn overall_efficiency(q: f64, nq: f64) -> f64 {
-    let m = efficiency_exponent(q, nq);
+    let m = efficiency_exponent(0.1, q, nq);
     1.0 - 0.095 * (Q_REF / q).powf(m)
         - 0.3 * (0.35 - (nq / 23.0).log10()).powi(2) * (Q_REF / q).powf(0.05)
 }
@@ -206,6 +207,22 @@ mod tests {
         }
         // Larger pumps are more efficient.
         assert!(overall_efficiency(1.0, 40.0) > overall_efficiency(0.01, 40.0));
+    }
+
+    #[test]
+    fn overall_efficiency_of_the_reference_pump() {
+        // Q = 100 m³/h, nq = 35.92: m = 0.1·36^0.15·(45/35.92)^0.06 = 0.1735 (Gülich 2nd
+        // ed., eq. 3.9.1), η = 0.8144.
+        assert_relative_eq!(
+            overall_efficiency(100.0 / 3600.0, 35.92),
+            0.8144,
+            epsilon = 5e-4
+        );
+        assert_relative_eq!(
+            hydraulic_efficiency(100.0 / 3600.0, 35.92),
+            0.9065,
+            epsilon = 5e-4
+        );
     }
 
     #[test]
