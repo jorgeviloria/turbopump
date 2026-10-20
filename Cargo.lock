@@ -576,6 +576,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "tp-design"
+version = "0.1.0"
+dependencies = [
+ "approx",
+ "proptest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tp-math",
+ "tp-units",
+]
+
+[[package]]
 name = "tp-math"
 version = "0.1.0"
 dependencies = [
@@ -595,6 +608,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "tp-design",
  "tp-units",
 ]
 

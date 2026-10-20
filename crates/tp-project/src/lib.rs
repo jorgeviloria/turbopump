@@ -11,7 +11,6 @@ mod error;
 mod file;
 mod history;
 mod machine;
-mod param;
 mod project;
 mod setup;
 
@@ -21,6 +20,6 @@ pub use error::ProjectError;
 pub use file::{FILE_EXTENSION, FORMAT_VERSION};
 pub use history::History;
 pub use machine::MachineType;
-pub use param::Param;
 pub use project::{Issue, Project, ProjectInfo, Severity};
 pub use setup::{DesignPoint, EnergyTransfer, FlowRate, GlobalSetup, InletConditions, Rotation};
+pub use tp_design::Param;
