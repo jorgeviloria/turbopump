@@ -127,3 +127,29 @@ fn every_view_draws_without_a_gpu() {
     harness.get_by_label("The 3D view needs the wgpu renderer.");
     harness.get_by_label("Blade sections");
 }
+
+#[test]
+fn the_volute_is_designed_after_the_impeller() {
+    let mut harness = harness();
+    // Impeller up to the blade edges.
+    for _ in 0..6 {
+        accept(&mut harness);
+    }
+    // Then every volute step, from the tree.
+    harness.get_by_label_contains("Volute setup").click();
+    harness.run();
+    for step in tp_project::VOLUTE_STEPS {
+        assert!(matches!(harness.state().selection(), Selection::Step(_, s) if s == step));
+        accept(&mut harness);
+        let project = harness.state().document().project();
+        assert_eq!(
+            project.components()[1].status(step),
+            StepStatus::Done,
+            "{step}"
+        );
+    }
+    // The report and the 3D view include the volute.
+    harness.state_mut().focus_view(View::Report);
+    harness.run();
+    harness.get_by_label_contains(": volute");
+}

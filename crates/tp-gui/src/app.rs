@@ -15,7 +15,7 @@ use tp_project::{
 use tp_units::{DisplayUnits, QuantityKind};
 
 use crate::derived::Derived;
-use crate::export::{self, Exports, TextExport};
+use crate::export::{self, Exports, TextExport, VoluteExport};
 use crate::viewer::Viewer;
 use crate::views::{blade, front, meridional::MeridionalView, report};
 use crate::{default_project, steps, tree, widgets};
@@ -137,6 +137,7 @@ struct NewProjectForm {
     head: f64,
     speed: f64,
     fluid: String,
+    volute: bool,
 }
 
 impl Default for NewProjectForm {
@@ -147,6 +148,7 @@ impl Default for NewProjectForm {
             head: 32.0,
             speed: 2900.0 * std::f64::consts::PI / 30.0,
             fluid: "Water".into(),
+            volute: true,
         }
     }
 }
@@ -164,6 +166,9 @@ impl NewProjectForm {
         setup.fluid = self.fluid.trim().to_owned();
         let mut project = Project::new(self.name.trim(), MachineType::Pump, setup)?;
         project.add_component(ComponentKind::Impeller, None)?;
+        if self.volute {
+            project.add_component(ComponentKind::Volute, None)?;
+        }
         Ok(project)
     }
 }
@@ -280,6 +285,7 @@ impl TurbopumpApp {
             });
         CentralPanel::no_frame().show(ui, |ui| {
             let active = self.active_impeller();
+            let volute = self.active_volute();
             let mut views = Views {
                 cx: EditCtx {
                     doc: &mut self.doc,
@@ -289,6 +295,7 @@ impl TurbopumpApp {
                     exports: &mut self.exports,
                 },
                 active,
+                volute,
                 meridional: &mut self.meridional,
                 viewer: &mut self.viewer,
                 render_state,
@@ -307,6 +314,7 @@ impl TurbopumpApp {
             &self.derived,
             self.doc.project(),
             self.active_impeller(),
+            self.active_volute(),
         );
 
         // A gesture ends when the pointer is released and no field is being typed in.
@@ -326,22 +334,45 @@ impl TurbopumpApp {
         }
     }
 
-    /// The impeller the views show: the selected one, or the first.
+    /// The impeller the views show: the selected one, the one feeding the selected
+    /// component, or the first.
     fn active_impeller(&self) -> Option<ComponentId> {
-        let project = self.doc.project();
-        let is_impeller = |id| {
-            project
-                .component(id)
-                .is_some_and(|c| c.kind() == ComponentKind::Impeller)
+        let components = self.doc.project().components();
+        let selected = match self.selection {
+            Selection::Step(id, _) => components.iter().position(|c| c.id() == id),
+            Selection::Setup => None,
         };
-        match self.selection {
-            Selection::Step(id, _) if is_impeller(id) => Some(id),
-            _ => project
-                .components()
+        if let Some(index) = selected
+            && let Some(c) = components[..=index]
                 .iter()
+                .rev()
                 .find(|c| c.kind() == ComponentKind::Impeller)
-                .map(|c| c.id()),
+        {
+            return Some(c.id());
         }
+        components
+            .iter()
+            .find(|c| c.kind() == ComponentKind::Impeller)
+            .map(|c| c.id())
+    }
+
+    /// The volute shown with the active impeller: the selected one, or the one right
+    /// after the impeller.
+    fn active_volute(&self) -> Option<ComponentId> {
+        let components = self.doc.project().components();
+        if let Selection::Step(id, _) = self.selection
+            && components
+                .iter()
+                .any(|c| c.id() == id && c.kind() == ComponentKind::Volute)
+        {
+            return Some(id);
+        }
+        let impeller = self.active_impeller()?;
+        let index = components.iter().position(|c| c.id() == impeller)?;
+        components
+            .get(index + 1)
+            .filter(|c| c.kind() == ComponentKind::Volute)
+            .map(|c| c.id())
     }
 
     fn select_first_step(&mut self) {
@@ -585,6 +616,26 @@ impl TurbopumpApp {
                         }
                     }
                 }
+                let volute = self.active_volute();
+                let has_volute = volute.is_some_and(|id| self.derived.volute(id).is_some());
+                if volute.is_some() {
+                    ui.separator();
+                    for kind in VoluteExport::ALL {
+                        if ui
+                            .add_enabled(has_volute, Button::new(kind.menu_label()))
+                            .clicked()
+                            && let Some(g) = volute.and_then(|id| self.derived.volute(id))
+                        {
+                            let result =
+                                export::save_volute(kind, g, &self.doc.project().info.name);
+                            match result {
+                                Ok(Some(path)) => self.info(format!("Wrote {}", path.display())),
+                                Ok(None) => {}
+                                Err(e) => self.error(e),
+                            }
+                        }
+                    }
+                }
                 ui.separator();
                 if ui
                     .add_enabled(
@@ -755,6 +806,9 @@ impl TurbopumpApp {
                             ui.label("Fluid");
                             ui.text_edit_singleline(&mut form.fluid);
                             ui.end_row();
+                            ui.label("Casing");
+                            ui.checkbox(&mut form.volute, "volute after the impeller");
+                            ui.end_row();
                         });
                     ui.add_space(4.0);
                     ui.weak("Other machine types arrive in phase 6.");
@@ -859,6 +913,7 @@ impl eframe::App for TurbopumpApp {
 struct Views<'a> {
     cx: EditCtx<'a>,
     active: Option<ComponentId>,
+    volute: Option<ComponentId>,
     meridional: &'a mut MeridionalView,
     viewer: &'a mut Viewer,
     render_state: Option<&'a RenderState>,
@@ -893,11 +948,21 @@ impl egui_dock::TabViewer for Views<'_> {
         };
         let units = self.cx.units();
         match tab {
-            View::Meridional => self.meridional.show(ui, &mut self.cx, id),
+            View::Meridional => self.meridional.show(ui, &mut self.cx, id, self.volute),
             View::Blade => blade::show(ui, self.cx.derived, id, &units),
-            View::FrontView => front::show(ui, self.cx.derived, id, &units),
-            View::View3d => self.viewer.show(ui, self.render_state, self.cx.derived, id),
-            View::Report => report::show(ui, self.cx.doc.project(), self.cx.derived, id, &units),
+            View::FrontView => front::show(ui, self.cx.derived, id, self.volute, &units),
+            View::View3d => {
+                self.viewer
+                    .show(ui, self.render_state, self.cx.derived, id, self.volute);
+            }
+            View::Report => report::show(
+                ui,
+                self.cx.doc.project(),
+                self.cx.derived,
+                id,
+                self.volute,
+                &units,
+            ),
         }
     }
 }

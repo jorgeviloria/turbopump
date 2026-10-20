@@ -166,8 +166,15 @@ impl MeridionalView {
         self.transform.as_ref()
     }
 
-    pub(crate) fn show(&mut self, ui: &mut Ui, cx: &mut EditCtx<'_>, id: ComponentId) {
+    pub(crate) fn show(
+        &mut self,
+        ui: &mut Ui,
+        cx: &mut EditCtx<'_>,
+        id: ComponentId,
+        volute: Option<ComponentId>,
+    ) {
         let derived = cx.derived;
+        let volute = volute.and_then(|v| derived.volute(v));
         let Some(results) = derived.impeller(id) else {
             return;
         };
@@ -287,6 +294,34 @@ impl MeridionalView {
                         );
                     }
                 }
+                if let Some(v) = volute {
+                    // Inlet ring walls and a few cross sections, folded into one plane.
+                    let (inner, outer) = v.inlet_ring();
+                    let zm = v.basis.midplane;
+                    let half = v.design.inlet_width / 2.0;
+                    for z in [zm - half, zm + half] {
+                        plot.line(
+                            Line::new(
+                                "volute",
+                                line([DVec2::new(z, inner), DVec2::new(z, outer)], scale),
+                            )
+                            .color(palette.volute)
+                            .width(1.5),
+                        );
+                    }
+                    let n = v.sections.len();
+                    for index in [n / 4, n / 2, 3 * n / 4, n - 1] {
+                        let s = &v.sections[index];
+                        let mut points: Vec<DVec2> =
+                            s.outline.iter().map(|p| DVec2::new(p.y, p.x)).collect();
+                        points.push(points[0]);
+                        plot.line(
+                            Line::new("volute", line(points, scale))
+                                .color(palette.volute)
+                                .width(if index == n - 1 { 2.0 } else { 1.0 }),
+                        );
+                    }
+                }
                 for &(handle, p) in &handles {
                     let current = active == Some(handle);
                     plot.points(
@@ -303,6 +338,7 @@ impl MeridionalView {
                 plot.pointer_coordinate()
             });
 
+        super::settle(ui, ("meridional", id.0), &response.transform);
         self.transform = Some(response.transform);
         let plot_response = &response.response;
         if plot_response.drag_started() && hovered.is_some() {

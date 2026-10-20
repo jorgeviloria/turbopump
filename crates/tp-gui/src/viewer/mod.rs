@@ -22,11 +22,13 @@ pub(crate) struct Viewer {
     camera: Option<Camera>,
     gpu: Option<Gpu>,
     /// What the uploaded mesh was built from.
-    mesh_key: Option<(u64, ComponentId, ViewOptions)>,
+    mesh_key: Option<(u64, ComponentId, Option<ComponentId>, ViewOptions)>,
     /// Center and radius of the model, for "fit".
     bounds: Option<(glam::Vec3, f32)>,
-    /// Impeller the camera was fitted to.
-    fitted: Option<ComponentId>,
+    /// Impeller and volute the camera was fitted to.
+    fitted: Option<(ComponentId, bool)>,
+    /// Whether the stage shown has a volute, for the toolbar.
+    has_volute: bool,
 }
 
 impl Viewer {
@@ -36,7 +38,10 @@ impl Viewer {
         render_state: Option<&RenderState>,
         derived: &Derived,
         id: ComponentId,
+        volute: Option<ComponentId>,
     ) {
+        let volute = volute.and_then(|v| derived.volute(v).map(|g| (v, g)));
+        self.has_volute = volute.is_some();
         self.toolbar(ui);
         let Some(state) = render_state else {
             unavailable(ui, "The 3D view needs the wgpu renderer.");
@@ -52,14 +57,15 @@ impl Viewer {
         };
 
         let gpu = self.gpu.get_or_insert_with(|| Gpu::new(&state.device));
-        let key = (derived.revision(), id, self.options);
+        let key = (derived.revision(), id, volute.map(|v| v.0), self.options);
         if self.mesh_key != Some(key) {
-            let mesh = mesh::build(g, &self.options);
+            let mesh = mesh::build(g, volute.map(|v| v.1), &self.options);
             gpu.upload(&state.device, &mesh);
             self.bounds = Some((mesh.center, mesh.radius));
-            if self.fitted != Some(id) || self.camera.is_none() {
+            let content = (id, volute.is_some());
+            if self.fitted != Some(content) || self.camera.is_none() {
                 self.camera = Some(Camera::fit(mesh.center, mesh.radius));
-                self.fitted = Some(id);
+                self.fitted = Some(content);
             }
             self.mesh_key = Some(key);
         }
@@ -141,6 +147,25 @@ impl Viewer {
                     );
                     ui.selectable_value(&mut self.options.shroud, ShroudMode::Solid, "solid");
                 });
+            if self.has_volute {
+                ui.label("volute");
+                ComboBox::from_id_salt("volute_mode")
+                    .width(100.0)
+                    .selected_text(match self.options.volute {
+                        ShroudMode::Hidden => "hidden",
+                        ShroudMode::Transparent => "transparent",
+                        ShroudMode::Solid => "solid",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.options.volute, ShroudMode::Hidden, "hidden");
+                        ui.selectable_value(
+                            &mut self.options.volute,
+                            ShroudMode::Transparent,
+                            "transparent",
+                        );
+                        ui.selectable_value(&mut self.options.volute, ShroudMode::Solid, "solid");
+                    });
+            }
             ui.checkbox(&mut self.options.all_blades, "all blades");
             ui.checkbox(&mut self.options.wireframe, "wireframe");
             ui.separator();

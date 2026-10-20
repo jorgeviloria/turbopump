@@ -69,3 +69,26 @@ fn documentation() {
     harness.run();
     save(&mut harness, "editor");
 }
+
+/// The whole stage: impeller and volute designed, the spiral step selected.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn volute() {
+    let mut harness = harness(egui::Theme::Dark);
+    for _ in 0..6 {
+        harness.get_by_label("Accept step").click();
+        harness.run();
+    }
+    harness.get_by_label_contains("Volute setup").click();
+    harness.run();
+    for _ in 0..2 {
+        harness.get_by_label("Accept step").click();
+        harness.run();
+    }
+    harness.remove_cursor();
+    harness.run();
+    save(&mut harness, "volute-spiral");
+    harness.state_mut().focus_view(View::FrontView);
+    harness.run();
+    save(&mut harness, "volute-front");
+}

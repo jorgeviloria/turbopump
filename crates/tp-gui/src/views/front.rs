@@ -26,7 +26,14 @@ fn circle(r: f64, scale: f64) -> PlotPoints<'static> {
         .collect()
 }
 
-pub(crate) fn show(ui: &mut Ui, derived: &Derived, id: ComponentId, units: &DisplayUnits) {
+pub(crate) fn show(
+    ui: &mut Ui,
+    derived: &Derived,
+    id: ComponentId,
+    volute: Option<ComponentId>,
+    units: &DisplayUnits,
+) {
+    let volute = volute.and_then(|v| derived.volute(v));
     let Some(g) = derived.geometry(id) else {
         let reason = derived
             .impeller(id)
@@ -59,7 +66,7 @@ pub(crate) fn show(ui: &mut Ui, derived: &Derived, id: ComponentId, units: &Disp
         ),
     ];
 
-    Plot::new(("front", id.0))
+    let response = Plot::new(("front", id.0))
         .data_aspect(1.0)
         .x_axis_label(format!("x [{unit}]"))
         .y_axis_label(format!("y [{unit}]"))
@@ -80,6 +87,59 @@ pub(crate) fn show(ui: &mut Ui, derived: &Derived, id: ComponentId, units: &Disp
                         .width(1.0),
                 );
             }
+            if let Some(v) = volute {
+                let sign = v.basis.rotation_sign;
+                // Outer wall of the spiral, from the start to the throat.
+                let outer: PlotPoints = v
+                    .sections
+                    .iter()
+                    .map(|s| {
+                        let r = s.outline.iter().map(|p| p.x).fold(0.0, f64::max);
+                        let t = sign * s.angle;
+                        view(r * t.cos(), r * t.sin(), scale)
+                    })
+                    .collect();
+                plot.line(Line::new("volute", outer).color(palette.volute).width(2.0));
+                plot.line(
+                    Line::new(
+                        "cutwater d_z",
+                        circle(v.design.cutwater_diameter / 2.0, scale),
+                    )
+                    .color(palette.volute)
+                    .style(LineStyle::dashed_loose())
+                    .width(1.0),
+                );
+                // Side walls of the discharge diffuser.
+                let axis = v.nozzle_axis;
+                let across = DVec3::new(-axis.y, axis.x, 0.0);
+                let mut walls = (Vec::new(), Vec::new());
+                for n in &v.nozzle {
+                    let along = |p: &DVec3| (*p - n.center).dot(across);
+                    let low = n.points.iter().min_by(|a, b| along(a).total_cmp(&along(b)));
+                    let high = n.points.iter().max_by(|a, b| along(a).total_cmp(&along(b)));
+                    if let (Some(l), Some(h)) = (low, high) {
+                        walls.0.push(view(l.x, l.y, scale));
+                        walls.1.push(view(h.x, h.y, scale));
+                    }
+                }
+                if let (Some(&a), Some(&b)) = (walls.0.last(), walls.1.last()) {
+                    plot.line(
+                        Line::new("volute", vec![a, b])
+                            .color(palette.volute)
+                            .width(2.0),
+                    );
+                }
+                plot.line(
+                    Line::new("volute", walls.0)
+                        .color(palette.volute)
+                        .width(2.0),
+                );
+                plot.line(
+                    Line::new("volute", walls.1)
+                        .color(palette.volute)
+                        .width(2.0),
+                );
+            }
             for i in 0..blade.count {
                 let angle = 2.0 * PI * f64::from(i) / f64::from(blade.count);
                 let (sin, cos) = angle.sin_cos();
@@ -93,4 +153,5 @@ pub(crate) fn show(ui: &mut Ui, derived: &Derived, id: ComponentId, units: &Disp
                 }
             }
         });
+    super::settle(ui, ("front", id.0), &response.transform);
 }

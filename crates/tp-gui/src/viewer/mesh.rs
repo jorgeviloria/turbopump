@@ -5,7 +5,8 @@ use std::collections::HashMap;
 use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
 use tp_design::impeller::ImpellerGeometry;
-use tp_io::mesh::{Triangle, impeller_parts};
+use tp_design::volute::VoluteGeometry;
+use tp_io::mesh::{Triangle, impeller_parts, volute_triangles};
 use tp_math::DVec3;
 
 /// How the shroud is drawn.
@@ -23,6 +24,8 @@ pub(crate) struct ViewOptions {
     pub shroud: ShroudMode,
     pub all_blades: bool,
     pub wireframe: bool,
+    /// How the volute is drawn, when the stage has one.
+    pub volute: ShroudMode,
 }
 
 impl Default for ViewOptions {
@@ -32,6 +35,7 @@ impl Default for ViewOptions {
             shroud: ShroudMode::Transparent,
             all_blades: true,
             wireframe: false,
+            volute: ShroudMode::Transparent,
         }
     }
 }
@@ -61,6 +65,8 @@ const BLADE: [f32; 4] = [0.10, 0.25, 0.55, 1.0];
 const HUB: [f32; 4] = [0.42, 0.43, 0.45, 1.0];
 const SHROUD_SOLID: [f32; 4] = [0.55, 0.30, 0.16, 1.0];
 const SHROUD_GLASS: [f32; 4] = [0.60, 0.36, 0.20, 0.22];
+const VOLUTE_SOLID: [f32; 4] = [0.36, 0.42, 0.22, 1.0];
+const VOLUTE_GLASS: [f32; 4] = [0.45, 0.55, 0.25, 0.16];
 /// Faces meeting at more than this angle keep a sharp edge.
 const CREASE_DEGREES: f64 = 40.0;
 
@@ -141,8 +147,12 @@ fn push_edges(out: &mut Vec<Vertex>, triangles: &[Triangle], color: [f32; 4]) {
     }
 }
 
-/// Builds the vertices of the impeller as `options` ask.
-pub(crate) fn build(g: &ImpellerGeometry, options: &ViewOptions) -> MeshData {
+/// Builds the vertices of the impeller, and of its volute if given, as `options` ask.
+pub(crate) fn build(
+    g: &ImpellerGeometry,
+    volute: Option<&VoluteGeometry>,
+    options: &ViewOptions,
+) -> MeshData {
     let parts = impeller_parts(g);
     let blades: Vec<Triangle> = if options.all_blades {
         parts.blades.iter().flatten().copied().collect()
@@ -158,6 +168,14 @@ pub(crate) fn build(g: &ImpellerGeometry, options: &ViewOptions) -> MeshData {
         ShroudMode::Hidden => {}
         ShroudMode::Solid => opaque.push((&parts.shroud, SHROUD_SOLID)),
         ShroudMode::Transparent => transparent.push((&parts.shroud, SHROUD_GLASS)),
+    }
+    let casing = volute.map(volute_triangles).unwrap_or_default();
+    if !casing.is_empty() {
+        match options.volute {
+            ShroudMode::Hidden => {}
+            ShroudMode::Solid => opaque.push((&casing, VOLUTE_SOLID)),
+            ShroudMode::Transparent => transparent.push((&casing, VOLUTE_GLASS)),
+        }
     }
 
     let mut mesh = MeshData::default();
@@ -179,13 +197,14 @@ pub(crate) fn build(g: &ImpellerGeometry, options: &ViewOptions) -> MeshData {
         }
     }
 
-    // Bounds of the whole impeller, whatever is shown, so the camera stays put.
+    // Bounds of the whole stage, whatever is shown, so the camera stays put.
     let all = parts
         .blades
         .iter()
         .flatten()
         .chain(&parts.hub)
         .chain(&parts.shroud)
+        .chain(&casing)
         .flatten();
     let (min, max) = all.clone().fold(
         (DVec3::splat(f64::INFINITY), DVec3::splat(f64::NEG_INFINITY)),
@@ -221,7 +240,7 @@ mod tests {
     #[test]
     fn normals_are_unit_vectors() {
         let g = geometry();
-        let mesh = build(&g, &ViewOptions::default());
+        let mesh = build(&g, None, &ViewOptions::default());
         assert!(mesh.vertices.len() > 3000);
         for v in &mesh.vertices {
             let n = Vec3::from(v.normal);
@@ -234,7 +253,7 @@ mod tests {
     #[test]
     fn transparent_shroud_comes_last() {
         let g = geometry();
-        let mesh = build(&g, &ViewOptions::default());
+        let mesh = build(&g, None, &ViewOptions::default());
         assert!(mesh.opaque > 0 && (mesh.opaque as usize) < mesh.vertices.len());
         assert!(
             mesh.vertices[mesh.opaque as usize..]
@@ -243,6 +262,7 @@ mod tests {
         );
         let solid = build(
             &g,
+            None,
             &ViewOptions {
                 shroud: ShroudMode::Solid,
                 ..ViewOptions::default()
@@ -256,6 +276,7 @@ mod tests {
         let g = geometry();
         let mesh = build(
             &g,
+            None,
             &ViewOptions {
                 wireframe: true,
                 ..ViewOptions::default()

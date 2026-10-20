@@ -67,7 +67,7 @@ pub(crate) fn show(ui: &mut Ui, derived: &Derived, id: ComponentId, units: &Disp
             plot =
                 plot.x_axis_label("relative meridional length (0 leading edge, 1 trailing edge)");
         }
-        plot.show(ui, |plot| {
+        let response = plot.show(ui, |plot| {
             for (i, s) in sections.iter().enumerate() {
                 plot.line(
                     Line::new(format!("span {:.2}", s.span), along(s, |k| value(s, k)))
@@ -76,5 +76,6 @@ pub(crate) fn show(ui: &mut Ui, derived: &Derived, id: ComponentId, units: &Disp
                 );
             }
         });
+        super::settle(ui, (name, id.0), &response.transform);
     }
 }

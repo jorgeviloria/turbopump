@@ -5,7 +5,8 @@ pub(crate) mod front;
 pub(crate) mod meridional;
 pub(crate) mod report;
 
-use eframe::egui::{Color32, Ui};
+use eframe::egui::{Color32, Id, Ui};
+use egui_plot::PlotTransform;
 
 /// Line colors shared by the plots, tuned for light and dark themes.
 #[derive(Debug, Clone, Copy)]
@@ -17,6 +18,7 @@ pub(crate) struct Palette {
     pub guide: Color32,
     pub handle: Color32,
     pub handle_active: Color32,
+    pub volute: Color32,
 }
 
 impl Palette {
@@ -30,6 +32,7 @@ impl Palette {
                 guide: Color32::from_gray(90),
                 handle: Color32::from_rgb(90, 200, 160),
                 handle_active: Color32::WHITE,
+                volute: Color32::from_rgb(170, 190, 120),
             }
         } else {
             Self {
@@ -40,6 +43,7 @@ impl Palette {
                 guide: Color32::from_gray(185),
                 handle: Color32::from_rgb(0, 140, 110),
                 handle_active: Color32::BLACK,
+                volute: Color32::from_rgb(90, 120, 30),
             }
         }
     }
@@ -52,6 +56,24 @@ impl Palette {
             0.0
         };
         self.hub.lerp_to_gamma(self.shroud, t)
+    }
+}
+
+/// Asks for one more frame when a plot's bounds moved. egui_plot lays out its axes
+/// from the previous frame, so after the data change the labels would otherwise lag
+/// until the next input event.
+pub(crate) fn settle(
+    ui: &Ui,
+    id: impl std::hash::Hash + std::fmt::Debug,
+    transform: &PlotTransform,
+) {
+    let key = Id::new(id).with("settled_bounds");
+    let b = transform.bounds();
+    let current = [b.min()[0], b.min()[1], b.max()[0], b.max()[1]];
+    let previous = ui.ctx().data(|d| d.get_temp::<[f64; 4]>(key));
+    if previous != Some(current) {
+        ui.ctx().data_mut(|d| d.insert_temp(key, current));
+        ui.ctx().request_repaint();
     }
 }
 

@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 
 use tp_design::impeller::ImpellerGeometry;
 use tp_design::pump::CentrifugalPumpDesign;
+use tp_design::volute::VoluteGeometry;
 use tp_fluids::LiquidProperties;
 use tp_project::{ComponentId, ComponentKind, Project};
 
@@ -23,6 +24,7 @@ pub struct Derived {
     revision: u64,
     pub liquid: Option<Result<LiquidProperties, String>>,
     pub impellers: BTreeMap<ComponentId, ImpellerResults>,
+    pub volutes: BTreeMap<ComponentId, Result<VoluteGeometry, String>>,
 }
 
 impl Derived {
@@ -51,6 +53,17 @@ impl Derived {
                 (id, ImpellerResults { main, geometry })
             })
             .collect();
+        self.volutes = project
+            .components()
+            .iter()
+            .filter(|c| c.kind() == ComponentKind::Volute)
+            .map(|c| {
+                (
+                    c.id(),
+                    project.compute_volute(c.id()).map_err(|e| e.to_string()),
+                )
+            })
+            .collect();
         self.source = Some(project.clone());
         self.revision += 1;
         true
@@ -71,6 +84,14 @@ impl Derived {
 
     pub fn geometry(&self, id: ComponentId) -> Option<&ImpellerGeometry> {
         self.impeller(id).and_then(|r| r.geometry.as_ref().ok())
+    }
+
+    pub fn volute_result(&self, id: ComponentId) -> Option<&Result<VoluteGeometry, String>> {
+        self.volutes.get(&id)
+    }
+
+    pub fn volute(&self, id: ComponentId) -> Option<&VoluteGeometry> {
+        self.volute_result(id).and_then(|r| r.as_ref().ok())
     }
 }
 

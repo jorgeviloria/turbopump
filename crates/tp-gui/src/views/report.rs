@@ -4,6 +4,7 @@
 use eframe::egui::{self, Grid, RichText, Ui};
 use tp_design::impeller::BladeLoading;
 use tp_design::pump::{InletSection, correlations as corr};
+use tp_design::volute::{AreaLaw, SectionShape};
 use tp_project::{ComponentId, Project};
 use tp_units::{DisplayUnits, QuantityKind};
 
@@ -21,6 +22,7 @@ pub(crate) fn show(
     project: &Project,
     derived: &Derived,
     id: ComponentId,
+    volute: Option<ComponentId>,
     units: &DisplayUnits,
 ) {
     use QuantityKind::*;
@@ -318,6 +320,92 @@ pub(crate) fn show(
                 }
             });
         warnings(ui, &g.warnings);
+
+        let Some(volute) = volute else {
+            return;
+        };
+        let name = project.component(volute).map_or("", |c| c.name.as_str());
+        heading(ui, &format!("{name}: volute"));
+        let v = match derived.volute_result(volute) {
+            Some(Ok(v)) => v,
+            Some(Err(e)) => {
+                ui.colored_label(ui.visuals().error_fg_color, e);
+                return;
+            }
+            None => return,
+        };
+        let d = &v.design;
+        let shape = match d.shape {
+            SectionShape::Rectangular => "rectangular".to_owned(),
+            SectionShape::Circular => "circular".to_owned(),
+            SectionShape::Trapezoidal { flank_angle } => {
+                format!("trapezoidal, flanks at {}", s(Angle, flank_angle))
+            }
+        };
+        let law = match d.law {
+            AreaLaw::ConstantVelocity => "constant velocity (eqs. 7.26–7.27)",
+            _ => "angular momentum (eqs. 7.24–7.25)",
+        };
+        Grid::new("report_volute")
+            .num_columns(2)
+            .striped(true)
+            .show(ui, |ui| {
+                value_row(ui, "Design flow Q_Le", s(VolumeFlow, d.flow));
+                value_row(
+                    ui,
+                    "Cutwater diameter d_z",
+                    format!(
+                        "{} (minimum {}, Table 10.2)",
+                        s(Length, d.cutwater_diameter),
+                        s(Length, d.min_cutwater_diameter)
+                    ),
+                );
+                value_row(ui, "Inlet width b₃", s(Length, d.inlet_width));
+                value_row(ui, "Cutwater thickness e₃", s(Length, d.cutwater_thickness));
+                value_row(ui, "Cross sections", shape);
+                value_row(ui, "Area law", law);
+                value_row(ui, "Throat area A₃q", s(Area, d.throat.area));
+                value_row(ui, "Throat height", s(Length, d.throat.height));
+                value_row(ui, "Throat B/H", format!("{:.2} (2 to 3)", d.throat_aspect));
+                value_row(ui, "Throat velocity c₃q", s(Velocity, d.throat_velocity));
+                value_row(
+                    ui,
+                    "c₃q/c₂",
+                    format!("{:.2} (not much below 0.8, Table 10.2)", d.deceleration),
+                );
+                value_row(
+                    ui,
+                    "Cutwater angle α₃B",
+                    format!(
+                        "{} (flow {})",
+                        s(Angle, d.cutwater_angle),
+                        s(Angle, d.cutwater_flow_angle)
+                    ),
+                );
+                let dif = &d.diffuser;
+                value_row(
+                    ui,
+                    "Discharge diffuser",
+                    format!(
+                        "{} long, outlet {}, area ratio {:.2}",
+                        s(Length, dif.length),
+                        s(Length, dif.outlet_diameter),
+                        dif.area_ratio
+                    ),
+                );
+                value_row(
+                    ui,
+                    "Opening angle",
+                    format!(
+                        "{} (allowed {}, eq. 1.44)",
+                        s(Angle, dif.opening_angle),
+                        s(Angle, dif.allowable_angle)
+                    ),
+                );
+                value_row(ui, "Outlet velocity", s(Velocity, dif.outlet_velocity));
+                value_row(ui, "Wall thickness", s(Length, d.wall_thickness));
+            });
+        warnings(ui, &v.warnings);
     });
 }
 

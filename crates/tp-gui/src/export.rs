@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use eframe::egui;
 use tp_design::impeller::ImpellerGeometry;
+use tp_design::volute::VoluteGeometry;
 use tp_project::{ComponentId, Project};
 
 use crate::derived::Derived;
@@ -65,6 +66,54 @@ pub(crate) fn save_text(
     project_name: &str,
 ) -> Result<Option<PathBuf>, String> {
     let (suffix, extension, filter) = kind.file();
+    save_file(suffix, extension, filter, || kind.contents(g), project_name)
+}
+
+/// Exports of the volute written by `tp-io`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum VoluteExport {
+    Points,
+    Mesh,
+}
+
+impl VoluteExport {
+    pub const ALL: [VoluteExport; 2] = [VoluteExport::Points, VoluteExport::Mesh];
+
+    pub fn menu_label(self) -> &'static str {
+        match self {
+            VoluteExport::Points => "Volute points (TXT)…",
+            VoluteExport::Mesh => "Volute surface mesh (STL)…",
+        }
+    }
+
+    pub fn contents(self, g: &VoluteGeometry) -> String {
+        match self {
+            VoluteExport::Points => tp_io::points::volute_txt(g),
+            VoluteExport::Mesh => tp_io::stl::ascii("volute", &tp_io::mesh::volute_triangles(g)),
+        }
+    }
+}
+
+/// Asks for a file name and writes a volute export.
+pub(crate) fn save_volute(
+    kind: VoluteExport,
+    g: &VoluteGeometry,
+    project_name: &str,
+) -> Result<Option<PathBuf>, String> {
+    let (suffix, extension, filter) = match kind {
+        VoluteExport::Points => ("volute", "txt", "Text"),
+        VoluteExport::Mesh => ("volute", "stl", "STL mesh"),
+    };
+    save_file(suffix, extension, filter, || kind.contents(g), project_name)
+}
+
+fn save_file(
+    suffix: &str,
+    extension: &str,
+    filter: &str,
+    contents: impl FnOnce() -> String,
+    project_name: &str,
+) -> Result<Option<PathBuf>, String> {
     let Some(path) = rfd::FileDialog::new()
         .add_filter(filter, &[extension])
         .set_file_name(format!("{project_name}-{suffix}.{extension}"))
@@ -72,7 +121,7 @@ pub(crate) fn save_text(
     else {
         return Ok(None);
     };
-    std::fs::write(&path, kind.contents(g)).map_err(|e| format!("{}: {e}", path.display()))?;
+    std::fs::write(&path, contents()).map_err(|e| format!("{}: {e}", path.display()))?;
     Ok(Some(path))
 }
 
@@ -108,6 +157,7 @@ impl Exports {
         derived: &Derived,
         project: &Project,
         active: Option<ComponentId>,
+        volute: Option<ComponentId>,
     ) {
         if !self.cad_open {
             return;
@@ -120,10 +170,10 @@ impl Exports {
             .default_width(380.0)
             .show(ctx, |ui| {
                 #[cfg(feature = "cad")]
-                self.cad.ui(ui, derived, project, active);
+                self.cad.ui(ui, derived, project, active, volute);
                 #[cfg(not(feature = "cad"))]
                 {
-                    let _ = (derived, project, active);
+                    let _ = (derived, project, active, volute);
                     ui.label("This build has no CAD support.");
                 }
             });
@@ -140,7 +190,8 @@ mod cad {
     use tp_cad::{CadOptions, Shape};
     use tp_design::Param;
     use tp_design::impeller::ImpellerGeometry;
-    use tp_project::{ComponentId, DesignStep, Project, StepStatus};
+    use tp_design::volute::VoluteGeometry;
+    use tp_project::{ComponentId, DesignStep, Project, StepStatus, VOLUTE_STEPS};
     use tp_units::QuantityKind;
 
     use crate::derived::Derived;
@@ -153,6 +204,7 @@ mod cad {
         files: Vec<PathBuf>,
         impeller_volume: f64,
         fluid_volume: f64,
+        volute_volume: Option<f64>,
         wall_thickness: f64,
         problems: Vec<String>,
     }
@@ -196,11 +248,16 @@ mod cad {
 
     fn run(
         g: &ImpellerGeometry,
+        volute: Option<&VoluteGeometry>,
         options: &CadOptions,
         folder: &Path,
         formats: &[&str],
     ) -> Result<CadReport, String> {
         let cad = tp_cad::build_impeller(g, options).map_err(|e| e.to_string())?;
+        let volute = volute
+            .map(tp_cad::build_volute)
+            .transpose()
+            .map_err(|e| e.to_string())?;
         std::fs::create_dir_all(folder).map_err(|e| format!("{}: {e}", folder.display()))?;
         // STL chordal deflection: 1/2000 of the outlet diameter, in mm.
         let deflection = g.basis.outlet_diameter * 1e3 / 2000.0;
@@ -212,12 +269,21 @@ mod cad {
                 files.push(path);
             }
         }
+        if let Some(v) = &volute {
+            for format in formats {
+                let path = folder.join(format!("volute.{format}"));
+                write(&v.fluid, &path, format, deflection)?;
+                files.push(path);
+            }
+        }
         let problems = [
-            ("blade", &cad.blade),
-            ("flow domain", &cad.fluid),
-            ("impeller", &cad.impeller),
+            ("blade", Some(&cad.blade)),
+            ("flow domain", Some(&cad.fluid)),
+            ("impeller", Some(&cad.impeller)),
+            ("volute flow domain", volute.as_ref().map(|v| &v.fluid)),
         ]
         .into_iter()
+        .filter_map(|(label, s)| s.map(|s| (label, s)))
         .filter(|(_, s)| !s.is_valid() || s.solid_count() != 1)
         .map(|(label, s)| {
             format!(
@@ -231,6 +297,7 @@ mod cad {
             files,
             impeller_volume: cad.impeller_volume(),
             fluid_volume: cad.fluid_volume(),
+            volute_volume: volute.as_ref().map(|v| v.fluid_volume()),
             wall_thickness: cad.wall_thickness,
             problems,
         })
@@ -257,7 +324,13 @@ mod cad {
             }
         }
 
-        fn start(&mut self, ctx: &egui::Context, g: ImpellerGeometry, folder: PathBuf) {
+        fn start(
+            &mut self,
+            ctx: &egui::Context,
+            g: ImpellerGeometry,
+            volute: Option<VoluteGeometry>,
+            folder: PathBuf,
+        ) {
             let options = CadOptions {
                 wall_thickness: self.wall.manual_value(),
                 bore_diameter: self.bore.manual_value(),
@@ -273,7 +346,7 @@ mod cad {
             let spawned = std::thread::Builder::new()
                 .name("cad-export".into())
                 .spawn(move || {
-                    let result = run(&g, &options, &folder, &formats);
+                    let result = run(&g, volute.as_ref(), &options, &folder, &formats);
                     let _ = tx.send(result);
                     ctx.request_repaint();
                 });
@@ -292,6 +365,7 @@ mod cad {
             derived: &Derived,
             project: &Project,
             active: Option<ComponentId>,
+            volute: Option<ComponentId>,
         ) {
             use QuantityKind::*;
             let units = project.display_units.clone();
@@ -307,6 +381,15 @@ mod cad {
                 return;
             };
             let d2 = g.basis.outlet_diameter;
+            // The volute goes along once all of its steps are accepted.
+            let volute_ready = volute.filter(|&v| {
+                project.component(v).is_some_and(|c| {
+                    VOLUTE_STEPS
+                        .iter()
+                        .all(|&s| c.status(s) == StepStatus::Done)
+                })
+            });
+            let volute_geometry = volute_ready.and_then(|v| derived.volute(v));
 
             Grid::new("cad_options")
                 .num_columns(3)
@@ -336,6 +419,13 @@ mod cad {
                     quantity(ui, &mut self.density, Density, &units, 100.0..=30_000.0);
                     ui.end_row();
                 });
+            if volute.is_some() {
+                ui.label(if volute_geometry.is_some() {
+                    "The volute flow domain is exported too."
+                } else {
+                    "The volute is left out until its steps are accepted."
+                });
+            }
             ui.horizontal(|ui| {
                 ui.label("Formats");
                 ui.checkbox(&mut self.step, "STEP");
@@ -362,7 +452,7 @@ mod cad {
                 if response.clicked()
                     && let Some(folder) = rfd::FileDialog::new().pick_folder()
                 {
-                    self.start(ui.ctx(), g.clone(), folder);
+                    self.start(ui.ctx(), g.clone(), volute_geometry.cloned(), folder);
                 }
                 if !ready {
                     ui.weak("Accept the geometry steps up to the blade edges first.");
@@ -398,12 +488,15 @@ mod cad {
                             "Flow domain",
                             format!("{:.1} cm³", report.fluid_volume * 1e6),
                         );
+                        if let Some(v) = report.volute_volume {
+                            value_row(ui, "Volute flow domain", format!("{:.1} cm³", v * 1e6));
+                        }
                     });
                     for file in &report.files {
                         ui.weak(file.display().to_string());
                     }
                     if report.problems.is_empty() {
-                        ui.label("Blade, flow domain and impeller are single valid solids.");
+                        ui.label("Every solid is a single valid solid.");
                     }
                     for p in &report.problems {
                         ui.colored_label(ui.visuals().warn_fg_color, format!("⚑ {p}"));
@@ -430,8 +523,11 @@ mod cad {
             derived.update(&project);
             let g = derived.geometry(project.components()[0].id()).unwrap();
             let folder = std::env::temp_dir().join(format!("tp-gui-cad-{}", std::process::id()));
-            let report = run(g, &CadOptions::default(), &folder, &["step"]).unwrap();
-            assert_eq!(report.files.len(), 2);
+            let volute = derived.volute(project.components()[1].id());
+            assert!(volute.is_some());
+            let report = run(g, volute, &CadOptions::default(), &folder, &["step"]).unwrap();
+            assert_eq!(report.files.len(), 3);
+            assert!(report.volute_volume.is_some_and(|v| v > 0.0));
             for file in &report.files {
                 assert!(std::fs::metadata(file).unwrap().len() > 1000);
             }

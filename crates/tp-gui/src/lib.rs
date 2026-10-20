@@ -13,6 +13,7 @@ mod steps;
 mod tree;
 mod viewer;
 mod views;
+mod volute_steps;
 mod widgets;
 
 use std::f64::consts::PI;
@@ -23,7 +24,7 @@ use tp_project::{
 };
 
 /// The project a new window starts with: a single-stage water pump for 100 m³/h and
-/// 32 m at 2900 rpm, with one impeller.
+/// 32 m at 2900 rpm, with one impeller and its volute.
 pub fn default_project() -> Project {
     let setup = GlobalSetup::new(
         MachineType::Pump,
@@ -38,5 +39,8 @@ pub fn default_project() -> Project {
     project
         .add_component(ComponentKind::Impeller, None)
         .expect("a pump takes an impeller");
+    project
+        .add_component(ComponentKind::Volute, None)
+        .expect("a volute closes the pump");
     project
 }
