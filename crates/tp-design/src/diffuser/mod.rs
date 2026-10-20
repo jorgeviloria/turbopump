@@ -697,8 +697,9 @@ pub const DIFFUSER_CORRELATIONS: &[CorrelationInfo] = &[
     },
     CorrelationInfo {
         id: "diffuser.dimensions",
-        description: "b₃/b₂ = 1.15, d₄/d₂ = 1.10 + 0.01·nq, e₃ = 0.0125·d₂",
-        reference: "middle of the ranges of Gülich pp. 425–428",
+        description: "b₃/b₂ = 1.15; d₄ for L₃₋₄/a₃ = 4.5, between 1.05·d₃ and \
+                      (1.15 + 0.01·nq)·d₂; e₃ = 0.0125·d₂, e₄ = 1.5·e₃",
+        reference: "middle of the ranges of Gülich pp. 425–428; criterion C",
         verification: Verification::EngineeringDefault,
     },
     CorrelationInfo {

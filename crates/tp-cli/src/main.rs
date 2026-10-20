@@ -83,8 +83,8 @@ enum Command {
     Volute(volute::VoluteArgs),
     /// Design the stators after the impellers: vaneless rings or vaned diffusers.
     Diffuser(diffuser::DiffuserArgs),
-    /// Build the CAD solids of the impeller and its flow domain with Open CASCADE and
-    /// export them to STEP, IGES or STL.
+    /// Build the CAD solids of the impellers, stators and volutes and their flow domains
+    /// with Open CASCADE and export them to STEP, IGES or STL.
     #[cfg(feature = "cad")]
     Cad(cad::CadArgs),
     /// Show a project summary and its open issues.
