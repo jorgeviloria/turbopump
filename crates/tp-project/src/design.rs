@@ -4,6 +4,7 @@ use tp_design::MainDimensionsInput;
 use tp_design::diffuser::{DiffuserDesign, DiffuserInput};
 use tp_design::impeller::{self, ImpellerBasis, ImpellerGeometry, ImpellerGeometryInput};
 use tp_design::outlet::ImpellerOutlet;
+use tp_design::performance::{self, Collector, PerformanceInput, PumpPerformance};
 use tp_design::pump::{self, CentrifugalPumpDesign, CentrifugalPumpInput, PumpDuty, Suction};
 use tp_design::volute::{VoluteGeometry, VoluteInput};
 use tp_fluids::LiquidProperties;
@@ -131,6 +132,40 @@ impl Project {
         let duty = self.pump_duty(id)?;
         let input = self.pump_impeller_input(id)?;
         Ok(pump::design(&duty, &input)?)
+    }
+
+    /// What collects the flow after impeller `id`: the component that follows it, or a
+    /// volute when nothing does.
+    pub fn collector_after(&self, id: ComponentId) -> Result<Collector, ProjectError> {
+        let components = self.components();
+        let index = components
+            .iter()
+            .position(|c| c.id() == id)
+            .ok_or(ProjectError::UnknownComponent(id))?;
+        Ok(match components.get(index + 1).map(|c| c.kind()) {
+            Some(ComponentKind::Stator { vaned: true }) => Collector::VanedDiffuser,
+            Some(ComponentKind::Stator { vaned: false }) => Collector::VanelessDiffuser,
+            _ => Collector::Volute,
+        })
+    }
+
+    /// Default settings of the performance prediction of impeller `id`.
+    pub fn performance_input(&self, id: ComponentId) -> Result<PerformanceInput, ProjectError> {
+        Ok(PerformanceInput {
+            collector: self.collector_after(id)?,
+            ..PerformanceInput::default()
+        })
+    }
+
+    /// Predicts the characteristic of impeller `id` from its main dimensions.
+    pub fn compute_performance(
+        &self,
+        id: ComponentId,
+        input: &PerformanceInput,
+    ) -> Result<PumpPerformance, ProjectError> {
+        let duty = self.pump_duty(id)?;
+        let design = self.compute_main_dimensions(id)?;
+        Ok(performance::predict(&duty, &design, input)?)
     }
 
     /// Computes the main dimensions of impeller `id` and marks the step as done.
@@ -594,6 +629,28 @@ mod tests {
         let impeller = p.add_component(ComponentKind::Impeller, None).unwrap();
         let volute = p.add_component(ComponentKind::Volute, None).unwrap();
         (p, impeller, volute)
+    }
+
+    #[test]
+    fn the_collector_sets_the_performance_prediction() {
+        use tp_design::performance::Collector;
+        let (mut p, impeller, _) = pump_with_volute();
+        assert_eq!(p.collector_after(impeller).unwrap(), Collector::Volute);
+        let volute_curve = p
+            .compute_performance(impeller, &p.performance_input(impeller).unwrap())
+            .unwrap();
+        assert_relative_eq!(volute_curve.design.head, 32.0, max_relative = 1e-9);
+        p.add_component(ComponentKind::Stator { vaned: true }, Some(1))
+            .unwrap();
+        assert_eq!(
+            p.collector_after(impeller).unwrap(),
+            Collector::VanedDiffuser
+        );
+        let diffuser_curve = p
+            .compute_performance(impeller, &p.performance_input(impeller).unwrap())
+            .unwrap();
+        // Diffuser pumps reach a higher head against a closed valve.
+        assert!(diffuser_curve.shutoff_head > volute_curve.shutoff_head);
     }
 
     #[test]
