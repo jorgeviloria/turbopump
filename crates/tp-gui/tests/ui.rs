@@ -153,3 +153,42 @@ fn the_volute_is_designed_after_the_impeller() {
     harness.run();
     harness.get_by_label_contains(": volute");
 }
+
+#[test]
+fn a_diffuser_goes_between_impeller_and_volute() {
+    use tp_project::{ComponentKind, VANED_STEPS};
+    let mut harness = harness();
+    harness.get_by_label("✚ Add component").click();
+    harness.run();
+    harness.get_by_label("Stator (vaned diffuser)").click();
+    harness.run();
+    let kinds: Vec<ComponentKind> = harness
+        .state()
+        .document()
+        .project()
+        .components()
+        .iter()
+        .map(|c| c.kind())
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            ComponentKind::Impeller,
+            ComponentKind::Stator { vaned: true },
+            ComponentKind::Volute
+        ]
+    );
+    for step in VANED_STEPS {
+        assert!(matches!(harness.state().selection(), Selection::Step(_, s) if s == step));
+        accept(&mut harness);
+        let project = harness.state().document().project();
+        assert_eq!(
+            project.components()[1].status(step),
+            StepStatus::Done,
+            "{step}"
+        );
+    }
+    harness.state_mut().focus_view(View::Report);
+    harness.run();
+    harness.get_by_label_contains(": vaned diffuser");
+}

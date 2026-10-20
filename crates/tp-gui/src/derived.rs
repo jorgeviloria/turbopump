@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use tp_design::diffuser::DiffuserDesign;
 use tp_design::impeller::ImpellerGeometry;
 use tp_design::pump::CentrifugalPumpDesign;
 use tp_design::volute::VoluteGeometry;
@@ -25,6 +26,7 @@ pub struct Derived {
     pub liquid: Option<Result<LiquidProperties, String>>,
     pub impellers: BTreeMap<ComponentId, ImpellerResults>,
     pub volutes: BTreeMap<ComponentId, Result<VoluteGeometry, String>>,
+    pub diffusers: BTreeMap<ComponentId, Result<DiffuserDesign, String>>,
 }
 
 impl Derived {
@@ -64,6 +66,15 @@ impl Derived {
                 )
             })
             .collect();
+        self.diffusers = project
+            .components()
+            .iter()
+            .filter(|c| matches!(c.kind(), ComponentKind::Stator { .. }))
+            .map(|c| {
+                let result = project.compute_diffuser(c.id()).map_err(|e| e.to_string());
+                (c.id(), result)
+            })
+            .collect();
         self.source = Some(project.clone());
         self.revision += 1;
         true
@@ -92,6 +103,14 @@ impl Derived {
 
     pub fn volute(&self, id: ComponentId) -> Option<&VoluteGeometry> {
         self.volute_result(id).and_then(|r| r.as_ref().ok())
+    }
+
+    pub fn diffuser_result(&self, id: ComponentId) -> Option<&Result<DiffuserDesign, String>> {
+        self.diffusers.get(&id)
+    }
+
+    pub fn diffuser(&self, id: ComponentId) -> Option<&DiffuserDesign> {
+        self.diffuser_result(id).and_then(|r| r.as_ref().ok())
     }
 }
 

@@ -15,6 +15,16 @@ use camera::Camera;
 use mesh::{ShroudMode, ViewOptions};
 use render::{Gpu, Uniforms};
 
+/// What the uploaded mesh was built from: results revision, impeller, stator, volute
+/// and display options.
+type MeshKey = (
+    u64,
+    ComponentId,
+    Option<ComponentId>,
+    Option<ComponentId>,
+    ViewOptions,
+);
+
 /// State of the 3D view between frames.
 #[derive(Debug, Default)]
 pub(crate) struct Viewer {
@@ -22,13 +32,14 @@ pub(crate) struct Viewer {
     camera: Option<Camera>,
     gpu: Option<Gpu>,
     /// What the uploaded mesh was built from.
-    mesh_key: Option<(u64, ComponentId, Option<ComponentId>, ViewOptions)>,
+    mesh_key: Option<MeshKey>,
     /// Center and radius of the model, for "fit".
     bounds: Option<(glam::Vec3, f32)>,
-    /// Impeller and volute the camera was fitted to.
-    fitted: Option<(ComponentId, bool)>,
-    /// Whether the stage shown has a volute, for the toolbar.
+    /// Impeller, stator and volute the camera was fitted to.
+    fitted: Option<(ComponentId, bool, bool)>,
+    /// Whether the stage shown has a volute or a stator, for the toolbar.
     has_volute: bool,
+    has_stator: bool,
 }
 
 impl Viewer {
@@ -38,10 +49,13 @@ impl Viewer {
         render_state: Option<&RenderState>,
         derived: &Derived,
         id: ComponentId,
+        stator: Option<ComponentId>,
         volute: Option<ComponentId>,
     ) {
+        let stator = stator.and_then(|s| derived.diffuser(s).map(|d| (s, d)));
         let volute = volute.and_then(|v| derived.volute(v).map(|g| (v, g)));
         self.has_volute = volute.is_some();
+        self.has_stator = stator.is_some();
         self.toolbar(ui);
         let Some(state) = render_state else {
             unavailable(ui, "The 3D view needs the wgpu renderer.");
@@ -57,12 +71,18 @@ impl Viewer {
         };
 
         let gpu = self.gpu.get_or_insert_with(|| Gpu::new(&state.device));
-        let key = (derived.revision(), id, volute.map(|v| v.0), self.options);
+        let key = (
+            derived.revision(),
+            id,
+            stator.map(|s| s.0),
+            volute.map(|v| v.0),
+            self.options,
+        );
         if self.mesh_key != Some(key) {
-            let mesh = mesh::build(g, volute.map(|v| v.1), &self.options);
+            let mesh = mesh::build(g, stator.map(|s| s.1), volute.map(|v| v.1), &self.options);
             gpu.upload(&state.device, &mesh);
             self.bounds = Some((mesh.center, mesh.radius));
-            let content = (id, volute.is_some());
+            let content = (id, stator.is_some(), volute.is_some());
             if self.fitted != Some(content) || self.camera.is_none() {
                 self.camera = Some(Camera::fit(mesh.center, mesh.radius));
                 self.fitted = Some(content);
@@ -147,6 +167,25 @@ impl Viewer {
                     );
                     ui.selectable_value(&mut self.options.shroud, ShroudMode::Solid, "solid");
                 });
+            if self.has_stator {
+                ui.label("diffuser");
+                ComboBox::from_id_salt("stator_mode")
+                    .width(100.0)
+                    .selected_text(match self.options.stator {
+                        ShroudMode::Hidden => "hidden",
+                        ShroudMode::Transparent => "transparent",
+                        ShroudMode::Solid => "solid",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.options.stator, ShroudMode::Hidden, "hidden");
+                        ui.selectable_value(
+                            &mut self.options.stator,
+                            ShroudMode::Transparent,
+                            "transparent",
+                        );
+                        ui.selectable_value(&mut self.options.stator, ShroudMode::Solid, "solid");
+                    });
+            }
             if self.has_volute {
                 ui.label("volute");
                 ComboBox::from_id_salt("volute_mode")

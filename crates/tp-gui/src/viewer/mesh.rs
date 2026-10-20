@@ -4,9 +4,10 @@ use std::collections::HashMap;
 
 use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
+use tp_design::diffuser::DiffuserDesign;
 use tp_design::impeller::ImpellerGeometry;
 use tp_design::volute::VoluteGeometry;
-use tp_io::mesh::{Triangle, impeller_parts, volute_triangles};
+use tp_io::mesh::{Triangle, diffuser_parts, impeller_parts, volute_triangles};
 use tp_math::DVec3;
 
 /// How the shroud is drawn.
@@ -26,6 +27,8 @@ pub(crate) struct ViewOptions {
     pub wireframe: bool,
     /// How the volute is drawn, when the stage has one.
     pub volute: ShroudMode,
+    /// How the side walls of a diffuser are drawn; its vanes are solid unless hidden.
+    pub stator: ShroudMode,
 }
 
 impl Default for ViewOptions {
@@ -36,6 +39,7 @@ impl Default for ViewOptions {
             all_blades: true,
             wireframe: false,
             volute: ShroudMode::Transparent,
+            stator: ShroudMode::Transparent,
         }
     }
 }
@@ -67,6 +71,9 @@ const SHROUD_SOLID: [f32; 4] = [0.55, 0.30, 0.16, 1.0];
 const SHROUD_GLASS: [f32; 4] = [0.60, 0.36, 0.20, 0.22];
 const VOLUTE_SOLID: [f32; 4] = [0.36, 0.42, 0.22, 1.0];
 const VOLUTE_GLASS: [f32; 4] = [0.45, 0.55, 0.25, 0.16];
+const STATOR_VANES: [f32; 4] = [0.12, 0.45, 0.45, 1.0];
+const STATOR_WALL_SOLID: [f32; 4] = [0.30, 0.40, 0.42, 1.0];
+const STATOR_WALL_GLASS: [f32; 4] = [0.30, 0.55, 0.55, 0.18];
 /// Faces meeting at more than this angle keep a sharp edge.
 const CREASE_DEGREES: f64 = 40.0;
 
@@ -150,6 +157,7 @@ fn push_edges(out: &mut Vec<Vertex>, triangles: &[Triangle], color: [f32; 4]) {
 /// Builds the vertices of the impeller, and of its volute if given, as `options` ask.
 pub(crate) fn build(
     g: &ImpellerGeometry,
+    stator: Option<&DiffuserDesign>,
     volute: Option<&VoluteGeometry>,
     options: &ViewOptions,
 ) -> MeshData {
@@ -168,6 +176,15 @@ pub(crate) fn build(
         ShroudMode::Hidden => {}
         ShroudMode::Solid => opaque.push((&parts.shroud, SHROUD_SOLID)),
         ShroudMode::Transparent => transparent.push((&parts.shroud, SHROUD_GLASS)),
+    }
+    let diffuser = stator.map(diffuser_parts).unwrap_or_default();
+    if options.stator != ShroudMode::Hidden && !diffuser.vanes.is_empty() {
+        opaque.push((&diffuser.vanes, STATOR_VANES));
+    }
+    match options.stator {
+        ShroudMode::Hidden => {}
+        ShroudMode::Solid => opaque.push((&diffuser.walls, STATOR_WALL_SOLID)),
+        ShroudMode::Transparent => transparent.push((&diffuser.walls, STATOR_WALL_GLASS)),
     }
     let casing = volute.map(volute_triangles).unwrap_or_default();
     if !casing.is_empty() {
@@ -204,6 +221,7 @@ pub(crate) fn build(
         .flatten()
         .chain(&parts.hub)
         .chain(&parts.shroud)
+        .chain(&diffuser.walls)
         .chain(&casing)
         .flatten();
     let (min, max) = all.clone().fold(
@@ -240,7 +258,7 @@ mod tests {
     #[test]
     fn normals_are_unit_vectors() {
         let g = geometry();
-        let mesh = build(&g, None, &ViewOptions::default());
+        let mesh = build(&g, None, None, &ViewOptions::default());
         assert!(mesh.vertices.len() > 3000);
         for v in &mesh.vertices {
             let n = Vec3::from(v.normal);
@@ -253,7 +271,7 @@ mod tests {
     #[test]
     fn transparent_shroud_comes_last() {
         let g = geometry();
-        let mesh = build(&g, None, &ViewOptions::default());
+        let mesh = build(&g, None, None, &ViewOptions::default());
         assert!(mesh.opaque > 0 && (mesh.opaque as usize) < mesh.vertices.len());
         assert!(
             mesh.vertices[mesh.opaque as usize..]
@@ -262,6 +280,7 @@ mod tests {
         );
         let solid = build(
             &g,
+            None,
             None,
             &ViewOptions {
                 shroud: ShroudMode::Solid,
@@ -276,6 +295,7 @@ mod tests {
         let g = geometry();
         let mesh = build(
             &g,
+            None,
             None,
             &ViewOptions {
                 wireframe: true,

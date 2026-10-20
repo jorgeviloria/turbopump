@@ -8,6 +8,7 @@
 
 mod app;
 mod derived;
+mod diffuser_steps;
 mod export;
 mod steps;
 mod tree;

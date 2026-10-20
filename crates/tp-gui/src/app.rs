@@ -285,6 +285,7 @@ impl TurbopumpApp {
             });
         CentralPanel::no_frame().show(ui, |ui| {
             let active = self.active_impeller();
+            let stator = self.active_stator();
             let volute = self.active_volute();
             let mut views = Views {
                 cx: EditCtx {
@@ -295,6 +296,7 @@ impl TurbopumpApp {
                     exports: &mut self.exports,
                 },
                 active,
+                stator,
                 volute,
                 meridional: &mut self.meridional,
                 viewer: &mut self.viewer,
@@ -314,6 +316,7 @@ impl TurbopumpApp {
             &self.derived,
             self.doc.project(),
             self.active_impeller(),
+            self.active_stator(),
             self.active_volute(),
         );
 
@@ -356,21 +359,27 @@ impl TurbopumpApp {
             .map(|c| c.id())
     }
 
-    /// The volute shown with the active impeller: the selected one, or the one right
-    /// after the impeller.
-    fn active_volute(&self) -> Option<ComponentId> {
+    /// The stator right after the active impeller, if any.
+    fn active_stator(&self) -> Option<ComponentId> {
         let components = self.doc.project().components();
-        if let Selection::Step(id, _) = self.selection
-            && components
-                .iter()
-                .any(|c| c.id() == id && c.kind() == ComponentKind::Volute)
-        {
-            return Some(id);
-        }
         let impeller = self.active_impeller()?;
         let index = components.iter().position(|c| c.id() == impeller)?;
         components
             .get(index + 1)
+            .filter(|c| matches!(c.kind(), ComponentKind::Stator { .. }))
+            .map(|c| c.id())
+    }
+
+    /// The volute of the active stage: right after the impeller, or after its stator.
+    fn active_volute(&self) -> Option<ComponentId> {
+        let components = self.doc.project().components();
+        let impeller = self.active_impeller()?;
+        let mut index = components.iter().position(|c| c.id() == impeller)? + 1;
+        if self.active_stator().is_some() {
+            index += 1;
+        }
+        components
+            .get(index)
             .filter(|c| c.kind() == ComponentKind::Volute)
             .map(|c| c.id())
     }
@@ -913,6 +922,7 @@ impl eframe::App for TurbopumpApp {
 struct Views<'a> {
     cx: EditCtx<'a>,
     active: Option<ComponentId>,
+    stator: Option<ComponentId>,
     volute: Option<ComponentId>,
     meridional: &'a mut MeridionalView,
     viewer: &'a mut Viewer,
@@ -948,18 +958,30 @@ impl egui_dock::TabViewer for Views<'_> {
         };
         let units = self.cx.units();
         match tab {
-            View::Meridional => self.meridional.show(ui, &mut self.cx, id, self.volute),
+            View::Meridional => {
+                self.meridional
+                    .show(ui, &mut self.cx, id, self.stator, self.volute);
+            }
             View::Blade => blade::show(ui, self.cx.derived, id, &units),
-            View::FrontView => front::show(ui, self.cx.derived, id, self.volute, &units),
+            View::FrontView => {
+                front::show(ui, self.cx.derived, id, self.stator, self.volute, &units);
+            }
             View::View3d => {
-                self.viewer
-                    .show(ui, self.render_state, self.cx.derived, id, self.volute);
+                self.viewer.show(
+                    ui,
+                    self.render_state,
+                    self.cx.derived,
+                    id,
+                    self.stator,
+                    self.volute,
+                );
             }
             View::Report => report::show(
                 ui,
                 self.cx.doc.project(),
                 self.cx.derived,
                 id,
+                self.stator,
                 self.volute,
                 &units,
             ),

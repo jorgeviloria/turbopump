@@ -157,6 +157,7 @@ impl Exports {
         derived: &Derived,
         project: &Project,
         active: Option<ComponentId>,
+        stator: Option<ComponentId>,
         volute: Option<ComponentId>,
     ) {
         if !self.cad_open {
@@ -170,10 +171,10 @@ impl Exports {
             .default_width(380.0)
             .show(ctx, |ui| {
                 #[cfg(feature = "cad")]
-                self.cad.ui(ui, derived, project, active, volute);
+                self.cad.ui(ui, derived, project, active, stator, volute);
                 #[cfg(not(feature = "cad"))]
                 {
-                    let _ = (derived, project, active, volute);
+                    let _ = (derived, project, active, stator, volute);
                     ui.label("This build has no CAD support.");
                 }
             });
@@ -189,9 +190,13 @@ mod cad {
     use eframe::egui::{self, Grid, Ui};
     use tp_cad::{CadOptions, Shape};
     use tp_design::Param;
+    use tp_design::diffuser::DiffuserDesign;
     use tp_design::impeller::ImpellerGeometry;
     use tp_design::volute::VoluteGeometry;
-    use tp_project::{ComponentId, DesignStep, Project, StepStatus, VOLUTE_STEPS};
+    use tp_project::{
+        ComponentId, ComponentKind, DesignStep, Project, StepStatus, VANED_STEPS, VANELESS_STEPS,
+        VOLUTE_STEPS,
+    };
     use tp_units::QuantityKind;
 
     use crate::derived::Derived;
@@ -205,6 +210,7 @@ mod cad {
         impeller_volume: f64,
         fluid_volume: f64,
         volute_volume: Option<f64>,
+        diffuser_volume: Option<f64>,
         wall_thickness: f64,
         problems: Vec<String>,
     }
@@ -248,6 +254,7 @@ mod cad {
 
     fn run(
         g: &ImpellerGeometry,
+        stator: Option<&DiffuserDesign>,
         volute: Option<&VoluteGeometry>,
         options: &CadOptions,
         folder: &Path,
@@ -256,6 +263,10 @@ mod cad {
         let cad = tp_cad::build_impeller(g, options).map_err(|e| e.to_string())?;
         let volute = volute
             .map(tp_cad::build_volute)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        let diffuser = stator
+            .map(tp_cad::build_diffuser)
             .transpose()
             .map_err(|e| e.to_string())?;
         std::fs::create_dir_all(folder).map_err(|e| format!("{}: {e}", folder.display()))?;
@@ -276,11 +287,25 @@ mod cad {
                 files.push(path);
             }
         }
+        if let Some(d) = &diffuser {
+            for format in formats {
+                let mut shapes = vec![("diffuser", &d.fluid)];
+                if let Some(vanes) = &d.vanes {
+                    shapes.push(("diffuser-vanes", vanes));
+                }
+                for (stem, shape) in shapes {
+                    let path = folder.join(format!("{stem}.{format}"));
+                    write(shape, &path, format, deflection)?;
+                    files.push(path);
+                }
+            }
+        }
         let problems = [
             ("blade", Some(&cad.blade)),
             ("flow domain", Some(&cad.fluid)),
             ("impeller", Some(&cad.impeller)),
             ("volute flow domain", volute.as_ref().map(|v| &v.fluid)),
+            ("diffuser flow domain", diffuser.as_ref().map(|d| &d.fluid)),
         ]
         .into_iter()
         .filter_map(|(label, s)| s.map(|s| (label, s)))
@@ -298,6 +323,7 @@ mod cad {
             impeller_volume: cad.impeller_volume(),
             fluid_volume: cad.fluid_volume(),
             volute_volume: volute.as_ref().map(|v| v.fluid_volume()),
+            diffuser_volume: diffuser.as_ref().map(|d| d.fluid_volume()),
             wall_thickness: cad.wall_thickness,
             problems,
         })
@@ -328,6 +354,7 @@ mod cad {
             &mut self,
             ctx: &egui::Context,
             g: ImpellerGeometry,
+            stator: Option<DiffuserDesign>,
             volute: Option<VoluteGeometry>,
             folder: PathBuf,
         ) {
@@ -346,7 +373,14 @@ mod cad {
             let spawned = std::thread::Builder::new()
                 .name("cad-export".into())
                 .spawn(move || {
-                    let result = run(&g, volute.as_ref(), &options, &folder, &formats);
+                    let result = run(
+                        &g,
+                        stator.as_ref(),
+                        volute.as_ref(),
+                        &options,
+                        &folder,
+                        &formats,
+                    );
                     let _ = tx.send(result);
                     ctx.request_repaint();
                 });
@@ -365,6 +399,7 @@ mod cad {
             derived: &Derived,
             project: &Project,
             active: Option<ComponentId>,
+            stator: Option<ComponentId>,
             volute: Option<ComponentId>,
         ) {
             use QuantityKind::*;
@@ -390,6 +425,17 @@ mod cad {
                 })
             });
             let volute_geometry = volute_ready.and_then(|v| derived.volute(v));
+            let stator_design = stator
+                .filter(|&s| {
+                    project.component(s).is_some_and(|c| {
+                        let steps: &[DesignStep] = match c.kind() {
+                            ComponentKind::Stator { vaned: true } => &VANED_STEPS,
+                            _ => &VANELESS_STEPS,
+                        };
+                        steps.iter().all(|&s| c.status(s) == StepStatus::Done)
+                    })
+                })
+                .and_then(|s| derived.diffuser(s));
 
             Grid::new("cad_options")
                 .num_columns(3)
@@ -419,6 +465,13 @@ mod cad {
                     quantity(ui, &mut self.density, Density, &units, 100.0..=30_000.0);
                     ui.end_row();
                 });
+            if stator.is_some() {
+                ui.label(if stator_design.is_some() {
+                    "The diffuser flow domain and vanes are exported too."
+                } else {
+                    "The diffuser is left out until its steps are accepted."
+                });
+            }
             if volute.is_some() {
                 ui.label(if volute_geometry.is_some() {
                     "The volute flow domain is exported too."
@@ -452,7 +505,13 @@ mod cad {
                 if response.clicked()
                     && let Some(folder) = rfd::FileDialog::new().pick_folder()
                 {
-                    self.start(ui.ctx(), g.clone(), volute_geometry.cloned(), folder);
+                    self.start(
+                        ui.ctx(),
+                        g.clone(),
+                        stator_design.cloned(),
+                        volute_geometry.cloned(),
+                        folder,
+                    );
                 }
                 if !ready {
                     ui.weak("Accept the geometry steps up to the blade edges first.");
@@ -488,6 +547,9 @@ mod cad {
                             "Flow domain",
                             format!("{:.1} cm³", report.fluid_volume * 1e6),
                         );
+                        if let Some(v) = report.diffuser_volume {
+                            value_row(ui, "Diffuser flow domain", format!("{:.1} cm³", v * 1e6));
+                        }
                         if let Some(v) = report.volute_volume {
                             value_row(ui, "Volute flow domain", format!("{:.1} cm³", v * 1e6));
                         }
@@ -525,7 +587,7 @@ mod cad {
             let folder = std::env::temp_dir().join(format!("tp-gui-cad-{}", std::process::id()));
             let volute = derived.volute(project.components()[1].id());
             assert!(volute.is_some());
-            let report = run(g, volute, &CadOptions::default(), &folder, &["step"]).unwrap();
+            let report = run(g, None, volute, &CadOptions::default(), &folder, &["step"]).unwrap();
             assert_eq!(report.files.len(), 3);
             assert!(report.volute_volume.is_some_and(|v| v > 0.0));
             for file in &report.files {

@@ -19,6 +19,7 @@ pub(crate) struct Palette {
     pub handle: Color32,
     pub handle_active: Color32,
     pub volute: Color32,
+    pub stator: Color32,
 }
 
 impl Palette {
@@ -33,6 +34,7 @@ impl Palette {
                 handle: Color32::from_rgb(90, 200, 160),
                 handle_active: Color32::WHITE,
                 volute: Color32::from_rgb(170, 190, 120),
+                stator: Color32::from_rgb(110, 200, 200),
             }
         } else {
             Self {
@@ -44,6 +46,7 @@ impl Palette {
                 handle: Color32::from_rgb(0, 140, 110),
                 handle_active: Color32::BLACK,
                 volute: Color32::from_rgb(90, 120, 30),
+                stator: Color32::from_rgb(0, 120, 130),
             }
         }
     }

@@ -130,7 +130,13 @@ fn remove_component(cx: &mut EditCtx<'_>, id: ComponentId) {
 
 /// Entries that add a component to the project.
 pub(crate) fn add_component_menu(ui: &mut Ui, cx: &mut EditCtx<'_>) {
-    let len = cx.doc.project().components().len();
+    let components = cx.doc.project().components();
+    let len = components.len();
+    // An outlet volute stays last: new components go before it.
+    let end = match components.last() {
+        Some(c) if c.kind() == ComponentKind::Volute && len > 1 => len - 1,
+        _ => len,
+    };
     let entries = [
         ("Impeller", ComponentKind::Impeller, None),
         (
@@ -150,8 +156,13 @@ pub(crate) fn add_component_menu(ui: &mut Ui, cx: &mut EditCtx<'_>) {
         if ui.button(label).clicked() {
             let label = format!("add {}", kind.label().to_lowercase());
             let mut added = None;
+            let at = match (kind, position) {
+                (_, Some(p)) => p,
+                (ComponentKind::Volute, None) => len,
+                (_, None) => end,
+            };
             let ok = cx.edit(&label, |p| {
-                added = Some(p.add_component(kind, position.or(Some(len)))?);
+                added = Some(p.add_component(kind, Some(at))?);
                 Ok(())
             });
             if ok && let Some(id) = added {

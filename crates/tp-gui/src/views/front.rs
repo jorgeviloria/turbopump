@@ -30,9 +30,11 @@ pub(crate) fn show(
     ui: &mut Ui,
     derived: &Derived,
     id: ComponentId,
+    stator: Option<ComponentId>,
     volute: Option<ComponentId>,
     units: &DisplayUnits,
 ) {
+    let stator = stator.and_then(|s| derived.diffuser(s));
     let volute = volute.and_then(|v| derived.volute(v));
     let Some(g) = derived.geometry(id) else {
         let reason = derived
@@ -86,6 +88,29 @@ pub(crate) fn show(
                         .style(LineStyle::dashed_loose())
                         .width(1.0),
                 );
+            }
+            if let Some(d) = stator {
+                for r in [d.inlet_diameter / 2.0, d.outlet_diameter / 2.0] {
+                    plot.line(
+                        Line::new("diffuser", circle(r, scale))
+                            .color(palette.stator)
+                            .style(LineStyle::dashed_loose())
+                            .width(1.0),
+                    );
+                }
+                if let Some(vanes) = &d.vanes {
+                    for k in 0..vanes.count {
+                        let mut outline = vanes.geometry.outline(k, d.rotation_sign);
+                        outline.push(outline[0]);
+                        let points: PlotPoints =
+                            outline.iter().map(|p| view(p.x, p.y, scale)).collect();
+                        plot.line(
+                            Line::new("diffuser vanes", points)
+                                .color(palette.stator)
+                                .width(1.5),
+                        );
+                    }
+                }
             }
             if let Some(v) = volute {
                 let sign = v.basis.rotation_sign;

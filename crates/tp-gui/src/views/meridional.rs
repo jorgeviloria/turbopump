@@ -171,9 +171,11 @@ impl MeridionalView {
         ui: &mut Ui,
         cx: &mut EditCtx<'_>,
         id: ComponentId,
+        stator: Option<ComponentId>,
         volute: Option<ComponentId>,
     ) {
         let derived = cx.derived;
+        let stator = stator.and_then(|s| derived.diffuser(s));
         let volute = volute.and_then(|v| derived.volute(v));
         let Some(results) = derived.impeller(id) else {
             return;
@@ -291,6 +293,40 @@ impl MeridionalView {
                                 .color(palette.handle)
                                 .style(LineStyle::dashed_dense())
                                 .width(1.0),
+                        );
+                    }
+                }
+                if let Some(d) = stator {
+                    // Side walls from the impeller outlet to d₄, and the vane edges.
+                    let (r2, r3, r4) = (
+                        d.impeller_diameter / 2.0,
+                        d.inlet_diameter / 2.0,
+                        d.outlet_diameter / 2.0,
+                    );
+                    for side in [-1.0, 1.0] {
+                        let wall: Vec<DVec2> = [r2, r3, r4]
+                            .iter()
+                            .map(|&r| DVec2::new(d.midplane + side * d.half_width(r), r))
+                            .collect();
+                        plot.line(
+                            Line::new("diffuser", line(wall, scale))
+                                .color(palette.stator)
+                                .width(1.5),
+                        );
+                    }
+                    let edges: &[f64] = if d.vanes.is_some() { &[r3, r4] } else { &[r4] };
+                    for &r in edges {
+                        let h = d.half_width(r);
+                        plot.line(
+                            Line::new(
+                                "diffuser",
+                                line(
+                                    [DVec2::new(d.midplane - h, r), DVec2::new(d.midplane + h, r)],
+                                    scale,
+                                ),
+                            )
+                            .color(palette.stator)
+                            .width(1.0),
                         );
                     }
                 }

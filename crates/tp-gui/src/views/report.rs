@@ -22,6 +22,7 @@ pub(crate) fn show(
     project: &Project,
     derived: &Derived,
     id: ComponentId,
+    stator: Option<ComponentId>,
     volute: Option<ComponentId>,
     units: &DisplayUnits,
 ) {
@@ -321,6 +322,10 @@ pub(crate) fn show(
             });
         warnings(ui, &g.warnings);
 
+        if let Some(stator) = stator {
+            diffuser(ui, project, derived, stator, units);
+        }
+
         let Some(volute) = volute else {
             return;
         };
@@ -407,6 +412,132 @@ pub(crate) fn show(
             });
         warnings(ui, &v.warnings);
     });
+}
+
+fn diffuser(
+    ui: &mut Ui,
+    project: &Project,
+    derived: &Derived,
+    id: ComponentId,
+    units: &DisplayUnits,
+) {
+    use QuantityKind::*;
+    let s = |kind, value| units.show(kind, value);
+    let name = project.component(id).map_or("", |c| c.name.as_str());
+    let d = match derived.diffuser_result(id) {
+        Some(Ok(d)) => d,
+        Some(Err(e)) => {
+            heading(ui, &format!("{name}: diffuser"));
+            ui.colored_label(ui.visuals().error_fg_color, e);
+            return;
+        }
+        None => return,
+    };
+    let kind = if d.vanes.is_some() {
+        "vaned"
+    } else {
+        "vaneless"
+    };
+    heading(ui, &format!("{name}: {kind} diffuser"));
+    Grid::new("report_diffuser")
+        .num_columns(2)
+        .striped(true)
+        .show(ui, |ui| {
+            value_row(ui, "Design flow Q_Le", s(VolumeFlow, d.flow));
+            value_row(
+                ui,
+                "Inlet d₃ × b₃",
+                format!(
+                    "{} × {}",
+                    s(Length, d.inlet_diameter),
+                    s(Length, d.inlet_width)
+                ),
+            );
+            value_row(
+                ui,
+                "Outlet d₄ × b₄",
+                format!(
+                    "{} × {} ({:.3}·d₂)",
+                    s(Length, d.outlet_diameter),
+                    s(Length, d.outlet_width),
+                    d.outlet_diameter / d.impeller_diameter
+                ),
+            );
+            value_row(
+                ui,
+                "Velocity in / out",
+                format!(
+                    "{} / {}",
+                    s(Velocity, d.inlet.velocity()),
+                    s(Velocity, d.outlet.velocity())
+                ),
+            );
+            value_row(
+                ui,
+                "Ideal pressure recovery",
+                format!("{:.2}", d.ideal_pressure_recovery),
+            );
+            if let Some(v) = &d.vanes {
+                let c = &v.checks;
+                value_row(ui, "Vanes", v.count.to_string());
+                value_row(
+                    ui,
+                    "Vane angles α₃B / α₄B",
+                    format!("{} / {}", s(Angle, v.inlet_angle), s(Angle, v.outlet_angle)),
+                );
+                value_row(
+                    ui,
+                    "Throat a₃",
+                    format!(
+                        "{} (eq. T7.7.10: {})",
+                        s(Length, v.throat),
+                        s(Length, v.throat_target)
+                    ),
+                );
+                value_row(
+                    ui,
+                    "A: area ratio",
+                    format!("{:.2} (optimum {:.2})", c.area_ratio, c.optimum_area_ratio),
+                );
+                value_row(
+                    ui,
+                    "B: c₃q/c₂",
+                    format!("{:.2} (0.7 to 0.85)", c.deceleration),
+                );
+                value_row(
+                    ui,
+                    "C: L₃₋₄/a₃",
+                    format!("{:.1} (2.5 to 6)", c.length_ratio),
+                );
+                value_row(ui, "D: b₃/a₃", format!("{:.2} (0.8 to 2)", c.aspect_ratio));
+                value_row(
+                    ui,
+                    "E: c₄²/(2gH)",
+                    format!("{:.3} (0.02 to 0.04)", c.outlet_energy),
+                );
+                value_row(
+                    ui,
+                    "F: opening angle",
+                    format!(
+                        "{} (allowed {})",
+                        s(Angle, c.opening_angle),
+                        s(Angle, c.allowable_angle)
+                    ),
+                );
+            } else {
+                value_row(ui, "Flow angle", s(Angle, d.inlet.angle));
+                value_row(
+                    ui,
+                    "Path",
+                    format!(
+                        "{} around, {} long",
+                        s(Angle, d.wrap_angle),
+                        s(Length, d.path_length)
+                    ),
+                );
+            }
+        });
+    warnings(ui, &d.warnings);
 }
 
 fn warnings(ui: &mut Ui, warnings: &[String]) {

@@ -92,3 +92,25 @@ fn volute() {
     harness.run();
     save(&mut harness, "volute-front");
 }
+
+/// A stage with a vaned diffuser between impeller and volute.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn diffuser() {
+    let mut harness = harness(egui::Theme::Dark);
+    harness.get_by_label("✚ Add component").click();
+    harness.run();
+    harness.get_by_label("Stator (vaned diffuser)").click();
+    harness.run();
+    for _ in 0..2 {
+        harness.get_by_label("Accept step").click();
+        harness.run();
+    }
+    harness.state_mut().focus_view(View::FrontView);
+    harness.remove_cursor();
+    harness.run();
+    save(&mut harness, "diffuser-front");
+    harness.state_mut().focus_view(View::View3d);
+    harness.run();
+    save(&mut harness, "diffuser-3d");
+}

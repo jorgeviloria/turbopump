@@ -11,7 +11,7 @@ use tp_design::pump::correlations as corr;
 use tp_design::pump::{CentrifugalPumpInput, InletDesign, Suction};
 use tp_project::{
     ComponentId, ComponentKind, DesignStep, EnergyTransfer, FlowRate, Param, Project, Rotation,
-    StepStatus, VOLUTE_STEPS,
+    StepStatus, VANED_STEPS, VANELESS_STEPS, VOLUTE_STEPS,
 };
 use tp_units::{DisplayUnits, QuantityKind};
 
@@ -34,7 +34,12 @@ pub(crate) fn is_available(kind: ComponentKind, step: DesignStep) -> bool {
                 | ModelSettings
         ),
         ComponentKind::Volute => VOLUTE_STEPS.contains(&step) || step == ModelSettings,
-        ComponentKind::Stator { .. } => false,
+        ComponentKind::Stator { vaned: true } => {
+            VANED_STEPS.contains(&step) || step == ModelSettings
+        }
+        ComponentKind::Stator { vaned: false } => {
+            VANELESS_STEPS.contains(&step) || step == ModelSettings
+        }
     }
 }
 
@@ -47,14 +52,9 @@ pub(crate) fn planned_phase(kind: ComponentKind, step: DesignStep) -> String {
         (ComponentKind::Impeller, DesignStep::ModelFinishing) => {
             "Model finishing (fillets, trimming, balance holes) is planned for phase 9.".into()
         }
-        (ComponentKind::Volute, DesignStep::CfdSetup) => {
-            "CFD setup is planned for phase 8 (meshing and CFD).".into()
-        }
-        (ComponentKind::Impeller | ComponentKind::Volute, _) => String::new(),
-        _ => format!(
-            "The design of a {} is not available yet.",
-            kind.label().to_lowercase()
-        ),
+        (_, DesignStep::CfdSetup) => "CFD setup is planned for phase 8 (meshing and CFD).".into(),
+        (_, DesignStep::ModelFinishing) => "Model finishing is planned for phase 9.".into(),
+        _ => String::new(),
     }
 }
 
@@ -65,7 +65,8 @@ fn can_accept(kind: ComponentKind, step: DesignStep) -> bool {
             step == DesignStep::MainDimensions || tp_project::GEOMETRY_STEPS.contains(&step)
         }
         ComponentKind::Volute => VOLUTE_STEPS.contains(&step),
-        ComponentKind::Stator { .. } => false,
+        ComponentKind::Stator { vaned: true } => VANED_STEPS.contains(&step),
+        ComponentKind::Stator { vaned: false } => VANELESS_STEPS.contains(&step),
     }
 }
 
@@ -374,10 +375,20 @@ fn step_panel(ui: &mut Ui, cx: &mut EditCtx<'_>, id: ComponentId, step: DesignSt
     ui.separator();
 
     egui::ScrollArea::vertical().show(ui, |ui| {
-        if component.kind() == ComponentKind::Volute && step != DesignStep::ModelSettings {
-            crate::volute_steps::show(ui, cx, &project, id, step);
-            problems(ui, cx, id, step);
-            return;
+        if step != DesignStep::ModelSettings {
+            match component.kind() {
+                ComponentKind::Volute => {
+                    crate::volute_steps::show(ui, cx, &project, id, step);
+                    problems(ui, cx, id, step);
+                    return;
+                }
+                ComponentKind::Stator { .. } => {
+                    crate::diffuser_steps::show(ui, cx, &project, id, step);
+                    problems(ui, cx, id, step);
+                    return;
+                }
+                ComponentKind::Impeller => {}
+            }
         }
         match step {
             DesignStep::MainDimensions => main_dimensions(ui, cx, &project, id),
@@ -418,6 +429,7 @@ fn buttons(
         .all(|&s| component.status(s) == StepStatus::Done);
     let computed = match (kind, step) {
         (ComponentKind::Volute, _) => cx.derived.volute(id).is_some(),
+        (ComponentKind::Stator { .. }, _) => cx.derived.diffuser(id).is_some(),
         (_, DesignStep::MainDimensions) => cx.derived.main(id).is_some(),
         _ => cx.derived.geometry(id).is_some(),
     };
@@ -482,9 +494,16 @@ fn buttons(
 fn reset(cx: &mut EditCtx<'_>, project: &Project, id: ComponentId, step: DesignStep) {
     cx.doc.end_gesture();
     let label = format!("reset {step}");
-    if VOLUTE_STEPS.contains(&step) {
-        crate::volute_steps::reset(cx, project, id, step, &label);
-        return;
+    match project.component(id).map(|c| c.kind()) {
+        Some(ComponentKind::Volute) => {
+            crate::volute_steps::reset(cx, project, id, step, &label);
+            return;
+        }
+        Some(ComponentKind::Stator { .. }) => {
+            crate::diffuser_steps::reset(cx, project, id, step, &label);
+            return;
+        }
+        _ => {}
     }
     if step == DesignStep::MainDimensions {
         let old = project.pump_impeller_input(id).unwrap_or_default();
@@ -513,6 +532,14 @@ fn reset(cx: &mut EditCtx<'_>, project: &Project, id: ComponentId, step: DesignS
 
 /// Errors and warnings of the computation behind `step`.
 fn problems(ui: &mut Ui, cx: &EditCtx<'_>, id: ComponentId, step: DesignStep) {
+    if let Some(result) = cx.derived.diffuser_result(id) {
+        let (error, warnings) = match result {
+            Ok(d) => (None, d.warnings.clone()),
+            Err(e) => (Some(e), Vec::new()),
+        };
+        show_problems(ui, error, &warnings);
+        return;
+    }
     if let Some(result) = cx.derived.volute_result(id) {
         let (error, warnings) = match result {
             Ok(g) => (None, g.warnings.clone()),
@@ -1125,18 +1152,27 @@ fn model(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: ComponentId) 
     let Some(component) = project.component(id) else {
         return;
     };
-    let volute = component.kind() == ComponentKind::Volute;
-    let ready = if volute {
-        VOLUTE_STEPS
+    let kind = component.kind();
+    let volute = kind == ComponentKind::Volute;
+    let done = |steps: &[DesignStep]| {
+        steps
             .iter()
             .all(|&s| component.status(s) == StepStatus::Done)
-    } else {
-        component.status(DesignStep::BladeEdges) == StepStatus::Done
     };
-    ui.weak(if volute {
-        "CAD solid of the volute flow domain, built with Open CASCADE."
-    } else {
-        "CAD solids of the impeller and of its flow domain, built with Open CASCADE."
+    let ready = match kind {
+        ComponentKind::Volute => done(&VOLUTE_STEPS),
+        ComponentKind::Stator { vaned: true } => done(&VANED_STEPS),
+        ComponentKind::Stator { vaned: false } => done(&VANELESS_STEPS),
+        ComponentKind::Impeller => component.status(DesignStep::BladeEdges) == StepStatus::Done,
+    };
+    ui.weak(match kind {
+        ComponentKind::Volute => "CAD solid of the volute flow domain, built with Open CASCADE.",
+        ComponentKind::Stator { .. } => {
+            "CAD solids of the diffuser flow domain and vanes, built with Open CASCADE."
+        }
+        ComponentKind::Impeller => {
+            "CAD solids of the impeller and of its flow domain, built with Open CASCADE."
+        }
     });
     ui.add_space(8.0);
     if !crate::export::CAD_AVAILABLE {
@@ -1147,7 +1183,7 @@ fn model(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: ComponentId) 
         ui.label(if volute {
             "Accept the volute steps up to the wall thickness before exporting."
         } else {
-            "Accept the geometry steps up to the blade edges before exporting."
+            "Accept the design steps before exporting."
         });
     }
     if ui
@@ -1179,9 +1215,13 @@ mod tests {
         assert!(is_available(ComponentKind::Volute, DesignStep::CutWater));
         assert!(!is_available(ComponentKind::Volute, DesignStep::CfdSetup));
         assert!(planned_phase(ComponentKind::Volute, DesignStep::CfdSetup).contains("phase 8"));
-        assert!(!is_available(
+        assert!(is_available(
             ComponentKind::Stator { vaned: true },
-            DesignStep::MainDimensions
+            DesignStep::BladeEdges
+        ));
+        assert!(!is_available(
+            ComponentKind::Stator { vaned: false },
+            DesignStep::BladeProperties
         ));
     }
 }
