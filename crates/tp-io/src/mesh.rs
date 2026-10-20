@@ -183,9 +183,8 @@ pub(crate) mod tests {
         let parts = impeller_parts(&g);
         assert_eq!(parts.blades.len(), g.blade.count as usize);
         assert!(!parts.hub.is_empty() && !parts.shroud.is_empty());
-        let count = parts.blades.iter().map(Vec::len).sum::<usize>()
-            + parts.hub.len()
-            + parts.shroud.len();
+        let count =
+            parts.blades.iter().map(Vec::len).sum::<usize>() + parts.hub.len() + parts.shroud.len();
         assert_eq!(count, impeller_triangles(&g).len());
         // The second blade is the first one turned by 2π/z about the axis.
         let angle = 2.0 * PI / f64::from(g.blade.count);
