@@ -6,6 +6,7 @@
 use std::f64::consts::PI;
 
 use tp_design::impeller::ImpellerGeometry;
+use tp_design::volute::VoluteGeometry;
 use tp_math::{DVec2, DVec3};
 
 pub type Triangle = [DVec3; 3];
@@ -131,6 +132,43 @@ pub fn impeller_triangles(g: &ImpellerGeometry) -> Vec<Triangle> {
     out
 }
 
+/// Surface between consecutive closed rings with the same number of points.
+fn loft_rings(out: &mut Vec<Triangle>, rings: &[Vec<DVec3>]) {
+    for pair in rings.windows(2) {
+        let (a, b) = (&pair[0], &pair[1]);
+        let n = a.len().min(b.len());
+        for i in 0..n {
+            let j = (i + 1) % n;
+            quad(out, a[i], a[j], b[j], b[i]);
+        }
+    }
+}
+
+/// Flat cap over a closed ring, fanned from its mean point.
+fn cap(out: &mut Vec<Triangle>, ring: &[DVec3]) {
+    let n = ring.len();
+    let centre = ring.iter().copied().sum::<DVec3>() / n as f64;
+    for i in 0..n {
+        let t = [centre, ring[i], ring[(i + 1) % n]];
+        if (t[1] - t[0]).cross(t[2] - t[0]).length_squared() > 1e-24 {
+            out.push(t);
+        }
+    }
+}
+
+/// Inner surface of the volute: spiral channel and discharge diffuser, closed at the
+/// start of the spiral and at the outlet.
+pub fn volute_triangles(g: &VoluteGeometry) -> Vec<Triangle> {
+    let rings = g.rings();
+    let mut out = Vec::new();
+    loft_rings(&mut out, &rings);
+    if let (Some(first), Some(last)) = (rings.first(), rings.last()) {
+        cap(&mut out, first);
+        cap(&mut out, last);
+    }
+    out
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -175,6 +213,39 @@ pub(crate) mod tests {
         let one = blade_triangles(&g).len();
         let all = impeller_triangles(&g).len();
         assert!(all >= one * g.blade.count as usize);
+    }
+
+    #[test]
+    fn volute_mesh_is_closed_and_encloses_the_channel() {
+        use tp_design::volute::{VoluteBasis, VoluteInput};
+        let basis = VoluteBasis {
+            flow: 100.0 / 3600.0,
+            impeller_diameter: 0.172,
+            impeller_width: 0.0174,
+            cu: 13.27,
+            cm: 3.03,
+            nq: 35.9,
+            stage_head: 32.0,
+            density: 998.2,
+            midplane: 0.0378,
+            rotation_sign: 1.0,
+        };
+        let g = VoluteGeometry::build(&basis, &VoluteInput::default()).unwrap();
+        let tris = volute_triangles(&g);
+        // Divergence theorem: a closed mesh gives the enclosed volume.
+        let volume: f64 = tris.iter().map(|t| t[0].dot(t[1].cross(t[2]))).sum::<f64>() / 6.0;
+        let spiral: f64 = g
+            .sections
+            .windows(2)
+            .map(|w| {
+                0.5 * (w[0].size.area + w[1].size.area)
+                    * 0.5
+                    * (w[0].size.centroid_radius + w[1].size.centroid_radius)
+                    * (w[1].angle - w[0].angle)
+            })
+            .sum();
+        assert!(volume.abs() > spiral, "{volume} vs spiral {spiral}");
+        assert!(volume.abs() < 1.6 * spiral);
     }
 
     #[test]

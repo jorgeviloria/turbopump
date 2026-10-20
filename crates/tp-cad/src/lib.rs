@@ -8,9 +8,11 @@
 mod bridge;
 mod impeller;
 mod occ;
+mod volute;
 
 pub use impeller::{CadOptions, ImpellerCad, build_impeller};
 pub use occ::{Shape, read_step, write_iges, write_step, write_stl};
+pub use volute::{VoluteCad, build_volute};
 
 /// Errors from CAD construction and export.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]

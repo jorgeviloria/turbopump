@@ -17,6 +17,7 @@
 use std::fmt::Write;
 
 use tp_design::impeller::ImpellerGeometry;
+use tp_design::volute::VoluteGeometry;
 
 /// Points per hub and shroud contour.
 const CONTOUR_POINTS: usize = 101;
@@ -82,6 +83,45 @@ pub fn geometry_txt(g: &ImpellerGeometry) -> String {
             ];
             let line: Vec<String> = values.iter().map(|&v| number(v)).collect();
             let _ = writeln!(out, "{}", line.join(" "));
+        }
+    }
+    out
+}
+
+/// The volute as a text point list: one block per cross section and per diffuser
+/// section, with Cartesian points of the closed outline.
+pub fn volute_txt(g: &VoluteGeometry) -> String {
+    let mut out = String::new();
+    let d = &g.design;
+    let _ = writeln!(out, "# Turbopump volute geometry");
+    let _ = writeln!(
+        out,
+        "# units: m, m² and rad; wrap angle from the cutwater in the direction of rotation"
+    );
+    let _ = writeln!(
+        out,
+        "# cutwater diameter {} inlet width {} throat area {}",
+        number(d.cutwater_diameter),
+        number(d.inlet_width),
+        number(d.throat.area)
+    );
+    let sign = g.basis.rotation_sign;
+    for s in &g.sections {
+        let _ = writeln!(
+            out,
+            "[section angle={} area={} outer_radius={}]",
+            number(s.angle),
+            number(s.size.area),
+            number(s.size.outer_radius)
+        );
+        for p in s.points(sign) {
+            let _ = writeln!(out, "{} {} {}", number(p.x), number(p.y), number(p.z));
+        }
+    }
+    for (i, n) in g.nozzle.iter().enumerate().skip(1) {
+        let _ = writeln!(out, "[diffuser section={i} area={}]", number(n.area));
+        for p in &n.points {
+            let _ = writeln!(out, "{} {} {}", number(p.x), number(p.y), number(p.z));
         }
     }
     out
