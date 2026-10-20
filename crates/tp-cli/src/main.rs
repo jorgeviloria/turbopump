@@ -6,6 +6,7 @@
 #[cfg(feature = "cad")]
 mod cad;
 mod design;
+mod diffuser;
 mod geometry;
 mod volute;
 
@@ -80,6 +81,8 @@ enum Command {
     /// Design the volute casings: cutwater, cross sections, spiral, discharge diffuser
     /// and wall, and optionally export points and an STL mesh.
     Volute(volute::VoluteArgs),
+    /// Design the stators after the impellers: vaneless rings or vaned diffusers.
+    Diffuser(diffuser::DiffuserArgs),
     /// Build the CAD solids of the impeller and its flow domain with Open CASCADE and
     /// export them to STEP, IGES or STL.
     #[cfg(feature = "cad")]
@@ -181,6 +184,7 @@ fn main() -> ExitCode {
         Command::Design(args) => design::run(args),
         Command::Geometry(args) => geometry::run(args),
         Command::Volute(args) => volute::run(args),
+        Command::Diffuser(args) => diffuser::run(args),
         #[cfg(feature = "cad")]
         Command::Cad(args) => cad::run(args),
         Command::Info { file, units } => info(&file, units),

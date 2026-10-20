@@ -363,6 +363,46 @@ fn volute_designs_and_exports() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+#[test]
+fn diffuser_designs_vaned_and_vaneless_stators() {
+    let dir = scratch_dir("diffuser");
+    let file = dir.join("multistage.tpj");
+    let file_arg = file.to_str().unwrap();
+    let out = turbopump(&[
+        "new",
+        file_arg,
+        "--machine",
+        "pump",
+        "--flow",
+        "100 m3/h",
+        "--head",
+        "64 m",
+        "--speed",
+        "2900 rpm",
+        "--components",
+        "impeller,stator,impeller,vaneless-stator",
+    ]);
+    assert_eq!(out.status.code(), Some(0), "{}", stdout(&out));
+    let out = turbopump(&["diffuser", file_arg]);
+    let text = stdout(&out);
+    assert!(text.contains("vaned diffuser"), "{text}");
+    assert!(text.contains("vaneless diffuser"), "{text}");
+    assert!(text.contains("Criteria   A"), "{text}");
+    let manual = stdout(&turbopump(&[
+        "diffuser",
+        file_arg,
+        "--component",
+        "2",
+        "--set",
+        "z=11",
+        "--dry-run",
+    ]));
+    assert!(manual.contains("Vanes      z 11"), "{manual}");
+    let bad = turbopump(&["diffuser", file_arg, "--set", "colour=blue"]);
+    assert_eq!(bad.status.code(), Some(2));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 #[cfg(feature = "cad")]
 #[test]
 fn cad_exports_impeller_and_flow_domain() {

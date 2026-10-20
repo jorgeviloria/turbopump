@@ -107,7 +107,7 @@ fn export(dir: &std::path::Path, g: &ImpellerGeometry) -> Result<(), String> {
     Ok(())
 }
 
-fn parse_edge(value: &str) -> Result<EdgeShape, String> {
+pub(crate) fn parse_edge(value: &str) -> Result<EdgeShape, String> {
     match value {
         "cut" => Ok(EdgeShape::Cut),
         "round" => Ok(EdgeShape::Ellipse { ratio: 1.0 }),

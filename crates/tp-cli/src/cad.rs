@@ -5,7 +5,10 @@ use std::path::{Path, PathBuf};
 
 use clap::{Args, ValueEnum};
 use tp_cad::{CadOptions, ImpellerCad, Shape};
-use tp_project::{ComponentId, ComponentKind, DesignStep, Project, StepStatus, VOLUTE_STEPS};
+use tp_project::{
+    ComponentId, ComponentKind, DesignStep, Project, StepStatus, VANED_STEPS, VANELESS_STEPS,
+    VOLUTE_STEPS,
+};
 use tp_units::{DisplayUnits, QuantityKind, parse_quantity_or};
 
 use crate::design::err;
@@ -101,9 +104,18 @@ pub(crate) fn run(args: CadArgs) -> CliResult {
         .filter(|c| args.component.is_none_or(|n| c.id().0 == n))
         .map(|c| (c.id(), c.name.clone()))
         .collect();
-    if impellers.is_empty() && volutes.is_empty() {
+    let stators: Vec<(ComponentId, String, bool)> = project
+        .components()
+        .iter()
+        .filter_map(|c| match c.kind() {
+            ComponentKind::Stator { vaned } => Some((c.id(), c.name.clone(), vaned)),
+            _ => None,
+        })
+        .filter(|(id, _, _)| args.component.is_none_or(|n| id.0 == n))
+        .collect();
+    if impellers.is_empty() && volutes.is_empty() && stators.is_empty() {
         return Err(match args.component {
-            Some(n) => format!("no impeller or volute with id #{n}"),
+            Some(n) => format!("no component with id #{n}"),
             None => "the project has no impeller".into(),
         });
     }
@@ -140,6 +152,48 @@ pub(crate) fn run(args: CadArgs) -> CliResult {
         for &format in &args.format {
             for (stem, shape) in [("impeller", &cad.impeller), ("fluid", &cad.fluid)] {
                 let path = dir.join(format!("{stem}.{}", format.extension()));
+                write(shape, &path, format, deflection)?;
+            }
+        }
+        println!();
+    }
+
+    for (id, name, vaned) in &stators {
+        let component = project.component(*id).expect("listed above");
+        let steps: &[DesignStep] = if *vaned {
+            &VANED_STEPS
+        } else {
+            &VANELESS_STEPS
+        };
+        if steps
+            .iter()
+            .any(|&step| component.status(step) != StepStatus::Done)
+        {
+            println!(
+                "{name} ({id}): not designed yet; run `turbopump diffuser {}` first",
+                args.file.display()
+            );
+            println!();
+            warned = true;
+            continue;
+        }
+        let design = project.compute_diffuser(*id).map_err(err)?;
+        println!("{name} ({id}): building CAD solids…");
+        let cad = tp_cad::build_diffuser(&design).map_err(|e| e.to_string())?;
+        println!("  Diffuser flow domain {:.1} cm³", cad.fluid_volume() * 1e6);
+        if !cad.fluid.is_valid() || cad.fluid.solid_count() != 1 {
+            println!("  warning: the diffuser flow domain is not a single valid solid");
+            warned = true;
+        }
+        std::fs::create_dir_all(&base).map_err(|e| format!("{}: {e}", base.display()))?;
+        let deflection = design.outlet_diameter * 1e3 / 2000.0;
+        for &format in &args.format {
+            let mut shapes = vec![(format!("diffuser-{}", id.0), &cad.fluid)];
+            if let Some(vanes) = &cad.vanes {
+                shapes.push((format!("diffuser-{}-vanes", id.0), vanes));
+            }
+            for (stem, shape) in shapes {
+                let path = base.join(format!("{stem}.{}", format.extension()));
                 write(shape, &path, format, deflection)?;
             }
         }
