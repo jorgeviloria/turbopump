@@ -4,7 +4,8 @@ Turbopump es una aplicación libre y multiplataforma (Windows, macOS y Linux), e
 Rust, para el diseño preliminar e interactivo de turbomáquinas: bombas, ventiladores,
 compresores y turbinas.
 
-> **Estado:** Fase 1, el diseño 1D de rodetes de bomba centrífuga. Por ahora no hay interfaz gráfica.
+> **Estado:** Fase 2: dimensiones principales y geometría de rodetes de bomba centrífuga.
+> Por ahora no hay interfaz gráfica.
 > La hoja de ruta completa está en [PLAN.md](PLAN.md).
 
 ## Qué hay ahora
@@ -14,7 +15,8 @@ compresores y turbinas.
 | [`tp-units`](crates/tp-units) | Magnitudes físicas, unidades SI/US, conversión y lectura de texto (`"2900 rpm"`), y velocidad específica (nq, ns US, ωs, σ de Cordier) |
 | [`tp-math`](crates/tp-math) | Curvas Bézier y B-spline (evaluación, derivadas, subdivisión, interpolación), polilíneas, interpolación 1D monótona, raíces y cuadratura |
 | [`tp-fluids`](crates/tp-fluids) | Propiedades de líquidos con CoolProp, cargado al ejecutar, y un modelo propio del agua (IAPWS) para cuando falta |
-| [`tp-design`](crates/tp-design) | Triángulos de velocidad, deslizamiento (Wiesner), correlaciones de bomba y dimensiones principales del rodete |
+| [`tp-design`](crates/tp-design) | Triángulos de velocidad, deslizamiento (Wiesner), correlaciones de bomba, dimensiones principales y geometría del rodete: contorno meridional, flujo meridional, álabes y espesores |
+| [`tp-io`](crates/tp-io) | Exportación: lista de puntos, malla STL y dibujos SVG |
 | [`tp-project`](crates/tp-project) | Modelo de proyecto, parámetros automáticos o manuales, componentes y sus reglas, pasos de diseño, archivo `.tpj` y deshacer/rehacer |
 | [`tp-cli`](crates/tp-cli) | Ejecutable `turbopump` para la línea de comandos |
 
@@ -58,6 +60,17 @@ cargo run -p tp-cli -- design bomba.tpj
 ```bash
 cargo run -p tp-cli -- design bomba.tpj --set d2=180 --set z=6
 ```
+
+Construir la geometría del rodete (contorno meridional, flujo meridional, álabes,
+espesores y bordes) y exportar puntos, malla STL y dibujos:
+
+```bash
+cargo run -p tp-cli -- geometry bomba.tpj --export salida
+```
+
+| Vista meridional | Vista frontal |
+|---|---|
+| ![meridional](docs/img/rodete-referencia-meridional.svg) | ![frontal](docs/img/rodete-referencia-frontal.svg) |
 
 Propiedades de un líquido:
 

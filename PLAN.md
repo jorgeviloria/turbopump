@@ -242,13 +242,13 @@ resto de máquinas.
 |---|---|---|---|
 | **0. Base** ✅ | Workspace, CI en los 3 sistemas, licencia, `tp-units`, `tp-math` (Bézier/B-spline), modelo de proyecto, serialización, undo/redo | Repositorio que compila y pasa tests en Win/Mac/Linux | Hecha |
 | **1. Diseño 1D de bomba centrífuga** ✅ | Configuración global, fluidos (CoolProp), dimensiones principales, triángulos de velocidad, Cordier, slip, eficiencias, eje | CLI que calcula las dimensiones principales. Hecha; quedan por verificar varios coeficientes de Gülich | Hecha |
-| **2. Geometría del rodete** | Contorno meridional, flujo meridional, propiedades del álabe, líneas medias (mapeo conforme y β), espesores, bordes, superficies 3D en puntos | Nube de puntos 3D del álabe; export geo-txt y TurboGrid | 6–8 sem |
+| **2. Geometría del rodete** ✅ | Contorno meridional, flujo meridional (cuasi-1D), propiedades del álabe, líneas medias (mapeo conforme y β), espesores, bordes, superficies 3D en puntos | Hecha: puntos 3D, malla STL y vistas SVG. El flujo potencial 2D pasa a la Fase 7 y TurboGrid a la Fase 8 | Hecha |
 | **3. CAD con OCCT** | Bindings, superficies B-spline, sólido del rodete y del dominio fluido, STEP/IGES/STL, teselación | El rodete se abre en FreeCAD y SolidWorks | 4–6 sem |
 | **4. GUI MVP** (en paralelo con 2–3) | Ventana, árbol, pasos, diálogos, diagramas con Bézier arrastrables, visor 3D | **v0.1: diseño completo de un rodete de bomba centrífuga, exportable a STEP** | 6–8 sem |
 | **5. Voluta y estator** | Voluta completa, estatores con y sin álabes, acoplamiento entre componentes, multietapa | **v0.2: bomba completa (rodete + voluta)** | 6–8 sem |
 | **6. Resto de máquinas** | Ventiladores (incl. axiales con perfiles, BEM y Lieblein), compresores centrífugos y axiales, turbinas radiales y axiales, Francis y Kaplan; editor de correlaciones | v0.3–0.5 | 3–4 meses |
-| **7. Análisis** | Predicción de prestaciones (Euler y Casey/Robinson), álabe a álabe 1D/2D, velocidades sobre el álabe, informe | v0.6 | 4–6 sem |
-| **8. Malla y CFD** | netgen + escritores, geometría virtual, RSI, caso OpenFOAM y CFD-Pre XML | v0.7 | 4–6 sem |
+| **7. Análisis** | Predicción de prestaciones (Euler y Casey/Robinson), flujo meridional potencial 2D, álabe a álabe 1D/2D, velocidades sobre el álabe, informe | v0.6 | 4–6 sem |
+| **8. Malla y CFD** | netgen + escritores, geometría virtual, RSI, caso OpenFOAM, CFD-Pre XML y curvas de TurboGrid | v0.7 | 4–6 sem |
 | **9. Producción** | Acabado (redondeos, recorte, agujeros de equilibrado), modo por lotes, Python, ingeniería inversa desde STEP, instaladores firmados, manual | **v1.0** | 2–3 meses |
 
 **Totales aproximados:** un MVP útil (rodete y voluta de bomba con exportación a
