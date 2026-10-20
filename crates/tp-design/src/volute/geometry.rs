@@ -82,6 +82,19 @@ impl VoluteGeometry {
             .collect()
     }
 
+    /// Indices where the pieces of every outline start: flanks, rounded corners, outer
+    /// wall and inlet for rectangles and trapezoids; a single smooth loop for circles.
+    /// The outline is smooth inside a piece and may have a corner between pieces.
+    pub fn ring_breaks(&self) -> Vec<usize> {
+        match self.design.shape {
+            SectionShape::Circular => vec![0],
+            _ => {
+                let (e, c) = (EDGE_POINTS, CORNER_POINTS);
+                vec![0, e, e + c, 2 * e + c, 2 * e + 2 * c, 3 * e + 2 * c]
+            }
+        }
+    }
+
     /// Inner and outer radius of the vaneless ring between impeller and volute.
     pub fn inlet_ring(&self) -> (f64, f64) {
         (

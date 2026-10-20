@@ -249,8 +249,12 @@ pub struct VoluteDesign {
     pub throat_correction: f64,
     /// Mean throat velocity c₃q = Q_Le/A₃q, m/s.
     pub throat_velocity: f64,
-    /// c₃q/c₂
+    /// c₃q/c₂; Gülich Table 10.2 advises not much below 0.8 for low pressure
+    /// pulsations, which only flat sections approach under angular momentum.
     pub deceleration: f64,
+    /// Width over height B/H of the throat; flat sections with B/H = 2 to 3 are
+    /// considered optimal (Gülich p. 414).
+    pub throat_aspect: f64,
     /// Flow angle at the cutwater α₃', rad.
     pub cutwater_flow_angle: f64,
     /// Camber angle of the cutwater α₃B, rad.
@@ -263,7 +267,7 @@ pub struct VoluteDesign {
 }
 
 /// Default flank angle of trapezoidal sections, degrees.
-pub const DEFAULT_FLANK_ANGLE_DEG: f64 = 20.0;
+pub const DEFAULT_FLANK_ANGLE_DEG: f64 = 30.0;
 /// Specific speed separating the constant-velocity and angular-momentum laws.
 pub const AREA_LAW_NQ: f64 = 30.0;
 /// Above this specific speed the discharge nozzle should not decelerate further.
@@ -480,6 +484,10 @@ impl VoluteDesign {
         };
         let throat = section.size(a3 + throat_correction);
         let throat_velocity = flow / throat.area;
+        let throat_aspect = match shape {
+            SectionShape::Circular => 1.0,
+            _ => (inlet_width + 2.0 * section.slope() * throat.height) / throat.height,
+        };
         let c2 = basis.cu.hypot(basis.cm);
         let deceleration = throat_velocity / c2;
 
@@ -504,12 +512,6 @@ impl VoluteDesign {
                  pulsations and hydraulic excitation forces",
                 cutwater_diameter / d2,
                 min_ratio
-            ));
-        }
-        if deceleration < 0.75 {
-            warnings.push(format!(
-                "strong deceleration into the volute throat (c₃q/c₂ = {deceleration:.2}); \
-                 Gülich Table 10.2 advises not much below 0.8"
             ));
         }
         if incidence.abs() > 3f64.to_radians() + 1e-12 {
@@ -547,6 +549,7 @@ impl VoluteDesign {
             throat_correction,
             throat_velocity,
             deceleration,
+            throat_aspect,
             cutwater_flow_angle,
             cutwater_angle,
             diffuser,
