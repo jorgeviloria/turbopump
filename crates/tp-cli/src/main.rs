@@ -3,6 +3,8 @@
 //! Exit codes follow the batch-mode convention: 0 = success, 1 = completed with
 //! warnings, 2 = error.
 
+#[cfg(feature = "cad")]
+mod cad;
 mod design;
 mod geometry;
 
@@ -74,6 +76,10 @@ enum Command {
     /// Build the meridional contour, meridional flow and blades of the impellers, and
     /// optionally export points, an STL mesh and SVG drawings.
     Geometry(geometry::GeometryArgs),
+    /// Build the CAD solids of the impeller and its flow domain with Open CASCADE and
+    /// export them to STEP, IGES or STL.
+    #[cfg(feature = "cad")]
+    Cad(cad::CadArgs),
     /// Show a project summary and its open issues.
     Info {
         file: PathBuf,
@@ -170,6 +176,8 @@ fn main() -> ExitCode {
         Command::New(args) => new_project(args),
         Command::Design(args) => design::run(args),
         Command::Geometry(args) => geometry::run(args),
+        #[cfg(feature = "cad")]
+        Command::Cad(args) => cad::run(args),
         Command::Info { file, units } => info(&file, units),
     };
     match result {

@@ -331,3 +331,42 @@ fn design_reports_verified_checks() {
     );
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[cfg(feature = "cad")]
+#[test]
+fn cad_exports_impeller_and_flow_domain() {
+    let (dir, file) = reference_project("cad");
+    let file_arg = file.to_str().unwrap();
+
+    let early = turbopump(&["cad", file_arg]);
+    assert_eq!(early.status.code(), Some(2), "needs the geometry first");
+    assert!(String::from_utf8_lossy(&early.stderr).contains("turbopump geometry"));
+
+    assert_eq!(turbopump(&["design", file_arg]).status.code(), Some(0));
+    assert_eq!(turbopump(&["geometry", file_arg]).status.code(), Some(0));
+    let out_dir = dir.join("cad");
+    let out = turbopump(&[
+        "cad",
+        file_arg,
+        "--out",
+        out_dir.to_str().unwrap(),
+        "--format",
+        "step,stl",
+    ]);
+    let text = stdout(&out);
+    assert_eq!(out.status.code(), Some(0), "{text}");
+    assert!(text.contains("Solids           valid"), "{text}");
+    // OCCT's transfer statistics are silenced.
+    assert!(!text.contains("Statistics on Transfer"), "{text}");
+    for name in ["impeller.step", "fluid.step", "impeller.stl", "fluid.stl"] {
+        let size = std::fs::metadata(out_dir.join(name)).unwrap().len();
+        assert!(size > 100_000, "{name}: {size} bytes");
+    }
+    let step = std::fs::read_to_string(out_dir.join("impeller.step")).unwrap();
+    assert!(step.starts_with("ISO-10303-21;"));
+    assert!(
+        step.contains("B_SPLINE_SURFACE"),
+        "blades are B-spline surfaces"
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}

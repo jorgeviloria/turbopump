@@ -7,12 +7,19 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 
+[features]
+default = ["cad"]
+# CAD solids and STEP/IGES/STL export through Open CASCADE (built from source on the
+# first build, which takes several minutes).
+cad = ["dep:tp-cad"]
+
 [[bin]]
 name = "turbopump"
 path = "src/main.rs"
 
 [dependencies]
 clap.workspace = true
+tp-cad = { workspace = true, optional = true }
 tp-design.workspace = true
 tp-fluids.workspace = true
 tp-io.workspace = true
