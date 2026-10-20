@@ -64,28 +64,43 @@ También abre un proyecto existente:
 cargo run --release -p tp-gui -- bomba.tpj
 ```
 
-Arranca con una bomba de 100 m³/h, 32 m y 2900 rpm, con un rodete y una voluta. El
-trabajo sigue los pasos de diseño de cada componente:
+Arranca con una bomba de 100 m³/h, 32 m y 2900 rpm, con un rodete y una voluta, en tema
+claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada componente:
 
-- **Árbol del proyecto** (izquierda): configuración global y pasos de cada componente,
-  con su estado: pendiente (○), hecho (⏺) o desactualizado (⟲) porque cambió un dato
-  anterior. *Add component* añade un difusor con o sin álabes, que se coloca delante de
-  la voluta.
+- **Barra de herramientas** (arriba), por pestañas:
+  - *Home*: proyecto, deshacer, configuración global, unidades, añadir componentes y
+    exportar;
+  - la pestaña del componente seleccionado, con sus pasos de diseño, el estado de cada
+    uno y los botones para aceptar o restablecer el paso;
+  - *View*: vistas, cámara, modo de dibujo, distribución de la ventana y tema;
+  - *Help*.
+
+  El menú *File* abre, guarda y exporta.
+- **Columna de componentes** (izquierda): la configuración global y un pictograma por
+  componente, con un punto verde si está terminado o naranja si quedó desactualizado.
+  El botón + añade un rodete, un difusor con o sin álabes o una voluta.
+- **Panel izquierdo**, con dos pestañas:
+  - *Design*: los pasos de cada componente, con su estado (pendiente, hecho o
+    desactualizado porque cambió un dato anterior) y sus avisos;
+  - *3D model*: muestra u oculta cada pieza de la vista 3D o la vuelve translúcida.
 - **Panel del paso** (derecha): los datos del paso seleccionado. Cada valor es
   automático (propuesto por una correlación) o manual. *Accept step* marca el paso como
-  hecho y pasa al siguiente.
+  hecho y pasa al siguiente. Los errores y avisos salen en tarjetas al final.
 - **Vistas** (centro, acoplables):
   - vista meridional, donde los puntos de control de Bézier, el borde de ataque y la
     longitud axial se arrastran con el ratón, con las paredes del difusor y las
     secciones de la voluta;
   - gráficas del álabe (β, θ y espesor);
   - vista frontal de la etapa, con los álabes del difusor y la espiral;
-  - vista 3D;
+  - vista 3D, con aristas de las piezas, secciones de la voluta, cubo de vistas (un clic
+    en una cara gira la cámara), ejes y barra de escala;
   - informe con las mismas cifras que la línea de comandos.
+- **Barra de estado** (abajo): el último mensaje, las unidades y el contador de errores
+  y avisos, que abre el panel de mensajes de todo el proyecto.
 - **Edición:** todo se puede deshacer y rehacer (Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z). Un
   arrastre completo cuenta como un solo paso.
-- **Exportación** (menú *File ▸ Export*): puntos, malla STL, dibujos SVG y sólidos CAD
-  STEP, IGES o STL, que se construyen en segundo plano.
+- **Exportación:** puntos, malla STL, dibujos SVG y sólidos CAD STEP, IGES o STL, que se
+  construyen en segundo plano.
 
 Las pruebas de la interfaz usan [kittest](https://github.com/rerun-io/kittest) y no
 necesitan GPU. Las capturas con wgpu se generan a mano en `target/screenshots/`:
@@ -216,6 +231,10 @@ Puedes usar el proyecto bajo cualquiera de estas dos licencias, a tu elección:
 Los binarios con CAD incluyen Open CASCADE enlazado de forma estática (LGPL-2.1 con la
 excepción de Open CASCADE). El código fuente completo está disponible para volver a
 enlazarlo.
+
+La interfaz gráfica incluye la fuente Noto Sans, bajo la SIL Open Font License 1.1
+([texto](crates/tp-gui/LICENSE-OFL-NotoSans.txt)), y los iconos
+[Phosphor](https://phosphoricons.com), bajo licencia MIT.
 
 Las contribuciones se aceptan bajo esas mismas dos licencias. Antes de contribuir, lee
 [CONTRIBUTING.md](CONTRIBUTING.md), en especial las reglas de sala limpia.
