@@ -9,6 +9,7 @@ mod param;
 pub mod pump;
 pub mod slip;
 pub mod triangle;
+pub mod volute;
 
 use serde::{Deserialize, Serialize};
 
