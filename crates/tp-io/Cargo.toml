@@ -1,0 +1,18 @@
+[package]
+name = "tp-io"
+description = "Geometry export for Turbopump: point lists, STL meshes and SVG drawings"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+tp-design.workspace = true
+tp-math.workspace = true
+
+[dev-dependencies]
+approx.workspace = true
+
+[lints]
+workspace = true

@@ -673,6 +673,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "tp-io"
+version = "0.1.0"
+dependencies = [
+ "approx",
+ "tp-design",
+ "tp-math",
+]
+
+[[package]]
 name = "tp-math"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,151 @@
+//! Triangle meshes of the impeller for visual checks.
+//!
+//! The mesh is made of separate surfaces (blade faces, hub and shroud walls) and is not
+//! a closed solid; the CAD solids come from the CAD kernel in a later phase.
+
+use std::f64::consts::PI;
+
+use tp_design::impeller::ImpellerGeometry;
+use tp_math::{DVec2, DVec3};
+
+pub type Triangle = [DVec3; 3];
+
+/// Segments around the circumference of the hub and shroud walls.
+const WALL_SEGMENTS: usize = 96;
+/// Points along the hub and shroud contours.
+const WALL_POINTS: usize = 60;
+
+fn rotate_z(p: DVec3, angle: f64) -> DVec3 {
+    let (s, c) = angle.sin_cos();
+    DVec3::new(c * p.x - s * p.y, s * p.x + c * p.y, p.z)
+}
+
+/// Two triangles for the quad a-b-c-d, skipping degenerate ones.
+fn quad(out: &mut Vec<Triangle>, a: DVec3, b: DVec3, c: DVec3, d: DVec3) {
+    for t in [[a, b, c], [a, c, d]] {
+        if (t[1] - t[0]).cross(t[2] - t[0]).length_squared() > 1e-24 {
+            out.push(t);
+        }
+    }
+}
+
+/// Surface through a grid of points `rows[j][k]`.
+fn grid(out: &mut Vec<Triangle>, rows: &[Vec<DVec3>]) {
+    for j in 0..rows.len() - 1 {
+        for k in 0..rows[j].len() - 1 {
+            quad(
+                out,
+                rows[j][k],
+                rows[j][k + 1],
+                rows[j + 1][k + 1],
+                rows[j + 1][k],
+            );
+        }
+    }
+}
+
+/// Surface of revolution of a meridional curve (z, r).
+fn revolve(out: &mut Vec<Triangle>, curve: &[DVec2]) {
+    let rows: Vec<Vec<DVec3>> = (0..=WALL_SEGMENTS)
+        .map(|i| {
+            let phi = 2.0 * PI * i as f64 / WALL_SEGMENTS as f64;
+            curve
+                .iter()
+                .map(|p| DVec3::new(p.y * phi.cos(), p.y * phi.sin(), p.x))
+                .collect()
+        })
+        .collect();
+    grid(out, &rows);
+}
+
+/// Triangles of one blade: pressure and suction faces, closed at both edges.
+pub fn blade_triangles(g: &ImpellerGeometry) -> Vec<Triangle> {
+    let sign = g.blade.rotation_sign;
+    let ps: Vec<Vec<DVec3>> = g
+        .blade
+        .sections
+        .iter()
+        .map(|s| s.pressure_side(sign))
+        .collect();
+    let ss: Vec<Vec<DVec3>> = g
+        .blade
+        .sections
+        .iter()
+        .map(|s| s.suction_side(sign))
+        .collect();
+    let mut out = Vec::new();
+    grid(&mut out, &ps);
+    grid(&mut out, &ss);
+    for edge in [0, ps[0].len() - 1] {
+        for j in 0..ps.len() - 1 {
+            quad(
+                &mut out,
+                ps[j][edge],
+                ps[j + 1][edge],
+                ss[j + 1][edge],
+                ss[j][edge],
+            );
+        }
+    }
+    out
+}
+
+/// All blades plus the hub and shroud walls.
+pub fn impeller_triangles(g: &ImpellerGeometry) -> Vec<Triangle> {
+    let one = blade_triangles(g);
+    let z = g.blade.count;
+    let mut out = Vec::with_capacity(one.len() * z as usize);
+    for i in 0..z {
+        let angle = 2.0 * PI * f64::from(i) / f64::from(z);
+        out.extend(one.iter().map(|t| t.map(|p| rotate_z(p, angle))));
+    }
+    revolve(&mut out, &g.contour.hub.sample(WALL_POINTS));
+    revolve(&mut out, &g.contour.shroud.sample(WALL_POINTS));
+    out
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    use std::f64::consts::PI;
+    use tp_design::impeller::{self, ImpellerBasis, ImpellerGeometryInput};
+    use tp_design::pump::{CentrifugalPumpInput, PumpDuty, design};
+
+    pub(crate) fn reference() -> ImpellerGeometry {
+        let duty = PumpDuty {
+            flow: 100.0 / 3600.0,
+            head: 32.0,
+            machine_head: 32.0,
+            speed: 2900.0 * PI / 30.0,
+            density: 998.2,
+            vapor_pressure: 2339.0,
+            inlet_total_pressure: 101_325.0,
+        };
+        let input = CentrifugalPumpInput::default();
+        let main = design(&duty, &input).unwrap();
+        let basis = ImpellerBasis::from_pump(&main, &input, 1.0);
+        impeller::build(&basis, &ImpellerGeometryInput::default()).unwrap()
+    }
+
+    #[test]
+    fn mesh_lies_inside_the_impeller_envelope() {
+        let g = reference();
+        let r2 = g.basis.outlet_diameter / 2.0;
+        let tris = impeller_triangles(&g);
+        assert!(tris.len() > 1000);
+        for t in &tris {
+            for p in t {
+                assert!(p.truncate().length() <= r2 * (1.0 + 1e-9));
+                assert!(p.z >= -1e-12 && p.z <= g.contour.axial_length + 1e-12);
+            }
+        }
+    }
+
+    #[test]
+    fn blades_are_rotated_copies() {
+        let g = reference();
+        let one = blade_triangles(&g).len();
+        let all = impeller_triangles(&g).len();
+        assert!(all >= one * g.blade.count as usize);
+    }
+}
