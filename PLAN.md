@@ -162,7 +162,7 @@ Resto del stack en Rust:
 | Área | Herramienta |
 |---|---|
 | Interfaz gráfica | `eframe`/`egui` + `egui_dock` (paneles acoplables) + `egui_plot` |
-| Visor 3D | `wgpu`, a partir de la teselación de OCCT |
+| Visor 3D | `wgpu`, con la malla del propio diseño, que sigue cada cambio al instante; la teselación de OCCT se añadirá para ver el acabado |
 | Unidades | `tp-units` propio: SI interno y conversión en tiempo de ejecución, porque la interfaz deja elegir unidades (descartado `uom`, que fija las unidades al compilar) |
 | Formato de proyecto | `serde` (JSON con versión de esquema) |
 | XML | `quick-xml` |
@@ -244,7 +244,7 @@ resto de máquinas.
 | **1. Diseño 1D de bomba centrífuga** ✅ | Configuración global, fluidos (CoolProp), dimensiones principales, triángulos de velocidad, Cordier, slip, eficiencias, eje | CLI que calcula las dimensiones principales. Hecha; quedan por verificar varios coeficientes de Gülich | Hecha |
 | **2. Geometría del rodete** ✅ | Contorno meridional, flujo meridional (cuasi-1D), propiedades del álabe, líneas medias (mapeo conforme y β), espesores, bordes, superficies 3D en puntos | Hecha: puntos 3D, malla STL y vistas SVG. El flujo potencial 2D pasa a la Fase 7 y TurboGrid a la Fase 8 | Hecha |
 | **3. CAD con OCCT** ✅ | Puente C++ propio con OCCT 7.8.1 estático, superficies B-spline, sólidos del rodete y del dominio fluido, STEP/IGES/STL | Hecha: sólidos válidos verificados por volumen; el disco del cubo es macizo hasta la Fase 9 | Hecha |
-| **4. GUI MVP** (en paralelo con 2–3) | Ventana, árbol, pasos, diálogos, diagramas con Bézier arrastrables, visor 3D | **v0.1: diseño completo de un rodete de bomba centrífuga, exportable a STEP** | 6–8 sem |
+| **4. GUI MVP** ✅ | Ventana, árbol, pasos, diálogos, diagramas con Bézier arrastrables, visor 3D | **v0.1: diseño completo de un rodete de bomba centrífuga, exportable a STEP.** Hecha con egui 0.36, egui_dock y wgpu; quedan para fases posteriores los diagramas de β arrastrables, el editor de correlaciones y la teselación de OCCT en el visor | Hecha |
 | **5. Voluta y estator** | Voluta completa, estatores con y sin álabes, acoplamiento entre componentes, multietapa | **v0.2: bomba completa (rodete + voluta)** | 6–8 sem |
 | **6. Resto de máquinas** | Ventiladores (incl. axiales con perfiles, BEM y Lieblein), compresores centrífugos y axiales, turbinas radiales y axiales, Francis y Kaplan; editor de correlaciones | v0.3–0.5 | 3–4 meses |
 | **7. Análisis** | Predicción de prestaciones (Euler y Casey/Robinson), flujo meridional potencial 2D, álabe a álabe 1D/2D, velocidades sobre el álabe, informe | v0.6 | 4–6 sem |

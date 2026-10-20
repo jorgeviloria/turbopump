@@ -4,9 +4,11 @@ Turbopump es una aplicación libre y multiplataforma (Windows, macOS y Linux), e
 Rust, para el diseño preliminar e interactivo de turbomáquinas: bombas, ventiladores,
 compresores y turbinas.
 
-> **Estado:** Fase 3: dimensiones principales, geometría y sólidos CAD (STEP, IGES, STL)
-> de rodetes de bomba centrífuga. Por ahora no hay interfaz gráfica.
-> La hoja de ruta completa está en [PLAN.md](PLAN.md).
+> **Estado:** Fase 4, versión 0.1: diseño completo del rodete de una bomba centrífuga,
+> desde el punto de diseño hasta los sólidos CAD (STEP, IGES, STL), con interfaz gráfica
+> y línea de comandos. La hoja de ruta completa está en [PLAN.md](PLAN.md).
+
+![Editor de Turbopump](docs/img/editor.jpg)
 
 ## Qué hay ahora
 
@@ -20,6 +22,7 @@ compresores y turbinas.
 | [`tp-cad`](crates/tp-cad) | Sólidos del rodete y del dominio fluido con Open CASCADE, y exportación STEP, IGES y STL |
 | [`tp-project`](crates/tp-project) | Modelo de proyecto, parámetros automáticos o manuales, componentes y sus reglas, pasos de diseño, archivo `.tpj` y deshacer/rehacer |
 | [`tp-cli`](crates/tp-cli) | Ejecutable `turbopump` para la línea de comandos |
+| [`tp-gui`](crates/tp-gui) | Ejecutable `turbopump-gui`: editor gráfico con egui y vista 3D con wgpu |
 
 ## Compilar y probar
 
@@ -37,11 +40,55 @@ cargo build -p tp-cli --no-default-features
 ```
 
 ```bash
+cargo build -p tp-gui --no-default-features
+```
+
+```bash
 cargo build --release
 ```
 
 ```bash
 cargo test --workspace
+```
+
+## Interfaz gráfica
+
+```bash
+cargo run --release -p tp-gui
+```
+
+También abre un proyecto existente:
+
+```bash
+cargo run --release -p tp-gui -- bomba.tpj
+```
+
+Arranca con una bomba de 100 m³/h, 32 m y 2900 rpm. El trabajo sigue los pasos de diseño
+del rodete:
+
+- **Árbol del proyecto** (izquierda): configuración global y pasos de cada componente,
+  con su estado: pendiente (○), hecho (⏺) o desactualizado (⟲) porque cambió un dato
+  anterior.
+- **Panel del paso** (derecha): los datos del paso seleccionado. Cada valor es
+  automático (propuesto por una correlación) o manual. *Accept step* marca el paso como
+  hecho y pasa al siguiente.
+- **Vistas** (centro, acoplables):
+  - vista meridional, donde los puntos de control de Bézier, el borde de ataque y la
+    longitud axial se arrastran con el ratón;
+  - gráficas del álabe (β, θ y espesor);
+  - vista frontal;
+  - vista 3D;
+  - informe con las mismas cifras que la línea de comandos.
+- **Edición:** todo se puede deshacer y rehacer (Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z). Un
+  arrastre completo cuenta como un solo paso.
+- **Exportación** (menú *File ▸ Export*): puntos, malla STL, dibujos SVG y sólidos CAD
+  STEP, IGES o STL, que se construyen en segundo plano.
+
+Las pruebas de la interfaz usan [kittest](https://github.com/rerun-io/kittest) y no
+necesitan GPU. Las capturas con wgpu se generan a mano en `target/screenshots/`:
+
+```bash
+cargo test -p tp-gui --test screenshots -- --ignored
 ```
 
 ## Ejemplos de uso
