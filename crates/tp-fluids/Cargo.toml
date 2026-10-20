@@ -1,0 +1,27 @@
+[package]
+name = "tp-fluids"
+description = "Working-fluid properties for Turbopump: built-in water model and CoolProp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[features]
+default = ["coolprop"]
+# Real-fluid properties through the CoolProp shared library, loaded at run time.
+# Without the library the program still runs, with the built-in water model.
+coolprop = ["dep:libloading"]
+
+[dependencies]
+libloading = { workspace = true, optional = true }
+thiserror.workspace = true
+
+[dev-dependencies]
+approx.workspace = true
+# Only for tests and the `coolprop_path` example: supplies a CoolProp shared library
+# built for the host platform (MIT licence), so CI can test the CoolProp path.
+coolprop-sys.workspace = true
+
+[lints]
+workspace = true
