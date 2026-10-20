@@ -3,6 +3,7 @@
 
 use eframe::egui::{self, Grid, RichText, Ui};
 use tp_design::impeller::BladeLoading;
+use tp_design::impeller::loading::blade_velocities;
 use tp_design::pump::{InletSection, correlations as corr};
 use tp_design::volute::{AreaLaw, SectionShape};
 use tp_project::{ComponentId, Project};
@@ -321,6 +322,90 @@ pub(crate) fn show(
                 }
             });
         warnings(ui, &g.warnings);
+
+        heading(ui, "Blade velocities");
+        ui.weak("Relative velocity on the faces over u₂, with the flow following the blades.");
+        let velocities = blade_velocities(g);
+        let u2 = velocities.outlet_speed;
+        Grid::new("report_velocities")
+            .num_columns(5)
+            .striped(true)
+            .show(ui, |ui| {
+                for h in ["span", "w_SS max", "w_PS min", "w_LE (mean)", "w_TE (mean)"] {
+                    ui.label(RichText::new(h).strong());
+                }
+                ui.end_row();
+                for v in &velocities.sections {
+                    let max = v.suction.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+                    let min = v.pressure.iter().copied().fold(f64::INFINITY, f64::min);
+                    ui.label(format!("{:.2}", v.span));
+                    ui.label(format!("{:.3}", max / u2));
+                    ui.label(format!("{:.3}", min / u2));
+                    ui.label(format!("{:.3}", v.mean[0] / u2));
+                    ui.label(format!("{:.3}", v.mean[v.mean.len() - 1] / u2));
+                    ui.end_row();
+                }
+            });
+        warnings(ui, &velocities.warnings);
+
+        heading(ui, "Predicted characteristic");
+        match &results.performance {
+            Ok(c) => {
+                let q = c.design.flow;
+                Grid::new("report_performance")
+                    .num_columns(2)
+                    .striped(true)
+                    .show(ui, |ui| {
+                        value_row(
+                            ui,
+                            "Best efficiency",
+                            format!(
+                                "{} ({:.0} % of design) · {} · η {:.3}",
+                                s(VolumeFlow, c.best.flow),
+                                100.0 * c.best.flow / q,
+                                s(Head, c.best.head),
+                                c.best.efficiency
+                            ),
+                        );
+                        value_row(
+                            ui,
+                            "Shut-off head",
+                            format!(
+                                "{} (ψ₀ {:.3}, Gülich eqs. 3.27–3.28)",
+                                s(Head, c.shutoff_head),
+                                c.shutoff_coefficient
+                            ),
+                        );
+                        value_row(
+                            ui,
+                            "Shut-off power",
+                            format!("{} (estimate)", s(Power, c.shutoff_power)),
+                        );
+                        value_row(
+                            ui,
+                            "Recirculation below",
+                            format!(
+                                "{} ({:.0} % of design)",
+                                s(VolumeFlow, c.recirculation_flow),
+                                100.0 * c.recirculation_flow / q
+                            ),
+                        );
+                        value_row(
+                            ui,
+                            "Largest flow",
+                            format!(
+                                "{} ({:.0} % of design)",
+                                s(VolumeFlow, c.max_flow),
+                                100.0 * c.max_flow / q
+                            ),
+                        );
+                    });
+                warnings(ui, &c.warnings);
+            }
+            Err(e) => {
+                ui.colored_label(ui.visuals().error_fg_color, e);
+            }
+        }
 
         if let Some(stator) = stator {
             diffuser(ui, project, derived, stator, units);

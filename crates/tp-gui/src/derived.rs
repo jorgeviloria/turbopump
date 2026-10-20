@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 
 use tp_design::diffuser::DiffuserDesign;
 use tp_design::impeller::ImpellerGeometry;
+use tp_design::performance::PumpPerformance;
 use tp_design::pump::CentrifugalPumpDesign;
 use tp_design::volute::VoluteGeometry;
 use tp_fluids::LiquidProperties;
@@ -14,6 +15,8 @@ use tp_project::{ComponentId, ComponentKind, Project};
 pub struct ImpellerResults {
     pub main: Result<CentrifugalPumpDesign, String>,
     pub geometry: Result<ImpellerGeometry, String>,
+    /// Predicted characteristic with the automatic settings.
+    pub performance: Result<PumpPerformance, String>,
 }
 
 /// Everything the views show that is computed from the project.
@@ -52,7 +55,21 @@ impl Derived {
                         .map_err(|e| e.to_string()),
                     Err(_) => Err("the main dimensions could not be computed".into()),
                 };
-                (id, ImpellerResults { main, geometry })
+                let performance = match &main {
+                    Ok(_) => project
+                        .performance_input(id)
+                        .and_then(|input| project.compute_performance(id, &input))
+                        .map_err(|e| e.to_string()),
+                    Err(_) => Err("the main dimensions could not be computed".into()),
+                };
+                (
+                    id,
+                    ImpellerResults {
+                        main,
+                        geometry,
+                        performance,
+                    },
+                )
             })
             .collect();
         self.volutes = project
@@ -128,6 +145,7 @@ mod tests {
         let id = project.components()[0].id();
         assert!(derived.main(id).is_some());
         assert!(derived.geometry(id).is_some());
+        assert!(derived.impeller(id).unwrap().performance.is_ok());
 
         project.info.name = "Changed".into();
         assert!(derived.update(&project));
