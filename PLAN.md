@@ -153,7 +153,7 @@ Todas son libres salvo REFPROP, que es opcional:
 |---|---|---|
 | **Open CASCADE (OCCT)** | Kernel CAD: superficies B-spline, sólidos, cosido, booleanas, redondeos, STEP/IGES | El mismo OCCT, a través de bindings `cxx` (base: `opencascade-rs`). `truck` (100 % Rust) queda como alternativa futura |
 | **netgen** | Mallas tetraédricas | El mismo netgen, mediante FFI a `nglib` generada con `bindgen` |
-| **CoolProp** | Propiedades de fluidos reales | El mismo CoolProp, con el crate `rfluids` o FFI a su API en C |
+| **CoolProp** | Propiedades de fluidos reales | El mismo CoolProp, cargado al ejecutar con un cargador propio (`libloading` sobre su API en C). Si falta, el agua usa un modelo IAPWS propio |
 | **AMD AOCL** (BLAS/LAPACK) | Álgebra lineal | `faer` / `nalgebra`, en Rust puro. Así evitamos una dependencia nativa y funciona también en ARM (Mac M) |
 | REFPROP (opcional) | Fluidos NIST | Backend de REFPROP dentro de CoolProp, si el usuario lo tiene instalado |
 
@@ -241,7 +241,7 @@ resto de máquinas.
 | Fase | Contenido | Entregable | Duración |
 |---|---|---|---|
 | **0. Base** ✅ | Workspace, CI en los 3 sistemas, licencia, `tp-units`, `tp-math` (Bézier/B-spline), modelo de proyecto, serialización, undo/redo | Repositorio que compila y pasa tests en Win/Mac/Linux | Hecha |
-| **1. Diseño 1D de bomba centrífuga** | Configuración global, fluidos (CoolProp), dimensiones principales, triángulos de velocidad, Cordier, slip, eficiencias, eje | CLI que calcula las dimensiones principales y coincide con los ejemplos de Gülich | 4–6 sem |
+| **1. Diseño 1D de bomba centrífuga** ✅ | Configuración global, fluidos (CoolProp), dimensiones principales, triángulos de velocidad, Cordier, slip, eficiencias, eje | CLI que calcula las dimensiones principales. Hecha; quedan por verificar varios coeficientes de Gülich | Hecha |
 | **2. Geometría del rodete** | Contorno meridional, flujo meridional, propiedades del álabe, líneas medias (mapeo conforme y β), espesores, bordes, superficies 3D en puntos | Nube de puntos 3D del álabe; export geo-txt y TurboGrid | 6–8 sem |
 | **3. CAD con OCCT** | Bindings, superficies B-spline, sólido del rodete y del dominio fluido, STEP/IGES/STL, teselación | El rodete se abre en FreeCAD y SolidWorks | 4–6 sem |
 | **4. GUI MVP** (en paralelo con 2–3) | Ventana, árbol, pasos, diálogos, diagramas con Bézier arrastrables, visor 3D | **v0.1: diseño completo de un rodete de bomba centrífuga, exportable a STEP** | 6–8 sem |
