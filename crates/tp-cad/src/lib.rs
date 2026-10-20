@@ -6,10 +6,12 @@
 //! IGES writers; volumes are reported in m³.
 
 mod bridge;
+mod diffuser;
 mod impeller;
 mod occ;
 mod volute;
 
+pub use diffuser::{DiffuserCad, build_diffuser};
 pub use impeller::{CadOptions, ImpellerCad, build_impeller};
 pub use occ::{Shape, read_step, write_iges, write_step, write_stl};
 pub use volute::{VoluteCad, build_volute};

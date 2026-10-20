@@ -5,6 +5,7 @@
 
 use std::f64::consts::PI;
 
+use tp_design::diffuser::DiffuserDesign;
 use tp_design::impeller::ImpellerGeometry;
 use tp_design::volute::VoluteGeometry;
 use tp_math::{DVec2, DVec3};
@@ -169,6 +170,47 @@ pub fn volute_triangles(g: &VoluteGeometry) -> Vec<Triangle> {
     out
 }
 
+/// A radial diffuser split by part: the two side walls and the vanes.
+#[derive(Debug, Clone, Default)]
+pub struct DiffuserMesh {
+    pub walls: Vec<Triangle>,
+    pub vanes: Vec<Triangle>,
+}
+
+/// Side walls from the impeller outlet to d₄ and, for a vaned diffuser, the vanes
+/// standing between them.
+pub fn diffuser_parts(d: &DiffuserDesign) -> DiffuserMesh {
+    let r2 = d.impeller_diameter / 2.0;
+    let r4 = d.outlet_diameter / 2.0;
+    let zm = d.midplane;
+    let radii: Vec<f64> = (0..=WALL_POINTS)
+        .map(|i| r2 + (r4 - r2) * i as f64 / WALL_POINTS as f64)
+        .collect();
+    let mut walls = Vec::new();
+    for side in [-1.0, 1.0] {
+        let curve: Vec<DVec2> = radii
+            .iter()
+            .map(|&r| DVec2::new(zm + side * d.half_width(r), r))
+            .collect();
+        revolve(&mut walls, &curve);
+    }
+    let mut vanes = Vec::new();
+    if let Some(v) = &d.vanes {
+        for k in 0..v.count {
+            let outline = v.geometry.outline(k, d.rotation_sign);
+            let n = outline.len();
+            for i in 0..n {
+                let (a, b) = (outline[i], outline[(i + 1) % n]);
+                let at = |p: DVec2, side: f64| {
+                    DVec3::new(p.x, p.y, zm + side * d.half_width(p.length()))
+                };
+                quad(&mut vanes, at(a, -1.0), at(b, -1.0), at(b, 1.0), at(a, 1.0));
+            }
+        }
+    }
+    DiffuserMesh { walls, vanes }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -248,6 +290,38 @@ pub(crate) mod tests {
             .sum();
         assert!(volume.abs() > spiral, "{volume} vs spiral {spiral}");
         assert!(volume.abs() < 1.6 * spiral);
+    }
+
+    #[test]
+    fn diffuser_mesh_has_walls_and_vanes() {
+        use tp_design::diffuser::DiffuserInput;
+        use tp_design::outlet::ImpellerOutlet;
+        let outlet = ImpellerOutlet {
+            flow: 100.0 / 3600.0,
+            impeller_diameter: 0.172,
+            impeller_width: 0.0174,
+            cu: 13.27,
+            cm: 3.03,
+            nq: 35.9,
+            stage_head: 32.0,
+            density: 998.2,
+            midplane: 0.0378,
+            rotation_sign: 1.0,
+            impeller_blades: 7,
+        };
+        let vaned = DiffuserDesign::new(&outlet, &DiffuserInput::default(), true).unwrap();
+        let mesh = diffuser_parts(&vaned);
+        assert!(!mesh.walls.is_empty() && !mesh.vanes.is_empty());
+        // The blunt trailing edge reaches past d₄ by part of its thickness.
+        let reach = vaned.outlet_diameter / 2.0 + vaned.vanes.as_ref().unwrap().trailing_thickness;
+        for t in mesh.walls.iter().chain(&mesh.vanes) {
+            for p in t {
+                assert!(p.truncate().length() <= reach);
+                assert!((p.z - 0.0378).abs() <= vaned.half_width(0.1) * 1.01 + 1e-9);
+            }
+        }
+        let vaneless = DiffuserDesign::new(&outlet, &DiffuserInput::default(), false).unwrap();
+        assert!(diffuser_parts(&vaneless).vanes.is_empty());
     }
 
     #[test]
