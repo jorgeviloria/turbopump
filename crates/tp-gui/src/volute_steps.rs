@@ -8,6 +8,7 @@ use tp_project::{ComponentId, DesignStep, Project};
 use tp_units::QuantityKind;
 
 use crate::app::EditCtx;
+use crate::i18n::{tf, tr};
 use crate::steps::{grid, section};
 use crate::widgets::{param_f64, param_u32, value_row};
 
@@ -69,17 +70,17 @@ fn setup(
     let units = cx.units();
     let g = cx.derived.volute(id);
     let d = g.map(|g| &g.design);
-    ui.weak(
+    ui.weak(tr(
         "The volute collects the flow of the impeller before it: Q, d₂, b₂ and c₂u come from \
          there. Gülich 2nd ed., Chap. 7.8.",
-    );
-    section(ui, "Main dimensions");
+    ));
+    section(ui, tr("Main dimensions"));
     grid("volute_setup").show(ui, |ui| {
         let flow_factor = g.map(|g| g.design.flow / g.basis.flow);
         param_f64(
             ui,
-            "Flow factor Q_Le/Q",
-            "Allowance for leakage that flows through the volute (eq. T7.7.1)",
+            tr("Flow factor Q_Le/Q"),
+            tr("Allowance for leakage that flows through the volute (eq. T7.7.1)"),
             &mut input.setup.flow_factor,
             Dimensionless,
             flow_factor,
@@ -88,8 +89,8 @@ fn setup(
         );
         param_f64(
             ui,
-            "Cutwater diameter d_z",
-            "Base circle; automatic: the smallest gap of Gülich Table 10.2",
+            tr("Cutwater diameter d_z"),
+            tr("Base circle; automatic: the smallest gap of Gülich Table 10.2"),
             &mut input.setup.cutwater_diameter,
             Length,
             d.map(|d| d.cutwater_diameter),
@@ -98,8 +99,8 @@ fn setup(
         );
         param_f64(
             ui,
-            "Inlet width b₃",
-            "Width of the volute at the base circle; b₃/b₂ from 2.0 at low nq to 1.2",
+            tr("Inlet width b₃"),
+            tr("Width of the volute at the base circle; b₃/b₂ from 2.0 at low nq to 1.2"),
             &mut input.setup.inlet_width,
             Length,
             d.map(|d| d.inlet_width),
@@ -108,8 +109,8 @@ fn setup(
         );
         param_f64(
             ui,
-            "Cutwater thickness e₃",
-            "Nose of the cutwater; about 0.02·d₂ (Gülich Chap. 7.8.1)",
+            tr("Cutwater thickness e₃"),
+            tr("Nose of the cutwater; about 0.02·d₂ (Gülich Chap. 7.8.1)"),
             &mut input.setup.cutwater_thickness,
             Length,
             d.map(|d| d.cutwater_thickness),
@@ -119,26 +120,32 @@ fn setup(
     });
     if let Some(g) = g {
         let d = &g.design;
-        section(ui, "Results");
+        section(ui, tr("Results"));
         Grid::new("volute_setup_results")
             .num_columns(2)
             .show(ui, |ui| {
-                value_row(ui, "Design flow Q_Le", units.show(VolumeFlow, d.flow));
+                value_row(ui, tr("Design flow Q_Le"), units.show(VolumeFlow, d.flow));
                 value_row(
                     ui,
-                    "d_z/d₂",
-                    format!(
-                        "{:.3} (minimum {:.3}, Table 10.2)",
-                        d.cutwater_diameter / g.basis.impeller_diameter,
-                        d.min_cutwater_diameter / g.basis.impeller_diameter
+                    tr("d_z/d₂"),
+                    tf(
+                        "{} (minimum {}, Table 10.2)",
+                        &[
+                            &format!("{:.3}", d.cutwater_diameter / g.basis.impeller_diameter),
+                            &format!("{:.3}", d.min_cutwater_diameter / g.basis.impeller_diameter),
+                        ],
                     ),
                 );
                 value_row(
                     ui,
-                    "Stagnation radius r'_z",
+                    tr("Stagnation radius r'_z"),
                     units.show(Length, d.stagnation_radius),
                 );
-                value_row(ui, "c₂u of the impeller", units.show(Velocity, g.basis.cu));
+                value_row(
+                    ui,
+                    tr("c₂u of the impeller"),
+                    units.show(Velocity, g.basis.cu),
+                );
             });
     }
     "edit volute setup"
@@ -152,14 +159,16 @@ fn cross_section(
 ) -> &'static str {
     let units = cx.units();
     let angle_unit = units.get(QuantityKind::Angle).symbol;
-    ui.weak("Flat sections with B/H = 2 to 3 lose least (Gülich p. 414).");
-    section(ui, "Shape");
+    ui.weak(tr(
+        "Flat sections with B/H = 2 to 3 lose least (Gülich p. 414).",
+    ));
+    section(ui, tr("Shape"));
     Grid::new("volute_shape")
         .num_columns(2)
         .spacing([10.0, 4.0])
         .show(ui, |ui| {
             let shape = &mut input.cross_section.shape;
-            ui.label("Cross section");
+            ui.label(tr("Cross section"));
             let name = match shape {
                 SectionShape::Rectangular => "rectangular",
                 SectionShape::Trapezoidal { .. } => "trapezoidal",
@@ -169,13 +178,13 @@ fn cross_section(
                 .selected_text(name)
                 .show_ui(ui, |ui| {
                     if ui
-                        .selectable_label(name == "rectangular", "rectangular")
+                        .selectable_label(name == tr("rectangular"), tr("rectangular"))
                         .clicked()
                     {
                         *shape = SectionShape::Rectangular;
                     }
                     if ui
-                        .selectable_label(name == "trapezoidal", "trapezoidal")
+                        .selectable_label(name == tr("trapezoidal"), tr("trapezoidal"))
                         .clicked()
                         && name != "trapezoidal"
                     {
@@ -184,7 +193,7 @@ fn cross_section(
                         };
                     }
                     if ui
-                        .selectable_label(name == "circular", "circular")
+                        .selectable_label(name == tr("circular"), tr("circular"))
                         .clicked()
                     {
                         *shape = SectionShape::Circular;
@@ -192,8 +201,8 @@ fn cross_section(
                 });
             ui.end_row();
             if let SectionShape::Trapezoidal { flank_angle } = shape {
-                ui.label("Flank angle δ")
-                    .on_hover_text("Angle of the side walls from the radial plane");
+                ui.label(tr("Flank angle δ"))
+                    .on_hover_text(tr("Angle of the side walls from the radial plane"));
                 let mut shown = units.to_display(QuantityKind::Angle, *flank_angle);
                 let max = units.to_display(QuantityKind::Angle, 60f64.to_radians());
                 if ui
@@ -213,23 +222,23 @@ fn cross_section(
         });
     if let Some(g) = cx.derived.volute(id) {
         let d = &g.design;
-        section(ui, "Throat");
+        section(ui, tr("Throat"));
         Grid::new("volute_shape_results")
             .num_columns(2)
             .show(ui, |ui| {
                 value_row(
                     ui,
-                    "Height",
+                    tr("Height"),
                     units.show(QuantityKind::Length, d.throat.height),
                 );
                 value_row(
                     ui,
-                    "Width over height B/H",
-                    format!("{:.2} (2 to 3)", d.throat_aspect),
+                    tr("Width over height B/H"),
+                    tf("{} (2 to 3)", &[&format!("{:.2}", d.throat_aspect)]),
                 );
                 value_row(
                     ui,
-                    "Area A₃q",
+                    tr("Area A₃q"),
                     units.show(QuantityKind::Area, d.throat.area),
                 );
             });
@@ -246,21 +255,23 @@ fn spiral(
     use QuantityKind::*;
     let units = cx.units();
     let g = cx.derived.volute(id);
-    ui.weak("Below nq = 30 the sections grow linearly (constant velocity), above it they keep c_u·r constant.");
-    section(ui, "Area law");
+    ui.weak(tr("Below nq = 30 the sections grow linearly (constant velocity), above it they keep c_u·r constant."));
+    section(ui, tr("Area law"));
     Grid::new("volute_law")
         .num_columns(2)
         .spacing([10.0, 4.0])
         .show(ui, |ui| {
-            ui.label("Law");
+            ui.label(tr("Law"));
             let resolved = g.map(|g| g.design.law);
-            let text = |law: AreaLaw| match law {
-                AreaLaw::Auto => "automatic",
-                AreaLaw::AngularMomentum => "angular momentum",
-                AreaLaw::ConstantVelocity => "constant velocity",
+            let text = |law: AreaLaw| {
+                tr(match law {
+                    AreaLaw::Auto => "automatic",
+                    AreaLaw::AngularMomentum => "angular momentum",
+                    AreaLaw::ConstantVelocity => "constant velocity",
+                })
             };
             let selected = match (input.spiral.law, resolved) {
-                (AreaLaw::Auto, Some(law)) => format!("automatic: {}", text(law)),
+                (AreaLaw::Auto, Some(law)) => tf("automatic: {}", &[&text(law)]),
                 (law, _) => text(law).to_owned(),
             };
             ComboBox::from_id_salt("volute_law")
@@ -275,16 +286,17 @@ fn spiral(
                     }
                 });
             ui.end_row();
-            ui.label("Cutwater correction")
-                .on_hover_text("Enlarge the throat for the blockage of the cutwater (eq. 7.28)");
+            ui.label(tr("Cutwater correction")).on_hover_text(tr(
+                "Enlarge the throat for the blockage of the cutwater (eq. 7.28)",
+            ));
             ui.checkbox(&mut input.spiral.cutwater_correction, "");
             ui.end_row();
         });
     grid("volute_sections").show(ui, |ui| {
         param_u32(
             ui,
-            "Sections",
-            "Cross sections from the start of the spiral to the throat",
+            tr("Sections"),
+            tr("Cross sections from the start of the spiral to the throat"),
             &mut input.spiral.sections,
             g.map(|g| g.sections.len() as u32 - 1),
             4..=180,
@@ -292,30 +304,37 @@ fn spiral(
     });
     if let Some(g) = g {
         let d = &g.design;
-        section(ui, "Throat");
+        section(ui, tr("Throat"));
         Grid::new("volute_spiral_results")
             .num_columns(2)
             .show(ui, |ui| {
-                value_row(ui, "Area A₃q", units.show(Area, d.throat.area));
+                value_row(ui, tr("Area A₃q"), units.show(Area, d.throat.area));
                 value_row(
                     ui,
-                    "Outer radius r_a",
+                    tr("Outer radius r_a"),
                     units.show(Length, d.throat.outer_radius),
                 );
                 value_row(
                     ui,
-                    "Cutwater correction Δa₃",
+                    tr("Cutwater correction Δa₃"),
                     units.show(Length, d.throat_correction),
                 );
-                value_row(ui, "Velocity c₃q", units.show(Velocity, d.throat_velocity));
                 value_row(
                     ui,
-                    "c₃q/c₂",
-                    format!("{:.2} (not much below 0.8, Table 10.2)", d.deceleration),
+                    tr("Velocity c₃q"),
+                    units.show(Velocity, d.throat_velocity),
                 );
-                value_row(ui, "Spiral starts at", units.show(Angle, g.start_angle));
+                value_row(
+                    ui,
+                    tr("c₃q/c₂"),
+                    tf(
+                        "{} (not much below 0.8, Table 10.2)",
+                        &[&format!("{:.2}", d.deceleration)],
+                    ),
+                );
+                value_row(ui, tr("Spiral starts at"), units.show(Angle, g.start_angle));
             });
-        section(ui, "Area along the spiral");
+        section(ui, tr("Area along the spiral"));
         let area_scale = units.to_display(Area, 1.0);
         let points: PlotPoints = g
             .sections
@@ -328,7 +347,7 @@ fn spiral(
             .y_axis_label(format!("A [{}]", units.get(Area).symbol))
             .allow_scroll(false)
             .show(ui, |plot| {
-                plot.line(Line::new("area", points).width(2.0));
+                plot.line(Line::new(tr("area"), points).width(2.0));
             });
     }
     "edit volute spiral"
@@ -344,13 +363,13 @@ fn diffuser(
     let units = cx.units();
     let g = cx.derived.volute(id);
     let dif = g.map(|g| &g.design.diffuser);
-    ui.weak("Straight conical diffuser from the throat to the discharge nozzle, checked against the allowable opening angle (Gülich eqs. 1.44, 1.45).");
-    section(ui, "Discharge diffuser");
+    ui.weak(tr("Straight conical diffuser from the throat to the discharge nozzle, checked against the allowable opening angle (Gülich eqs. 1.44, 1.45)."));
+    section(ui, tr("Discharge diffuser"));
     grid("volute_diffuser").show(ui, |ui| {
         param_f64(
             ui,
-            "Length",
-            "Along the diffuser axis from the throat; automatic: four throat radii",
+            tr("Length"),
+            tr("Along the diffuser axis from the throat; automatic: four throat radii"),
             &mut input.diffuser.length,
             Length,
             dif.map(|d| d.length),
@@ -359,8 +378,8 @@ fn diffuser(
         );
         param_f64(
             ui,
-            "Outlet diameter",
-            "Automatic: 85 % of the allowable opening angle; no deceleration above nq = 80",
+            tr("Outlet diameter"),
+            tr("Automatic: 85 % of the allowable opening angle; no deceleration above nq = 80"),
             &mut input.diffuser.outlet_diameter,
             Length,
             dif.map(|d| d.outlet_diameter),
@@ -369,28 +388,30 @@ fn diffuser(
         );
     });
     if let Some(d) = dif {
-        section(ui, "Results");
+        section(ui, tr("Results"));
         Grid::new("volute_diffuser_results")
             .num_columns(2)
             .show(ui, |ui| {
-                value_row(ui, "Area ratio A_R", format!("{:.2}", d.area_ratio));
+                value_row(ui, tr("Area ratio A_R"), format!("{:.2}", d.area_ratio));
                 value_row(
                     ui,
-                    "Opening angle ϑ_eq",
-                    format!(
+                    tr("Opening angle ϑ_eq"),
+                    tf(
                         "{} (allowed {})",
-                        units.show(Angle, d.opening_angle),
-                        units.show(Angle, d.allowable_angle)
+                        &[
+                            &units.show(Angle, d.opening_angle),
+                            &units.show(Angle, d.allowable_angle),
+                        ],
                     ),
                 );
                 value_row(
                     ui,
-                    "Outlet velocity",
+                    tr("Outlet velocity"),
                     units.show(Velocity, d.outlet_velocity),
                 );
                 value_row(
                     ui,
-                    "Ideal pressure recovery c_p,id",
+                    tr("Ideal pressure recovery c_p,id"),
                     format!("{:.2}", d.ideal_pressure_recovery),
                 );
             });
@@ -407,14 +428,14 @@ fn cutwater(
     use QuantityKind::*;
     let units = cx.units();
     let g = cx.derived.volute(id);
-    ui.weak("The cutwater meets the flow leaving the impeller; its camber angle follows the flow angle plus a small incidence (Gülich eqs. T7.7.3 to T7.7.6).");
-    section(ui, "Cutwater");
+    ui.weak(tr("The cutwater meets the flow leaving the impeller; its camber angle follows the flow angle plus a small incidence (Gülich eqs. T7.7.3 to T7.7.6)."));
+    section(ui, tr("Cutwater"));
     grid("volute_cutwater").show(ui, |ui| {
         let incidence = input.cutwater.incidence.resolve(|| 0.0);
         param_f64(
             ui,
-            "Incidence i₃",
-            "Between the cutwater and the approaching flow, ±3°",
+            tr("Incidence i₃"),
+            tr("Between the cutwater and the approaching flow, ±3°"),
             &mut input.cutwater.incidence,
             Angle,
             Some(incidence),
@@ -424,22 +445,30 @@ fn cutwater(
     });
     if let Some(g) = g {
         let d = &g.design;
-        section(ui, "Results");
+        section(ui, tr("Results"));
         Grid::new("volute_cutwater_results")
             .num_columns(2)
             .show(ui, |ui| {
                 value_row(
                     ui,
-                    "Flow angle α₃'",
+                    tr("Flow angle α₃'"),
                     units.show(Angle, d.cutwater_flow_angle),
                 );
                 value_row(
                     ui,
-                    "Cutwater angle α₃B",
+                    tr("Cutwater angle α₃B"),
                     units.show(Angle, d.cutwater_angle),
                 );
-                value_row(ui, "Thickness e₃", units.show(Length, d.cutwater_thickness));
-                value_row(ui, "Diameter d_z", units.show(Length, d.cutwater_diameter));
+                value_row(
+                    ui,
+                    tr("Thickness e₃"),
+                    units.show(Length, d.cutwater_thickness),
+                );
+                value_row(
+                    ui,
+                    tr("Diameter d_z"),
+                    units.show(Length, d.cutwater_diameter),
+                );
             });
     }
     "edit volute cutwater"
@@ -453,13 +482,13 @@ fn wall(
 ) -> &'static str {
     let units = cx.units();
     let g = cx.derived.volute(id);
-    ui.weak("Casing wall around the flow domain.");
-    section(ui, "Wall");
+    ui.weak(tr("Casing wall around the flow domain."));
+    section(ui, tr("Wall"));
     grid("volute_wall").show(ui, |ui| {
         param_f64(
             ui,
-            "Wall thickness",
-            "Automatic: 3 % of d₂, at least 6 mm",
+            tr("Wall thickness"),
+            tr("Automatic: 3 % of d₂, at least 6 mm"),
             &mut input.wall.thickness,
             QuantityKind::Length,
             g.map(|g| g.design.wall_thickness),

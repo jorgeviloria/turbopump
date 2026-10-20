@@ -5,6 +5,7 @@
 
 use std::ops::RangeInclusive;
 
+use crate::i18n::tr;
 use eframe::egui::{self, DragValue, Ui};
 use tp_design::Param;
 use tp_units::{DisplayUnits, QuantityKind, decimals_for};
@@ -139,10 +140,10 @@ fn auto_toggle<T: Copy>(
     manual_start: impl FnOnce() -> T,
 ) -> bool {
     let mut auto = param.is_auto();
-    let response = ui.checkbox(&mut auto, "auto").on_hover_text(
+    let response = ui.checkbox(&mut auto, tr("auto")).on_hover_text(tr(
         "Automatic: the program proposes the value from a correlation and updates it when \
          earlier inputs change. Clear it to fix your own value.",
-    );
+    ));
     if response.changed() {
         *param = if auto {
             Param::Auto
@@ -166,7 +167,7 @@ pub fn value_row(ui: &mut Ui, label: &str, value: impl Into<egui::WidgetText>) {
 pub fn manual_tag<T>(param: &Param<T>) -> &'static str {
     match param {
         Param::Auto => "",
-        Param::Manual(_) => " (manual)",
+        Param::Manual(_) => tr(" (manual)"),
     }
 }
 

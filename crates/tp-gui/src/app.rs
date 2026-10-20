@@ -15,6 +15,7 @@ use tp_units::{DisplayUnits, QuantityKind};
 
 use crate::derived::Derived;
 use crate::export::{self, Exports};
+use crate::i18n::{self, Language, message, tf, tr};
 use crate::messages::{self, Message};
 use crate::ribbon::{Command, Ribbon, RibbonCx};
 use crate::steps::AcceptState;
@@ -66,7 +67,7 @@ impl EditCtx<'_> {
         match self.doc.edit_gesture(label, edit) {
             Ok(()) => true,
             Err(e) => {
-                self.error(format!("{label}: {e}"));
+                self.error(format!("{}: {}", message(label), message(&e.to_string())));
                 false
             }
         }
@@ -119,26 +120,26 @@ impl View {
     ];
 
     pub fn title(self) -> &'static str {
-        match self {
+        tr(match self {
             View::Meridional => "Meridional view",
             View::Blade => "Blade",
             View::FrontView => "Front view",
             View::View3d => "3D view",
             View::Performance => "Performance curves",
             View::Report => "Report",
-        }
+        })
     }
 
     /// Name under a toolbar button.
     pub fn short_title(self) -> &'static str {
-        match self {
+        tr(match self {
             View::Meridional => "Meridional",
             View::Blade => "Blade",
             View::FrontView => "Front",
             View::View3d => "3D",
             View::Performance => "Curves",
             View::Report => "Report",
-        }
+        })
     }
 
     pub fn icon(self) -> &'static str {
@@ -150,6 +151,22 @@ impl View {
             View::Performance => icon::CHART_LINE,
             View::Report => icon::TABLE,
         }
+    }
+}
+
+/// Key of the language in the stored preferences.
+const LANGUAGE_KEY: &str = "language";
+
+/// Spanish if the system speaks it, else English.
+fn system_language() -> Language {
+    let spanish = ["LC_ALL", "LC_MESSAGES", "LANG"]
+        .iter()
+        .filter_map(|k| std::env::var(k).ok())
+        .any(|v| v.starts_with("es"));
+    if spanish {
+        Language::Spanish
+    } else {
+        Language::English
     }
 }
 
@@ -169,7 +186,7 @@ fn folded_strip(ui: &mut Ui, rect: egui::Rect, p: &Palette) -> bool {
             egui::Id::new("properties_strip"),
             egui::Sense::click(),
         )
-        .on_hover_text("Show the properties");
+        .on_hover_text(tr("Show the properties"));
     if response.hovered() {
         ui.painter().rect_filled(rect, 8, p.hover);
     }
@@ -182,7 +199,7 @@ fn folded_strip(ui: &mut Ui, rect: egui::Rect, p: &Palette) -> bool {
         p.text,
     );
     let galley = painter.layout_no_wrap(
-        format!("{}  Properties", icon::SLIDERS_HORIZONTAL),
+        format!("{}  {}", icon::SLIDERS_HORIZONTAL, tr("Properties")),
         egui::FontId::proportional(13.0),
         p.text,
     );
@@ -193,7 +210,7 @@ fn folded_strip(ui: &mut Ui, rect: egui::Rect, p: &Palette) -> bool {
             .with_angle(-std::f32::consts::FRAC_PI_2),
     );
     response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Show the properties")
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tr("Show the properties"))
     });
     response.clicked()
 }
@@ -249,7 +266,7 @@ struct NewProjectForm {
 impl Default for NewProjectForm {
     fn default() -> Self {
         Self {
-            name: "Untitled".into(),
+            name: tr("Untitled").into(),
             flow: 100.0 / 3600.0,
             head: 32.0,
             speed: 2900.0 * std::f64::consts::PI / 30.0,
@@ -301,6 +318,8 @@ pub struct TurbopumpApp {
     follow_step: bool,
     /// Whether the tree panel is open.
     tree_open: bool,
+    /// Language of the interface, kept between sessions.
+    language: Language,
     /// Width of the open properties panel, set by dragging its edge.
     sidebar_width: f32,
     meridional: MeridionalView,
@@ -335,6 +354,14 @@ impl TurbopumpApp {
         theme::install(&cc.egui_ctx);
         let mut app = Self::with_document(Document::new(default_project()));
         app.styled = true;
+        // The stored choice, else the system's language. Without storage (tests), English.
+        if let Some(storage) = cc.storage {
+            app.language = storage
+                .get_string(LANGUAGE_KEY)
+                .and_then(|code| Language::from_code(&code))
+                .unwrap_or_else(system_language);
+        }
+        i18n::set(app.language);
         if let Some(path) = path {
             app.open_path(path);
         }
@@ -352,6 +379,7 @@ impl TurbopumpApp {
             followed: None,
             follow_step: true,
             tree_open: true,
+            language: Language::English,
             sidebar_width: SIDEBAR_WIDTH,
             meridional: MeridionalView::default(),
             performance: PerformanceView::default(),
@@ -403,6 +431,7 @@ impl TurbopumpApp {
             ctx.request_discard("installing the fonts");
             return;
         }
+        i18n::set(self.language);
         self.handle_shortcuts(&ctx);
         self.handle_close_request(&ctx);
         self.derived.update(self.doc.project());
@@ -444,6 +473,7 @@ impl TurbopumpApp {
                     sidebar_open: self.sidebar_open,
                     messages_open: self.show_messages,
                     follow_step: self.follow_step,
+                    language: self.language,
                 };
                 command = self.ribbon.show(ui, &mut cx);
             });
@@ -461,11 +491,11 @@ impl TurbopumpApp {
                 .size_range(70.0..=420.0)
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(theme::bold("Messages"));
+                        ui.label(theme::bold(tr("Messages")));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui
                                 .add(Button::new(icon::X).frame(false))
-                                .on_hover_text("Close")
+                                .on_hover_text(tr("Close"))
                                 .clicked()
                             {
                                 self.show_messages = false;
@@ -502,8 +532,14 @@ impl TurbopumpApp {
                 ui.add_space(6.0);
                 ui.columns(2, |columns| {
                     let tabs = [
-                        (LeftTab::Design, format!("{}  Design", icon::TREE_STRUCTURE)),
-                        (LeftTab::Model, format!("{}  3D model", icon::CUBE)),
+                        (
+                            LeftTab::Design,
+                            format!("{}  {}", icon::TREE_STRUCTURE, tr("Design")),
+                        ),
+                        (
+                            LeftTab::Model,
+                            format!("{}  {}", icon::CUBE, tr("3D model")),
+                        ),
                     ];
                     for (ui, (tab, label)) in columns.iter_mut().zip(tabs) {
                         let button = Button::selectable(self.left == tab, label)
@@ -549,7 +585,9 @@ impl TurbopumpApp {
             };
             let Some(id) = active else {
                 ui.centered_and_justified(|ui| {
-                    ui.weak("Add an impeller to see its geometry (Home > Components).");
+                    ui.weak(tr(
+                        "Add an impeller to see its geometry (Home > Components).",
+                    ));
                 });
                 return;
             };
@@ -639,9 +677,9 @@ impl TurbopumpApp {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
                     let tip = if self.tree_open {
-                        "Hide the tree"
+                        tr("Hide the tree")
                     } else {
-                        "Show the tree"
+                        tr("Show the tree")
                     };
                     if ui
                         .add(Button::selectable(
@@ -666,10 +704,10 @@ impl TurbopumpApp {
                         }
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let text = format!("{}  Properties", icon::SLIDERS_HORIZONTAL);
+                        let text = format!("{}  {}", icon::SLIDERS_HORIZONTAL, tr("Properties"));
                         if ui
                             .add(Button::selectable(self.sidebar_open, text))
-                            .on_hover_text("Show or hide the dialog of the selected step")
+                            .on_hover_text(tr("Show or hide the dialog of the selected step"))
                             .clicked()
                         {
                             self.sidebar_open = !self.sidebar_open;
@@ -750,7 +788,7 @@ impl TurbopumpApp {
                                     |ui| {
                                         if ui
                                             .add(Button::new(icon::CARET_RIGHT).frame(false))
-                                            .on_hover_text("Fold the properties")
+                                            .on_hover_text(tr("Fold the properties"))
                                             .clicked()
                                         {
                                             toggle = true;
@@ -801,7 +839,7 @@ impl TurbopumpApp {
                 } else {
                     DisplayUnits::si()
                 };
-                self.edit_ctx().edit("change units", |p| {
+                self.edit_ctx().edit(tr("change units"), |p| {
                     p.display_units = preset;
                     Ok(())
                 });
@@ -840,6 +878,10 @@ impl TurbopumpApp {
             Command::ToggleMessages => self.show_messages = !self.show_messages,
             Command::FollowStep => self.follow_step = !self.follow_step,
             Command::Theme(preference) => ctx.set_theme(preference),
+            Command::Language(language) => {
+                self.language = language;
+                i18n::set(language);
+            }
             Command::About => self.dialog = Some(Dialog::About),
             Command::Documentation => ctx.open_url(egui::OpenUrl::new_tab(PROJECT_PAGE)),
         }
@@ -847,7 +889,7 @@ impl TurbopumpApp {
 
     fn report_export(&mut self, result: Result<Option<PathBuf>, String>) {
         match result {
-            Ok(Some(path)) => self.info(format!("Wrote {}", path.display())),
+            Ok(Some(path)) => self.info(tf("Wrote {}", &[&path.display()])),
             Ok(None) => {}
             Err(e) => self.error(e),
         }
@@ -939,13 +981,13 @@ impl TurbopumpApp {
 
     fn update_title(&mut self, ctx: &egui::Context) {
         let file = self.doc.path().and_then(|p| p.file_name()).map_or_else(
-            || "not saved".to_owned(),
+            || tr("not saved").to_owned(),
             |n| n.to_string_lossy().into_owned(),
         );
         let dirty = if self.doc.is_dirty() { " •" } else { "" };
         let title = format!(
             "{} ({file}){dirty} — Turbopump",
-            self.doc.project().info.name
+            i18n::project_name(&self.doc.project().info.name)
         );
         if title != self.title {
             ctx.send_viewport_cmd(ViewportCommand::Title(title.clone()));
@@ -992,15 +1034,15 @@ impl TurbopumpApp {
 
     fn undo(&mut self) {
         match self.doc.undo() {
-            Some(label) => self.info(format!("Undid: {label}")),
-            None => self.info("Nothing to undo"),
+            Some(label) => self.info(tf("Undid: {}", &[&message(&label)])),
+            None => self.info(tr("Nothing to undo")),
         }
     }
 
     fn redo(&mut self) {
         match self.doc.redo() {
-            Some(label) => self.info(format!("Redid: {label}")),
-            None => self.info("Nothing to redo"),
+            Some(label) => self.info(tf("Redid: {}", &[&message(&label)])),
+            None => self.info(tr("Nothing to redo")),
         }
     }
 
@@ -1032,7 +1074,7 @@ impl TurbopumpApp {
             Pending::New(project) => {
                 self.doc = Document::new(*project);
                 self.select_first_step();
-                self.info("New project");
+                self.info(tr("New project"));
             }
             Pending::Open(path) => self.open_path(&path),
             Pending::Quit => self.allow_close = true,
@@ -1044,15 +1086,18 @@ impl TurbopumpApp {
             Ok(doc) => {
                 self.doc = doc;
                 self.select_first_step();
-                self.info(format!("Opened {}", path.display()));
+                self.info(tf("Opened {}", &[&path.display()]));
             }
-            Err(e) => self.error(format!("Could not open {}: {e}", path.display())),
+            Err(e) => self.error(tf(
+                "Could not open {}: {}",
+                &[&path.display(), &message(&e.to_string())],
+            )),
         }
     }
 
     fn open_dialog(&mut self) {
         if let Some(path) = rfd::FileDialog::new()
-            .add_filter("Turbopump project", &[tp_project::FILE_EXTENSION])
+            .add_filter(tr("Turbopump project"), &[tp_project::FILE_EXTENSION])
             .pick_file()
         {
             self.request(Pending::Open(path));
@@ -1068,11 +1113,11 @@ impl TurbopumpApp {
         match self.doc.save() {
             Ok(()) => {
                 let path = self.doc.path().map(|p| p.display().to_string());
-                self.info(format!("Saved {}", path.unwrap_or_default()));
+                self.info(tf("Saved {}", &[&path.unwrap_or_default()]));
                 true
             }
             Err(e) => {
-                self.error(format!("Could not save: {e}"));
+                self.error(tf("Could not save: {}", &[&message(&e.to_string())]));
                 false
             }
         }
@@ -1085,7 +1130,7 @@ impl TurbopumpApp {
             tp_project::FILE_EXTENSION
         );
         let Some(path) = rfd::FileDialog::new()
-            .add_filter("Turbopump project", &[tp_project::FILE_EXTENSION])
+            .add_filter(tr("Turbopump project"), &[tp_project::FILE_EXTENSION])
             .set_file_name(name)
             .save_file()
         else {
@@ -1093,11 +1138,11 @@ impl TurbopumpApp {
         };
         match self.doc.save_as(&path) {
             Ok(()) => {
-                self.info(format!("Saved {}", path.display()));
+                self.info(tf("Saved {}", &[&path.display()]));
                 true
             }
             Err(e) => {
-                self.error(format!("Could not save: {e}"));
+                self.error(tf("Could not save: {}", &[&message(&e.to_string())]));
                 false
             }
         }
@@ -1110,20 +1155,21 @@ impl TurbopumpApp {
                 Some(Status { text, error: true }) => {
                     ui.colored_label(
                         ui.visuals().error_fg_color,
-                        format!("{}  {text}", icon::X_CIRCLE),
+                        format!("{}  {}", icon::X_CIRCLE, message(text)),
                     );
                 }
                 Some(Status { text, .. }) => {
-                    ui.label(format!("{}  {text}", icon::INFO));
+                    ui.label(format!("{}  {}", icon::INFO, message(text)));
                 }
                 None => {
-                    ui.label(RichText::new("Ready").color(p.weak));
+                    ui.label(RichText::new(tr("Ready")).color(p.weak));
                 }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let (errors, warnings) = messages::count(all_messages);
                 let text = if errors + warnings == 0 {
-                    RichText::new(format!("{}  No problems", icon::CHECK_CIRCLE)).color(p.done)
+                    RichText::new(format!("{}  {}", icon::CHECK_CIRCLE, tr("No problems")))
+                        .color(p.done)
                 } else {
                     let color = if errors > 0 {
                         ui.visuals().error_fg_color
@@ -1139,34 +1185,34 @@ impl TurbopumpApp {
                 };
                 if ui
                     .add(Button::selectable(self.show_messages, text))
-                    .on_hover_text("Show every error and warning of the project")
+                    .on_hover_text(tr("Show every error and warning of the project"))
                     .clicked()
                 {
                     self.show_messages = !self.show_messages;
                 }
                 ui.separator();
                 let units = if self.doc.project().display_units == DisplayUnits::us() {
-                    "US units"
+                    tr("US units")
                 } else {
-                    "SI units"
+                    tr("SI units")
                 };
                 ui.label(RichText::new(units).color(p.weak));
                 ui.separator();
                 let source = match &self.derived.liquid {
                     Some(Ok(l)) => match l.source {
-                        tp_fluids::PropertySource::CoolProp => "fluid properties: CoolProp",
+                        tp_fluids::PropertySource::CoolProp => tr("fluid properties: CoolProp"),
                         tp_fluids::PropertySource::BuiltinWater => {
-                            "fluid properties: built-in water model"
+                            tr("fluid properties: built-in water model")
                         }
                     },
-                    Some(Err(_)) => "fluid properties: unavailable",
+                    Some(Err(_)) => tr("fluid properties: unavailable"),
                     None => "",
                 };
                 ui.label(RichText::new(source).color(p.weak));
                 if self.exports.cad_running() {
                     ui.separator();
                     ui.spinner();
-                    ui.label("Building CAD solids…");
+                    ui.label(tr("Building CAD solids…"));
                 }
             });
         });
@@ -1182,16 +1228,16 @@ impl TurbopumpApp {
                 let mut create = false;
                 let mut cancel = false;
                 let response = Modal::new(egui::Id::new("new_project")).show(ctx, |ui| {
-                    ui.heading("New pump project");
+                    ui.heading(tr("New pump project"));
                     ui.add_space(6.0);
                     egui::Grid::new("new_project_grid")
                         .num_columns(2)
                         .spacing([12.0, 6.0])
                         .show(ui, |ui| {
-                            ui.label("Name");
+                            ui.label(tr("Name"));
                             ui.text_edit_singleline(&mut form.name);
                             ui.end_row();
-                            ui.label("Flow rate Q");
+                            ui.label(tr("Flow rate Q"));
                             widgets::quantity(
                                 ui,
                                 &mut form.flow,
@@ -1200,7 +1246,7 @@ impl TurbopumpApp {
                                 1e-5..=100.0,
                             );
                             ui.end_row();
-                            ui.label("Head H");
+                            ui.label(tr("Head H"));
                             widgets::quantity(
                                 ui,
                                 &mut form.head,
@@ -1209,7 +1255,7 @@ impl TurbopumpApp {
                                 0.1..=5000.0,
                             );
                             ui.end_row();
-                            ui.label("Speed n");
+                            ui.label(tr("Speed n"));
                             widgets::quantity(
                                 ui,
                                 &mut form.speed,
@@ -1218,19 +1264,19 @@ impl TurbopumpApp {
                                 1.0..=10_000.0,
                             );
                             ui.end_row();
-                            ui.label("Fluid");
+                            ui.label(tr("Fluid"));
                             ui.text_edit_singleline(&mut form.fluid);
                             ui.end_row();
-                            ui.label("Casing");
-                            ui.checkbox(&mut form.volute, "volute after the impeller");
+                            ui.label(tr("Casing"));
+                            ui.checkbox(&mut form.volute, tr("volute after the impeller"));
                             ui.end_row();
                         });
                     ui.add_space(4.0);
-                    ui.weak("Other machine types arrive in phase 6.");
+                    ui.weak(tr("Other machine types arrive in phase 6."));
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
-                        create = ui.button("Create").clicked();
-                        cancel = ui.button("Cancel").clicked();
+                        create = ui.button(tr("Create")).clicked();
+                        cancel = ui.button(tr("Cancel")).clicked();
                     });
                 });
                 if create {
@@ -1240,7 +1286,7 @@ impl TurbopumpApp {
                             None
                         }
                         Err(e) => {
-                            self.error(format!("Invalid project: {e}"));
+                            self.error(tf("Invalid project: {}", &[&message(&e.to_string())]));
                             Some(Dialog::NewProject(form))
                         }
                     }
@@ -1254,17 +1300,17 @@ impl TurbopumpApp {
                 let mut choice = None;
                 let name = self.doc.project().info.name.clone();
                 let response = Modal::new(egui::Id::new("confirm_discard")).show(ctx, |ui| {
-                    ui.heading("Unsaved changes");
-                    ui.label(format!("Save the changes to \"{name}\" first?"));
+                    ui.heading(tr("Unsaved changes"));
+                    ui.label(tf("Save the changes to \"{}\" first?", &[&name]));
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
-                        if ui.button("Save").clicked() {
+                        if ui.button(tr("Save")).clicked() {
                             choice = Some(Choice::Save);
                         }
-                        if ui.button("Don't save").clicked() {
+                        if ui.button(tr("Don't save")).clicked() {
                             choice = Some(Choice::Discard);
                         }
-                        if ui.button("Cancel").clicked() {
+                        if ui.button(tr("Cancel")).clicked() {
                             choice = Some(Choice::Cancel);
                         }
                     });
@@ -1287,12 +1333,12 @@ impl TurbopumpApp {
             }
             Dialog::About => {
                 let response = Modal::new(egui::Id::new("about")).show(ctx, |ui| {
-                    ui.heading("Turbopump");
-                    ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
-                    ui.label("Open-source preliminary design of turbomachinery.");
-                    ui.label("License: MIT OR Apache-2.0");
+                    ui.heading(tr("Turbopump"));
+                    ui.label(tf("Version {}", &[&env!("CARGO_PKG_VERSION")]));
+                    ui.label(tr("Open-source preliminary design of turbomachinery."));
+                    ui.label(tr("License: MIT OR Apache-2.0"));
                     ui.add_space(6.0);
-                    ui.button("Close").clicked()
+                    ui.button(tr("Close")).clicked()
                 });
                 (!response.inner && !response.should_close()).then_some(Dialog::About)
             }
@@ -1321,6 +1367,10 @@ impl eframe::App for TurbopumpApp {
     fn ui(&mut self, ui: &mut Ui, frame: &mut eframe::Frame) {
         let render_state = frame.wgpu_render_state().cloned();
         self.show(ui, render_state.as_ref());
+    }
+
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        storage.set_string(LANGUAGE_KEY, self.language.code().to_owned());
     }
 }
 

@@ -162,3 +162,29 @@ fn properties_folded() {
     harness.run();
     save(&mut harness, "properties-folded");
 }
+
+/// The interface in Spanish: the step editor, the report and the curves.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn spanish() {
+    let mut harness = harness(egui::Theme::Light);
+    harness.get_by_label("View tab").click();
+    harness.run();
+    harness.get_by_label_contains("Español").click();
+    harness.run();
+    harness.get_by_label_contains("Aceptar paso").click();
+    harness.run();
+    harness.remove_cursor();
+    harness.run();
+    save(&mut harness, "es-main");
+    for (view, name) in [
+        (View::Report, "es-report"),
+        (View::Performance, "es-curves"),
+        (View::Meridional, "es-meridional"),
+        (View::View3d, "es-3d"),
+    ] {
+        harness.state_mut().focus_view(view);
+        harness.run();
+        save(&mut harness, name);
+    }
+}

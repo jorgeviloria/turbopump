@@ -17,6 +17,7 @@ use tp_units::{DisplayUnits, QuantityKind};
 
 use crate::app::{EditCtx, Selection};
 use crate::derived::Derived;
+use crate::i18n::{component_name, tf, tr};
 use crate::icons;
 use crate::messages::{self, Severity};
 use crate::theme::{Palette, bold, icon};
@@ -51,13 +52,15 @@ pub(crate) fn is_available(kind: ComponentKind, step: DesignStep) -> bool {
 pub(crate) fn planned_phase(kind: ComponentKind, step: DesignStep) -> String {
     match (kind, step) {
         (ComponentKind::Impeller, DesignStep::CfdSetup) => {
-            "CFD setup is planned for phase 8 (meshing and CFD).".into()
+            tr("CFD setup is planned for phase 8 (meshing and CFD).").into()
         }
         (ComponentKind::Impeller, DesignStep::ModelFinishing) => {
-            "Model finishing (fillets, trimming, balance holes) is planned for phase 9.".into()
+            tr("Model finishing (fillets, trimming, balance holes) is planned for phase 9.").into()
         }
-        (_, DesignStep::CfdSetup) => "CFD setup is planned for phase 8 (meshing and CFD).".into(),
-        (_, DesignStep::ModelFinishing) => "Model finishing is planned for phase 9.".into(),
+        (_, DesignStep::CfdSetup) => {
+            tr("CFD setup is planned for phase 8 (meshing and CFD).").into()
+        }
+        (_, DesignStep::ModelFinishing) => tr("Model finishing is planned for phase 9.").into(),
         _ => String::new(),
     }
 }
@@ -77,10 +80,15 @@ fn can_accept(kind: ComponentKind, step: DesignStep) -> bool {
 /// Title of the dialog for `selection`: icon, component and step.
 pub(crate) fn title(project: &Project, selection: Selection) -> String {
     match selection {
-        Selection::Setup => format!("{}  Global setup", icon::GEAR),
+        Selection::Setup => format!("{}  {}", icon::GEAR, tr("Global setup")),
         Selection::Step(id, step) => {
             let name = project.component(id).map_or("", |c| c.name.as_str());
-            format!("{}  {name} · {}", icons::step(step), step_title(step))
+            format!(
+                "{}  {} · {}",
+                icons::step(step),
+                component_name(name),
+                step_title(step)
+            )
         }
     }
 }
@@ -98,8 +106,10 @@ pub(crate) fn footer(ui: &mut Ui, cx: &mut EditCtx<'_>) {
     let p = Palette::of(ui);
     let Selection::Step(id, step) = *cx.selection else {
         ui.label(
-            RichText::new("Shared by every component. Changing it makes every step outdated.")
-                .color(p.weak),
+            RichText::new(tr(
+                "Shared by every component. Changing it makes every step outdated.",
+            ))
+            .color(p.weak),
         );
         return;
     };
@@ -107,24 +117,78 @@ pub(crate) fn footer(ui: &mut Ui, cx: &mut EditCtx<'_>) {
     let Some(kind) = project.component(id).map(|c| c.kind()) else {
         return;
     };
-    ui.horizontal(|ui| {
-        buttons(ui, cx, &project, id, step);
-        let (back, next) = neighbours(kind, step);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let next_button = egui::Button::new(format!("Next {}", icon::CARET_RIGHT));
-            if ui.add_enabled(next.is_some(), next_button).clicked()
-                && let Some(next) = next
-            {
-                *cx.selection = Selection::Step(id, next);
+    let (back, next) = neighbours(kind, step);
+    let mut target = None;
+    // Back and next go on the right of the same row when they fit, else on a row of
+    // their own, so a long label never draws over them.
+    let fits = ui
+        .horizontal(|ui| {
+            buttons(ui, cx, &project, id, step);
+            let fits = ui.available_width() >= navigation_width(ui);
+            if fits {
+                target = navigation(ui, back, next);
             }
-            let back_button = egui::Button::new(format!("{} Back", icon::CARET_LEFT));
-            if ui.add_enabled(back.is_some(), back_button).clicked()
-                && let Some(back) = back
-            {
-                *cx.selection = Selection::Step(id, back);
-            }
-        });
-    });
+            fits
+        })
+        .inner;
+    if !fits {
+        ui.horizontal(|ui| target = navigation(ui, back, next));
+    }
+    if let Some(target) = target {
+        *cx.selection = Selection::Step(id, target);
+    }
+}
+
+fn next_text() -> String {
+    format!("{} {}", tr("Next"), icon::CARET_RIGHT)
+}
+
+fn back_text() -> String {
+    format!("{} {}", icon::CARET_LEFT, tr("Back"))
+}
+
+/// Width the back and next buttons take.
+fn navigation_width(ui: &Ui) -> f32 {
+    let text_width = |text: String| {
+        egui::WidgetText::from(text)
+            .into_galley(
+                ui,
+                Some(egui::TextWrapMode::Extend),
+                f32::INFINITY,
+                egui::TextStyle::Button,
+            )
+            .size()
+            .x
+    };
+    let spacing = ui.spacing();
+    text_width(next_text())
+        + text_width(back_text())
+        + 4.0 * spacing.button_padding.x
+        + 2.0 * spacing.item_spacing.x
+}
+
+/// The back and next buttons, right-aligned. Returns the step clicked.
+fn navigation(
+    ui: &mut Ui,
+    back: Option<DesignStep>,
+    next: Option<DesignStep>,
+) -> Option<DesignStep> {
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        let next_clicked = ui
+            .add_enabled(next.is_some(), egui::Button::new(next_text()))
+            .clicked();
+        let back_clicked = ui
+            .add_enabled(back.is_some(), egui::Button::new(back_text()))
+            .clicked();
+        if next_clicked {
+            next
+        } else if back_clicked {
+            back
+        } else {
+            None
+        }
+    })
+    .inner
 }
 
 /// Heading of a group of inputs, with a rule after it.
@@ -220,7 +284,7 @@ pub(crate) fn accept(cx: &mut EditCtx<'_>, id: ComponentId, step: DesignStep) {
         .edit(&format!("accept {step}"), |p| p.design_step(id, step))
     {
         Ok(()) => {
-            cx.info(format!("{} accepted", step_title(step)));
+            cx.info(tf("{} accepted", &[&step_title(step)]));
             if let (_, Some(next)) = neighbours(kind, step) {
                 *cx.selection = Selection::Step(id, next);
             }
@@ -260,17 +324,17 @@ fn setup(ui: &mut Ui, cx: &mut EditCtx<'_>) {
     egui::ScrollArea::vertical()
         .auto_shrink(false)
         .show(ui, |ui| {
-            section(ui, "Project");
+            section(ui, tr("Project"));
             let mut info = project.info.clone();
             let mut renamed = false;
             Grid::new("project_info").num_columns(2).show(ui, |ui| {
-                ui.label("Name");
+                ui.label(tr("Name"));
                 renamed |= ui.text_edit_singleline(&mut info.name).changed();
                 ui.end_row();
-                ui.label("Author");
+                ui.label(tr("Author"));
                 renamed |= ui.text_edit_singleline(&mut info.author).changed();
                 ui.end_row();
-                ui.label("Machine");
+                ui.label(tr("Machine"));
                 ui.label(project.machine().to_string());
                 ui.end_row();
             });
@@ -283,12 +347,12 @@ fn setup(ui: &mut Ui, cx: &mut EditCtx<'_>) {
 
             let mut setup = project.setup().clone();
             let mut changed = false;
-            section(ui, "Design point");
+            section(ui, tr("Design point"));
             Grid::new("design_point")
                 .num_columns(2)
                 .spacing([10.0, 4.0])
                 .show(ui, |ui| {
-                    ui.label("Flow rate");
+                    ui.label(tr("Flow rate"));
                     ui.horizontal(|ui| {
                         let (mut value, mass) = match setup.design_point.flow {
                             FlowRate::Volume(v) => (v, false),
@@ -302,10 +366,10 @@ fn setup(ui: &mut Ui, cx: &mut EditCtx<'_>) {
                         changed |= widgets::quantity(ui, &mut value, kind, &units, 1e-6..=1e5);
                         let mut is_mass = mass;
                         ComboBox::from_id_salt("flow_kind")
-                            .selected_text(if mass { "mass" } else { "volume" })
+                            .selected_text(tr(if mass { "mass" } else { "volume" }))
                             .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut is_mass, false, "volume");
-                                ui.selectable_value(&mut is_mass, true, "mass");
+                                ui.selectable_value(&mut is_mass, false, tr("volume"));
+                                ui.selectable_value(&mut is_mass, true, tr("mass"));
                             });
                         let density = cx
                             .derived
@@ -327,7 +391,7 @@ fn setup(ui: &mut Ui, cx: &mut EditCtx<'_>) {
                     });
                     ui.end_row();
 
-                    ui.label("Energy");
+                    ui.label(tr("Energy"));
                     ui.horizontal(|ui| {
                         let (mut value, pressure) = match setup.design_point.energy {
                             EnergyTransfer::TotalPressureDifference(p) => (p, true),
@@ -341,10 +405,10 @@ fn setup(ui: &mut Ui, cx: &mut EditCtx<'_>) {
                         changed |= widgets::quantity(ui, &mut value, kind, &units, 1e-3..=1e9);
                         let mut is_pressure = pressure;
                         ComboBox::from_id_salt("energy_kind")
-                            .selected_text(if pressure { "pressure rise" } else { "head" })
+                            .selected_text(tr(if pressure { "pressure rise" } else { "head" }))
                             .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut is_pressure, false, "head");
-                                ui.selectable_value(&mut is_pressure, true, "pressure rise");
+                                ui.selectable_value(&mut is_pressure, false, tr("head"));
+                                ui.selectable_value(&mut is_pressure, true, tr("pressure rise"));
                             });
                         if is_pressure != pressure {
                             let rho_g = cx
@@ -369,7 +433,7 @@ fn setup(ui: &mut Ui, cx: &mut EditCtx<'_>) {
                     });
                     ui.end_row();
 
-                    ui.label("Rotational speed");
+                    ui.label(tr("Rotational speed"));
                     changed |= widgets::quantity(
                         ui,
                         &mut setup.design_point.speed,
@@ -379,36 +443,36 @@ fn setup(ui: &mut Ui, cx: &mut EditCtx<'_>) {
                     );
                     ui.end_row();
 
-                    ui.label("Rotation");
+                    ui.label(tr("Rotation"));
                     ui.horizontal(|ui| {
                         changed |= ui
-                            .radio_value(&mut setup.rotation, Rotation::Clockwise, "clockwise")
+                            .radio_value(&mut setup.rotation, Rotation::Clockwise, tr("clockwise"))
                             .changed();
                         changed |= ui
                             .radio_value(
                                 &mut setup.rotation,
                                 Rotation::CounterClockwise,
-                                "counter-clockwise",
+                                tr("counter-clockwise"),
                             )
                             .changed();
                     })
                     .response
-                    .on_hover_text("Seen from the inlet, looking downstream");
+                    .on_hover_text(tr("Seen from the inlet, looking downstream"));
                     ui.end_row();
                 });
 
-            section(ui, "Fluid and inlet conditions");
+            section(ui, tr("Fluid and inlet conditions"));
             Grid::new("fluid")
                 .num_columns(2)
                 .spacing([10.0, 4.0])
                 .show(ui, |ui| {
-                    ui.label("Fluid");
+                    ui.label(tr("Fluid"));
                     ui.horizontal(|ui| {
                         changed |= ui
                             .add(egui::TextEdit::singleline(&mut setup.fluid).desired_width(120.0))
                             .changed();
                         ComboBox::from_id_salt("common_fluids")
-                            .selected_text("common…")
+                            .selected_text(tr("common…"))
                             .show_ui(ui, |ui| {
                                 for name in COMMON_FLUIDS {
                                     if ui.selectable_label(setup.fluid == *name, *name).clicked() {
@@ -419,7 +483,7 @@ fn setup(ui: &mut Ui, cx: &mut EditCtx<'_>) {
                             });
                     });
                     ui.end_row();
-                    ui.label("Inlet total pressure");
+                    ui.label(tr("Inlet total pressure"));
                     changed |= widgets::quantity(
                         ui,
                         &mut setup.inlet.total_pressure,
@@ -428,7 +492,7 @@ fn setup(ui: &mut Ui, cx: &mut EditCtx<'_>) {
                         1.0..=1e9,
                     );
                     ui.end_row();
-                    ui.label("Inlet total temperature");
+                    ui.label(tr("Inlet total temperature"));
                     changed |= widgets::quantity(
                         ui,
                         &mut setup.inlet.total_temperature,
@@ -447,26 +511,26 @@ fn setup(ui: &mut Ui, cx: &mut EditCtx<'_>) {
                     Grid::new("liquid").num_columns(2).show(ui, |ui| {
                         value_row(
                             ui,
-                            "Density ρ",
+                            tr("Density ρ"),
                             units.show(QuantityKind::Density, l.density),
                         );
                         value_row(
                             ui,
-                            "Kinematic viscosity ν",
+                            tr("Kinematic viscosity ν"),
                             units.show(QuantityKind::KinematicViscosity, l.kinematic_viscosity()),
                         );
                         value_row(
                             ui,
-                            "Vapour pressure p_v",
+                            tr("Vapour pressure p_v"),
                             units.show(QuantityKind::Pressure, l.vapor_pressure),
                         );
                         let source = match l.source {
                             tp_fluids::PropertySource::CoolProp => "CoolProp",
                             tp_fluids::PropertySource::BuiltinWater => {
-                                "built-in water model (IAPWS)"
+                                tr("built-in water model (IAPWS)")
                             }
                         };
-                        value_row(ui, "Source", source);
+                        value_row(ui, tr("Source"), source);
                     });
                 }
                 Some(Err(e)) => {
@@ -475,7 +539,7 @@ fn setup(ui: &mut Ui, cx: &mut EditCtx<'_>) {
                 None => {}
             }
 
-            section(ui, "Units");
+            section(ui, tr("Units"));
             let presets = [("SI", DisplayUnits::si()), ("US", DisplayUnits::us())];
             ui.horizontal(|ui| {
                 for (label, preset) in presets {
@@ -566,7 +630,7 @@ fn buttons(
         return;
     }
     let ready = state == AcceptState::Ready;
-    let text = format!("{}  Accept step", icon::CHECK);
+    let text = format!("{}  {}", icon::CHECK, tr("Accept step"));
     let button = if ready {
         egui::Button::new(RichText::new(text).color(p.on_accent)).fill(p.accent)
     } else {
@@ -578,18 +642,21 @@ fn buttons(
     };
     if ui
         .add_enabled(ready, button)
-        .on_hover_text("Mark this step as done with the current values")
-        .on_disabled_hover_text(reason)
+        .on_hover_text(tr("Mark this step as done with the current values"))
+        .on_disabled_hover_text(tr(reason))
         .clicked()
     {
         accept(cx, id, step);
     }
     if ui
         .button(format!(
-            "{}  Reset to automatic",
-            icon::ARROW_COUNTER_CLOCKWISE
+            "{}  {}",
+            icon::ARROW_COUNTER_CLOCKWISE,
+            tr("Reset to automatic")
         ))
-        .on_hover_text("Return every value of this step to its automatic proposal")
+        .on_hover_text(tr(
+            "Return every value of this step to its automatic proposal",
+        ))
         .clicked()
     {
         reset(cx, project, id, step);
@@ -700,55 +767,55 @@ fn main_dimensions(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Com
     let d = design.as_ref();
     let mut changed = false;
 
-    ui.weak("One-dimensional design with Gülich's correlations. Values in automatic mode follow the design point.");
-    section(ui, "Impeller type");
+    ui.weak(tr("One-dimensional design with Gülich's correlations. Values in automatic mode follow the design point."));
+    section(ui, tr("Impeller type"));
     Grid::new("impeller_type").num_columns(2).show(ui, |ui| {
-        ui.label("Suction");
+        ui.label(tr("Suction"));
         ComboBox::from_id_salt("suction")
-            .selected_text(match input.suction {
+            .selected_text(tr(match input.suction {
                 Suction::Single => "single entry",
                 Suction::Double => "double entry",
-            })
+            }))
             .show_ui(ui, |ui| {
                 changed |= ui
-                    .selectable_value(&mut input.suction, Suction::Single, "single entry")
+                    .selectable_value(&mut input.suction, Suction::Single, tr("single entry"))
                     .changed();
                 changed |= ui
-                    .selectable_value(&mut input.suction, Suction::Double, "double entry")
+                    .selectable_value(&mut input.suction, Suction::Double, tr("double entry"))
                     .changed();
             });
         ui.end_row();
-        ui.label("Inlet design");
+        ui.label(tr("Inlet design"));
         ComboBox::from_id_salt("inlet_design")
-            .selected_text(match input.inlet_design {
+            .selected_text(tr(match input.inlet_design {
                 InletDesign::Normal => "normal impeller",
                 InletDesign::Suction => "suction impeller (low NPSH)",
-            })
+            }))
             .show_ui(ui, |ui| {
                 changed |= ui
                     .selectable_value(
                         &mut input.inlet_design,
                         InletDesign::Normal,
-                        "normal impeller",
+                        tr("normal impeller"),
                     )
                     .changed();
                 changed |= ui
                     .selectable_value(
                         &mut input.inlet_design,
                         InletDesign::Suction,
-                        "suction impeller (low NPSH)",
+                        tr("suction impeller (low NPSH)"),
                     )
                     .changed();
             });
         ui.end_row();
     });
 
-    section(ui, "Efficiencies");
+    section(ui, tr("Efficiencies"));
     grid("efficiencies").show(ui, |ui| {
         changed |= param_f64(
             ui,
-            "Hydraulic η_h",
-            "Gülich Table 3.9 (m = 0.08)",
+            tr("Hydraulic η_h"),
+            tr("Gülich Table 3.9 (m = 0.08)"),
             &mut input.hydraulic_efficiency,
             Dimensionless,
             d.map(|d| d.efficiencies.hydraulic),
@@ -757,8 +824,8 @@ fn main_dimensions(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Com
         );
         changed |= param_f64(
             ui,
-            "Volumetric η_v",
-            "Leakage through the seals",
+            tr("Volumetric η_v"),
+            tr("Leakage through the seals"),
             &mut input.volumetric_efficiency,
             Dimensionless,
             d.map(|d| d.efficiencies.volumetric),
@@ -767,8 +834,8 @@ fn main_dimensions(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Com
         );
         changed |= param_f64(
             ui,
-            "Overall η",
-            "Gülich Table 3.9 (m = 0.1)",
+            tr("Overall η"),
+            tr("Gülich Table 3.9 (m = 0.1)"),
             &mut input.overall_efficiency,
             Dimensionless,
             d.map(|d| d.efficiencies.overall),
@@ -777,12 +844,12 @@ fn main_dimensions(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Com
         );
     });
 
-    section(ui, "Dimensions");
+    section(ui, tr("Dimensions"));
     grid("dimensions").show(ui, |ui| {
         changed |= param_f64(
             ui,
-            "Pressure coefficient ψ",
-            "ψ = 2gH/u₂², Gülich eq. 3.26; ignored when d₂ is manual",
+            tr("Pressure coefficient ψ"),
+            tr("ψ = 2gH/u₂², Gülich eq. 3.26; ignored when d₂ is manual"),
             &mut input.pressure_coefficient,
             Dimensionless,
             d.map(|d| d.pressure_coefficient),
@@ -791,8 +858,8 @@ fn main_dimensions(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Com
         );
         changed |= param_f64(
             ui,
-            "Outlet diameter d₂",
-            "From ψ and the head",
+            tr("Outlet diameter d₂"),
+            tr("From ψ and the head"),
             &mut input.outlet_diameter,
             Length,
             d.map(|d| d.outlet_diameter),
@@ -801,8 +868,8 @@ fn main_dimensions(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Com
         );
         changed |= param_f64(
             ui,
-            "Outlet width b₂",
-            "Gülich eq. 7.1",
+            tr("Outlet width b₂"),
+            tr("Gülich eq. 7.1"),
             &mut input.outlet_width,
             Length,
             d.map(|d| d.outlet_width),
@@ -815,8 +882,8 @@ fn main_dimensions(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Com
         };
         changed |= param_f64(
             ui,
-            "Eye factor f_d1",
-            "d₁ over the eye diameter of minimum w₁ (Gülich Table 7.1)",
+            tr("Eye factor f_d1"),
+            tr("d₁ over the eye diameter of minimum w₁ (Gülich Table 7.1)"),
             &mut input.inlet_diameter_factor,
             Dimensionless,
             factor,
@@ -825,8 +892,8 @@ fn main_dimensions(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Com
         );
         changed |= param_f64(
             ui,
-            "Eye diameter d₁",
-            "Overrides the eye factor when manual",
+            tr("Eye diameter d₁"),
+            tr("Overrides the eye factor when manual"),
             &mut input.inlet_diameter,
             Length,
             d.map(|d| d.inlet_diameter),
@@ -835,8 +902,8 @@ fn main_dimensions(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Com
         );
         changed |= param_f64(
             ui,
-            "Hub diameter d_n",
-            "Hub diameter at the eye",
+            tr("Hub diameter d_n"),
+            tr("Hub diameter at the eye"),
             &mut input.hub_diameter,
             Length,
             d.map(|d| d.hub_diameter),
@@ -845,8 +912,8 @@ fn main_dimensions(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Com
         );
         changed |= param_f64(
             ui,
-            "Shaft diameter",
-            "From the torque and the allowable shear stress",
+            tr("Shaft diameter"),
+            tr("From the torque and the allowable shear stress"),
             &mut input.shaft_diameter,
             Length,
             d.map(|d| d.shaft_diameter),
@@ -858,8 +925,8 @@ fn main_dimensions(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Com
             .resolve(|| corr::SHAFT_SHEAR_STRESS);
         changed |= param_f64(
             ui,
-            "Shaft shear stress",
-            "Allowable torsional stress",
+            tr("Shaft shear stress"),
+            tr("Allowable torsional stress"),
             &mut input.shaft_shear_stress,
             Pressure,
             Some(tau),
@@ -868,16 +935,16 @@ fn main_dimensions(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Com
         );
         changed |= param_u32(
             ui,
-            "Blades z",
-            "5 to 7 (Gülich)",
+            tr("Blades z"),
+            tr("5 to 7 (Gülich)"),
             &mut input.blade_count,
             d.map(|d| d.blade_count),
             3..=12,
         );
         changed |= param_f64(
             ui,
-            "Blade thickness e",
-            "Normal thickness at inlet and outlet",
+            tr("Blade thickness e"),
+            tr("Normal thickness at inlet and outlet"),
             &mut input.blade_thickness,
             Length,
             d.map(|d| d.blade_thickness),
@@ -886,13 +953,13 @@ fn main_dimensions(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Com
         );
     });
 
-    section(ui, "Inlet and cavitation");
+    section(ui, tr("Inlet and cavitation"));
     grid("inlet").show(ui, |ui| {
         let incidence = input.incidence.resolve(|| 0.0);
         changed |= param_f64(
             ui,
-            "Incidence i",
-            "Between blade and inflow at the leading edge (0°–4°)",
+            tr("Incidence i"),
+            tr("Between blade and inflow at the leading edge (0°–4°)"),
             &mut input.incidence,
             Angle,
             Some(incidence),
@@ -904,8 +971,8 @@ fn main_dimensions(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Com
             .resolve(|| corr::SUCTION_SPECIFIC_SPEED);
         changed |= param_f64(
             ui,
-            "Suction specific speed nss",
-            "rpm, m³/s, m; sets NPSH3",
+            tr("Suction specific speed nss"),
+            tr("rpm, m³/s, m; sets NPSH3"),
             &mut input.suction_specific_speed,
             Dimensionless,
             Some(nss),
@@ -921,23 +988,27 @@ fn main_dimensions(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Com
     }
 
     if let Some(d) = d {
-        section(ui, "Results");
+        section(ui, tr("Results"));
         Grid::new("main_results").num_columns(2).show(ui, |ui| {
-            value_row(ui, "Specific speed nq", format!("{:.2}", d.nq));
-            value_row(ui, "Shaft power", units.show(Power, d.stage_power));
+            value_row(ui, tr("Specific speed nq"), format!("{:.2}", d.nq));
+            value_row(ui, tr("Shaft power"), units.show(Power, d.stage_power));
             value_row(
                 ui,
-                "Outlet blade angle β₂B",
+                tr("Outlet blade angle β₂B"),
                 units.show(Angle, d.outlet.blade_angle),
             );
             value_row(
                 ui,
-                "Inlet blade angle β₁B (mean)",
+                tr("Inlet blade angle β₁B (mean)"),
                 units.show(Angle, d.inlet_mean.blade_angle),
             );
-            value_row(ui, "Slip factor γ", format!("{:.3}", d.outlet.slip_factor));
-            value_row(ui, "NPSH3", units.show(Head, d.npsh_required));
-            value_row(ui, "NPSH available", units.show(Head, d.npsh_available));
+            value_row(
+                ui,
+                tr("Slip factor γ"),
+                format!("{:.3}", d.outlet.slip_factor),
+            );
+            value_row(ui, tr("NPSH3"), units.show(Head, d.npsh_required));
+            value_row(ui, tr("NPSH available"), units.show(Head, d.npsh_available));
         });
     }
 }
@@ -954,20 +1025,20 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
     let g = cx.derived.geometry(id);
     let m: &mut MeridionalInput = &mut input.meridional;
     let mut changed = false;
-    ui.weak("Hub and shroud are cubic Bézier curves. Drag their control points in the meridional view, or type the values here.");
-    section(ui, "Contour");
+    ui.weak(tr("Hub and shroud are cubic Bézier curves. Drag their control points in the meridional view, or type the values here."));
+    section(ui, tr("Contour"));
     grid("contour").show(ui, |ui| {
         changed |= param_f64(
             ui,
-            "Axial length L",
-            "From the inlet plane to the hub at the outlet; default b₂ + (d₁ − d_n)/2",
+            tr("Axial length L"),
+            tr("From the inlet plane to the hub at the outlet; default b₂ + (d₁ − d_n)/2"),
             &mut m.axial_length,
             Length,
             g.map(|g| g.contour.axial_length),
             &units,
             0.001..=5.0,
         );
-        let tangents: [(&str, &mut Param<f64>); 4] = [
+        let tangents: [(&'static str, &mut Param<f64>); 4] = [
             ("Hub inlet tangent", &mut m.hub_inlet_tangent),
             ("Hub outlet tangent", &mut m.hub_outlet_tangent),
             ("Shroud inlet tangent", &mut m.shroud_inlet_tangent),
@@ -976,8 +1047,8 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
         for (label, param) in tangents {
             changed |= param_f64(
                 ui,
-                label,
-                "Length of the Bézier tangent as a fraction of the distance to the corner",
+                tr(label),
+                tr("Length of the Bézier tangent as a fraction of the distance to the corner"),
                 param,
                 Dimensionless,
                 Some(DEFAULT_TANGENT),
@@ -986,12 +1057,12 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
             );
         }
     });
-    section(ui, "Leading edge");
+    section(ui, tr("Leading edge"));
     grid("leading_edge").show(ui, |ui| {
         changed |= param_f64(
             ui,
-            "On the hub",
-            "Fraction of the hub length",
+            tr("On the hub"),
+            tr("Fraction of the hub length"),
             &mut m.leading_edge_hub,
             Dimensionless,
             Some(g.map_or(DEFAULT_LEADING_EDGE_HUB, |g| g.contour.leading_edge.0)),
@@ -1000,8 +1071,8 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
         );
         changed |= param_f64(
             ui,
-            "On the shroud",
-            "Fraction of the shroud length",
+            tr("On the shroud"),
+            tr("Fraction of the shroud length"),
             &mut m.leading_edge_shroud,
             Dimensionless,
             Some(g.map_or(DEFAULT_LEADING_EDGE_SHROUD, |g| g.contour.leading_edge.1)),
@@ -1014,19 +1085,23 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
     }
     if let Some(g) = g {
         let qos = &g.channel.quasi_orthogonals;
-        section(ui, "Meridional flow");
+        section(ui, tr("Meridional flow"));
         Grid::new("meridional_results")
             .num_columns(2)
             .show(ui, |ui| {
-                value_row(ui, "Hub length", units.show(Length, g.contour.hub_length()));
                 value_row(
                     ui,
-                    "Shroud length",
+                    tr("Hub length"),
+                    units.show(Length, g.contour.hub_length()),
+                );
+                value_row(
+                    ui,
+                    tr("Shroud length"),
                     units.show(Length, g.contour.shroud_length()),
                 );
                 value_row(
                     ui,
-                    "c_m inlet / outlet",
+                    tr("c_m inlet / outlet"),
                     format!(
                         "{} / {}",
                         units.show(Velocity, qos[0].cm),
@@ -1035,7 +1110,7 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                 );
                 value_row(
                     ui,
-                    "Largest local rise of c_m",
+                    tr("Largest local rise of c_m"),
                     format!("{:.1} %", g.channel.max_cm_rise() * 100.0),
                 );
             });
@@ -1047,13 +1122,15 @@ fn blade_properties(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Co
     let mut input = project.impeller_geometry_input(id).unwrap_or_default();
     let g = cx.derived.geometry(id);
     let mut changed = false;
-    ui.weak("Blade sections are built on stream surfaces that split the flow into equal parts.");
-    section(ui, "Sections");
+    ui.weak(tr(
+        "Blade sections are built on stream surfaces that split the flow into equal parts.",
+    ));
+    section(ui, tr("Sections"));
     grid("properties").show(ui, |ui| {
         changed |= param_u32(
             ui,
-            "Spans",
-            "Blade sections from hub to shroud",
+            tr("Spans"),
+            tr("Blade sections from hub to shroud"),
             &mut input.properties.spans,
             Some(g.map_or(DEFAULT_SPANS, |g| g.blade.sections.len() as u32)),
             2..=21,
@@ -1063,18 +1140,22 @@ fn blade_properties(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Co
         edit_geometry(cx, id, "edit blade properties", input);
     }
     if let Some(g) = g {
-        section(ui, "Blade loading (Gülich eqs. 7.1.10–11)");
+        section(ui, tr("Blade loading (Gülich eqs. 7.1.10–11)"));
         let l = &g.blade_loading;
         Grid::new("loading").num_columns(2).show(ui, |ui| {
-            value_row(ui, "Blades z", g.blade.count.to_string());
+            value_row(ui, tr("Blades z"), g.blade.count.to_string());
             value_row(
                 ui,
-                "Outlet blade angle β₂B",
+                tr("Outlet blade angle β₂B"),
                 units.show(QuantityKind::Angle, g.blade.outlet_blade_angle),
             );
-            value_row(ui, "ξ_eff", format!("{:.3}", l.effective));
-            value_row(ui, "ξ_al", format!("{:.3}", l.allowable));
-            value_row(ui, "ξ_eff / ξ_al", format!("{:.2} (0.85–1.15)", l.ratio()));
+            value_row(ui, tr("ξ_eff"), format!("{:.3}", l.effective));
+            value_row(ui, tr("ξ_al"), format!("{:.3}", l.allowable));
+            value_row(
+                ui,
+                tr("ξ_eff / ξ_al"),
+                format!("{:.2} (0.85–1.15)", l.ratio()),
+            );
         });
     }
 }
@@ -1084,22 +1165,24 @@ fn mean_lines(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
     let mut input = project.impeller_geometry_input(id).unwrap_or_default();
     let g = cx.derived.geometry(id);
     let mut changed = false;
-    ui.weak("Conformal mapping dθ = dm/(r·tan β), stacked at the trailing edge.");
-    section(ui, "Blade angle distribution");
+    ui.weak(tr(
+        "Conformal mapping dθ = dm/(r·tan β), stacked at the trailing edge.",
+    ));
+    section(ui, tr("Blade angle distribution"));
     Grid::new("beta")
         .num_columns(2)
         .spacing([10.0, 4.0])
         .show(ui, |ui| {
-            ui.label("Distribution");
+            ui.label(tr("Distribution"));
             let smooth = matches!(input.mean_lines.beta, BetaDistribution::Smooth { .. });
             ComboBox::from_id_salt("beta_kind")
-                .selected_text(if smooth { "smooth (Bézier)" } else { "linear" })
+                .selected_text(tr(if smooth { "smooth (Bézier)" } else { "linear" }))
                 .show_ui(ui, |ui| {
-                    if ui.selectable_label(!smooth, "linear").clicked() && smooth {
+                    if ui.selectable_label(!smooth, tr("linear")).clicked() && smooth {
                         input.mean_lines.beta = BetaDistribution::Linear;
                         changed = true;
                     }
-                    if ui.selectable_label(smooth, "smooth (Bézier)").clicked() && !smooth {
+                    if ui.selectable_label(smooth, tr("smooth (Bézier)")).clicked() && !smooth {
                         input.mean_lines.beta = BetaDistribution::Smooth {
                             inlet: 0.3,
                             outlet: 0.3,
@@ -1109,26 +1192,26 @@ fn mean_lines(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                 });
             ui.end_row();
             if let BetaDistribution::Smooth { inlet, outlet } = &mut input.mean_lines.beta {
-                ui.label("Inlet hold")
-                    .on_hover_text("How long β stays near its inlet value");
+                ui.label(tr("Inlet hold"))
+                    .on_hover_text(tr("How long β stays near its inlet value"));
                 changed |= ui
                     .add(DragValue::new(inlet).range(0.0..=1.0).speed(0.005))
                     .changed();
                 ui.end_row();
-                ui.label("Outlet hold")
-                    .on_hover_text("How long β stays near its outlet value");
+                ui.label(tr("Outlet hold"))
+                    .on_hover_text(tr("How long β stays near its outlet value"));
                 changed |= ui
                     .add(DragValue::new(outlet).range(0.0..=1.0).speed(0.005))
                     .changed();
                 ui.end_row();
             }
         });
-    section(ui, "Resolution");
+    section(ui, tr("Resolution"));
     grid("points").show(ui, |ui| {
         changed |= param_u32(
             ui,
-            "Points per section",
-            "From leading to trailing edge",
+            tr("Points per section"),
+            tr("From leading to trailing edge"),
             &mut input.mean_lines.points,
             Some(g.map_or(DEFAULT_POINTS, |g| g.blade.sections[0].m.len() as u32)),
             11..=201,
@@ -1138,7 +1221,7 @@ fn mean_lines(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
         edit_geometry(cx, id, "edit blade mean lines", input);
     }
     if let Some(g) = g {
-        section(ui, "Sections");
+        section(ui, tr("Sections"));
         Grid::new("sections")
             .num_columns(4)
             .striped(true)
@@ -1163,14 +1246,14 @@ fn profiles(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: ComponentI
     let mut input = project.impeller_geometry_input(id).unwrap_or_default();
     let base = cx.derived.geometry(id).map(|g| g.basis.blade_thickness);
     let mut changed = false;
-    ui.weak("Normal thickness, varying linearly from leading to trailing edge before the edges are shaped.");
-    section(ui, "Thickness");
+    ui.weak(tr("Normal thickness, varying linearly from leading to trailing edge before the edges are shaped."));
+    section(ui, tr("Thickness"));
     grid("profiles").show(ui, |ui| {
         let leading = input.profiles.thickness_leading.manual_value().or(base);
         changed |= param_f64(
             ui,
-            "At the leading edge",
-            "Default: the blade thickness of the main dimensions",
+            tr("At the leading edge"),
+            tr("Default: the blade thickness of the main dimensions"),
             &mut input.profiles.thickness_leading,
             QuantityKind::Length,
             leading,
@@ -1180,8 +1263,8 @@ fn profiles(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: ComponentI
         let trailing = input.profiles.thickness_trailing.manual_value().or(base);
         changed |= param_f64(
             ui,
-            "At the trailing edge",
-            "Default: the blade thickness of the main dimensions",
+            tr("At the trailing edge"),
+            tr("Default: the blade thickness of the main dimensions"),
             &mut input.profiles.thickness_trailing,
             QuantityKind::Length,
             trailing,
@@ -1198,13 +1281,13 @@ fn edge_shape(ui: &mut Ui, salt: &str, shape: &mut EdgeShape) -> bool {
     let mut changed = false;
     let ellipse = matches!(shape, EdgeShape::Ellipse { .. });
     ComboBox::from_id_salt(salt)
-        .selected_text(if ellipse { "elliptic" } else { "blunt (cut)" })
+        .selected_text(tr(if ellipse { "elliptic" } else { "blunt (cut)" }))
         .show_ui(ui, |ui| {
-            if ui.selectable_label(ellipse, "elliptic").clicked() && !ellipse {
+            if ui.selectable_label(ellipse, tr("elliptic")).clicked() && !ellipse {
                 *shape = EdgeShape::Ellipse { ratio: 4.0 };
                 changed = true;
             }
-            if ui.selectable_label(!ellipse, "blunt (cut)").clicked() && ellipse {
+            if ui.selectable_label(!ellipse, tr("blunt (cut)")).clicked() && ellipse {
                 *shape = EdgeShape::Cut;
                 changed = true;
             }
@@ -1217,7 +1300,7 @@ fn edge_shape(ui: &mut Ui, salt: &str, shape: &mut EdgeShape) -> bool {
                     .speed(0.02)
                     .suffix(" : 1"),
             )
-            .on_hover_text("Length of the nose over the half thickness (1 = round)")
+            .on_hover_text(tr("Length of the nose over the half thickness (1 = round)"))
             .changed();
     } else {
         ui.label("");
@@ -1229,24 +1312,27 @@ fn edge_shape(ui: &mut Ui, salt: &str, shape: &mut EdgeShape) -> bool {
 fn edges(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: ComponentId) {
     let mut input = project.impeller_geometry_input(id).unwrap_or_default();
     let mut changed = false;
-    ui.weak(
+    ui.weak(tr(
         "A blunt trailing edge leaves material to under-file after casting (Gülich pp. 347–349).",
-    );
-    section(ui, "Edge shapes");
+    ));
+    section(ui, tr("Edge shapes"));
     grid("edges").show(ui, |ui| {
-        ui.label("Leading edge");
+        ui.label(tr("Leading edge"));
         changed |= edge_shape(ui, "leading_edge_shape", &mut input.edges.leading);
-        ui.label("Trailing edge");
+        ui.label(tr("Trailing edge"));
         changed |= edge_shape(ui, "trailing_edge_shape", &mut input.edges.trailing);
     });
     match input.edges.leading.min_pressure_coefficient() {
         Some(cp) => {
-            ui.label(format!(
-                "c_p,min of the leading edge at shockless entry: {cp:.2} (Gülich eq. 7.1a)"
+            ui.label(tf(
+                "c_p,min of the leading edge at shockless entry: {} (Gülich eq. 7.1a)",
+                &[&format!("{cp:.2}")],
             ));
         }
         None => {
-            ui.label("A blunt leading edge causes a strong local pressure drop.");
+            ui.label(tr(
+                "A blunt leading edge causes a strong local pressure drop.",
+            ));
         }
     }
     if changed {
@@ -1271,7 +1357,7 @@ fn model(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: ComponentId) 
         ComponentKind::Stator { vaned: false } => done(&VANELESS_STEPS),
         ComponentKind::Impeller => component.status(DesignStep::BladeEdges) == StepStatus::Done,
     };
-    ui.weak(match kind {
+    ui.weak(tr(match kind {
         ComponentKind::Volute => "CAD solid of the volute flow domain, built with Open CASCADE.",
         ComponentKind::Stator { .. } => {
             "CAD solids of the diffuser flow domain and vanes, built with Open CASCADE."
@@ -1279,27 +1365,29 @@ fn model(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: ComponentId) 
         ComponentKind::Impeller => {
             "CAD solids of the impeller and of its flow domain, built with Open CASCADE."
         }
-    });
+    }));
     ui.add_space(8.0);
     if !crate::export::CAD_AVAILABLE {
-        ui.label("This build has no CAD support (built without the `cad` feature).");
+        ui.label(tr(
+            "This build has no CAD support (built without the `cad` feature).",
+        ));
         return;
     }
     if !ready {
-        ui.label(if volute {
+        ui.label(tr(if volute {
             "Accept the volute steps up to the wall thickness before exporting."
         } else {
             "Accept the design steps before exporting."
-        });
+        }));
     }
     if ui
-        .add_enabled(ready, egui::Button::new("Export CAD solids…"))
+        .add_enabled(ready, egui::Button::new(tr("Export CAD solids…")))
         .clicked()
     {
         cx.exports.open_cad();
     }
     ui.add_space(8.0);
-    ui.weak("CFD setup and model finishing (fillets, trimming, balance holes) arrive in phases 8 and 9.");
+    ui.weak(tr("CFD setup and model finishing (fillets, trimming, balance holes) arrive in phases 8 and 9."));
 }
 
 #[cfg(test)]

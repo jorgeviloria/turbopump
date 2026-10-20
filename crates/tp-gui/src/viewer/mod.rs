@@ -18,6 +18,7 @@ use tp_project::ComponentId;
 use tp_units::{DisplayUnits, QuantityKind};
 
 use crate::derived::Derived;
+use crate::i18n::tr;
 use crate::theme::{Palette, icon};
 use crate::views::unavailable;
 use camera::Camera;
@@ -111,15 +112,18 @@ impl Viewer {
         let stator = stator.and_then(|s| derived.diffuser(s).map(|d| (s, d)));
         let volute = volute.and_then(|v| derived.volute(v).map(|g| (v, g)));
         let Some(state) = render_state else {
-            unavailable(ui, "The 3D view needs the wgpu renderer.");
+            unavailable(ui, tr("The 3D view needs the wgpu renderer."));
             return;
         };
         let Some(g) = derived.geometry(id) else {
             let reason = derived
                 .impeller(id)
                 .and_then(|r| r.geometry.as_ref().err())
-                .map_or("No geometry yet.", String::as_str);
-            unavailable(ui, reason);
+                .map_or_else(
+                    || tr("No geometry yet.").to_owned(),
+                    |e| crate::i18n::message(e),
+                );
+            unavailable(ui, &reason);
             return;
         };
 
@@ -232,10 +236,10 @@ impl Viewer {
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 0.0;
-                        let tool = |ui: &mut Ui, glyph: &str, tip: &str, on: bool| {
+                        let tool = |ui: &mut Ui, glyph: &str, tip: &'static str, on: bool| {
                             let text = RichText::new(glyph).size(17.0);
                             ui.add(egui::Button::selectable(on, text).min_size(vec2(28.0, 26.0)))
-                                .on_hover_text(tip)
+                                .on_hover_text(tr(tip))
                                 .clicked()
                         };
                         for (glyph, tip, v) in [
@@ -276,10 +280,10 @@ impl Viewer {
                         ui.add_space(4.0);
                         ui.separator();
                         ui.label(RichText::new(icon::QUESTION).size(16.0).color(p.weak))
-                            .on_hover_text(
+                            .on_hover_text(tr(
                                 "Drag: rotate\nRight-drag or Shift-drag: pan\nScroll or pinch: \
                                  zoom\nDouble-click: fit\nView cube: click a face",
-                            );
+                            ));
                     });
                 });
         });
@@ -463,7 +467,7 @@ fn view_cube(ui: &mut Ui, rect: Rect, camera: &Camera) -> Option<Vec3> {
             painter.text(
                 mid.to_pos2(),
                 Align2::CENTER_CENTER,
-                label,
+                tr(label),
                 FontId::proportional(8.0 + 3.0 * depth),
                 if hovered { p.accent } else { p.text },
             );
@@ -473,7 +477,7 @@ fn view_cube(ui: &mut Ui, rect: Rect, camera: &Camera) -> Option<Vec3> {
         }
     }
     if pointer.is_some() {
-        response.on_hover_text("Click a face to look at it");
+        response.on_hover_text(tr("Click a face to look at it"));
     }
     clicked
 }

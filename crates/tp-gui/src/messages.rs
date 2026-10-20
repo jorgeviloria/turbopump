@@ -5,6 +5,7 @@ use eframe::egui::{self, Align, Layout, RichText, Sense, Ui};
 use tp_project::{ComponentId, Project};
 
 use crate::derived::Derived;
+use crate::i18n::{component_name, message, tr};
 use crate::theme::{Palette, component_color, icon};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,7 +106,7 @@ pub(crate) fn card(ui: &mut Ui, severity: Severity, text: &str) {
             ui.set_width(ui.available_width());
             ui.horizontal_top(|ui| {
                 ui.label(RichText::new(severity.glyph()).color(color).size(15.0));
-                ui.add(egui::Label::new(RichText::new(text).color(p.text)).wrap());
+                ui.add(egui::Label::new(RichText::new(message(text)).color(p.text)).wrap());
             });
         });
 }
@@ -118,7 +119,7 @@ pub(crate) fn panel(ui: &mut Ui, project: &Project, messages: &[Message]) -> Opt
     if messages.is_empty() {
         ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
             ui.label(RichText::new(icon::CHECK_CIRCLE).color(p.done));
-            ui.label(RichText::new("No errors or warnings.").color(p.weak));
+            ui.label(RichText::new(tr("No errors or warnings.")).color(p.weak));
         });
         return None;
     }
@@ -133,8 +134,11 @@ pub(crate) fn panel(ui: &mut Ui, project: &Project, messages: &[Message]) -> Opt
             };
             let row = ui.horizontal(|ui| {
                 ui.label(RichText::new(m.severity.glyph()).color(color));
-                ui.label(RichText::new(&component.name).color(component_color(component.kind())));
-                ui.label(&m.text);
+                ui.label(
+                    RichText::new(component_name(&component.name))
+                        .color(component_color(component.kind())),
+                );
+                ui.label(message(&m.text));
             });
             let response = ui
                 .interact(
@@ -143,7 +147,7 @@ pub(crate) fn panel(ui: &mut Ui, project: &Project, messages: &[Message]) -> Opt
                     Sense::click(),
                 )
                 .on_hover_cursor(egui::CursorIcon::PointingHand)
-                .on_hover_text("Go to this component");
+                .on_hover_text(tr("Go to this component"));
             if response.clicked() {
                 clicked = Some(m.component);
             }

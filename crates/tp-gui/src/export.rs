@@ -9,6 +9,7 @@ use tp_design::volute::VoluteGeometry;
 use tp_project::{ComponentId, Project};
 
 use crate::derived::Derived;
+use crate::i18n::tr;
 
 /// Whether this build can make CAD solids (the `cad` feature).
 pub(crate) const CAD_AVAILABLE: bool = cfg!(feature = "cad");
@@ -31,21 +32,21 @@ impl TextExport {
     ];
 
     pub fn menu_label(self) -> &'static str {
-        match self {
+        tr(match self {
             TextExport::Points => "Geometry points (TXT)…",
             TextExport::Mesh => "Surface mesh (STL)…",
             TextExport::Meridional => "Meridional drawing (SVG)…",
             TextExport::Front => "Front view drawing (SVG)…",
-        }
+        })
     }
 
     fn file(self) -> (&'static str, &'static str, &'static str) {
         // (file-name suffix, extension, filter name)
         match self {
-            TextExport::Points => ("points", "txt", "Text"),
-            TextExport::Mesh => ("mesh", "stl", "STL mesh"),
-            TextExport::Meridional => ("meridional", "svg", "SVG drawing"),
-            TextExport::Front => ("front", "svg", "SVG drawing"),
+            TextExport::Points => ("points", "txt", tr("Text")),
+            TextExport::Mesh => ("mesh", "stl", tr("STL mesh")),
+            TextExport::Meridional => ("meridional", "svg", tr("SVG drawing")),
+            TextExport::Front => ("front", "svg", tr("SVG drawing")),
         }
     }
 
@@ -80,10 +81,10 @@ impl VoluteExport {
     pub const ALL: [VoluteExport; 2] = [VoluteExport::Points, VoluteExport::Mesh];
 
     pub fn menu_label(self) -> &'static str {
-        match self {
+        tr(match self {
             VoluteExport::Points => "Volute points (TXT)…",
             VoluteExport::Mesh => "Volute surface mesh (STL)…",
-        }
+        })
     }
 
     pub fn contents(self, g: &VoluteGeometry) -> String {
@@ -101,8 +102,8 @@ pub(crate) fn save_volute(
     project_name: &str,
 ) -> Result<Option<PathBuf>, String> {
     let (suffix, extension, filter) = match kind {
-        VoluteExport::Points => ("volute", "txt", "Text"),
-        VoluteExport::Mesh => ("volute", "stl", "STL mesh"),
+        VoluteExport::Points => ("volute", "txt", tr("Text")),
+        VoluteExport::Mesh => ("volute", "stl", tr("STL mesh")),
     };
     save_file(suffix, extension, filter, || kind.contents(g), project_name)
 }
@@ -164,7 +165,7 @@ impl Exports {
             return;
         }
         let mut open = true;
-        egui::Window::new("Export CAD solids")
+        egui::Window::new(tr("Export CAD solids"))
             .open(&mut open)
             .resizable(false)
             .collapsible(false)
@@ -175,7 +176,7 @@ impl Exports {
                 #[cfg(not(feature = "cad"))]
                 {
                     let _ = (derived, project, active, stator, volute);
-                    ui.label("This build has no CAD support.");
+                    ui.label(tr("This build has no CAD support."));
                 }
             });
         self.cad_open = open;
@@ -184,6 +185,7 @@ impl Exports {
 
 #[cfg(feature = "cad")]
 mod cad {
+    use crate::i18n::{tf, tr};
     use std::path::{Path, PathBuf};
     use std::sync::mpsc::{Receiver, TryRecvError, channel};
 
@@ -311,9 +313,9 @@ mod cad {
         .filter_map(|(label, s)| s.map(|s| (label, s)))
         .filter(|(_, s)| !s.is_valid() || s.solid_count() != 1)
         .map(|(label, s)| {
-            format!(
-                "the {label} is not a single valid solid ({} solids)",
-                s.solid_count()
+            tf(
+                "the {} is not a single valid solid ({} solids)",
+                &[&tr(label), &s.solid_count()],
             )
         })
         .collect();
@@ -343,7 +345,7 @@ mod cad {
                     }
                     Err(TryRecvError::Empty) => {}
                     Err(TryRecvError::Disconnected) => {
-                        self.last = Some(Err("the CAD export stopped unexpectedly".into()));
+                        self.last = Some(Err(tr("the CAD export stopped unexpectedly").into()));
                         self.job = None;
                     }
                 }
@@ -389,7 +391,9 @@ mod cad {
                     self.job = Some(rx);
                     self.last = None;
                 }
-                Err(e) => self.last = Some(Err(format!("could not start the export: {e}"))),
+                Err(e) => {
+                    self.last = Some(Err(tf("could not start the export: {}", &[&e])));
+                }
             }
         }
 
@@ -405,14 +409,14 @@ mod cad {
             use QuantityKind::*;
             let units = project.display_units.clone();
             let Some(id) = active else {
-                ui.label("The project has no impeller.");
+                ui.label(tr("The project has no impeller."));
                 return;
             };
             let ready = project
                 .component(id)
                 .is_some_and(|c| c.status(DesignStep::BladeEdges) == StepStatus::Done);
             let Some(g) = derived.geometry(id) else {
-                ui.label("The impeller geometry has errors; fix them first.");
+                ui.label(tr("The impeller geometry has errors; fix them first."));
                 return;
             };
             let d2 = g.basis.outlet_diameter;
@@ -443,8 +447,8 @@ mod cad {
                 .show(ui, |ui| {
                     param_f64(
                         ui,
-                        "Wall thickness",
-                        "Hub disk and shroud; automatic: max(3 mm, 0.02·d₂)",
+                        tr("Wall thickness"),
+                        tr("Hub disk and shroud; automatic: max(3 mm, 0.02·d₂)"),
                         &mut self.wall,
                         Length,
                         Some((0.02 * d2).max(0.003)),
@@ -453,37 +457,37 @@ mod cad {
                     );
                     param_f64(
                         ui,
-                        "Bore diameter",
-                        "Automatic: the hub diameter at the eye",
+                        tr("Bore diameter"),
+                        tr("Automatic: the hub diameter at the eye"),
                         &mut self.bore,
                         Length,
                         Some(g.basis.hub_diameter),
                         &units,
                         0.0..=1.0,
                     );
-                    ui.label("Material density");
+                    ui.label(tr("Material density"));
                     quantity(ui, &mut self.density, Density, &units, 100.0..=30_000.0);
                     ui.end_row();
                 });
             if stator.is_some() {
-                ui.label(if stator_design.is_some() {
+                ui.label(tr(if stator_design.is_some() {
                     "The diffuser flow domain and vanes are exported too."
                 } else {
                     "The diffuser is left out until its steps are accepted."
-                });
+                }));
             }
             if volute.is_some() {
-                ui.label(if volute_geometry.is_some() {
+                ui.label(tr(if volute_geometry.is_some() {
                     "The volute flow domain is exported too."
                 } else {
                     "The volute is left out until its steps are accepted."
-                });
+                }));
             }
             ui.horizontal(|ui| {
-                ui.label("Formats");
-                ui.checkbox(&mut self.step, "STEP");
-                ui.checkbox(&mut self.iges, "IGES");
-                ui.checkbox(&mut self.stl, "STL");
+                ui.label(tr("Formats"));
+                ui.checkbox(&mut self.step, tr("STEP"));
+                ui.checkbox(&mut self.iges, tr("IGES"));
+                ui.checkbox(&mut self.stl, tr("STL"));
             });
             ui.add_space(6.0);
 
@@ -491,17 +495,17 @@ mod cad {
             if self.running() {
                 ui.horizontal(|ui| {
                     ui.spinner();
-                    ui.label("Building the solids with Open CASCADE…");
+                    ui.label(tr("Building the solids with Open CASCADE…"));
                 });
             } else {
                 let enabled = ready && any_format;
                 let response = ui
-                    .add_enabled(enabled, egui::Button::new("Choose folder and export…"))
-                    .on_disabled_hover_text(if ready {
+                    .add_enabled(enabled, egui::Button::new(tr("Choose folder and export…")))
+                    .on_disabled_hover_text(tr(if ready {
                         "Choose at least one format."
                     } else {
                         "Accept the geometry steps up to the blade edges first."
-                    });
+                    }));
                 if response.clicked()
                     && let Some(folder) = rfd::FileDialog::new().pick_folder()
                 {
@@ -514,7 +518,7 @@ mod cad {
                     );
                 }
                 if !ready {
-                    ui.weak("Accept the geometry steps up to the blade edges first.");
+                    ui.weak(tr("Accept the geometry steps up to the blade edges first."));
                 }
             }
 
@@ -523,15 +527,15 @@ mod cad {
                     ui.separator();
                     let mass = report.impeller_volume * self.density;
                     Grid::new("cad_report").num_columns(2).show(ui, |ui| {
-                        value_row(ui, "Folder", report.folder.display().to_string());
+                        value_row(ui, tr("Folder"), report.folder.display().to_string());
                         value_row(
                             ui,
-                            "Wall thickness",
+                            tr("Wall thickness"),
                             units.show(Length, report.wall_thickness),
                         );
                         value_row(
                             ui,
-                            "Impeller",
+                            tr("Impeller"),
                             format!(
                                 "{:.1} cm³, {}",
                                 report.impeller_volume * 1e6,
@@ -544,21 +548,25 @@ mod cad {
                         );
                         value_row(
                             ui,
-                            "Flow domain",
+                            tr("Flow domain"),
                             format!("{:.1} cm³", report.fluid_volume * 1e6),
                         );
                         if let Some(v) = report.diffuser_volume {
-                            value_row(ui, "Diffuser flow domain", format!("{:.1} cm³", v * 1e6));
+                            value_row(
+                                ui,
+                                tr("Diffuser flow domain"),
+                                format!("{:.1} cm³", v * 1e6),
+                            );
                         }
                         if let Some(v) = report.volute_volume {
-                            value_row(ui, "Volute flow domain", format!("{:.1} cm³", v * 1e6));
+                            value_row(ui, tr("Volute flow domain"), format!("{:.1} cm³", v * 1e6));
                         }
                     });
                     for file in &report.files {
                         ui.weak(file.display().to_string());
                     }
                     if report.problems.is_empty() {
-                        ui.label("Every solid is a single valid solid.");
+                        ui.label(tr("Every solid is a single valid solid."));
                     }
                     for p in &report.problems {
                         ui.colored_label(

@@ -17,6 +17,7 @@ use tp_units::QuantityKind;
 
 use super::{Palette, unavailable};
 use crate::app::EditCtx;
+use crate::i18n::{tf, tr};
 
 /// A point of the meridional contour the user can drag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,7 +43,7 @@ impl Handle {
     ];
 
     fn label(self) -> &'static str {
-        match self {
+        tr(match self {
             Handle::HubInlet => "hub inlet tangent",
             Handle::HubOutlet => "hub outlet tangent",
             Handle::ShroudInlet => "shroud inlet tangent",
@@ -50,7 +51,7 @@ impl Handle {
             Handle::LeadingEdgeHub => "leading edge on the hub",
             Handle::LeadingEdgeShroud => "leading edge on the shroud",
             Handle::AxialLength => "axial length",
-        }
+        })
     }
 }
 
@@ -201,18 +202,18 @@ impl MeridionalView {
         let palette = Palette::of(ui);
 
         ui.horizontal_wrapped(|ui| {
-            ui.checkbox(&mut self.show_stream_lines, "stream lines");
-            ui.checkbox(&mut self.show_quasi_orthogonals, "quasi-orthogonals");
-            ui.checkbox(&mut self.show_potential, "potential flow")
-                .on_hover_text(
+            ui.checkbox(&mut self.show_stream_lines, tr("stream lines"));
+            ui.checkbox(&mut self.show_quasi_orthogonals, tr("quasi-orthogonals"));
+            ui.checkbox(&mut self.show_potential, tr("potential flow"))
+                .on_hover_text(tr(
                     "Two-dimensional potential flow between hub and shroud: its stream \
                      lines, and the meridional velocity along the walls against the \
                      quasi-one-dimensional flow of the design",
-                );
-            ui.weak("(?)").on_hover_text(
+                ));
+            ui.weak("(?)").on_hover_text(tr(
                 "Drag the round handles to shape the contour. Drag the background to pan, \
                  scroll to zoom, double-click to fit.",
-            );
+            ));
         });
 
         let handles: Vec<(Handle, DVec2)> = Handle::ALL
@@ -448,7 +449,7 @@ impl MeridionalView {
             let mut input = current.clone();
             apply_drag(handle, pointer, &g.contour, &g.basis, &mut input.meridional);
             if input != current {
-                cx.edit(&format!("drag {}", handle.label()), |p| {
+                cx.edit(&tf("drag {}", &[&handle.label()]), |p| {
                     p.set_impeller_geometry(id, input)
                 });
                 // Show the new geometry even if the pointer stops here.

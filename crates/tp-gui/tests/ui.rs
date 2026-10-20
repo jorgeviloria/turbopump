@@ -283,3 +283,39 @@ fn the_toolbar_accepts_steps_and_adds_components() {
     harness.get_by_label("Side walls");
     harness.get_by_label("Casing");
 }
+
+#[test]
+fn the_interface_switches_to_spanish_and_back() {
+    let mut harness = harness();
+    harness.get_by_label("View tab").click();
+    harness.run();
+    harness.get_by_label_contains("Español").click();
+    harness.run();
+    // The step editor, the tree and the toolbar now read in Spanish.
+    harness.get_by_label_contains("Aceptar paso");
+    assert!(
+        harness
+            .get_all_by_label("Dimensiones principales")
+            .next()
+            .is_some()
+    );
+    harness.get_by_label("Vista tab");
+    assert!(harness.query_by_label_contains(ACCEPT).is_none());
+    // Every view draws in Spanish, and the steps still go forward.
+    for view in View::ALL {
+        harness.state_mut().focus_view(view);
+        harness.run();
+    }
+    harness.state_mut().focus_view(View::Report);
+    harness.run();
+    harness.get_by_label("Informe");
+    harness.get_by_label_contains("Aceptar paso").click();
+    harness.run();
+    assert_eq!(
+        status(&harness, DesignStep::MainDimensions),
+        StepStatus::Done
+    );
+    harness.get_by_label_contains("English").click();
+    harness.run();
+    harness.get_by_label_contains(ACCEPT);
+}

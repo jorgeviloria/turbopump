@@ -11,6 +11,7 @@ use tp_units::{DisplayUnits, QuantityKind};
 
 use super::{Palette, unavailable};
 use crate::derived::Derived;
+use crate::i18n::tr;
 
 /// Looking along +z the x axis points left, as in the SVG drawing.
 fn view(x: f64, y: f64, scale: f64) -> [f64; 2] {
@@ -40,8 +41,11 @@ pub(crate) fn show(
         let reason = derived
             .impeller(id)
             .and_then(|r| r.geometry.as_ref().err())
-            .map_or("No geometry yet.", String::as_str);
-        unavailable(ui, reason);
+            .map_or_else(
+                || tr("No geometry yet.").to_owned(),
+                |e| crate::i18n::message(e),
+            );
+        unavailable(ui, &reason);
         return;
     };
     let palette = Palette::of(ui);
@@ -57,12 +61,12 @@ pub(crate) fn show(
     };
     let outlines = [
         (
-            "hub section",
+            tr("hub section"),
             blade.sections.first().map(outline),
             palette.hub,
         ),
         (
-            "shroud section",
+            tr("shroud section"),
             blade.sections.last().map(outline),
             palette.shroud,
         ),
@@ -77,11 +81,14 @@ pub(crate) fn show(
         .show(ui, |plot| {
             let b = &g.basis;
             plot.line(
-                Line::new("outlet d₂", circle(b.outlet_diameter / 2.0, scale))
+                Line::new(tr("outlet d₂"), circle(b.outlet_diameter / 2.0, scale))
                     .color(palette.guide)
                     .width(1.5),
             );
-            for (name, d) in [("eye d₁", b.inlet_diameter), ("hub d_n", b.hub_diameter)] {
+            for (name, d) in [
+                (tr("eye d₁"), b.inlet_diameter),
+                (tr("hub d_n"), b.hub_diameter),
+            ] {
                 plot.line(
                     Line::new(name, circle(d / 2.0, scale))
                         .color(palette.guide)
@@ -92,7 +99,7 @@ pub(crate) fn show(
             if let Some(d) = stator {
                 for r in [d.inlet_diameter / 2.0, d.outlet_diameter / 2.0] {
                     plot.line(
-                        Line::new("diffuser", circle(r, scale))
+                        Line::new(tr("diffuser"), circle(r, scale))
                             .color(palette.stator)
                             .style(LineStyle::dashed_loose())
                             .width(1.0),
@@ -105,7 +112,7 @@ pub(crate) fn show(
                         let points: PlotPoints =
                             outline.iter().map(|p| view(p.x, p.y, scale)).collect();
                         plot.line(
-                            Line::new("diffuser vanes", points)
+                            Line::new(tr("diffuser vanes"), points)
                                 .color(palette.stator)
                                 .width(1.5),
                         );
@@ -124,10 +131,14 @@ pub(crate) fn show(
                         view(r * t.cos(), r * t.sin(), scale)
                     })
                     .collect();
-                plot.line(Line::new("volute", outer).color(palette.volute).width(2.0));
+                plot.line(
+                    Line::new(tr("volute"), outer)
+                        .color(palette.volute)
+                        .width(2.0),
+                );
                 plot.line(
                     Line::new(
-                        "cutwater d_z",
+                        tr("cutwater d_z"),
                         circle(v.design.cutwater_diameter / 2.0, scale),
                     )
                     .color(palette.volute)
@@ -149,18 +160,18 @@ pub(crate) fn show(
                 }
                 if let (Some(&a), Some(&b)) = (walls.0.last(), walls.1.last()) {
                     plot.line(
-                        Line::new("volute", vec![a, b])
+                        Line::new(tr("volute"), vec![a, b])
                             .color(palette.volute)
                             .width(2.0),
                     );
                 }
                 plot.line(
-                    Line::new("volute", walls.0)
+                    Line::new(tr("volute"), walls.0)
                         .color(palette.volute)
                         .width(2.0),
                 );
                 plot.line(
-                    Line::new("volute", walls.1)
+                    Line::new(tr("volute"), walls.1)
                         .color(palette.volute)
                         .width(2.0),
                 );

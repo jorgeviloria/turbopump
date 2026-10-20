@@ -10,6 +10,7 @@ use tp_project::{ComponentId, ComponentKind, DesignStep, Project, StepStatus};
 
 use crate::app::{Selection, View};
 use crate::export::{CAD_AVAILABLE, TextExport, VoluteExport};
+use crate::i18n::{Language, component_name, message, project_name, tf, tr};
 use crate::icons;
 use crate::steps::{self, AcceptState};
 use crate::theme::{Palette, bold, component_color, icon};
@@ -44,6 +45,7 @@ pub(crate) enum Command {
     ToggleMessages,
     FollowStep,
     Theme(ThemePreference),
+    Language(Language),
     About,
     Documentation,
 }
@@ -86,6 +88,7 @@ pub(crate) struct RibbonCx<'a> {
     pub sidebar_open: bool,
     pub messages_open: bool,
     pub follow_step: bool,
+    pub language: Language,
 }
 
 /// Height of a large button.
@@ -122,21 +125,21 @@ impl Ribbon {
                     ui.spacing_mut().item_spacing.x = 2.0;
                     command = command.or(self.file_menu(ui, cx, &p));
                     ui.add_space(6.0);
-                    self.tab_button(ui, Tab::Home, "Home", None);
+                    self.tab_button(ui, Tab::Home, tr("Home"), None);
                     if let Some((id, kind)) = component {
                         let name = cx
                             .project
                             .component(id)
-                            .map_or_else(String::new, |c| c.name.clone());
+                            .map_or_else(String::new, |c| component_name(&c.name));
                         self.tab_button(ui, Tab::Component, &name, Some(component_color(kind)));
                     }
-                    self.tab_button(ui, Tab::View, "View", None);
-                    self.tab_button(ui, Tab::Help, "Help", None);
+                    self.tab_button(ui, Tab::View, tr("View"), None);
+                    self.tab_button(ui, Tab::Help, tr("Help"), None);
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let (glyph, tip) = if self.collapsed {
-                            (icon::CARET_DOWN, "Show the toolbar")
+                            (icon::CARET_DOWN, tr("Show the toolbar"))
                         } else {
-                            (icon::CARET_UP, "Hide the toolbar")
+                            (icon::CARET_UP, tr("Hide the toolbar"))
                         };
                         if ui
                             .add(egui::Button::new(glyph).frame(false))
@@ -147,7 +150,11 @@ impl Ribbon {
                         }
                         let dirty = if cx.dirty { " •" } else { "" };
                         ui.label(
-                            RichText::new(format!("{}{dirty}", cx.project.info.name)).color(p.weak),
+                            RichText::new(format!(
+                                "{}{dirty}",
+                                project_name(&cx.project.info.name)
+                            ))
+                            .color(p.weak),
                         );
                     });
                 });
@@ -243,7 +250,7 @@ impl Ribbon {
     }
 
     fn file_menu(&mut self, ui: &mut Ui, cx: &RibbonCx<'_>, p: &Palette) -> Option<Command> {
-        let button = egui::Button::new(bold("File").color(p.on_accent))
+        let button = egui::Button::new(bold(tr("File")).color(p.on_accent))
             .fill(p.accent)
             .corner_radius(4);
         let mut command = None;
@@ -265,31 +272,34 @@ impl Ribbon {
             item(
                 ui,
                 icon::FILE_PLUS,
-                "New project…",
+                tr("New project…"),
                 &format!("{cmd}N"),
                 Command::NewProject,
             );
             item(
                 ui,
                 icon::FOLDER_OPEN,
-                "Open…",
+                tr("Open…"),
                 &format!("{cmd}O"),
                 Command::Open,
             );
             item(
                 ui,
                 icon::FLOPPY_DISK,
-                "Save",
+                tr("Save"),
                 &format!("{cmd}S"),
                 Command::Save,
             );
-            item(ui, icon::FLOPPY_DISK, "Save as…", "", Command::SaveAs);
+            item(ui, icon::FLOPPY_DISK, tr("Save as…"), "", Command::SaveAs);
             ui.separator();
             if let Some(c) = export_items(ui, cx) {
                 command = Some(c);
             }
             ui.separator();
-            if ui.button(format!("{}  Quit", icon::X_CIRCLE)).clicked() {
+            if ui
+                .button(format!("{}  {}", icon::X_CIRCLE, tr("Quit")))
+                .clicked()
+            {
                 command = Some(Command::Quit);
             }
         });
@@ -320,9 +330,9 @@ fn export_items(ui: &mut Ui, cx: &RibbonCx<'_>) -> Option<Command> {
     if ui
         .add_enabled(
             CAD_AVAILABLE,
-            egui::Button::new("CAD solids (STEP, IGES, STL)…"),
+            egui::Button::new(tr("CAD solids (STEP, IGES, STL)…")),
         )
-        .on_disabled_hover_text("This build has no CAD support.")
+        .on_disabled_hover_text(tr("This build has no CAD support."))
         .clicked()
     {
         command = Some(Command::ExportCad);
@@ -474,17 +484,24 @@ fn stack<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
 fn home(ui: &mut Ui, cx: &mut RibbonCx<'_>) -> Option<Command> {
     let mut command = None;
     let mut set = |c| command = Some(c);
-    group(ui, "Project", |ui| {
-        if big_button(ui, Icon::Glyph(icon::FILE_PLUS), "New", true, false, None)
-            .on_hover_text("New pump project")
-            .clicked()
+    group(ui, tr("Project"), |ui| {
+        if big_button(
+            ui,
+            Icon::Glyph(icon::FILE_PLUS),
+            tr("New"),
+            true,
+            false,
+            None,
+        )
+        .on_hover_text(tr("New pump project"))
+        .clicked()
         {
             set(Command::NewProject);
         }
         if big_button(
             ui,
             Icon::Glyph(icon::FOLDER_OPEN),
-            "Open",
+            tr("Open"),
             true,
             false,
             None,
@@ -496,7 +513,7 @@ fn home(ui: &mut Ui, cx: &mut RibbonCx<'_>) -> Option<Command> {
         if big_button(
             ui,
             Icon::Glyph(icon::FLOPPY_DISK),
-            "Save",
+            tr("Save"),
             true,
             false,
             None,
@@ -506,17 +523,17 @@ fn home(ui: &mut Ui, cx: &mut RibbonCx<'_>) -> Option<Command> {
             set(Command::Save);
         }
     });
-    group(ui, "Edit", |ui| {
-        let undo = cx
-            .undo_label
-            .map_or("Nothing to undo".to_owned(), |l| format!("Undo {l}"));
-        let redo = cx
-            .redo_label
-            .map_or("Nothing to redo".to_owned(), |l| format!("Redo {l}"));
+    group(ui, tr("Edit"), |ui| {
+        let undo = cx.undo_label.map_or(tr("Nothing to undo").to_owned(), |l| {
+            tf("Undo {}", &[&message(l)])
+        });
+        let redo = cx.redo_label.map_or(tr("Nothing to redo").to_owned(), |l| {
+            tf("Redo {}", &[&message(l)])
+        });
         if big_button(
             ui,
             Icon::Glyph(icon::ARROW_U_UP_LEFT),
-            "Undo",
+            tr("Undo"),
             cx.can_undo,
             false,
             None,
@@ -529,7 +546,7 @@ fn home(ui: &mut Ui, cx: &mut RibbonCx<'_>) -> Option<Command> {
         if big_button(
             ui,
             Icon::Glyph(icon::ARROW_U_UP_RIGHT),
-            "Redo",
+            tr("Redo"),
             cx.can_redo,
             false,
             None,
@@ -540,44 +557,51 @@ fn home(ui: &mut Ui, cx: &mut RibbonCx<'_>) -> Option<Command> {
             set(Command::Redo);
         }
     });
-    group(ui, "Setup", |ui| {
+    group(ui, tr("Setup"), |ui| {
         let selected = cx.selection == Selection::Setup;
         if big_button(
             ui,
             Icon::Glyph(icon::GEAR),
-            "Global setup",
+            tr("Global setup"),
             true,
             selected,
             None,
         )
-        .on_hover_text("Design point, fluid, inlet conditions and units")
+        .on_hover_text(tr("Design point, fluid, inlet conditions and units"))
         .clicked()
         {
             set(Command::GlobalSetup);
         }
         let us = cx.project.display_units == tp_units::DisplayUnits::us();
         stack(ui, |ui| {
-            if small_button(ui, icon::RULER, "SI units", true, !us).clicked() && us {
+            if small_button(ui, icon::RULER, tr("SI units"), true, !us).clicked() && us {
                 set(Command::UsUnits(false));
             }
-            if small_button(ui, icon::RULER, "US units", true, us).clicked() && !us {
+            if small_button(ui, icon::RULER, tr("US units"), true, us).clicked() && !us {
                 set(Command::UsUnits(true));
             }
         });
     });
-    group(ui, "Components", |ui| {
+    group(ui, tr("Components"), |ui| {
         for (index, entry) in ADD_ENTRIES.iter().enumerate().take(4) {
-            let label = entry.short;
+            let label = tr(entry.short);
             if big_button(ui, Icon::Component(entry.kind), label, true, false, None)
-                .on_hover_text(format!("Add: {}", entry.label))
+                .on_hover_text(tf("Add: {}", &[&tr(entry.label)]))
                 .clicked()
             {
                 set(Command::Add(index));
             }
         }
     });
-    group(ui, "Export", |ui| {
-        let response = big_button(ui, Icon::Glyph(icon::EXPORT), "Export", true, false, None);
+    group(ui, tr("Export"), |ui| {
+        let response = big_button(
+            ui,
+            Icon::Glyph(icon::EXPORT),
+            tr("Export"),
+            true,
+            false,
+            None,
+        );
         Popup::menu(&response).show(|ui| {
             ui.set_min_width(240.0);
             if let Some(c) = export_items(ui, cx) {
@@ -585,9 +609,9 @@ fn home(ui: &mut Ui, cx: &mut RibbonCx<'_>) -> Option<Command> {
             }
         });
         let label = if cx.cad_running {
-            "CAD running…"
+            tr("CAD running…")
         } else {
-            "CAD solids"
+            tr("CAD solids")
         };
         if big_button(
             ui,
@@ -597,7 +621,7 @@ fn home(ui: &mut Ui, cx: &mut RibbonCx<'_>) -> Option<Command> {
             false,
             None,
         )
-        .on_hover_text("STEP, IGES or STL solids with Open CASCADE")
+        .on_hover_text(tr("STEP, IGES or STL solids with Open CASCADE"))
         .clicked()
         {
             set(Command::ExportCad);
@@ -618,13 +642,13 @@ fn status_dot(p: &Palette, status: StepStatus) -> Option<Color32> {
 /// Captions of the groups of design steps.
 fn step_group(step: DesignStep) -> &'static str {
     use DesignStep::*;
-    match step {
+    tr(match step {
         MainDimensions | VoluteSetup => "Dimensions",
         MeridionalContour => "Meridian",
         BladeProperties | BladeMeanLines | BladeProfiles | BladeEdges => "Blading",
         CrossSection | SpiralDevelopment | Diffuser | CutWater | WallThickness => "Casing",
         CfdSetup | ModelSettings | ModelFinishing => "Model",
-    }
+    })
 }
 
 fn component_tab(
@@ -673,17 +697,17 @@ fn component_tab(
         });
         start = end;
     }
-    group(ui, "Step", |ui| {
+    group(ui, tr("Step"), |ui| {
         if let Some(step) = selected_step {
             let (enabled, tip) = match cx.accept {
-                AcceptState::Ready => (true, "Mark this step as done with the current values"),
-                AcceptState::Blocked(reason) => (false, reason),
-                AcceptState::NotApplicable => (false, "This step has nothing to accept."),
+                AcceptState::Ready => (true, tr("Mark this step as done with the current values")),
+                AcceptState::Blocked(reason) => (false, tr(reason)),
+                AcceptState::NotApplicable => (false, tr("This step has nothing to accept.")),
             };
             if big_button(
                 ui,
                 Icon::Glyph(icon::CHECK_CIRCLE),
-                "Accept",
+                tr("Accept"),
                 enabled,
                 false,
                 None,
@@ -697,20 +721,32 @@ fn component_tab(
             if big_button(
                 ui,
                 Icon::Glyph(icon::ARROW_COUNTER_CLOCKWISE),
-                "Reset",
+                tr("Reset"),
                 resettable,
                 false,
                 None,
             )
-            .on_hover_text("Return every value of this step to its automatic proposal")
+            .on_hover_text(tr(
+                "Return every value of this step to its automatic proposal",
+            ))
             .clicked()
             {
                 command = Some(Command::Reset(id, step));
             }
         }
-        if big_button(ui, Icon::Glyph(icon::TRASH), "Remove", true, false, None)
-            .on_hover_text(format!("Remove {} from the project", component.name))
-            .clicked()
+        if big_button(
+            ui,
+            Icon::Glyph(icon::TRASH),
+            tr("Remove"),
+            true,
+            false,
+            None,
+        )
+        .on_hover_text(tf(
+            "Remove {} from the project",
+            &[&component_name(&component.name)],
+        ))
+        .clicked()
         {
             command = Some(Command::Remove(id));
         }
@@ -721,7 +757,7 @@ fn component_tab(
 fn view_tab(ui: &mut Ui, cx: &mut RibbonCx<'_>) -> Option<Command> {
     let mut command = None;
     let mut set = |c| command = Some(c);
-    group(ui, "Views", |ui| {
+    group(ui, tr("Views"), |ui| {
         for view in View::ALL {
             if big_button(
                 ui,
@@ -731,14 +767,14 @@ fn view_tab(ui: &mut Ui, cx: &mut RibbonCx<'_>) -> Option<Command> {
                 false,
                 None,
             )
-            .on_hover_text(format!("Show the {}", view.title().to_lowercase()))
+            .on_hover_text(view.title())
             .clicked()
             {
                 set(Command::Focus(view));
             }
         }
     });
-    group(ui, "Camera", |ui| {
+    group(ui, tr("Camera"), |ui| {
         for (glyph, label, view, tip) in [
             (
                 icon::CORNERS_OUT,
@@ -760,38 +796,46 @@ fn view_tab(ui: &mut Ui, cx: &mut RibbonCx<'_>) -> Option<Command> {
             ),
             (icon::COLUMNS, "Side", CameraView::Side, "Across the axis"),
         ] {
-            if big_button(ui, Icon::Glyph(glyph), label, true, false, None)
-                .on_hover_text(tip)
+            if big_button(ui, Icon::Glyph(glyph), tr(label), true, false, None)
+                .on_hover_text(tr(tip))
                 .clicked()
             {
                 set(Command::Camera(view));
             }
         }
     });
-    group(ui, "Display", |ui| {
+    group(ui, tr("Display"), |ui| {
         let o = &mut *cx.options;
         stack(ui, |ui| {
-            if small_button(ui, icon::POLYGON, "Edges", true, o.edges).clicked() {
+            if small_button(ui, icon::POLYGON, tr("Edges"), true, o.edges).clicked() {
                 o.edges = !o.edges;
             }
-            if small_button(ui, icon::CUBE_TRANSPARENT, "Wireframe", true, o.wireframe).clicked() {
+            if small_button(
+                ui,
+                icon::CUBE_TRANSPARENT,
+                tr("Wireframe"),
+                true,
+                o.wireframe,
+            )
+            .clicked()
+            {
                 o.wireframe = !o.wireframe;
             }
-            if small_button(ui, icon::FAN, "All blades", true, o.all_blades).clicked() {
+            if small_button(ui, icon::FAN, tr("All blades"), true, o.all_blades).clicked() {
                 o.all_blades = !o.all_blades;
             }
         });
     });
-    group(ui, "Panels", |ui| {
+    group(ui, tr("Panels"), |ui| {
         if big_button(
             ui,
             Icon::Glyph(icon::SIDEBAR_SIMPLE),
-            "Tree",
+            tr("Tree"),
             true,
             cx.tree_open,
             None,
         )
-        .on_hover_text("The tree of design steps and of the 3D model")
+        .on_hover_text(tr("The tree of design steps and of the 3D model"))
         .clicked()
         {
             set(Command::ToggleTree);
@@ -799,12 +843,12 @@ fn view_tab(ui: &mut Ui, cx: &mut RibbonCx<'_>) -> Option<Command> {
         if big_button(
             ui,
             Icon::Glyph(icon::SLIDERS_HORIZONTAL),
-            "Properties",
+            tr("Properties"),
             true,
             cx.sidebar_open,
             None,
         )
-        .on_hover_text("The properties of the selected step")
+        .on_hover_text(tr("The properties of the selected step"))
         .clicked()
         {
             set(Command::ToggleDialog);
@@ -812,12 +856,12 @@ fn view_tab(ui: &mut Ui, cx: &mut RibbonCx<'_>) -> Option<Command> {
         if big_button(
             ui,
             Icon::Glyph(icon::WARNING),
-            "Messages",
+            tr("Messages"),
             true,
             cx.messages_open,
             None,
         )
-        .on_hover_text("Every error and warning of the project")
+        .on_hover_text(tr("Every error and warning of the project"))
         .clicked()
         {
             set(Command::ToggleMessages);
@@ -826,26 +870,43 @@ fn view_tab(ui: &mut Ui, cx: &mut RibbonCx<'_>) -> Option<Command> {
             if small_button(
                 ui,
                 icon::ARROWS_SPLIT,
-                "View follows step",
+                tr("View follows step"),
                 true,
                 cx.follow_step,
             )
-            .on_hover_text("Opening a step shows the view that suits it")
+            .on_hover_text(tr("Opening a step shows the view that suits it"))
             .clicked()
             {
                 set(Command::FollowStep);
             }
         });
     });
-    group(ui, "Theme", |ui| {
+    group(ui, tr("Theme"), |ui| {
         stack(ui, |ui| {
             for (glyph, label, theme) in [
                 (icon::SUN, "Light", ThemePreference::Light),
                 (icon::MOON, "Dark", ThemePreference::Dark),
                 (icon::CIRCLE_HALF, "System", ThemePreference::System),
             ] {
-                if small_button(ui, glyph, label, true, cx.theme == theme).clicked() {
+                if small_button(ui, glyph, tr(label), true, cx.theme == theme).clicked() {
                     set(Command::Theme(theme));
+                }
+            }
+        });
+    });
+    group(ui, tr("Language"), |ui| {
+        stack(ui, |ui| {
+            for language in Language::ALL {
+                if small_button(
+                    ui,
+                    icon::TRANSLATE,
+                    language.name(),
+                    true,
+                    cx.language == language,
+                )
+                .clicked()
+                {
+                    set(Command::Language(language));
                 }
             }
         });
@@ -855,21 +916,21 @@ fn view_tab(ui: &mut Ui, cx: &mut RibbonCx<'_>) -> Option<Command> {
 
 fn help_tab(ui: &mut Ui) -> Option<Command> {
     let mut command = None;
-    group(ui, "Help", |ui| {
+    group(ui, tr("Help"), |ui| {
         if big_button(
             ui,
             Icon::Glyph(icon::BOOK_OPEN),
-            "Documentation",
+            tr("Documentation"),
             true,
             false,
             None,
         )
-        .on_hover_text("Theory notes and examples on the project page")
+        .on_hover_text(tr("Theory notes and examples on the project page"))
         .clicked()
         {
             command = Some(Command::Documentation);
         }
-        if big_button(ui, Icon::Glyph(icon::INFO), "About", true, false, None).clicked() {
+        if big_button(ui, Icon::Glyph(icon::INFO), tr("About"), true, false, None).clicked() {
             command = Some(Command::About);
         }
     });

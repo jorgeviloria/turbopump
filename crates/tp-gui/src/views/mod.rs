@@ -103,6 +103,6 @@ pub(crate) fn nice_grid(input: egui_plot::GridInput) -> [f64; 3] {
 /// Message shown instead of a view when the geometry is missing.
 pub(crate) fn unavailable(ui: &mut Ui, reason: &str) {
     ui.centered_and_justified(|ui| {
-        ui.colored_label(ui.visuals().warn_fg_color, reason);
+        ui.colored_label(ui.visuals().warn_fg_color, crate::i18n::message(reason));
     });
 }

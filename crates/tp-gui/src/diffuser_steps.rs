@@ -8,6 +8,7 @@ use tp_project::{ComponentId, DesignStep, Project};
 use tp_units::QuantityKind;
 
 use crate::app::EditCtx;
+use crate::i18n::{tf, tr};
 use crate::steps::{grid, section};
 use crate::widgets::{param_f64, param_u32, value_row};
 
@@ -70,18 +71,18 @@ fn main(
     use QuantityKind::*;
     let units = cx.units();
     let vaned = d.is_none_or(|d| d.vanes.is_some());
-    ui.weak(if vaned {
+    ui.weak(tr(if vaned {
         "Vaned diffuser after the impeller (Gülich 2nd ed., Chap. 7.9 and Table 7.7)."
     } else {
         "Vaneless ring after the impeller: the flow keeps c_u·r constant and slows down."
-    });
-    section(ui, "Main dimensions");
+    }));
+    section(ui, tr("Main dimensions"));
     grid("diffuser_main").show(ui, |ui| {
         let flow_factor = input.main.flow_factor.resolve(|| 1.0);
         param_f64(
             ui,
-            "Flow factor Q_Le/Q",
-            "Allowance for leakage that flows through the diffuser (eq. T7.7.1)",
+            tr("Flow factor Q_Le/Q"),
+            tr("Allowance for leakage that flows through the diffuser (eq. T7.7.1)"),
             &mut input.main.flow_factor,
             Dimensionless,
             Some(flow_factor),
@@ -90,12 +91,12 @@ fn main(
         );
         param_f64(
             ui,
-            "Inlet diameter d₃",
-            if vaned {
+            tr("Inlet diameter d₃"),
+            tr(if vaned {
                 "Leading edge of the vanes; automatic: the smallest gap of Gülich Table 10.2"
             } else {
                 "Start of the ring; automatic: d₂"
-            },
+            }),
             &mut input.main.inlet_diameter,
             Length,
             d.map(|d| d.inlet_diameter),
@@ -104,8 +105,8 @@ fn main(
         );
         param_f64(
             ui,
-            "Inlet width b₃",
-            "b₃/b₂ = 1.05 to 1.3 (Gülich p. 425)",
+            tr("Inlet width b₃"),
+            tr("b₃/b₂ = 1.05 to 1.3 (Gülich p. 425)"),
             &mut input.main.inlet_width,
             Length,
             d.map(|d| d.inlet_width),
@@ -114,12 +115,12 @@ fn main(
         );
         param_f64(
             ui,
-            "Outlet diameter d₄",
-            if vaned {
+            tr("Outlet diameter d₄"),
+            tr(if vaned {
                 "Automatic: the channel length for Gülich criterion C"
             } else {
                 "Automatic: 1.5·d₂"
-            },
+            }),
             &mut input.main.outlet_diameter,
             Length,
             d.map(|d| d.outlet_diameter),
@@ -130,8 +131,8 @@ fn main(
             let incidence = input.main.incidence.resolve(|| 0.0);
             param_f64(
                 ui,
-                "Incidence i₃",
-                "Between the vanes and the approaching flow, ±3° (eq. T7.7.6)",
+                tr("Incidence i₃"),
+                tr("Between the vanes and the approaching flow, ±3° (eq. T7.7.6)"),
                 &mut input.main.incidence,
                 Angle,
                 Some(incidence),
@@ -141,7 +142,7 @@ fn main(
         }
     });
     if let Some(d) = d {
-        section(ui, "Flow");
+        section(ui, tr("Flow"));
         Grid::new("diffuser_flow")
             .num_columns(4)
             .striped(true)
@@ -163,17 +164,17 @@ fn main(
             .show(ui, |ui| {
                 value_row(
                     ui,
-                    "d₄/d₂",
+                    tr("d₄/d₂"),
                     format!("{:.3}", d.outlet_diameter / d.impeller_diameter),
                 );
                 value_row(
                     ui,
-                    "Ideal pressure recovery",
+                    tr("Ideal pressure recovery"),
                     format!("{:.2}", d.ideal_pressure_recovery),
                 );
                 if d.vanes.is_none() {
-                    value_row(ui, "Path wrap angle", units.show(Angle, d.wrap_angle));
-                    value_row(ui, "Path length", units.show(Length, d.path_length));
+                    value_row(ui, tr("Path wrap angle"), units.show(Angle, d.wrap_angle));
+                    value_row(ui, tr("Path length"), units.show(Length, d.path_length));
                 }
             });
     }
@@ -187,13 +188,13 @@ fn contour(
     input: &mut DiffuserInput,
 ) -> &'static str {
     let units = cx.units();
-    ui.weak("The side walls run straight from b₃ at d₃ to b₄ at d₄.");
-    section(ui, "Side walls");
+    ui.weak(tr("The side walls run straight from b₃ at d₃ to b₄ at d₄."));
+    section(ui, tr("Side walls"));
     grid("diffuser_contour").show(ui, |ui| {
         param_f64(
             ui,
-            "Outlet width b₄",
-            "Automatic: b₃ (parallel walls)",
+            tr("Outlet width b₄"),
+            tr("Automatic: b₃ (parallel walls)"),
             &mut input.contour.outlet_width,
             QuantityKind::Length,
             d.map(|d| d.outlet_width),
@@ -213,13 +214,15 @@ fn properties(
     use QuantityKind::*;
     let units = cx.units();
     let v = d.and_then(|d| d.vanes.as_ref());
-    ui.weak("The throat width sets the best efficiency point (Gülich eq. T7.7.10).");
-    section(ui, "Vanes");
+    ui.weak(tr(
+        "The throat width sets the best efficiency point (Gülich eq. T7.7.10).",
+    ));
+    section(ui, tr("Vanes"));
     grid("diffuser_properties").show(ui, |ui| {
         param_u32(
             ui,
-            "Vanes z_Le",
-            "8 below nq = 20, 12 above, avoiding resonant pairs (Table 10.2)",
+            tr("Vanes z_Le"),
+            tr("8 below nq = 20, 12 above, avoiding resonant pairs (Table 10.2)"),
             &mut input.properties.vane_count,
             v.map(|v| v.count),
             3..=40,
@@ -227,8 +230,8 @@ fn properties(
         let throat_factor = input.properties.throat_factor.resolve(|| 1.15);
         param_f64(
             ui,
-            "Throat factor f_a3",
-            "Throat over the width from angular momentum, 1.1 to 1.3",
+            tr("Throat factor f_a3"),
+            tr("Throat over the width from angular momentum, 1.1 to 1.3"),
             &mut input.properties.throat_factor,
             Dimensionless,
             Some(throat_factor),
@@ -237,8 +240,8 @@ fn properties(
         );
         param_f64(
             ui,
-            "Leading-edge thickness e₃",
-            "(0.01 to 0.015)·d₂ (Gülich Chap. 7.9.2)",
+            tr("Leading-edge thickness e₃"),
+            tr("(0.01 to 0.015)·d₂ (Gülich Chap. 7.9.2)"),
             &mut input.properties.leading_thickness,
             Length,
             v.map(|v| v.leading_thickness),
@@ -247,25 +250,32 @@ fn properties(
         );
     });
     if let Some(v) = v {
-        section(ui, "Throat");
+        section(ui, tr("Throat"));
         Grid::new("diffuser_throat").num_columns(2).show(ui, |ui| {
-            value_row(ui, "Flow angle α₃'", units.show(Angle, v.inlet_flow_angle));
-            value_row(ui, "Vane angle α₃B", units.show(Angle, v.inlet_angle));
             value_row(
                 ui,
-                "Throat a₃ (eq. T7.7.10)",
+                tr("Flow angle α₃'"),
+                units.show(Angle, v.inlet_flow_angle),
+            );
+            value_row(ui, tr("Vane angle α₃B"), units.show(Angle, v.inlet_angle));
+            value_row(
+                ui,
+                tr("Throat a₃ (eq. T7.7.10)"),
                 units.show(Length, v.throat_target),
             );
-            value_row(ui, "Throat of the vanes", units.show(Length, v.throat));
+            value_row(ui, tr("Throat of the vanes"), units.show(Length, v.throat));
             value_row(
                 ui,
-                "c₃q/c₂ (B)",
-                format!("{:.2} (0.7 to 0.85)", v.checks.deceleration),
+                tr("c₃q/c₂ (B)"),
+                tf(
+                    "{} (0.7 to 0.85)",
+                    &[&format!("{:.2}", v.checks.deceleration)],
+                ),
             );
             value_row(
                 ui,
-                "b₃/a₃ (D)",
-                format!("{:.2} (0.8 to 2)", v.checks.aspect_ratio),
+                tr("b₃/a₃ (D)"),
+                tf("{} (0.8 to 2)", &[&format!("{:.2}", v.checks.aspect_ratio)]),
             );
         });
     }
@@ -281,16 +291,16 @@ fn mean_lines(
     use QuantityKind::*;
     let units = cx.units();
     let v = d.and_then(|d| d.vanes.as_ref());
-    ui.weak(
+    ui.weak(tr(
         "Conformal mapping dθ = dr/(r·tan α). The vane angle grows from α₃B to α₄B; its law \
          is shaped to give the throat of the previous step.",
-    );
-    section(ui, "Mean lines");
+    ));
+    section(ui, tr("Mean lines"));
     grid("diffuser_mean_lines").show(ui, |ui| {
         param_f64(
             ui,
-            "Outlet vane angle α₄B",
-            "Automatic: the optimum area ratio of the channel (eq. 7.30)",
+            tr("Outlet vane angle α₄B"),
+            tr("Automatic: the optimum area ratio of the channel (eq. 7.30)"),
             &mut input.mean_lines.outlet_angle,
             Angle,
             v.map(|v| v.outlet_angle),
@@ -299,8 +309,8 @@ fn mean_lines(
         );
         param_u32(
             ui,
-            "Points per vane",
-            "From leading to trailing edge",
+            tr("Points per vane"),
+            tr("From leading to trailing edge"),
             &mut input.mean_lines.points,
             v.map(|v| v.geometry.mean_line.len() as u32),
             11..=201,
@@ -308,36 +318,50 @@ fn mean_lines(
     });
     if let Some(v) = v {
         let c = &v.checks;
-        section(ui, "Diffusing channel");
+        section(ui, tr("Diffusing channel"));
         Grid::new("diffuser_channel").num_columns(2).show(ui, |ui| {
-            value_row(ui, "Outlet width a₄", units.show(Length, v.outlet_throat));
-            value_row(ui, "Length L₃₋₄", units.show(Length, v.channel_length));
-            value_row(ui, "Wrap angle", units.show(Angle, v.geometry.wrap_angle));
             value_row(
                 ui,
-                "Area ratio (A)",
-                format!(
-                    "{:.2} (optimum {:.2}, c_p,opt {:.2})",
-                    c.area_ratio, c.optimum_area_ratio, c.optimum_pressure_recovery
+                tr("Outlet width a₄"),
+                units.show(Length, v.outlet_throat),
+            );
+            value_row(ui, tr("Length L₃₋₄"), units.show(Length, v.channel_length));
+            value_row(
+                ui,
+                tr("Wrap angle"),
+                units.show(Angle, v.geometry.wrap_angle),
+            );
+            value_row(
+                ui,
+                tr("Area ratio (A)"),
+                tf(
+                    "{} (optimum {}, c_p,opt {})",
+                    &[
+                        &format!("{:.2}", c.area_ratio),
+                        &format!("{:.2}", c.optimum_area_ratio),
+                        &format!("{:.2}", c.optimum_pressure_recovery),
+                    ],
                 ),
             );
             value_row(
                 ui,
-                "L₃₋₄/a₃ (C)",
-                format!("{:.1} (2.5 to 6)", c.length_ratio),
+                tr("L₃₋₄/a₃ (C)"),
+                tf("{} (2.5 to 6)", &[&format!("{:.1}", c.length_ratio)]),
             );
             value_row(
                 ui,
-                "c₄²/(2gH) (E)",
-                format!("{:.3} (0.02 to 0.04)", c.outlet_energy),
+                tr("c₄²/(2gH) (E)"),
+                tf("{} (0.02 to 0.04)", &[&format!("{:.3}", c.outlet_energy)]),
             );
             value_row(
                 ui,
-                "Opening angle (F)",
-                format!(
+                tr("Opening angle (F)"),
+                tf(
                     "{} (allowed {})",
-                    units.show(Angle, c.opening_angle),
-                    units.show(Angle, c.allowable_angle)
+                    &[
+                        &units.show(Angle, c.opening_angle),
+                        &units.show(Angle, c.allowable_angle),
+                    ],
                 ),
             );
         });
@@ -353,13 +377,13 @@ fn profiles(
 ) -> &'static str {
     let units = cx.units();
     let v = d.and_then(|d| d.vanes.as_ref());
-    ui.weak("The vane thickness varies linearly from e₃ to e₄.");
-    section(ui, "Thickness");
+    ui.weak(tr("The vane thickness varies linearly from e₃ to e₄."));
+    section(ui, tr("Thickness"));
     grid("diffuser_profiles").show(ui, |ui| {
         param_f64(
             ui,
-            "Trailing-edge thickness e₄",
-            "Automatic: 1.5·e₃",
+            tr("Trailing-edge thickness e₄"),
+            tr("Automatic: 1.5·e₃"),
             &mut input.profiles.trailing_thickness,
             QuantityKind::Length,
             v.map(|v| v.trailing_thickness),
@@ -373,12 +397,12 @@ fn profiles(
 fn edge_shape(ui: &mut Ui, salt: &str, shape: &mut EdgeShape) {
     let ellipse = matches!(shape, EdgeShape::Ellipse { .. });
     ComboBox::from_id_salt(salt)
-        .selected_text(if ellipse { "elliptic" } else { "blunt (cut)" })
+        .selected_text(tr(if ellipse { "elliptic" } else { "blunt (cut)" }))
         .show_ui(ui, |ui| {
-            if ui.selectable_label(ellipse, "elliptic").clicked() && !ellipse {
+            if ui.selectable_label(ellipse, tr("elliptic")).clicked() && !ellipse {
                 *shape = EdgeShape::Ellipse { ratio: 3.0 };
             }
-            if ui.selectable_label(!ellipse, "blunt (cut)").clicked() && ellipse {
+            if ui.selectable_label(!ellipse, tr("blunt (cut)")).clicked() && ellipse {
                 *shape = EdgeShape::Cut;
             }
         });
@@ -396,14 +420,14 @@ fn edge_shape(ui: &mut Ui, salt: &str, shape: &mut EdgeShape) {
 }
 
 fn edges(ui: &mut Ui, input: &mut DiffuserInput) -> &'static str {
-    ui.weak(
+    ui.weak(tr(
         "An elliptic leading edge makes the vane less sensitive to incidence (Gülich Chap. 7.9.2).",
-    );
-    section(ui, "Edge shapes");
+    ));
+    section(ui, tr("Edge shapes"));
     grid("diffuser_edges").show(ui, |ui| {
-        ui.label("Leading edge");
+        ui.label(tr("Leading edge"));
         edge_shape(ui, "diffuser_le", &mut input.edges.leading);
-        ui.label("Trailing edge");
+        ui.label(tr("Trailing edge"));
         edge_shape(ui, "diffuser_te", &mut input.edges.trailing);
     });
     "edit diffuser edges"

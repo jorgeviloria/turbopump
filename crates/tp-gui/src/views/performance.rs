@@ -10,6 +10,7 @@ use tp_units::{DisplayUnits, QuantityKind};
 
 use super::{Palette, unavailable};
 use crate::derived::Derived;
+use crate::i18n::{tf, tr};
 use crate::messages::{self, Severity};
 use crate::theme;
 
@@ -26,11 +27,11 @@ pub(crate) struct PerformanceView {
 }
 
 fn collector_name(c: Collector) -> &'static str {
-    match c {
+    tr(match c {
         Collector::Volute => "volute",
         Collector::VanedDiffuser => "vaned diffuser",
         Collector::VanelessDiffuser => "vaneless diffuser",
-    }
+    })
 }
 
 /// An automatic or manual setting on one line: label, value and "auto".
@@ -51,7 +52,7 @@ fn setting(ui: &mut Ui, label: &str, hint: &str, param: &mut Param<f64>, auto_va
         }
     }
     let mut auto = param.is_auto();
-    if ui.checkbox(&mut auto, "auto").changed() {
+    if ui.checkbox(&mut auto, tr("auto")).changed() {
         *param = if auto {
             Param::Auto
         } else {
@@ -71,7 +72,7 @@ impl PerformanceView {
         units: &DisplayUnits,
     ) {
         let Ok(mut input) = project.performance_input(id) else {
-            unavailable(ui, "The performance prediction needs a pump impeller.");
+            unavailable(ui, tr("The performance prediction needs a pump impeller."));
             return;
         };
         input.recirculation_onset = self.onset;
@@ -98,31 +99,35 @@ impl PerformanceView {
         // Settings.
         ui.horizontal_wrapped(|ui| {
             ui.label(
-                RichText::new(format!("Collector: {}", collector_name(input.collector)))
+                RichText::new(tf("Collector: {}", &[&collector_name(input.collector)]))
                     .color(Palette::of(ui).guide),
             )
-            .on_hover_text("From the component after the impeller; it sets the shut-off head");
+            .on_hover_text(tr(
+                "From the component after the impeller; it sets the shut-off head",
+            ));
             ui.add_space(10.0);
             let q_opt = curve.design.flow;
             setting(
                 ui,
-                "Recirculation below Q/Q_opt",
-                "Flow ratio where recirculation sets in at the impeller inlet; below it \
+                tr("Recirculation below Q/Q_opt"),
+                tr(
+                    "Flow ratio where recirculation sets in at the impeller inlet; below it \
                  the curve is an estimate",
+                ),
                 &mut self.onset,
                 curve.recirculation_flow / q_opt,
             );
             setting(
                 ui,
-                "Shut-off ψ₀",
-                "Pressure coefficient 2gH₀/u₂² against a closed valve (Gülich eqs. 3.27–3.28)",
+                tr("Shut-off ψ₀"),
+                tr("Pressure coefficient 2gH₀/u₂² against a closed valve (Gülich eqs. 3.27–3.28)"),
                 &mut self.shutoff,
                 curve.shutoff_coefficient,
             );
             setting(
                 ui,
-                "Up to Q/Q_opt",
-                "Largest flow of the curve",
+                tr("Up to Q/Q_opt"),
+                tr("Largest flow of the curve"),
                 &mut self.max_flow,
                 curve.max_flow / q_opt,
             );
@@ -139,7 +144,7 @@ impl PerformanceView {
             };
             line(
                 ui,
-                "Design",
+                tr("Design"),
                 format!(
                     "{} · {} · {} · η {:.1} %",
                     s(VolumeFlow, curve.design.flow),
@@ -150,7 +155,7 @@ impl PerformanceView {
             );
             line(
                 ui,
-                "Best efficiency",
+                tr("Best efficiency"),
                 format!(
                     "{} ({:.0} %) · η {:.1} %",
                     s(VolumeFlow, curve.best.flow),
@@ -160,11 +165,10 @@ impl PerformanceView {
             );
             line(
                 ui,
-                "Shut-off",
-                format!(
+                tr("Shut-off"),
+                tf(
                     "{} · {} (estimate)",
-                    s(Head, curve.shutoff_head),
-                    s(Power, curve.shutoff_power)
+                    &[&s(Head, curve.shutoff_head), &s(Power, curve.shutoff_power)],
                 ),
             );
             line(ui, "NPSH3", s(Head, curve.npsh_required));
@@ -208,21 +212,21 @@ impl PerformanceView {
             (
                 "curve_head",
                 format!("H [{}]", symbol(QuantityKind::Head)),
-                "head",
+                tr("head"),
                 head,
                 colors[0],
             ),
             (
                 "curve_efficiency",
                 "η [%]".into(),
-                "efficiency",
+                tr("efficiency"),
                 efficiency,
                 colors[1],
             ),
             (
                 "curve_power",
                 format!("P [{}]", symbol(QuantityKind::Power)),
-                "power",
+                tr("power"),
                 power,
                 colors[2],
             ),
@@ -245,9 +249,9 @@ impl PerformanceView {
                 _ => {}
             }
             // Items with an empty name stay out of the legend.
-            let named = |text: &str| {
+            let named = |text: &'static str| {
                 if index == 0 {
-                    text.to_owned()
+                    tr(text).to_owned()
                 } else {
                     String::new()
                 }
@@ -275,10 +279,17 @@ impl PerformanceView {
                 };
                 plot.line(Line::new(main, series(false)).color(color).width(2.0));
                 plot.line(
-                    Line::new(named(&format!("{legend}, estimate")), series(true))
-                        .color(color)
-                        .width(1.5)
-                        .style(LineStyle::dashed_loose()),
+                    Line::new(
+                        if index == 0 {
+                            tf("{}, estimate", &[&legend])
+                        } else {
+                            String::new()
+                        },
+                        series(true),
+                    )
+                    .color(color)
+                    .width(1.5)
+                    .style(LineStyle::dashed_loose()),
                 );
                 if index == 0 {
                     let theoretical: PlotPoints = curve
@@ -293,7 +304,7 @@ impl PerformanceView {
                         })
                         .collect();
                     plot.line(
-                        Line::new("theoretical head", theoretical)
+                        Line::new(tr("theoretical head"), theoretical)
                             .color(palette.guide)
                             .width(1.0)
                             .style(LineStyle::dashed_dense()),
@@ -307,7 +318,7 @@ impl PerformanceView {
                         .map(|p| [flow(p), 100.0 * p.hydraulic_efficiency])
                         .collect();
                     plot.line(
-                        Line::new("hydraulic efficiency", hydraulic)
+                        Line::new(tr("hydraulic efficiency"), hydraulic)
                             .color(color.gamma_multiply(0.6))
                             .width(1.0)
                             .style(LineStyle::dashed_dense()),

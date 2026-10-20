@@ -8,6 +8,7 @@ use eframe::egui::{
 use tp_project::{ComponentId, ComponentKind, DesignStep, StepStatus};
 
 use crate::app::{EditCtx, Selection};
+use crate::i18n::{component_name, project_name, tf, tr};
 use crate::icons;
 use crate::messages::{self, Severity};
 use crate::steps;
@@ -16,20 +17,33 @@ use crate::viewer::{Part, ViewOptions};
 
 /// Step name with a capital first letter.
 pub(crate) fn step_title(step: DesignStep) -> String {
-    let text = step.to_string();
-    let mut chars = text.chars();
-    match chars.next() {
-        Some(first) => first.to_uppercase().chain(chars).collect(),
-        None => text,
-    }
+    use DesignStep::*;
+    tr(match step {
+        MainDimensions => "Main dimensions",
+        MeridionalContour => "Meridional contour",
+        BladeProperties => "Blade properties",
+        BladeMeanLines => "Blade mean lines",
+        BladeProfiles => "Blade profiles",
+        BladeEdges => "Blade edges",
+        VoluteSetup => "Volute setup",
+        CrossSection => "Cross section",
+        SpiralDevelopment => "Spiral development",
+        Diffuser => "Diffuser",
+        CutWater => "Cut-water",
+        WallThickness => "Wall thickness",
+        CfdSetup => "CFD setup",
+        ModelSettings => "Model settings",
+        ModelFinishing => "Model finishing",
+    })
+    .to_owned()
 }
 
 pub(crate) fn status_text(status: StepStatus) -> &'static str {
-    match status {
+    tr(match status {
         StepStatus::Done => "done",
         StepStatus::Stale => "outdated: an input changed since",
         StepStatus::Pending => "pending",
-    }
+    })
 }
 
 /// Icon and color of a step status.
@@ -38,6 +52,18 @@ pub(crate) fn status_icon(p: &Palette, status: StepStatus) -> (&'static str, Col
         StepStatus::Done => (icon::CHECK_CIRCLE, p.done),
         StepStatus::Stale => (icon::ARROWS_CLOCKWISE, p.stale),
         StepStatus::Pending => (icon::CIRCLE, p.weak),
+    }
+}
+
+/// Name of a machine type, as `MachineType` writes it.
+fn machine_name(machine: tp_project::MachineType) -> &'static str {
+    match machine.to_string().as_str() {
+        "pump" => "pump",
+        "fan" => "fan",
+        "compressor" => "compressor",
+        "gas turbine" => "gas turbine",
+        "hydro turbine" => "hydro turbine",
+        _ => "machine",
     }
 }
 
@@ -103,7 +129,7 @@ pub(crate) fn add_component(cx: &mut EditCtx<'_>, index: usize) {
         _ => end,
     };
     let kind = entry.kind;
-    let label = format!("add {}", kind.label().to_lowercase());
+    let label = tf("add {}", &[&tr(kind.label()).to_lowercase()]);
     let mut added = None;
     let ok = cx.edit(&label, |p| {
         added = Some(p.add_component(kind, Some(at))?);
@@ -111,14 +137,14 @@ pub(crate) fn add_component(cx: &mut EditCtx<'_>, index: usize) {
     });
     if ok && let Some(id) = added {
         *cx.selection = Selection::Step(id, kind.steps()[0]);
-        cx.info(format!("Added {}", kind.label().to_lowercase()));
+        cx.info(tf("Added {}", &[&tr(kind.label()).to_lowercase()]));
     }
 }
 
 /// Entries that add a component to the project.
 pub(crate) fn add_component_menu(ui: &mut Ui, cx: &mut EditCtx<'_>) {
     for (index, entry) in ADD_ENTRIES.iter().enumerate() {
-        let text = format!("{}  {}", icon::PLUS, entry.label);
+        let text = format!("{}  {}", icon::PLUS, tr(entry.label));
         if ui.add(egui::Button::new(text)).clicked() {
             add_component(cx, index);
         }
@@ -132,10 +158,11 @@ pub(crate) fn remove_component(cx: &mut EditCtx<'_>, id: ComponentId) {
         .component(id)
         .map(|c| c.name.clone())
         .unwrap_or_default();
-    if cx.edit(&format!("remove {name}"), |p| {
+    let name = component_name(&name);
+    if cx.edit(&tf("remove {}", &[&name]), |p| {
         p.remove_component(id).map(|_| ())
     }) {
-        cx.info(format!("Removed {name}"));
+        cx.info(tf("Removed {}", &[&name]));
     }
 }
 
@@ -203,7 +230,7 @@ pub(crate) fn component_bar(ui: &mut Ui, cx: &mut EditCtx<'_>) {
     ui.vertical_centered(|ui| {
         ui.spacing_mut().item_spacing.y = 6.0;
         let setup = *cx.selection == Selection::Setup;
-        if tile(ui, "Global setup", setup, |painter, rect, color| {
+        if tile(ui, tr("Global setup"), setup, |painter, rect, color| {
             painter.text(
                 rect.center(),
                 Align2::CENTER_CENTER,
@@ -235,7 +262,7 @@ pub(crate) fn component_bar(ui: &mut Ui, cx: &mut EditCtx<'_>) {
         for (id, kind, name) in components {
             let selected = matches!(*cx.selection, Selection::Step(s, _) if s == id);
             let status = component_status(cx, id);
-            let response = tile(ui, &name, selected, |painter, rect, _| {
+            let response = tile(ui, &component_name(&name), selected, |painter, rect, _| {
                 icons::component(painter, rect, kind, component_color(kind));
             });
             let dot = match status {
@@ -258,7 +285,11 @@ pub(crate) fn component_bar(ui: &mut Ui, cx: &mut EditCtx<'_>) {
             }
             response.context_menu(|ui| {
                 if ui
-                    .button(format!("{}  Remove {name}", icon::TRASH))
+                    .button(format!(
+                        "{}  {}",
+                        icon::TRASH,
+                        tf("Remove {}", &[&component_name(&name)])
+                    ))
                     .clicked()
                 {
                     remove = Some(id);
@@ -269,7 +300,7 @@ pub(crate) fn component_bar(ui: &mut Ui, cx: &mut EditCtx<'_>) {
             remove_component(cx, id);
         }
 
-        let add = tile(ui, "Add component", false, |painter, rect, color| {
+        let add = tile(ui, tr("Add component"), false, |painter, rect, color| {
             painter.text(
                 rect.center(),
                 Align2::CENTER_CENTER,
@@ -417,16 +448,16 @@ pub(crate) fn design_tree(ui: &mut Ui, cx: &mut EditCtx<'_>) {
     let p = Palette::of(ui);
     let project = cx.doc.project().clone();
     ui.add_space(6.0);
-    ui.label(bold(&project.info.name).size(15.0));
+    ui.label(bold(project_name(&project.info.name)).size(15.0));
     ui.label(
-        RichText::new(format!("{} project", project.machine()))
+        RichText::new(tf("{} project", &[&tr(machine_name(project.machine()))]))
             .size(11.5)
             .color(p.weak),
     );
-    caption(ui, "DESIGN");
+    caption(ui, tr("DESIGN"));
     let setup = *cx.selection == Selection::Setup;
-    if row(ui, 0.0, icon::GEAR, p.text, "Global setup", setup, true)
-        .on_hover_text("Design point, fluid, inlet conditions and units")
+    if row(ui, 0.0, icon::GEAR, p.text, tr("Global setup"), setup, true)
+        .on_hover_text(tr("Design point, fluid, inlet conditions and units"))
         .clicked()
     {
         cx.open(Selection::Setup);
@@ -442,12 +473,12 @@ pub(crate) fn design_tree(ui: &mut Ui, cx: &mut EditCtx<'_>) {
             ui,
             Id::new(("design_open", id.0)),
             kind,
-            &component.name,
+            &component_name(&component.name),
             Some((errors, all.len() - errors)),
         );
         header.context_menu(|ui| {
             if ui
-                .button(format!("{}  Remove component", icon::TRASH))
+                .button(format!("{}  {}", icon::TRASH, tr("Remove component")))
                 .clicked()
             {
                 remove = Some(id);
@@ -476,7 +507,8 @@ pub(crate) fn design_tree(ui: &mut Ui, cx: &mut EditCtx<'_>) {
         remove_component(cx, id);
     }
     ui.add_space(4.0);
-    let add = ui.add(egui::Button::new(format!("{}  Add component", icon::PLUS)).frame(false));
+    let add =
+        ui.add(egui::Button::new(format!("{}  {}", icon::PLUS, tr("Add component"))).frame(false));
     Popup::menu(&add).show(|ui| {
         ui.set_min_width(200.0);
         add_component_menu(ui, cx);
@@ -503,7 +535,7 @@ fn part_row(ui: &mut Ui, label: &str, part: &mut Part, glass: bool) {
         };
         if ui
             .add(egui::Button::new(RichText::new(glyph).color(color)).frame(false))
-            .on_hover_text(if part.shown { "Hide" } else { "Show" })
+            .on_hover_text(if part.shown { tr("Hide") } else { tr("Show") })
             .clicked()
         {
             part.shown = !part.shown;
@@ -515,7 +547,7 @@ fn part_row(ui: &mut Ui, label: &str, part: &mut Part, glass: bool) {
                 let button = egui::Button::selectable(part.glass, icon::CUBE_TRANSPARENT);
                 if ui
                     .add_enabled(part.shown, button)
-                    .on_hover_text("See-through")
+                    .on_hover_text(tr("See-through"))
                     .clicked()
                 {
                     part.glass = !part.glass;
@@ -536,31 +568,31 @@ fn switch_row(ui: &mut Ui, label: &str, value: &mut bool) {
 
 /// The tree of what the 3D view shows.
 pub(crate) fn model_tree(ui: &mut Ui, options: &mut ViewOptions, stage: StageParts) {
-    caption(ui, "3D MODEL");
+    caption(ui, tr("3D MODEL"));
     let header = |ui: &mut Ui, kind: ComponentKind, name: &str| {
         component_header(ui, Id::new(("model_open", name)), kind, name, None).0
     };
-    if header(ui, ComponentKind::Impeller, "Impeller") {
-        part_row(ui, "Blades", &mut options.blades, true);
-        part_row(ui, "Hub", &mut options.hub, true);
-        part_row(ui, "Shroud", &mut options.shroud, true);
+    if header(ui, ComponentKind::Impeller, tr("Impeller")) {
+        part_row(ui, tr("Blades"), &mut options.blades, true);
+        part_row(ui, tr("Hub"), &mut options.hub, true);
+        part_row(ui, tr("Shroud"), &mut options.shroud, true);
     }
     if let Some(vaned) = stage.stator
-        && header(ui, ComponentKind::Stator { vaned }, "Diffuser")
+        && header(ui, ComponentKind::Stator { vaned }, tr("Diffuser"))
     {
         if vaned {
-            part_row(ui, "Vanes", &mut options.vanes, true);
+            part_row(ui, tr("Vanes"), &mut options.vanes, true);
         }
-        part_row(ui, "Side walls", &mut options.walls, true);
+        part_row(ui, tr("Side walls"), &mut options.walls, true);
     }
-    if stage.volute && header(ui, ComponentKind::Volute, "Volute") {
-        part_row(ui, "Casing", &mut options.volute, true);
-        switch_row(ui, "Section curves", &mut options.sections);
+    if stage.volute && header(ui, ComponentKind::Volute, tr("Volute")) {
+        part_row(ui, tr("Casing"), &mut options.volute, true);
+        switch_row(ui, tr("Section curves"), &mut options.sections);
     }
-    caption(ui, "DISPLAY");
-    switch_row(ui, "Feature edges", &mut options.edges);
-    switch_row(ui, "All blades", &mut options.all_blades);
-    switch_row(ui, "Wireframe", &mut options.wireframe);
+    caption(ui, tr("DISPLAY"));
+    switch_row(ui, tr("Feature edges"), &mut options.edges);
+    switch_row(ui, tr("All blades"), &mut options.all_blades);
+    switch_row(ui, tr("Wireframe"), &mut options.wireframe);
 }
 
 #[cfg(test)]

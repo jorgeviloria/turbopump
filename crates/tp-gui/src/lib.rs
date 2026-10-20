@@ -11,6 +11,7 @@ mod app;
 mod derived;
 mod diffuser_steps;
 mod export;
+mod i18n;
 mod icons;
 mod messages;
 mod ribbon;

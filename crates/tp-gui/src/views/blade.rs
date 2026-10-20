@@ -10,6 +10,7 @@ use tp_units::{DisplayUnits, QuantityKind};
 
 use super::{Palette, unavailable};
 use crate::derived::Derived;
+use crate::i18n::{tf, tr};
 
 /// Value of a blade section at a station, in display units.
 type Quantity<'a> = &'a dyn Fn(&BladeSection, usize) -> f64;
@@ -30,8 +31,11 @@ pub(crate) fn show(ui: &mut Ui, derived: &Derived, id: ComponentId, units: &Disp
         let reason = derived
             .impeller(id)
             .and_then(|r| r.geometry.as_ref().err())
-            .map_or("No geometry yet.", String::as_str);
-        unavailable(ui, reason);
+            .map_or_else(
+                || tr("No geometry yet.").to_owned(),
+                |e| crate::i18n::message(e),
+            );
+        unavailable(ui, &reason);
         return;
     };
     let palette = Palette::of(ui);
@@ -70,9 +74,12 @@ pub(crate) fn show(ui: &mut Ui, derived: &Derived, id: ComponentId, units: &Disp
         let response = plot.show(ui, |plot| {
             for (i, s) in sections.iter().enumerate() {
                 plot.line(
-                    Line::new(format!("span {:.2}", s.span), along(s, |k| value(s, k)))
-                        .color(palette.span(i, n))
-                        .width(1.5),
+                    Line::new(
+                        tf("span {}", &[&format!("{:.2}", s.span)]),
+                        along(s, |k| value(s, k)),
+                    )
+                    .color(palette.span(i, n))
+                    .width(1.5),
                 );
             }
         });
@@ -84,8 +91,10 @@ pub(crate) fn show(ui: &mut Ui, derived: &Derived, id: ComponentId, units: &Disp
     let u2 = velocities.outlet_speed.max(f64::EPSILON);
     let response = Plot::new(("blade_velocity", id.0))
         .height(height)
-        .y_axis_label("w/u₂")
-        .x_axis_label("relative meridional length (0 leading edge, 1 trailing edge)")
+        .y_axis_label(tr("w/u₂"))
+        .x_axis_label(tr(
+            "relative meridional length (0 leading edge, 1 trailing edge)",
+        ))
         .link_axis("blade_plots", [true, false])
         .link_cursor("blade_plots", [true, false])
         .x_grid_spacer(egui_plot::uniform_grid_spacer(super::nice_grid))
@@ -105,7 +114,10 @@ pub(crate) fn show(ui: &mut Ui, derived: &Derived, id: ComponentId, units: &Disp
                         .collect()
                 };
                 let (suction, pressure) = if i == 0 {
-                    ("suction face".to_owned(), "pressure face".to_owned())
+                    (
+                        tr("suction face").to_owned(),
+                        tr("pressure face").to_owned(),
+                    )
                 } else {
                     (String::new(), String::new())
                 };
