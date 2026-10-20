@@ -184,6 +184,8 @@ pub struct VaneDesign {
 pub struct DiffuserDesign {
     /// Design flow Q_Le, m³/s.
     pub flow: f64,
+    /// Outlet diameter of the impeller before it d₂, m.
+    pub impeller_diameter: f64,
     pub inlet_diameter: f64,
     /// Smallest d₃ of Gülich Table 10.2, m (vaned diffusers).
     pub min_inlet_diameter: f64,
@@ -257,6 +259,14 @@ fn positive(name: &str, value: f64) -> Result<f64, DesignError> {
 }
 
 impl DiffuserDesign {
+    /// Half width of the channel at radius `r`: the side walls run straight from b₃ at
+    /// d₃ to b₄ at d₄ (and keep b₃ inside d₃).
+    pub fn half_width(&self, r: f64) -> f64 {
+        let (r3, r4) = (self.inlet_diameter / 2.0, self.outlet_diameter / 2.0);
+        let t = ((r - r3) / (r4 - r3)).clamp(0.0, 1.0);
+        0.5 * (self.inlet_width + (self.outlet_width - self.inlet_width) * t)
+    }
+
     /// Designs a diffuser after `outlet`; `vaned` selects a vaned or vaneless one.
     pub fn new(
         outlet: &ImpellerOutlet,
@@ -308,8 +318,9 @@ impl DiffuserDesign {
                 outlet_width,
             )
         };
-        // Vaned: d₄/d₂ within (1.05 to 1.15) + 0.01·nq (Gülich p. 426), the value whose
-        // channel comes closest to L₃₋₄/a₃ = 4.5, inside criterion C (2.5 to 6).
+        // Vaned: the d₄ whose channel comes closest to L₃₋₄/a₃ = 4.5, inside criterion C
+        // (2.5 to 6), at most the (1.15 + 0.01·nq)·d₂ of Gülich p. 426. Below that range a
+        // smaller diffuser that meets the criterion is preferred to a longer one.
         let (outlet_diameter, vanes) = match (main.outlet_diameter, vaned) {
             (Param::Manual(d4), false) => (d4, None),
             (Param::Auto, false) => (1.5 * d2, None),
@@ -321,7 +332,7 @@ impl DiffuserDesign {
             }
             (Param::Auto, true) => {
                 let (mut low, mut high) = (
-                    ((1.05 + 0.01 * outlet.nq) * d2).max(inlet_diameter * 1.05),
+                    inlet_diameter * 1.05,
                     ((1.15 + 0.01 * outlet.nq) * d2).max(inlet_diameter * 1.1),
                 );
                 let ratio = |d4: f64| -> Result<f64, DesignError> {
@@ -406,6 +417,7 @@ impl DiffuserDesign {
 
         Ok(Self {
             flow,
+            impeller_diameter: d2,
             inlet_diameter,
             min_inlet_diameter,
             inlet_width,

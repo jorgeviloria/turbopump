@@ -134,19 +134,26 @@ impl VaneGeometry {
         })
     }
 
+    /// Outer and inner side of vane `index`, from leading to trailing edge, for
+    /// rotation `sign`.
+    pub fn sides(&self, index: u32, sign: f64) -> (Vec<DVec2>, Vec<DVec2>) {
+        let angle = TAU * f64::from(index) / f64::from(self.count);
+        let (s, c) = angle.sin_cos();
+        let place = |p: &DVec2| {
+            let q = DVec2::new(c * p.x - s * p.y, s * p.x + c * p.y);
+            DVec2::new(q.x, sign * q.y)
+        };
+        (
+            self.outer_side.iter().map(place).collect(),
+            self.inner_side.iter().map(place).collect(),
+        )
+    }
+
     /// Closed outline of vane `index` (leading edge along the outer side, back along
     /// the inner side) for rotation `sign`.
     pub fn outline(&self, index: u32, sign: f64) -> Vec<DVec2> {
-        let angle = TAU * f64::from(index) / f64::from(self.count);
-        let (s, c) = angle.sin_cos();
-        self.outer_side
-            .iter()
-            .chain(self.inner_side.iter().rev())
-            .map(|p| {
-                let q = DVec2::new(c * p.x - s * p.y, s * p.x + c * p.y);
-                DVec2::new(q.x, sign * q.y)
-            })
-            .collect()
+        let (outer, inner) = self.sides(index, sign);
+        outer.into_iter().chain(inner.into_iter().rev()).collect()
     }
 }
 
