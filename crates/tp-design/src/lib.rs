@@ -4,6 +4,7 @@
 //! projects or files, so the same code serves the editor, the command line and tests.
 
 mod error;
+pub mod impeller;
 mod param;
 pub mod pump;
 pub mod slip;
