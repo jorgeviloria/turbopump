@@ -3,8 +3,8 @@
 //! Exit codes follow the batch-mode convention: 0 = success, 1 = completed with
 //! warnings, 2 = error.
 
-#[cfg(feature = "cad")]
 mod analysis;
+#[cfg(feature = "cad")]
 mod cad;
 mod design;
 mod diffuser;
