@@ -90,17 +90,44 @@ pub fn blade_triangles(g: &ImpellerGeometry) -> Vec<Triangle> {
     out
 }
 
-/// All blades plus the hub and shroud walls.
-pub fn impeller_triangles(g: &ImpellerGeometry) -> Vec<Triangle> {
+/// The impeller mesh split by part, for viewers that color or hide each one.
+#[derive(Debug, Clone, Default)]
+pub struct ImpellerMesh {
+    /// One mesh per blade, in angular order.
+    pub blades: Vec<Vec<Triangle>>,
+    /// Hub wall (surface of revolution of the hub contour).
+    pub hub: Vec<Triangle>,
+    /// Shroud wall.
+    pub shroud: Vec<Triangle>,
+}
+
+/// Every blade and the hub and shroud walls, as separate meshes.
+pub fn impeller_parts(g: &ImpellerGeometry) -> ImpellerMesh {
     let one = blade_triangles(g);
     let z = g.blade.count;
-    let mut out = Vec::with_capacity(one.len() * z as usize);
-    for i in 0..z {
-        let angle = 2.0 * PI * f64::from(i) / f64::from(z);
-        out.extend(one.iter().map(|t| t.map(|p| rotate_z(p, angle))));
+    let blades = (0..z)
+        .map(|i| {
+            let angle = 2.0 * PI * f64::from(i) / f64::from(z);
+            one.iter().map(|t| t.map(|p| rotate_z(p, angle))).collect()
+        })
+        .collect();
+    let mut hub = Vec::new();
+    revolve(&mut hub, &g.contour.hub.sample(WALL_POINTS));
+    let mut shroud = Vec::new();
+    revolve(&mut shroud, &g.contour.shroud.sample(WALL_POINTS));
+    ImpellerMesh {
+        blades,
+        hub,
+        shroud,
     }
-    revolve(&mut out, &g.contour.hub.sample(WALL_POINTS));
-    revolve(&mut out, &g.contour.shroud.sample(WALL_POINTS));
+}
+
+/// All blades plus the hub and shroud walls.
+pub fn impeller_triangles(g: &ImpellerGeometry) -> Vec<Triangle> {
+    let parts = impeller_parts(g);
+    let mut out: Vec<Triangle> = parts.blades.into_iter().flatten().collect();
+    out.extend(parts.hub);
+    out.extend(parts.shroud);
     out
 }
 
@@ -148,5 +175,22 @@ pub(crate) mod tests {
         let one = blade_triangles(&g).len();
         let all = impeller_triangles(&g).len();
         assert!(all >= one * g.blade.count as usize);
+    }
+
+    #[test]
+    fn parts_add_up_to_the_whole_mesh() {
+        let g = reference();
+        let parts = impeller_parts(&g);
+        assert_eq!(parts.blades.len(), g.blade.count as usize);
+        assert!(!parts.hub.is_empty() && !parts.shroud.is_empty());
+        let count = parts.blades.iter().map(Vec::len).sum::<usize>()
+            + parts.hub.len()
+            + parts.shroud.len();
+        assert_eq!(count, impeller_triangles(&g).len());
+        // The second blade is the first one turned by 2π/z about the axis.
+        let angle = 2.0 * PI / f64::from(g.blade.count);
+        let p = parts.blades[0][0][0];
+        let q = parts.blades[1][0][0];
+        assert!((rotate_z(p, angle) - q).length() < 1e-12);
     }
 }
