@@ -48,11 +48,11 @@ jobs:
         run: cargo build -p tp-cli --no-default-features
 
   msrv:
-    name: Versión mínima de Rust (1.88)
+    name: Versión mínima de Rust (1.95)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@1.88
+      - uses: dtolnay/rust-toolchain@1.95
       - uses: Swatinem/rust-cache@v2
       - name: Caché de OCCT (se compila desde el código fuente la primera vez)
         uses: actions/cache@v4

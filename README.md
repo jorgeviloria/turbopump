@@ -25,7 +25,7 @@ compresores y turbinas.
 
 Hace falta:
 
-- Rust 1.88 o posterior;
+- Rust 1.95 o posterior;
 - **cmake**;
 - un **compilador C++17** (Xcode Command Line Tools, GCC/Clang o Visual Studio).
 
