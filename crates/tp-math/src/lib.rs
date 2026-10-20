@@ -13,6 +13,7 @@ mod point;
 mod polyline;
 pub mod quad;
 pub mod roots;
+pub mod sparse;
 
 pub use bezier::Bezier;
 pub use bspline::BSpline;
