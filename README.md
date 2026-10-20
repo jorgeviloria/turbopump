@@ -4,8 +4,8 @@ Turbopump es una aplicación libre y multiplataforma (Windows, macOS y Linux), e
 Rust, para el diseño preliminar e interactivo de turbomáquinas: bombas, ventiladores,
 compresores y turbinas.
 
-> **Estado:** Fase 2: dimensiones principales y geometría de rodetes de bomba centrífuga.
-> Por ahora no hay interfaz gráfica.
+> **Estado:** Fase 3: dimensiones principales, geometría y sólidos CAD (STEP, IGES, STL)
+> de rodetes de bomba centrífuga. Por ahora no hay interfaz gráfica.
 > La hoja de ruta completa está en [PLAN.md](PLAN.md).
 
 ## Qué hay ahora
@@ -17,12 +17,24 @@ compresores y turbinas.
 | [`tp-fluids`](crates/tp-fluids) | Propiedades de líquidos con CoolProp, cargado al ejecutar, y un modelo propio del agua (IAPWS) para cuando falta |
 | [`tp-design`](crates/tp-design) | Triángulos de velocidad, deslizamiento (Wiesner), correlaciones de bomba, dimensiones principales y geometría del rodete: contorno meridional, flujo meridional, álabes y espesores |
 | [`tp-io`](crates/tp-io) | Exportación: lista de puntos, malla STL y dibujos SVG |
+| [`tp-cad`](crates/tp-cad) | Sólidos del rodete y del dominio fluido con Open CASCADE, y exportación STEP, IGES y STL |
 | [`tp-project`](crates/tp-project) | Modelo de proyecto, parámetros automáticos o manuales, componentes y sus reglas, pasos de diseño, archivo `.tpj` y deshacer/rehacer |
 | [`tp-cli`](crates/tp-cli) | Ejecutable `turbopump` para la línea de comandos |
 
 ## Compilar y probar
 
-Hace falta Rust 1.88 o posterior.
+Hace falta:
+
+- Rust 1.88 o posterior;
+- **cmake**;
+- un **compilador C++17** (Xcode Command Line Tools, GCC/Clang o Visual Studio).
+
+La primera compilación construye Open CASCADE 7.8.1 desde el código fuente y tarda de 5 a
+15 minutos; las siguientes lo reutilizan. Para compilar sin CAD:
+
+```bash
+cargo build -p tp-cli --no-default-features
+```
 
 ```bash
 cargo build --release
@@ -72,6 +84,16 @@ cargo run -p tp-cli -- geometry bomba.tpj --export salida
 |---|---|
 | ![meridional](docs/img/rodete-referencia-meridional.svg) | ![frontal](docs/img/rodete-referencia-frontal.svg) |
 
+Sólidos CAD del rodete y del dominio fluido (Open CASCADE):
+
+```bash
+cargo run -p tp-cli -- cad bomba.tpj --format step,iges,stl
+```
+
+| Rodete | Dominio fluido |
+|---|---|
+| ![rodete](docs/img/rodete-referencia-cad.jpg) | ![fluido](docs/img/fluido-referencia-cad.jpg) |
+
 Propiedades de un líquido:
 
 ```bash
@@ -109,6 +131,10 @@ Puedes usar el proyecto bajo cualquiera de estas dos licencias, a tu elección:
 
 - Apache License 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
 - MIT ([LICENSE-MIT](LICENSE-MIT))
+
+Los binarios con CAD incluyen Open CASCADE enlazado de forma estática (LGPL-2.1 con la
+excepción de Open CASCADE). El código fuente completo está disponible para volver a
+enlazarlo.
 
 Las contribuciones se aceptan bajo esas mismas dos licencias. Antes de contribuir, lee
 [CONTRIBUTING.md](CONTRIBUTING.md), en especial las reglas de sala limpia.

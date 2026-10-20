@@ -151,7 +151,7 @@ Todas son libres salvo REFPROP, que es opcional:
 
 | Librería | Para qué | En Turbopump (Rust) |
 |---|---|---|
-| **Open CASCADE (OCCT)** | Kernel CAD: superficies B-spline, sólidos, cosido, booleanas, redondeos, STEP/IGES | El mismo OCCT, a través de bindings `cxx` (base: `opencascade-rs`). `truck` (100 % Rust) queda como alternativa futura |
+| **Open CASCADE (OCCT)** | Kernel CAD: superficies B-spline, sólidos, cosido, booleanas, redondeos, STEP/IGES | El mismo OCCT 7.8.1, compilado de forma estática con `occt-sys`, a través de un puente C++ propio (`cxx`) que convierte las excepciones en errores |
 | **netgen** | Mallas tetraédricas | El mismo netgen, mediante FFI a `nglib` generada con `bindgen` |
 | **CoolProp** | Propiedades de fluidos reales | El mismo CoolProp, cargado al ejecutar con un cargador propio (`libloading` sobre su API en C). Si falta, el agua usa un modelo IAPWS propio |
 | **AMD AOCL** (BLAS/LAPACK) | Álgebra lineal | `faer` / `nalgebra`, en Rust puro. Así evitamos una dependencia nativa y funciona también en ARM (Mac M) |
@@ -243,7 +243,7 @@ resto de máquinas.
 | **0. Base** ✅ | Workspace, CI en los 3 sistemas, licencia, `tp-units`, `tp-math` (Bézier/B-spline), modelo de proyecto, serialización, undo/redo | Repositorio que compila y pasa tests en Win/Mac/Linux | Hecha |
 | **1. Diseño 1D de bomba centrífuga** ✅ | Configuración global, fluidos (CoolProp), dimensiones principales, triángulos de velocidad, Cordier, slip, eficiencias, eje | CLI que calcula las dimensiones principales. Hecha; quedan por verificar varios coeficientes de Gülich | Hecha |
 | **2. Geometría del rodete** ✅ | Contorno meridional, flujo meridional (cuasi-1D), propiedades del álabe, líneas medias (mapeo conforme y β), espesores, bordes, superficies 3D en puntos | Hecha: puntos 3D, malla STL y vistas SVG. El flujo potencial 2D pasa a la Fase 7 y TurboGrid a la Fase 8 | Hecha |
-| **3. CAD con OCCT** | Bindings, superficies B-spline, sólido del rodete y del dominio fluido, STEP/IGES/STL, teselación | El rodete se abre en FreeCAD y SolidWorks | 4–6 sem |
+| **3. CAD con OCCT** ✅ | Puente C++ propio con OCCT 7.8.1 estático, superficies B-spline, sólidos del rodete y del dominio fluido, STEP/IGES/STL | Hecha: sólidos válidos verificados por volumen; el disco del cubo es macizo hasta la Fase 9 | Hecha |
 | **4. GUI MVP** (en paralelo con 2–3) | Ventana, árbol, pasos, diálogos, diagramas con Bézier arrastrables, visor 3D | **v0.1: diseño completo de un rodete de bomba centrífuga, exportable a STEP** | 6–8 sem |
 | **5. Voluta y estator** | Voluta completa, estatores con y sin álabes, acoplamiento entre componentes, multietapa | **v0.2: bomba completa (rodete + voluta)** | 6–8 sem |
 | **6. Resto de máquinas** | Ventiladores (incl. axiales con perfiles, BEM y Lieblein), compresores centrífugos y axiales, turbinas radiales y axiales, Francis y Kaplan; editor de correlaciones | v0.3–0.5 | 3–4 meses |

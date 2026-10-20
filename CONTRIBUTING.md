@@ -19,6 +19,13 @@ contribución tiene que cumplir estas reglas:
 
 Una pull request que no cumpla estas reglas se rechaza.
 
+## Requisitos de compilación
+
+Además de Rust hacen falta **cmake** y un **compilador C++17**: el crate `tp-cad` compila
+Open CASCADE desde el código fuente. Todo el código C++ del proyecto está en
+`crates/tp-cad/cpp/`. Cualquier llamada nueva a OCCT tiene que ir dentro de `guard(...)`,
+para que sus excepciones lleguen a Rust como errores.
+
 ## Estilo
 
 - El código, los identificadores y la documentación de la API van en inglés. Los
