@@ -1,5 +1,7 @@
 //! Meridional view: hub and shroud contours, leading and trailing edges, stream lines,
-//! and draggable handles that edit the meridional-contour inputs.
+//! and draggable handles that edit the meridional-contour inputs. On request, the
+//! two-dimensional potential flow: its stream lines and the meridional velocity along
+//! hub and shroud.
 
 use eframe::egui::{CursorIcon, Sense, Ui};
 use egui_plot::{
@@ -8,6 +10,7 @@ use egui_plot::{
 use tp_design::Param;
 use tp_design::impeller::ImpellerBasis;
 use tp_design::impeller::meridian::{MeridionalContour, MeridionalInput};
+use tp_design::impeller::potential::{self, PotentialFlow, PotentialMesh};
 use tp_math::DVec2;
 use tp_project::ComponentId;
 use tp_units::QuantityKind;
@@ -139,6 +142,9 @@ pub(crate) struct MeridionalView {
     transform: Option<PlotTransform>,
     show_stream_lines: bool,
     show_quasi_orthogonals: bool,
+    show_potential: bool,
+    /// Potential flow of the last geometry it was solved for.
+    potential: Option<((u64, ComponentId), Result<PotentialFlow, String>)>,
 }
 
 impl Default for MeridionalView {
@@ -148,6 +154,8 @@ impl Default for MeridionalView {
             transform: None,
             show_stream_lines: true,
             show_quasi_orthogonals: false,
+            show_potential: false,
+            potential: None,
         }
     }
 }
@@ -195,6 +203,12 @@ impl MeridionalView {
         ui.horizontal_wrapped(|ui| {
             ui.checkbox(&mut self.show_stream_lines, "stream lines");
             ui.checkbox(&mut self.show_quasi_orthogonals, "quasi-orthogonals");
+            ui.checkbox(&mut self.show_potential, "potential flow")
+                .on_hover_text(
+                    "Two-dimensional potential flow between hub and shroud: its stream \
+                     lines, and the meridional velocity along the walls against the \
+                     quasi-one-dimensional flow of the design",
+                );
             ui.weak("(?)").on_hover_text(
                 "Drag the round handles to shape the contour. Drag the background to pan, \
                  scroll to zoom, double-click to fit.",
@@ -224,8 +238,28 @@ impl MeridionalView {
             .and(self.transform.as_ref())
             .map(|t| *t.bounds());
 
+        // The potential flow, solved again only when the geometry changes.
+        let potential = if self.show_potential {
+            let key = (derived.revision(), id);
+            if self.potential.as_ref().is_none_or(|(k, _)| *k != key) {
+                let solution = potential::solve(&g.contour, g.basis.flow, PotentialMesh::default())
+                    .map_err(|e| e.to_string());
+                self.potential = Some((key, solution));
+            }
+            self.potential.as_ref().map(|(_, s)| s.clone())
+        } else {
+            None
+        };
+        let velocity_height = if potential.is_some() {
+            (ui.available_height() * 0.3).max(120.0)
+        } else {
+            0.0
+        };
+        let plot_height = (ui.available_height() - velocity_height).max(150.0);
+
         let sections = &g.blade.sections;
         let response = Plot::new(("meridional", id.0))
+            .height(plot_height)
             .data_aspect(1.0)
             .allow_drag(active.is_none())
             .sense(Sense::click_and_drag())
@@ -242,6 +276,17 @@ impl MeridionalView {
                             Line::new("quasi-orthogonals", line([qo.hub, qo.shroud], scale))
                                 .color(palette.guide)
                                 .width(0.5),
+                        );
+                    }
+                }
+                if let Some(Ok(flow)) = &potential {
+                    for fraction in [0.25, 0.5, 0.75] {
+                        let stream = flow.streamline(fraction);
+                        plot.line(
+                            Line::new("potential flow", line(stream.points, scale))
+                                .color(palette.stator)
+                                .width(1.2)
+                                .style(LineStyle::dashed_loose()),
                         );
                     }
                 }
@@ -410,7 +455,67 @@ impl MeridionalView {
                 ui.ctx().request_repaint();
             }
         }
+
+        match &potential {
+            Some(Ok(flow)) => wall_velocities(ui, flow, g, id, velocity_height, &units),
+            Some(Err(e)) => {
+                ui.colored_label(ui.visuals().error_fg_color, format!("Potential flow: {e}"));
+            }
+            None => {}
+        }
     }
+}
+
+/// Meridional velocity along hub and shroud: the potential flow against the uniform
+/// velocity of the quasi-one-dimensional flow.
+fn wall_velocities(
+    ui: &mut Ui,
+    flow: &PotentialFlow,
+    g: &tp_design::impeller::ImpellerGeometry,
+    id: ComponentId,
+    height: f32,
+    units: &tp_units::DisplayUnits,
+) {
+    let palette = Palette::of(ui);
+    let speed = |v: f64| units.to_display(QuantityKind::Velocity, v);
+    let symbol = units.get(QuantityKind::Velocity).symbol;
+    let wall = |points: Vec<[f64; 2]>| -> PlotPoints<'static> {
+        points.into_iter().map(|[t, v]| [t, speed(v)]).collect()
+    };
+    let quasi: PlotPoints = (0..=100)
+        .map(|i| {
+            let t = f64::from(i) / 100.0;
+            [t, speed(g.channel.cm_at(t))]
+        })
+        .collect();
+    let response = Plot::new(("meridional_velocity", id.0))
+        .height(height)
+        .x_axis_label("fraction of the wall length (0 inlet, 1 outlet)")
+        .y_axis_label(format!("c_m [{symbol}]"))
+        .x_grid_spacer(egui_plot::uniform_grid_spacer(super::nice_grid))
+        .y_grid_spacer(egui_plot::uniform_grid_spacer(super::nice_grid))
+        .include_y(0.0)
+        .allow_scroll(false)
+        .legend(Legend::default().position(Corner::RightTop))
+        .show(ui, |plot| {
+            plot.line(
+                Line::new("hub, potential flow", wall(flow.hub_velocity()))
+                    .color(palette.hub)
+                    .width(1.8),
+            );
+            plot.line(
+                Line::new("shroud, potential flow", wall(flow.shroud_velocity()))
+                    .color(palette.shroud)
+                    .width(1.8),
+            );
+            plot.line(
+                Line::new("quasi-one-dimensional", quasi)
+                    .color(palette.guide)
+                    .width(1.2)
+                    .style(LineStyle::dashed_loose()),
+            );
+        });
+    super::settle(ui, ("meridional_velocity", id.0), &response.transform);
 }
 
 #[cfg(test)]

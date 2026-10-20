@@ -132,3 +132,17 @@ fn diffuser() {
     harness.run();
     save(&mut harness, "diffuser-3d");
 }
+
+/// The meridional view with the potential flow: its stream lines and the velocity
+/// along hub and shroud.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn potential_flow() {
+    let mut harness = harness(egui::Theme::Light);
+    harness.state_mut().focus_view(View::Meridional);
+    harness.run();
+    harness.get_by_label("potential flow").click();
+    harness.remove_cursor();
+    harness.run();
+    save(&mut harness, "potential-flow");
+}
