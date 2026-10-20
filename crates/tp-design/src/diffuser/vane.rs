@@ -53,7 +53,7 @@ pub struct VaneGeometry {
 }
 
 /// Fine steps for integrating the conformal mapping between two stations.
-const SUBSTEPS: usize = 20;
+const SUBSTEPS: usize = 10;
 
 impl VaneGeometry {
     pub fn build(shape: &VaneShape) -> Result<Self, DesignError> {

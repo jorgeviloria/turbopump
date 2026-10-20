@@ -22,6 +22,7 @@ use crate::outlet::ImpellerOutlet;
 use crate::pump::correlations::{CorrelationInfo, Verification};
 use crate::triangle::blockage_factor;
 use crate::{DesignError, Param};
+use tp_math::roots;
 
 pub use vane::{VaneGeometry, VaneShape};
 
@@ -331,7 +332,7 @@ impl DiffuserDesign {
                 (d4, Some(vanes_at(d4 / 2.0)?))
             }
             (Param::Auto, true) => {
-                let (mut low, mut high) = (
+                let (low, high) = (
                     inlet_diameter * 1.05,
                     ((1.15 + 0.01 * outlet.nq) * d2).max(inlet_diameter * 1.1),
                 );
@@ -339,21 +340,15 @@ impl DiffuserDesign {
                     let v = vanes_at(d4 / 2.0)?;
                     Ok(v.checks.length_ratio)
                 };
-                if ratio(low)? >= TARGET_LENGTH_RATIO {
-                    high = low;
+                let d4 = if ratio(low)? >= TARGET_LENGTH_RATIO {
+                    low
                 } else if ratio(high)? <= TARGET_LENGTH_RATIO {
-                    low = high;
+                    high
                 } else {
-                    for _ in 0..30 {
-                        let mid = 0.5 * (low + high);
-                        if ratio(mid)? < TARGET_LENGTH_RATIO {
-                            low = mid;
-                        } else {
-                            high = mid;
-                        }
-                    }
-                }
-                let d4 = 0.5 * (low + high);
+                    let excess = |d4: f64| ratio(d4).map_or(f64::NAN, |r| r - TARGET_LENGTH_RATIO);
+                    roots::brent(excess, low, high, 1e-6 * d2)
+                        .map_err(|e| DesignError::Infeasible(e.to_string()))?
+                };
                 (d4, Some(vanes_at(d4 / 2.0)?))
             }
         };
@@ -521,22 +516,19 @@ impl DiffuserDesign {
                     ..shape
                 })
             };
-            let (mut low, mut high) = (MIN_EXPONENT, MAX_EXPONENT);
-            if at(low)?.throat <= throat_target {
-                return at(low);
+            let (low, high) = (MIN_EXPONENT, MAX_EXPONENT);
+            let lowest = at(low)?;
+            if lowest.throat <= throat_target {
+                return Ok(lowest);
             }
-            if at(high)?.throat >= throat_target {
-                return at(high);
+            let highest = at(high)?;
+            if highest.throat >= throat_target {
+                return Ok(highest);
             }
-            for _ in 0..40 {
-                let mid = 0.5 * (low + high);
-                if at(mid)?.throat > throat_target {
-                    low = mid;
-                } else {
-                    high = mid;
-                }
-            }
-            at(0.5 * (low + high))
+            let excess = |p: f64| at(p).map_or(f64::NAN, |g| g.throat - throat_target);
+            let p = roots::brent(excess, low, high, 1e-7)
+                .map_err(|e| DesignError::Infeasible(e.to_string()))?;
+            at(p)
         };
         let outlet_width_at = |angle: f64| pitch4 * angle.sin() - e4;
 
