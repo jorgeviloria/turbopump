@@ -54,7 +54,7 @@ fn main_window() {
     }
 }
 
-/// The picture in the README: a finished impeller with the meridional step selected.
+/// The picture in the README: impeller and volute designed, the spiral step selected.
 #[test]
 #[ignore = "needs a GPU; run with --ignored"]
 fn documentation() {
@@ -63,8 +63,12 @@ fn documentation() {
         harness.get_by_label("Accept step").click();
         harness.run();
     }
-    harness.get_by_label_contains("Meridional contour").click();
+    harness.get_by_label_contains("Volute setup").click();
     harness.run();
+    for _ in 0..2 {
+        harness.get_by_label("Accept step").click();
+        harness.run();
+    }
     harness.remove_cursor();
     harness.run();
     save(&mut harness, "editor");
