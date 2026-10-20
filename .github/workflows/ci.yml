@@ -46,6 +46,10 @@ jobs:
         run: cargo test -p tp-fluids --no-default-features
       - name: CLI sin CAD
         run: cargo build -p tp-cli --no-default-features
+      # Las pruebas de la interfaz no usan GPU; las capturas con wgpu solo se generan a
+      # mano (`cargo test -p tp-gui --test screenshots -- --ignored`).
+      - name: Interfaz gráfica sin CAD
+        run: cargo build -p tp-gui --no-default-features
 
   msrv:
     name: Versión mínima de Rust (1.95)
