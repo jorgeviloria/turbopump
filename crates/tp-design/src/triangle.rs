@@ -8,7 +8,7 @@ use serde::Serialize;
 ///   w_u = u − c_u (positive against the direction of rotation, as usual for pumps).
 ///
 /// Angles are measured from the circumferential direction, the pump convention of
-/// Gülich (*Centrifugal Pumps*, ch. 3) and Pfleiderer.
+/// Gülich (*Centrifugal Pumps*, 2nd ed., Tables 3.1 and 3.2) and Pfleiderer.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct VelocityTriangle {
     pub u: f64,
@@ -59,6 +59,8 @@ pub fn euler_work(inlet: &VelocityTriangle, outlet: &VelocityTriangle) -> f64 {
 /// meridional plane λ (90° for blades perpendicular to hub and shroud).
 ///
 /// Returns `f64::INFINITY` when the blades would fill the whole circumference.
+///
+/// Gülich 2nd ed., eqs. 3.1.7 (inlet) and 3.2.3 (outlet).
 pub fn blockage_factor(z: u32, e: f64, d: f64, blade_angle: f64, lambda: f64) -> f64 {
     if d <= 0.0 {
         return 1.0;

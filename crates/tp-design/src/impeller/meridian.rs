@@ -296,6 +296,10 @@ pub(crate) mod tests {
             outlet_blade_angle: 22.0f64.to_radians(),
             incidence: 0.0,
             rotation_sign: 1.0,
+            pressure_coefficient: 0.9176,
+            hydraulic_efficiency: 0.9065,
+            nq: 35.92,
+            outlet_relative_velocity: 13.27,
         }
     }
 

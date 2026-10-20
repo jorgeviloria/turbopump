@@ -16,7 +16,7 @@ use crate::STANDARD_GRAVITY;
 /// Y = g·H is the specific work. Q is the flow per impeller eye: divide by two for a
 /// double-suction impeller, and use the head of one stage for a multistage pump.
 ///
-/// References: J. F. Gülich, *Centrifugal Pumps*, Springer, ch. 3 (nq);
+/// References: J. F. Gülich, *Centrifugal Pumps*, 2nd ed., Springer 2010, §3.4 (nq);
 /// O. Cordier, "Ähnlichkeitsbedingungen für Strömungsmaschinen", *BWK* 5 (1953) (σ);
 /// S. L. Dixon, C. A. Hall, *Fluid Mechanics and Thermodynamics of Turbomachinery*,
 /// ch. 2 (dimensionless form).

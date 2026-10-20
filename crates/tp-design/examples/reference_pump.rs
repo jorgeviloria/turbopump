@@ -9,6 +9,7 @@ fn main() {
         flow: 100.0 / 3600.0,
         head: 32.0,
         machine_head: 32.0,
+        stages: 1,
         speed: 2900.0 * PI / 30.0,
         density: 998.2,
         vapor_pressure: 2339.0,

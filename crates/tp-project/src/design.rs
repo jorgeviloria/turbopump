@@ -74,6 +74,7 @@ impl Project {
             flow,
             head: machine_head / self.impeller_count() as f64,
             machine_head,
+            stages: self.impeller_count() as u32,
             speed: dp.speed,
             density: liquid.density,
             vapor_pressure: liquid.vapor_pressure,

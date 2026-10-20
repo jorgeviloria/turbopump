@@ -48,6 +48,8 @@ pub struct PumpDuty {
     pub head: f64,
     /// Head of the whole machine, m; sets the torque on the shaft.
     pub machine_head: f64,
+    /// Number of impeller stages in series (≥ 1).
+    pub stages: u32,
     /// Rotational speed, rad/s.
     pub speed: f64,
     /// kg/m³
@@ -63,6 +65,8 @@ pub struct PumpDuty {
 #[serde(default)]
 pub struct CentrifugalPumpInput {
     pub suction: Suction,
+    /// Normal or suction impeller; sets the automatic eye-diameter factor.
+    pub inlet_design: corr::InletDesign,
     pub hydraulic_efficiency: Param<f64>,
     pub volumetric_efficiency: Param<f64>,
     pub overall_efficiency: Param<f64>,
@@ -154,10 +158,17 @@ pub struct CentrifugalPumpDesign {
     pub npsh_required: f64,
     /// m
     pub npsh_available: f64,
+    /// Correlation set used for the automatic efficiencies.
+    pub layout: corr::PumpLayout,
+    /// Expected scatter ±Δη of the automatic overall efficiency.
+    pub efficiency_tolerance: f64,
+    /// Deviation angle δ₂ = β₂B − β₂, rad.
+    pub deviation_angle: f64,
+    /// Deceleration w₂/w₁ at the outer streamline (de Haller number).
+    pub de_haller: f64,
     pub warnings: Vec<String>,
 }
 
-const MAX_BLADES: u32 = 12;
 const MIN_BLADES: u32 = 3;
 
 fn require(ok: bool, message: impl FnOnce() -> String) -> Result<(), DesignError> {
@@ -272,6 +283,8 @@ pub fn design(
     )?;
     let mut warnings = Vec::new();
 
+    require(duty.stages >= 1, || "a pump has at least one stage".into())?;
+
     // 1. Specific speed per stage and eye.
     let eyes = input.suction.eyes();
     let q_eye = flow / eyes;
@@ -279,17 +292,46 @@ pub fn design(
     let (nq_min, nq_max) = corr::NQ_RANGE;
     if !(nq_min..=nq_max).contains(&nq) {
         warnings.push(format!(
-            "nq = {nq:.1} is outside {nq_min}–{nq_max}, the range of the radial-impeller \
-             correlations; check every automatic value"
+            "nq = {nq:.1} is outside {nq_min}–{nq_max}, the range of radial impellers with \
+             5–7 blades; check every automatic value"
         ));
     }
+    let layout = if duty.stages > 1 {
+        corr::PumpLayout::Multistage
+    } else if input.suction == Suction::Double {
+        corr::PumpLayout::DoubleEntry
+    } else {
+        corr::PumpLayout::SingleStage
+    };
 
-    // 2. Efficiencies.
+    // 2. Efficiencies. Table 3.9 uses the flow of the pump; double-entry impellers use
+    // the single-stage hydraulic equation with the flow of one eye.
+    let auto_efficiencies =
+        input.hydraulic_efficiency.is_auto() || input.overall_efficiency.is_auto();
+    if auto_efficiencies {
+        if flow < corr::MIN_EFFICIENCY_FLOW {
+            warnings.push(format!(
+                "the efficiency correlations are valid for Q ≥ {} m³/s",
+                corr::MIN_EFFICIENCY_FLOW
+            ));
+        }
+        if nq > layout.max_nq() {
+            warnings.push(format!(
+                "the {} efficiency correlation is valid up to nq = {}",
+                layout.name(),
+                layout.max_nq()
+            ));
+        }
+    }
+    let hydraulic_flow = match layout {
+        corr::PumpLayout::DoubleEntry => q_eye,
+        _ => flow,
+    };
     let eta_h = fraction(
         "hydraulic efficiency",
         input
             .hydraulic_efficiency
-            .resolve(|| corr::hydraulic_efficiency(q_eye, nq)),
+            .resolve(|| corr::hydraulic_efficiency(layout, hydraulic_flow, nq)),
     )?;
     let eta_v = fraction(
         "volumetric efficiency",
@@ -301,7 +343,7 @@ pub fn design(
         "overall efficiency",
         input
             .overall_efficiency
-            .resolve(|| corr::overall_efficiency(q_eye, nq)),
+            .resolve(|| corr::overall_efficiency(layout, flow, nq)),
     )?;
     let eta_m = eta / (eta_h * eta_v);
     if eta_m > 1.0 {
@@ -368,7 +410,9 @@ pub fn design(
         Param::Auto => {
             let factor = positive(
                 "inlet diameter factor",
-                input.inlet_diameter_factor.resolve(|| 1.0),
+                input
+                    .inlet_diameter_factor
+                    .resolve(|| corr::inlet_diameter_factor(input.inlet_design, nq)),
             )?;
             factor * corr::min_relative_velocity_eye_diameter(q_la_eye, omega, hub_diameter)
         }
@@ -396,7 +440,22 @@ pub fn design(
             .blade_thickness
             .resolve(|| corr::blade_thickness(outlet_diameter)),
     )?;
+    let inlet_width = (inlet_diameter - hub_diameter) / 2.0;
+    if outlet_width / eyes >= inlet_width {
+        warnings.push(format!(
+            "outlet width {:.1} mm is not below the inlet width b1 = (d1 − dn)/2 = {:.1} mm",
+            outlet_width / eyes * 1e3,
+            inlet_width * 1e3
+        ));
+    }
     let incidence = input.incidence.resolve(|| 0.0);
+    let (i_min, i_max) = corr::INCIDENCE_RANGE;
+    if !(i_min..=i_max).contains(&incidence.to_degrees()) {
+        warnings.push(format!(
+            "incidence {:.1}° is outside the recommended {i_min}°–{i_max}°",
+            incidence.to_degrees()
+        ));
+    }
 
     // 6. Velocity triangles and blades.
     let mean_diameter = ((inlet_diameter.powi(2) + hub_diameter.powi(2)) / 2.0).sqrt();
@@ -440,8 +499,10 @@ pub fn design(
                     beta2b,
                 )
                 .round()
-                .clamp(f64::from(MIN_BLADES), f64::from(MAX_BLADES))
-                    as u32;
+                .clamp(
+                    f64::from(corr::BLADE_COUNT_RANGE.0),
+                    f64::from(corr::BLADE_COUNT_RANGE.1),
+                ) as u32;
                 if proposed == z {
                     break;
                 }
@@ -464,9 +525,26 @@ pub fn design(
         blockage: tau2,
     };
     let beta2_deg = beta2b.to_degrees();
-    if !(15.0..=40.0).contains(&beta2_deg) {
+    let (b_min, b_max) = corr::OUTLET_BLADE_ANGLE_RANGE;
+    if !(b_min..=b_max).contains(&beta2_deg) {
         warnings.push(format!(
-            "outlet blade angle {beta2_deg:.1}° is outside the usual 15°–40°"
+            "outlet blade angle {beta2_deg:.1}° is outside the usual {b_min}°–{b_max}°"
+        ));
+    }
+    let deviation_angle = beta2b - outlet.triangle.beta();
+    if deviation_angle.to_degrees() > corr::MAX_DEVIATION_ANGLE {
+        warnings.push(format!(
+            "deviation angle β2B − β2 = {:.1}° exceeds {}°: expect high mixing losses",
+            deviation_angle.to_degrees(),
+            corr::MAX_DEVIATION_ANGLE
+        ));
+    }
+    let de_haller = outlet.triangle.w() / inlet_shroud.triangle.w();
+    if de_haller < corr::DE_HALLER_LIMIT {
+        warnings.push(format!(
+            "deceleration w2/w1 = {de_haller:.2} at the shroud is below {} (de Haller): \
+             risk of flow separation",
+            corr::DE_HALLER_LIMIT
         ));
     }
 
@@ -518,6 +596,10 @@ pub fn design(
         outlet,
         npsh_required,
         npsh_available,
+        layout,
+        efficiency_tolerance: corr::efficiency_tolerance(eta),
+        deviation_angle,
+        de_haller,
         warnings,
     })
 }
@@ -534,6 +616,7 @@ mod tests {
             flow: 100.0 / 3600.0,
             head: 32.0,
             machine_head: 32.0,
+            stages: 1,
             speed: 2900.0 * PI / 30.0,
             density: 998.2,
             vapor_pressure: 2339.0,
@@ -638,16 +721,35 @@ mod tests {
     }
 
     #[test]
+    fn eye_diameter_factor_follows_table_7_1() {
+        // nq = 35.92: f_d1 = 1.15 − 0.1·(35.92 − 15)/25 = 1.0663 for a normal impeller.
+        let base = design(&duty(), &CentrifugalPumpInput::default()).unwrap();
+        let f_auto = corr::inlet_diameter_factor(corr::InletDesign::Normal, base.nq);
+        assert_relative_eq!(f_auto, 1.0663, epsilon = 1e-4);
+        let suction = CentrifugalPumpInput {
+            inlet_design: corr::InletDesign::Suction,
+            ..Default::default()
+        };
+        let s = design(&duty(), &suction).unwrap();
+        assert_relative_eq!(
+            s.inlet_diameter / base.inlet_diameter,
+            (f_auto + 0.1) / f_auto,
+            max_relative = 1e-12
+        );
+    }
+
+    #[test]
     fn larger_eye_lowers_inlet_velocity() {
         let base = design(&duty(), &CentrifugalPumpInput::default()).unwrap();
+        let f_auto = corr::inlet_diameter_factor(corr::InletDesign::Normal, base.nq);
         let input = CentrifugalPumpInput {
-            inlet_diameter_factor: Param::Manual(1.15),
+            inlet_diameter_factor: Param::Manual(1.25),
             ..Default::default()
         };
         let wide = design(&duty(), &input).unwrap();
         assert_relative_eq!(
             wide.inlet_diameter,
-            1.15 * base.inlet_diameter,
+            1.25 / f_auto * base.inlet_diameter,
             max_relative = 1e-12
         );
         assert!(wide.inlet_shroud.triangle.cm < base.inlet_shroud.triangle.cm);

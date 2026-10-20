@@ -78,12 +78,27 @@ pub struct EdgeInput {
     pub trailing: EdgeShape,
 }
 
+impl EdgeShape {
+    /// Minimum pressure coefficient c_p,min = Δp_min/(½ρw₁²) of the leading-edge
+    /// profile at shockless entry: c_p = 2x + x² with x = 0.373·e/L_p, L_p being the
+    /// length of the nose (Gülich 2nd ed., eq. 7.1a). `None` for a blunt edge.
+    pub fn min_pressure_coefficient(&self) -> Option<f64> {
+        match *self {
+            EdgeShape::Cut => None,
+            EdgeShape::Ellipse { ratio } => {
+                let x = 0.373 * 2.0 / ratio;
+                Some(2.0 * x + x * x)
+            }
+        }
+    }
+}
+
 impl Default for EdgeInput {
-    /// Elliptic 2:1 leading edge, blunt trailing edge: the usual shape of cast pump
-    /// impellers.
+    /// Elliptic 4:1 leading edge (c_p,min ≈ 0.41) and full thickness to the trailing
+    /// edge, which leaves room for under-filing (Gülich 2nd ed., pp. 347–349).
     fn default() -> Self {
         Self {
-            leading: EdgeShape::Ellipse { ratio: 2.0 },
+            leading: EdgeShape::Ellipse { ratio: 4.0 },
             trailing: EdgeShape::Cut,
         }
     }
@@ -606,5 +621,35 @@ mod tests {
             &EdgeInput::default(),
         );
         assert!(err.is_err());
+    }
+}
+
+#[cfg(test)]
+mod edge_tests {
+    use super::*;
+    use approx::assert_relative_eq;
+
+    #[test]
+    fn leading_edge_pressure_coefficient_matches_gulich_examples() {
+        // Gülich eq. 7.1a: semi-circle (e/L_p = 2) gives 2.05, ellipse e/L_p = 0.2 gives 0.155.
+        let semi_circle = EdgeShape::Ellipse { ratio: 1.0 };
+        assert_relative_eq!(
+            semi_circle.min_pressure_coefficient().unwrap(),
+            2.05,
+            epsilon = 5e-3
+        );
+        let long = EdgeShape::Ellipse { ratio: 10.0 };
+        assert_relative_eq!(
+            long.min_pressure_coefficient().unwrap(),
+            0.155,
+            epsilon = 5e-4
+        );
+        let default = EdgeInput::default().leading;
+        assert_relative_eq!(
+            default.min_pressure_coefficient().unwrap(),
+            0.408,
+            epsilon = 1e-3
+        );
+        assert_eq!(EdgeShape::Cut.min_pressure_coefficient(), None);
     }
 }
