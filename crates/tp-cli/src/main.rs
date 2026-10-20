@@ -196,14 +196,7 @@ fn parse(text: &str, kind: QuantityKind) -> Result<f64, String> {
 
 /// Formats an SI value in the chosen display unit with about four significant digits.
 fn show(units: &DisplayUnits, kind: QuantityKind, si: f64) -> String {
-    units.format(kind, si, decimals_for(units.to_display(kind, si)))
-}
-
-fn decimals_for(value: f64) -> usize {
-    if value == 0.0 || !value.is_finite() {
-        return 0;
-    }
-    (3 - value.abs().log10().floor() as i64).clamp(0, 6) as usize
+    units.show(kind, si)
 }
 
 fn specific_speed(flow: &str, head: &str, speed: &str, eyes: u32, stages: u32) -> CliResult {
@@ -233,7 +226,7 @@ fn specific_speed(flow: &str, head: &str, speed: &str, eyes: u32, stages: u32) -
 
 fn convert(value: f64, from: &str, to: &str) -> CliResult {
     let result = tp_units::convert(value, from, to).map_err(|e| e.to_string())?;
-    let decimals = decimals_for(result).max(2);
+    let decimals = tp_units::decimals_for(result).max(2);
     println!("{value} {from} = {result:.decimals$} {to}");
     Ok(Outcome::Ok)
 }

@@ -113,6 +113,20 @@ impl DisplayUnits {
             format!("{value:.decimals$} {}", unit.symbol)
         }
     }
+
+    /// Formats an SI value in the display unit with about four significant digits,
+    /// e.g. `"262.4 mm"`.
+    pub fn show(&self, kind: QuantityKind, si: f64) -> String {
+        self.format(kind, si, decimals_for(self.to_display(kind, si)))
+    }
+}
+
+/// Decimals that show `value` with about four significant digits (0 to 6).
+pub fn decimals_for(value: f64) -> usize {
+    if value == 0.0 || !value.is_finite() {
+        return 0;
+    }
+    (3 - value.abs().log10().floor() as i64).clamp(0, 6) as usize
 }
 
 impl Default for DisplayUnits {
@@ -167,6 +181,16 @@ mod tests {
         assert_eq!(si.format(QuantityKind::Dimensionless, 0.5, 2), "0.50");
         let us = DisplayUnits::us();
         assert_eq!(us.format(QuantityKind::Head, 0.3048, 2), "1.00 ft");
+    }
+
+    #[test]
+    fn shows_four_significant_digits() {
+        let si = DisplayUnits::si();
+        assert_eq!(si.show(QuantityKind::Length, 0.26238), "262.4 mm");
+        assert_eq!(si.show(QuantityKind::Length, 0.0045), "4.500 mm");
+        assert_eq!(si.show(QuantityKind::Dimensionless, 0.0), "0");
+        assert_eq!(decimals_for(1234.5), 0);
+        assert_eq!(decimals_for(1e-9), 6);
     }
 
     #[test]

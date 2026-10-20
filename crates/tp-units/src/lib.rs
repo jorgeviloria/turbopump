@@ -21,7 +21,7 @@ mod parse;
 mod specific_speed;
 mod unit;
 
-pub use display::DisplayUnits;
+pub use display::{DisplayUnits, decimals_for};
 pub use error::UnitError;
 pub use kind::QuantityKind;
 pub use parse::{parse_quantity, parse_quantity_or};
