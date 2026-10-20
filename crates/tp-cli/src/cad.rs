@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use clap::{Args, ValueEnum};
 use tp_cad::{CadOptions, ImpellerCad, Shape};
-use tp_project::{ComponentId, ComponentKind, DesignStep, Project, StepStatus};
+use tp_project::{ComponentId, ComponentKind, DesignStep, Project, StepStatus, VOLUTE_STEPS};
 use tp_units::{DisplayUnits, QuantityKind, parse_quantity_or};
 
 use crate::design::err;
@@ -94,9 +94,16 @@ pub(crate) fn run(args: CadArgs) -> CliResult {
         .filter(|c| args.component.is_none_or(|n| c.id().0 == n))
         .map(|c| (c.id(), c.name.clone()))
         .collect();
-    if impellers.is_empty() {
+    let volutes: Vec<(ComponentId, String)> = project
+        .components()
+        .iter()
+        .filter(|c| c.kind() == ComponentKind::Volute)
+        .filter(|c| args.component.is_none_or(|n| c.id().0 == n))
+        .map(|c| (c.id(), c.name.clone()))
+        .collect();
+    if impellers.is_empty() && volutes.is_empty() {
         return Err(match args.component {
-            Some(n) => format!("no impeller with id #{n}"),
+            Some(n) => format!("no impeller or volute with id #{n}"),
             None => "the project has no impeller".into(),
         });
     }
@@ -135,6 +142,42 @@ pub(crate) fn run(args: CadArgs) -> CliResult {
                 let path = dir.join(format!("{stem}.{}", format.extension()));
                 write(shape, &path, format, deflection)?;
             }
+        }
+        println!();
+    }
+
+    for (id, name) in &volutes {
+        let component = project.component(*id).expect("listed above");
+        if VOLUTE_STEPS
+            .iter()
+            .any(|&step| component.status(step) != StepStatus::Done)
+        {
+            println!(
+                "{name} ({id}): not designed yet; run `turbopump volute {}` first",
+                args.file.display()
+            );
+            println!();
+            warned = true;
+            continue;
+        }
+        let geometry = project.compute_volute(*id).map_err(err)?;
+        println!("{name} ({id}): building CAD solids…");
+        let cad = tp_cad::build_volute(&geometry).map_err(|e| e.to_string())?;
+        println!("  Volute flow domain {:.1} cm³", cad.fluid_volume() * 1e6);
+        if !cad.fluid.is_valid() || cad.fluid.solid_count() != 1 {
+            println!("  warning: the volute flow domain is not a single valid solid");
+            warned = true;
+        }
+        std::fs::create_dir_all(&base).map_err(|e| format!("{}: {e}", base.display()))?;
+        let stem = if volutes.len() > 1 {
+            format!("volute-{}", id.0)
+        } else {
+            "volute".to_owned()
+        };
+        let deflection = geometry.basis.impeller_diameter * 1e3 / 2000.0;
+        for &format in &args.format {
+            let path = base.join(format!("{stem}.{}", format.extension()));
+            write(&cad.fluid, &path, format, deflection)?;
         }
         println!();
     }

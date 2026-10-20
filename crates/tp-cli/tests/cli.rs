@@ -332,6 +332,37 @@ fn design_reports_verified_checks() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+#[test]
+fn volute_designs_and_exports() {
+    let (dir, file) = reference_project("volute");
+    let file_arg = file.to_str().unwrap();
+    let out_dir = dir.join("volute");
+    let out = turbopump(&["volute", file_arg, "--export", out_dir.to_str().unwrap()]);
+    let text = stdout(&out);
+    assert_eq!(out.status.code(), Some(0), "{text}");
+    assert!(text.contains("min 193.3 mm, Table 10.2"), "{text}");
+    assert!(text.contains("conservation of angular momentum"), "{text}");
+    for name in ["volute.txt", "volute.stl"] {
+        assert!(std::fs::metadata(out_dir.join(name)).unwrap().len() > 10_000);
+    }
+    let info = stdout(&turbopump(&["info", file_arg]));
+    assert!(info.contains("next: CFD setup"), "{info}");
+
+    let manual = stdout(&turbopump(&[
+        "volute",
+        file_arg,
+        "--set",
+        "shape=circle",
+        "--set",
+        "law=velocity",
+        "--dry-run",
+    ]));
+    assert!(manual.contains("circular; constant velocity"), "{manual}");
+    let bad = turbopump(&["volute", file_arg, "--set", "shape=hexagon"]);
+    assert_eq!(bad.status.code(), Some(2));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 #[cfg(feature = "cad")]
 #[test]
 fn cad_exports_impeller_and_flow_domain() {
@@ -354,7 +385,7 @@ fn cad_exports_impeller_and_flow_domain() {
         "step,stl",
     ]);
     let text = stdout(&out);
-    assert_eq!(out.status.code(), Some(0), "{text}");
+    assert_eq!(out.status.code(), Some(1), "{text}");
     assert!(text.contains("Solids           valid"), "{text}");
     // OCCT's transfer statistics are silenced.
     assert!(!text.contains("Statistics on Transfer"), "{text}");
@@ -362,6 +393,23 @@ fn cad_exports_impeller_and_flow_domain() {
         let size = std::fs::metadata(out_dir.join(name)).unwrap().len();
         assert!(size > 100_000, "{name}: {size} bytes");
     }
+    // The volute is reported but skipped until it is designed.
+    assert!(text.contains("not designed yet"), "{text}");
+    assert_eq!(turbopump(&["volute", file_arg]).status.code(), Some(0));
+    let again = turbopump(&[
+        "cad",
+        file_arg,
+        "--out",
+        out_dir.to_str().unwrap(),
+        "--format",
+        "step",
+    ]);
+    assert_eq!(again.status.code(), Some(0), "{}", stdout(&again));
+    let volute = std::fs::metadata(out_dir.join("volute.step"))
+        .unwrap()
+        .len();
+    assert!(volute > 100_000, "volute.step: {volute} bytes");
+
     let step = std::fs::read_to_string(out_dir.join("impeller.step")).unwrap();
     assert!(step.starts_with("ISO-10303-21;"));
     assert!(
