@@ -291,7 +291,10 @@ mod tests {
             if path.extension().is_none_or(|e| e != "rs") || path.ends_with("i18n.rs") {
                 continue;
             }
-            let source = std::fs::read_to_string(&path).unwrap();
+            // A Windows checkout may have CRLF line endings; rustc reads them as LF.
+            let source = std::fs::read_to_string(&path)
+                .unwrap()
+                .replace("\r\n", "\n");
             let source = source.split("#[cfg(test)]").next().unwrap_or("");
             for call in ["tr(", "tf("] {
                 for (at, _) in source.match_indices(call) {
