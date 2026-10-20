@@ -219,7 +219,7 @@ fn beta_at(distribution: BetaDistribution, beta1: f64, beta2: f64, mbar: f64) ->
 }
 
 /// Thickness reduction factor of an edge at distance `s` from it along the mean line.
-fn edge_factor(shape: EdgeShape, thickness: f64, s: f64) -> f64 {
+pub(crate) fn edge_factor(shape: EdgeShape, thickness: f64, s: f64) -> f64 {
     match shape {
         EdgeShape::Cut => 1.0,
         EdgeShape::Ellipse { ratio } => {

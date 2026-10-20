@@ -3,6 +3,7 @@
 //! Calculations take plain SI inputs and return SI results; they know nothing about
 //! projects or files, so the same code serves the editor, the command line and tests.
 
+pub mod diffuser;
 mod error;
 pub mod impeller;
 pub mod outlet;
