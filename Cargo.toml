@@ -1,0 +1,38 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT OR Apache-2.0"
+authors = ["Jorge Viloria and the Turbopump contributors"]
+description = "Open-source preliminary design of turbomachinery: pumps, fans, compressors and turbines"
+keywords = ["turbomachinery", "pump", "compressor", "turbine", "cad"]
+categories = ["science", "simulation"]
+
+[workspace.dependencies]
+tp-units = { path = "crates/tp-units" }
+tp-math = { path = "crates/tp-math" }
+tp-project = { path = "crates/tp-project" }
+
+approx = "0.5"
+clap = { version = "4.6", features = ["derive"] }
+glam = { version = "0.34", features = ["serde"] }
+proptest = "1.12"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+float_cmp = "warn"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

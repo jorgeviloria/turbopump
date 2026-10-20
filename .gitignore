@@ -1,0 +1,13 @@
+/target
+**/*.rs.bk
+*.pdb
+.DS_Store
+
+# Third-party installers and manuals must never enter the repository
+# (see CONTRIBUTING.md, "Clean-room rules").
+*.exe
+*.msi
+/*.pdf
+
+# Reference papers kept locally (third-party copyright).
+docs/theory/cfd/
