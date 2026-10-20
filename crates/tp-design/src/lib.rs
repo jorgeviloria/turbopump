@@ -8,6 +8,7 @@ mod error;
 pub mod impeller;
 pub mod outlet;
 mod param;
+pub mod performance;
 pub mod pump;
 pub mod slip;
 pub mod triangle;
