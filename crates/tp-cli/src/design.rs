@@ -3,14 +3,16 @@
 use std::path::PathBuf;
 
 use clap::Args;
-use tp_design::pump::{CentrifugalPumpDesign, CentrifugalPumpInput, InletSection, Suction};
+use tp_design::pump::{
+    CentrifugalPumpDesign, CentrifugalPumpInput, InletDesign, InletSection, Suction, correlations,
+};
 use tp_design::{MainDimensionsInput, Param};
 use tp_project::{ComponentId, ComponentKind, Project, ProjectError};
 use tp_units::{DisplayUnits, QuantityKind, parse_quantity_or};
 
 use crate::{CliResult, Outcome, show};
 
-const KEYS: &str = "suction, eta-h, eta-v, eta, psi, d2, b2, d1, d1-factor, z, e, \
+const KEYS: &str = "suction, inlet, eta-h, eta-v, eta, psi, d2, b2, d1, d1-factor, z, e, \
                     shaft-stress, d-shaft, d-hub, incidence, nss";
 
 #[derive(Args)]
@@ -21,8 +23,9 @@ pub(crate) struct DesignArgs {
     #[arg(long)]
     component: Option<u32>,
     /// Fix an input as KEY=VALUE, or KEY=auto to return to the automatic value.
-    /// Keys: suction, eta-h, eta-v, eta, psi, d2, b2, d1, d1-factor, z, e,
-    /// shaft-stress, d-shaft, d-hub, incidence, nss. Bare numbers use the project
+    /// Keys: suction (single|double), inlet (normal|suction impeller), eta-h, eta-v, eta,
+    /// psi, d2, b2, d1, d1-factor, z, e, shaft-stress, d-shaft, d-hub, incidence, nss.
+    /// Bare numbers use the project
     /// display units, e.g. `--set d2=180` for 180 mm.
     #[arg(long = "set", value_name = "KEY=VALUE")]
     settings: Vec<String>,
@@ -101,6 +104,13 @@ fn apply(
     };
     use QuantityKind::*;
     match key {
+        "inlet" => {
+            input.inlet_design = match value {
+                "normal" => InletDesign::Normal,
+                "suction" => InletDesign::Suction,
+                _ => return Err(format!("inlet must be normal or suction, got {value:?}")),
+            }
+        }
         "suction" => {
             input.suction = match value {
                 "single" => Suction::Single,
@@ -197,6 +207,13 @@ fn print_report(
         e.overall,
         tag(&input.overall_efficiency)
     );
+    if input.overall_efficiency.is_auto() {
+        println!(
+            "              η ± {:.3} ({} pump correlation, Gülich eq. 3.9.10)",
+            d.efficiency_tolerance,
+            d.layout.name()
+        );
+    }
     println!();
 
     println!("Dimensions");
@@ -284,13 +301,20 @@ fn print_report(
         s(Angle, t.alpha()),
         o.slip_factor
     );
+    println!(
+        "Checks   δ2 = β2B − β2 {} (≤ {}°)   w2/w1 {:.2} (≥ {})",
+        s(Angle, d.deviation_angle),
+        correlations::MAX_DEVIATION_ANGLE,
+        d.de_haller,
+        correlations::DE_HALLER_LIMIT
+    );
     println!();
     println!(
         "Cavitation  NPSH3 ≈ {} (nss {:.0}{})   NPSH available {}",
         s(Head, d.npsh_required),
         input
             .suction_specific_speed
-            .resolve(|| tp_design::pump::correlations::SUCTION_SPECIFIC_SPEED),
+            .resolve(|| correlations::SUCTION_SPECIFIC_SPEED),
         tag(&input.suction_specific_speed),
         s(Head, d.npsh_available)
     );

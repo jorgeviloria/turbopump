@@ -5,9 +5,9 @@ use std::path::PathBuf;
 
 use clap::Args;
 use tp_design::Param;
-use tp_design::impeller::ImpellerGeometry;
 use tp_design::impeller::ImpellerGeometryInput;
 use tp_design::impeller::blade::{BetaDistribution, EdgeShape};
+use tp_design::impeller::{BladeLoading, ImpellerGeometry};
 use tp_project::{ComponentId, ComponentKind, Project};
 use tp_units::{DisplayUnits, QuantityKind, parse_quantity_or};
 
@@ -63,10 +63,10 @@ pub(crate) fn run(args: GeometryArgs) -> CliResult {
         project
             .component_mut(*id)
             .map_err(err)?
-            .set_geometry(input)
+            .set_geometry(input.clone())
             .map_err(err)?;
         let geometry = project.design_impeller_geometry(*id).map_err(err)?;
-        print_report(name, *id, &geometry, &units);
+        print_report(name, *id, &geometry, &input, &units);
         warned |= !geometry.warnings.is_empty();
 
         if let Some(dir) = &args.export {
@@ -199,7 +199,13 @@ fn apply(
     Ok(())
 }
 
-fn print_report(name: &str, id: ComponentId, g: &ImpellerGeometry, units: &DisplayUnits) {
+fn print_report(
+    name: &str,
+    id: ComponentId,
+    g: &ImpellerGeometry,
+    input: &ImpellerGeometryInput,
+    units: &DisplayUnits,
+) {
     use QuantityKind::*;
     let s = |kind, value| show(units, kind, value);
     println!("{name} ({id}): geometry");
@@ -242,6 +248,25 @@ fn print_report(name: &str, id: ComponentId, g: &ImpellerGeometry, units: &Displ
             s(Angle, section.wrap_angle()),
             s(Length, section.mean_line_length())
         );
+    }
+    let loading = &g.blade_loading;
+    println!();
+    println!(
+        "Blade loading  ξ_eff {:.3} / ξ_al {:.3} = {:.2}  (band {:.2}–{:.2}, Gülich eqs. 7.1.10–11)",
+        loading.effective,
+        loading.allowable,
+        loading.ratio(),
+        1.0 - BladeLoading::BAND,
+        1.0 + BladeLoading::BAND
+    );
+    match (
+        input.edges.leading,
+        input.edges.leading.min_pressure_coefficient(),
+    ) {
+        (EdgeShape::Ellipse { ratio }, Some(cp)) => println!(
+            "Leading edge   ellipse {ratio}:1, c_p,min at shockless entry {cp:.2} (Gülich eq. 7.1a)"
+        ),
+        _ => println!("Leading edge   blunt"),
     }
     if !g.warnings.is_empty() {
         println!();

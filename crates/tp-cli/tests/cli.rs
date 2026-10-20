@@ -302,3 +302,32 @@ fn geometry_overrides() {
     assert_eq!(bad.status.code(), Some(2));
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn design_reports_verified_checks() {
+    let (dir, file) = reference_project("checks");
+    let file_arg = file.to_str().unwrap();
+    let text = stdout(&turbopump(&["design", file_arg]));
+    assert!(text.contains("η 0.814"), "{text}");
+    assert!(
+        text.contains("η ± 0.037 (single-stage pump correlation"),
+        "{text}"
+    );
+    assert!(text.contains("Eye diameter d1      77.18 mm"), "{text}");
+    assert!(text.contains("δ2 = β2B − β2 8.789 °"), "{text}");
+
+    // A suction impeller gets a larger eye (f_d1 + 0.1).
+    let suction = stdout(&turbopump(&["design", file_arg, "--set", "inlet=suction"]));
+    assert!(
+        suction.contains("Eye diameter d1      84.42 mm"),
+        "{suction}"
+    );
+
+    let geometry = stdout(&turbopump(&["geometry", file_arg, "--set", "le=ellipse:2"]));
+    assert!(geometry.contains("Blade loading  ξ_eff"), "{geometry}");
+    assert!(
+        geometry.contains("ellipse 2:1, c_p,min at shockless entry 0.89"),
+        "{geometry}"
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
