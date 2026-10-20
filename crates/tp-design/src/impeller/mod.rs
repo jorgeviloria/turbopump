@@ -4,6 +4,7 @@
 //! so the same code serves any machine type that produces them.
 
 pub mod blade;
+pub mod loading;
 pub mod meridian;
 
 use std::f64::consts::PI;
@@ -246,11 +247,18 @@ pub const GEOMETRY_DEFAULTS: &[CorrelationInfo] = &[
 ];
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::pump::{PumpDuty, design};
     use approx::assert_relative_eq;
     use std::f64::consts::PI;
+
+    /// Geometry of the reference impeller, every value automatic.
+    pub(crate) fn reference_geometry() -> ImpellerGeometry {
+        let (d, input) = reference_design();
+        let basis = ImpellerBasis::from_pump(&d, &input, 1.0);
+        build(&basis, &ImpellerGeometryInput::default()).unwrap()
+    }
 
     fn reference_design() -> (CentrifugalPumpDesign, CentrifugalPumpInput) {
         let duty = PumpDuty {
