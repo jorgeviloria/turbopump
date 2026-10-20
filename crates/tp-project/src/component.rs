@@ -4,6 +4,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use tp_design::MainDimensionsInput;
 use tp_design::impeller::ImpellerGeometryInput;
+use tp_design::volute::VoluteInput;
 
 use crate::ProjectError;
 
@@ -157,6 +158,9 @@ pub struct Component {
     /// Inputs of the geometry steps, from meridional contour to blade edges.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     geometry: Option<ImpellerGeometryInput>,
+    /// Inputs of the volute steps.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    volute: Option<VoluteInput>,
 }
 
 impl Component {
@@ -169,7 +173,41 @@ impl Component {
             steps: BTreeMap::new(),
             main_dimensions: None,
             geometry: None,
+            volute: None,
         }
+    }
+
+    /// Inputs of the volute steps, if any were set.
+    pub fn volute(&self) -> Option<&VoluteInput> {
+        self.volute.as_ref()
+    }
+
+    /// Replaces the volute inputs. Each step whose inputs changed, and every step after
+    /// it, becomes stale.
+    pub fn set_volute(&mut self, input: VoluteInput) -> Result<(), ProjectError> {
+        if self.kind != ComponentKind::Volute {
+            return Err(ProjectError::NotAVolute(self.id));
+        }
+        let old = self.volute.clone().unwrap_or_default();
+        let first_changed = [
+            (old.setup != input.setup, DesignStep::VoluteSetup),
+            (
+                old.cross_section != input.cross_section,
+                DesignStep::CrossSection,
+            ),
+            (old.spiral != input.spiral, DesignStep::SpiralDevelopment),
+            (old.diffuser != input.diffuser, DesignStep::Diffuser),
+            (old.cutwater != input.cutwater, DesignStep::CutWater),
+            (old.wall != input.wall, DesignStep::WallThickness),
+        ]
+        .into_iter()
+        .find(|(changed, _)| *changed)
+        .map(|(_, step)| step);
+        self.volute = Some(input);
+        if let Some(step) = first_changed {
+            self.invalidate_from(step)?;
+        }
+        Ok(())
     }
 
     /// Inputs of the geometry steps, if any were set.

@@ -63,9 +63,7 @@ pub(crate) fn run(args: DesignArgs) -> CliResult {
             apply(&mut input, &units, setting)?;
         }
         project
-            .component_mut(id)
-            .map_err(err)?
-            .set_main_dimensions(MainDimensionsInput::CentrifugalPump(input.clone()))
+            .set_main_dimensions(id, MainDimensionsInput::CentrifugalPump(input.clone()))
             .map_err(err)?;
         let result = project.design_main_dimensions(id).map_err(err)?;
         print_report(&project, id, &input, &result, &units).map_err(err)?;

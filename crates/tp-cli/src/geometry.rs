@@ -61,9 +61,7 @@ pub(crate) fn run(args: GeometryArgs) -> CliResult {
             apply(&mut input, &units, setting)?;
         }
         project
-            .component_mut(*id)
-            .map_err(err)?
-            .set_geometry(input.clone())
+            .set_impeller_geometry(*id, input.clone())
             .map_err(err)?;
         let geometry = project.design_impeller_geometry(*id).map_err(err)?;
         print_report(name, *id, &geometry, &input, &units);

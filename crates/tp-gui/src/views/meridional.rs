@@ -332,7 +332,7 @@ impl MeridionalView {
             apply_drag(handle, pointer, &g.contour, &g.basis, &mut input.meridional);
             if input != current {
                 cx.edit(&format!("drag {}", handle.label()), |p| {
-                    p.component_mut(id)?.set_geometry(input)
+                    p.set_impeller_geometry(id, input)
                 });
                 // Show the new geometry even if the pointer stops here.
                 ui.ctx().request_repaint();

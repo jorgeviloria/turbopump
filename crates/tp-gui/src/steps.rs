@@ -423,9 +423,10 @@ fn buttons(
                 .clicked()
             {
                 cx.doc.end_gesture();
-                match cx.doc.edit(&format!("accept {step}"), |p| {
-                    p.design_impeller_step(id, step)
-                }) {
+                match cx
+                    .doc
+                    .edit(&format!("accept {step}"), |p| p.design_step(id, step))
+                {
                     Ok(()) => {
                         cx.info(format!("{} accepted", step_title(step)));
                         if let Some(&next) = steps.get(index + 1) {
@@ -471,8 +472,7 @@ fn reset(cx: &mut EditCtx<'_>, project: &Project, id: ComponentId, step: DesignS
             ..CentrifugalPumpInput::default()
         };
         cx.edit(&label, |p| {
-            p.component_mut(id)?
-                .set_main_dimensions(MainDimensionsInput::CentrifugalPump(input))
+            p.set_main_dimensions(id, MainDimensionsInput::CentrifugalPump(input))
         });
         return;
     }
@@ -486,7 +486,7 @@ fn reset(cx: &mut EditCtx<'_>, project: &Project, id: ComponentId, step: DesignS
         DesignStep::BladeEdges => input.edges = defaults.edges,
         _ => return,
     }
-    cx.edit(&label, |p| p.component_mut(id)?.set_geometry(input));
+    cx.edit(&label, |p| p.set_impeller_geometry(id, input));
 }
 
 /// Errors and warnings of the computation behind `step`.
@@ -749,8 +749,7 @@ fn main_dimensions(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Com
 
     if changed {
         cx.edit("edit main dimensions", |p| {
-            p.component_mut(id)?
-                .set_main_dimensions(MainDimensionsInput::CentrifugalPump(input))
+            p.set_main_dimensions(id, MainDimensionsInput::CentrifugalPump(input))
         });
     }
 
@@ -778,7 +777,7 @@ fn main_dimensions(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Com
 
 /// Geometry inputs of `id` and the closure that stores them.
 fn edit_geometry(cx: &mut EditCtx<'_>, id: ComponentId, label: &str, input: ImpellerGeometryInput) {
-    cx.edit(label, |p| p.component_mut(id)?.set_geometry(input));
+    cx.edit(label, |p| p.set_impeller_geometry(id, input));
 }
 
 fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: ComponentId) {

@@ -2,7 +2,8 @@
 
 use tp_design::MainDimensionsInput;
 use tp_design::impeller::{self, ImpellerBasis, ImpellerGeometry, ImpellerGeometryInput};
-use tp_design::pump::{self, CentrifugalPumpDesign, CentrifugalPumpInput, PumpDuty};
+use tp_design::pump::{self, CentrifugalPumpDesign, CentrifugalPumpInput, PumpDuty, Suction};
+use tp_design::volute::{VoluteBasis, VoluteGeometry, VoluteInput};
 use tp_fluids::LiquidProperties;
 use tp_units::STANDARD_GRAVITY;
 
@@ -18,6 +19,16 @@ pub const GEOMETRY_STEPS: [DesignStep; 5] = [
     DesignStep::BladeMeanLines,
     DesignStep::BladeProfiles,
     DesignStep::BladeEdges,
+];
+
+/// Design steps of a volute that the program can compute, in order.
+pub const VOLUTE_STEPS: [DesignStep; 6] = [
+    DesignStep::VoluteSetup,
+    DesignStep::CrossSection,
+    DesignStep::SpiralDevelopment,
+    DesignStep::Diffuser,
+    DesignStep::CutWater,
+    DesignStep::WallThickness,
 ];
 
 impl Project {
@@ -146,25 +157,87 @@ impl Project {
         Ok(impeller::build(&basis, &self.impeller_geometry_input(id)?)?)
     }
 
-    /// Computes step `step` of impeller `id` with the current inputs and marks it done.
-    /// Every earlier step must be done. A geometry step builds the whole geometry, so
-    /// it fails if any geometry input is invalid.
-    pub fn design_impeller_step(
-        &mut self,
-        id: ComponentId,
-        step: DesignStep,
-    ) -> Result<(), ProjectError> {
-        if step == DesignStep::MainDimensions {
-            self.design_main_dimensions(id)?;
-        } else if GEOMETRY_STEPS.contains(&step) {
-            self.compute_impeller_geometry(id)?;
-            self.component_mut(id)?.complete(step)?;
-        } else {
-            return Err(ProjectError::Unsupported(format!(
-                "the {step} step (planned for a later phase)"
-            )));
+    /// Computes step `step` of component `id` with the current inputs and marks it
+    /// done. Every earlier step must be done. Geometry and volute steps build the whole
+    /// geometry, so they fail if any of its inputs is invalid.
+    pub fn design_step(&mut self, id: ComponentId, step: DesignStep) -> Result<(), ProjectError> {
+        let kind = self
+            .component(id)
+            .ok_or(ProjectError::UnknownComponent(id))?
+            .kind();
+        match kind {
+            ComponentKind::Impeller if step == DesignStep::MainDimensions => {
+                self.design_main_dimensions(id)?;
+            }
+            ComponentKind::Impeller if GEOMETRY_STEPS.contains(&step) => {
+                self.compute_impeller_geometry(id)?;
+                self.component_mut(id)?.complete(step)?;
+            }
+            ComponentKind::Volute if VOLUTE_STEPS.contains(&step) => {
+                self.compute_volute(id)?;
+                self.component_mut(id)?.complete(step)?;
+            }
+            _ => {
+                return Err(ProjectError::Unsupported(format!(
+                    "the {step} step of a {} (planned for a later phase)",
+                    kind.label().to_lowercase()
+                )));
+            }
         }
         Ok(())
+    }
+
+    /// Marks every component after `id` stale: they are coupled to its outlet.
+    fn invalidate_downstream(&mut self, id: ComponentId) -> Result<(), ProjectError> {
+        let index = self
+            .components()
+            .iter()
+            .position(|c| c.id() == id)
+            .ok_or(ProjectError::UnknownComponent(id))?;
+        let ids: Vec<ComponentId> = self.components()[index + 1..]
+            .iter()
+            .map(|c| c.id())
+            .collect();
+        for next in ids {
+            self.component_mut(next)?.invalidate_all();
+        }
+        Ok(())
+    }
+
+    /// Replaces the main-dimensions inputs of impeller `id`. A change makes its whole
+    /// design stale, and the components after it too.
+    pub fn set_main_dimensions(
+        &mut self,
+        id: ComponentId,
+        input: MainDimensionsInput,
+    ) -> Result<(), ProjectError> {
+        let changed = self.component(id).and_then(|c| c.main_dimensions()) != Some(&input);
+        self.component_mut(id)?.set_main_dimensions(input)?;
+        if changed {
+            self.invalidate_downstream(id)?;
+        }
+        Ok(())
+    }
+
+    /// Replaces the geometry inputs of impeller `id`. A new meridional contour moves the
+    /// outlet, so it also makes the components after it stale.
+    pub fn set_impeller_geometry(
+        &mut self,
+        id: ComponentId,
+        input: ImpellerGeometryInput,
+    ) -> Result<(), ProjectError> {
+        let old = self.impeller_geometry_input(id)?;
+        let outlet_moved = old.meridional != input.meridional;
+        self.component_mut(id)?.set_geometry(input)?;
+        if outlet_moved {
+            self.invalidate_downstream(id)?;
+        }
+        Ok(())
+    }
+
+    /// Replaces the inputs of volute `id`.
+    pub fn set_volute(&mut self, id: ComponentId, input: VoluteInput) -> Result<(), ProjectError> {
+        self.component_mut(id)?.set_volute(input)
     }
 
     /// Builds the geometry of impeller `id` and marks the geometry steps as done.
@@ -179,6 +252,66 @@ impl Project {
             component.complete(step)?;
         }
         Ok(geometry)
+    }
+}
+
+impl Project {
+    /// The volute inputs of `id`, all automatic if never set.
+    pub fn volute_input(&self, id: ComponentId) -> Result<VoluteInput, ProjectError> {
+        let component = self
+            .component(id)
+            .ok_or(ProjectError::UnknownComponent(id))?;
+        if component.kind() != ComponentKind::Volute {
+            return Err(ProjectError::NotAVolute(id));
+        }
+        Ok(component.volute().cloned().unwrap_or_default())
+    }
+
+    /// What volute `id` receives from the impeller just upstream.
+    pub fn volute_basis(&self, id: ComponentId) -> Result<VoluteBasis, ProjectError> {
+        let index = self
+            .components()
+            .iter()
+            .position(|c| c.id() == id)
+            .ok_or(ProjectError::UnknownComponent(id))?;
+        if self.components()[index].kind() != ComponentKind::Volute {
+            return Err(ProjectError::NotAVolute(id));
+        }
+        if index == 0 {
+            return Err(ProjectError::Unsupported(
+                "inlet volutes (planned for a later phase)".into(),
+            ));
+        }
+        let upstream = &self.components()[index - 1];
+        if upstream.kind() != ComponentKind::Impeller {
+            return Err(ProjectError::Unsupported(format!(
+                "a volute after a {} (planned for a later phase)",
+                upstream.kind().label().to_lowercase()
+            )));
+        }
+        let impeller = upstream.id();
+        let main = self.compute_main_dimensions(impeller)?;
+        let duty = self.pump_duty(impeller)?;
+        let geometry = self.compute_impeller_geometry(impeller)?;
+        // A double-entry impeller is modelled as one half whose hub is the plane of
+        // symmetry; a single-entry impeller discharges between shroud and hub.
+        let length = geometry.contour.axial_length;
+        let midplane = match self.pump_impeller_input(impeller)?.suction {
+            Suction::Single => length - geometry.basis.outlet_width / 2.0,
+            Suction::Double => length,
+        };
+        Ok(VoluteBasis::from_pump(
+            &main,
+            &duty,
+            midplane,
+            geometry.blade.rotation_sign,
+        ))
+    }
+
+    /// Builds volute `id` without changing the project.
+    pub fn compute_volute(&self, id: ComponentId) -> Result<VoluteGeometry, ProjectError> {
+        let basis = self.volute_basis(id)?;
+        Ok(VoluteGeometry::build(&basis, &self.volute_input(id)?)?)
     }
 }
 
@@ -292,16 +425,16 @@ mod tests {
         let mut p = pump();
         let id = p.add_component(ComponentKind::Impeller, None).unwrap();
         assert!(matches!(
-            p.design_impeller_step(id, DesignStep::BladeProperties),
+            p.design_step(id, DesignStep::BladeProperties),
             Err(ProjectError::PreviousStepIncomplete { .. })
         ));
         for step in [DesignStep::MainDimensions, DesignStep::MeridionalContour] {
-            p.design_impeller_step(id, step).unwrap();
+            p.design_step(id, step).unwrap();
         }
         let c = p.component(id).unwrap();
         assert_eq!(c.next_step(), Some(DesignStep::BladeProperties));
         assert!(matches!(
-            p.design_impeller_step(id, DesignStep::CfdSetup),
+            p.design_step(id, DesignStep::CfdSetup),
             Err(ProjectError::Unsupported(_))
         ));
 
@@ -309,10 +442,7 @@ mod tests {
         let mut input = p.impeller_geometry_input(id).unwrap();
         input.properties.spans = Param::Manual(1);
         p.component_mut(id).unwrap().set_geometry(input).unwrap();
-        assert!(
-            p.design_impeller_step(id, DesignStep::BladeProperties)
-                .is_err()
-        );
+        assert!(p.design_step(id, DesignStep::BladeProperties).is_err());
         assert_eq!(
             p.component(id).unwrap().status(DesignStep::BladeProperties),
             StepStatus::Pending
@@ -365,6 +495,99 @@ mod tests {
             p.compute_impeller_geometry(id).unwrap().blade.rotation_sign,
             -1.0
         );
+    }
+
+    fn pump_with_volute() -> (Project, ComponentId, ComponentId) {
+        let mut p = pump();
+        let impeller = p.add_component(ComponentKind::Impeller, None).unwrap();
+        let volute = p.add_component(ComponentKind::Volute, None).unwrap();
+        (p, impeller, volute)
+    }
+
+    #[test]
+    fn volute_follows_the_impeller_outlet() {
+        let (p, impeller, volute) = pump_with_volute();
+        let basis = p.volute_basis(volute).unwrap();
+        let main = p.compute_main_dimensions(impeller).unwrap();
+        let g = p.compute_impeller_geometry(impeller).unwrap();
+        assert_relative_eq!(basis.impeller_diameter, main.outlet_diameter);
+        assert_relative_eq!(basis.cu, main.outlet.triangle.cu);
+        assert_relative_eq!(basis.flow, 100.0 / 3600.0, max_relative = 1e-12);
+        assert_relative_eq!(
+            basis.midplane,
+            g.contour.axial_length - main.outlet_width / 2.0,
+            max_relative = 1e-12
+        );
+        let v = p.compute_volute(volute).unwrap();
+        assert!(v.design.cutwater_diameter > main.outlet_diameter);
+    }
+
+    #[test]
+    fn volute_steps_and_downstream_staleness() {
+        let (mut p, impeller, volute) = pump_with_volute();
+        for step in VOLUTE_STEPS {
+            p.design_step(volute, step).unwrap();
+        }
+        assert_eq!(
+            p.component(volute).unwrap().next_step(),
+            Some(DesignStep::CfdSetup)
+        );
+        assert!(matches!(
+            p.design_step(volute, DesignStep::CfdSetup),
+            Err(ProjectError::Unsupported(_))
+        ));
+
+        // Blade edges do not move the outlet; the main dimensions do.
+        let mut geometry = p.impeller_geometry_input(impeller).unwrap();
+        geometry.edges.trailing = tp_design::impeller::blade::EdgeShape::Ellipse { ratio: 2.0 };
+        p.set_impeller_geometry(impeller, geometry).unwrap();
+        assert_eq!(
+            p.component(volute).unwrap().status(DesignStep::VoluteSetup),
+            StepStatus::Done
+        );
+        let input = CentrifugalPumpInput {
+            blade_count: Param::Manual(6),
+            ..Default::default()
+        };
+        p.set_main_dimensions(impeller, MainDimensionsInput::CentrifugalPump(input))
+            .unwrap();
+        assert_eq!(
+            p.component(volute).unwrap().status(DesignStep::VoluteSetup),
+            StepStatus::Stale
+        );
+    }
+
+    #[test]
+    fn volute_inputs_invalidate_from_their_step_and_persist() {
+        let (mut p, _, volute) = pump_with_volute();
+        for step in VOLUTE_STEPS {
+            p.design_step(volute, step).unwrap();
+        }
+        let mut input = p.volute_input(volute).unwrap();
+        input.diffuser.length = Param::Manual(0.2);
+        p.set_volute(volute, input.clone()).unwrap();
+        let c = p.component(volute).unwrap();
+        assert_eq!(c.status(DesignStep::SpiralDevelopment), StepStatus::Done);
+        assert_eq!(c.status(DesignStep::Diffuser), StepStatus::Stale);
+
+        let loaded = Project::from_json(&p.to_json().unwrap()).unwrap();
+        assert_eq!(loaded.volute_input(volute).unwrap(), input);
+    }
+
+    #[test]
+    fn volutes_need_an_impeller_upstream() {
+        let mut p = pump();
+        let inlet = p.add_component(ComponentKind::Volute, None).unwrap();
+        p.add_component(ComponentKind::Impeller, None).unwrap();
+        assert!(matches!(
+            p.compute_volute(inlet),
+            Err(ProjectError::Unsupported(_))
+        ));
+        let (p, impeller, _) = pump_with_volute();
+        assert!(matches!(
+            p.volute_input(impeller),
+            Err(ProjectError::NotAVolute(_))
+        ));
     }
 
     #[test]

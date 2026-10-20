@@ -30,6 +30,9 @@ pub enum ProjectError {
     #[error("{0} is not an impeller")]
     NotAnImpeller(ComponentId),
 
+    #[error("{0} is not a volute")]
+    NotAVolute(ComponentId),
+
     #[error("not available yet: {0}")]
     Unsupported(String),
 
