@@ -12,6 +12,7 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tp-design.workspace = true
+tp-fluids.workspace = true
 tp-units.workspace = true
 
 [dev-dependencies]

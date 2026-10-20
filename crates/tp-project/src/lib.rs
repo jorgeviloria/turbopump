@@ -6,6 +6,7 @@
 //! A [`Document`] wraps a project with undo/redo and save state for the editor.
 
 mod component;
+mod design;
 mod document;
 mod error;
 mod file;

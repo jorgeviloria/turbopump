@@ -642,6 +642,9 @@ name = "tp-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "coolprop-sys",
+ "tp-design",
+ "tp-fluids",
  "tp-project",
  "tp-units",
 ]
@@ -690,6 +693,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tp-design",
+ "tp-fluids",
  "tp-units",
 ]
 

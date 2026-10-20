@@ -3,6 +3,8 @@
 //! Exit codes follow the batch-mode convention: 0 = success, 1 = completed with
 //! warnings, 2 = error.
 
+mod design;
+
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -51,8 +53,23 @@ enum Command {
         from: String,
         to: String,
     },
+    /// Liquid properties of a fluid (CoolProp, or the built-in water model).
+    Fluid {
+        /// Fluid name, e.g. Water, Ethanol, n-Hexane.
+        name: String,
+        #[arg(long, default_value = "20 °C")]
+        temperature: String,
+        #[arg(long, default_value = "1 atm")]
+        pressure: String,
+        /// Units used for display.
+        #[arg(long, value_enum, default_value_t = UnitsChoice::Si)]
+        units: UnitsChoice,
+    },
     /// Create a new project file.
     New(NewArgs),
+    /// Compute the main dimensions and velocity triangles of the impellers of a pump
+    /// project.
+    Design(design::DesignArgs),
     /// Show a project summary and its open issues.
     Info {
         file: PathBuf,
@@ -140,7 +157,14 @@ fn main() -> ExitCode {
             stages,
         } => specific_speed(&flow, &head, &speed, eyes, stages),
         Command::Convert { value, from, to } => convert(value, &from, &to),
+        Command::Fluid {
+            name,
+            temperature,
+            pressure,
+            units,
+        } => fluid(&name, &temperature, &pressure, units),
         Command::New(args) => new_project(args),
+        Command::Design(args) => design::run(args),
         Command::Info { file, units } => info(&file, units),
     };
     match result {
@@ -198,6 +222,47 @@ fn convert(value: f64, from: &str, to: &str) -> CliResult {
     let result = tp_units::convert(value, from, to).map_err(|e| e.to_string())?;
     let decimals = decimals_for(result).max(2);
     println!("{value} {from} = {result:.decimals$} {to}");
+    Ok(Outcome::Ok)
+}
+
+fn fluid(name: &str, temperature: &str, pressure: &str, units: UnitsChoice) -> CliResult {
+    let t = parse(temperature, QuantityKind::Temperature)?;
+    let p = parse(pressure, QuantityKind::Pressure)?;
+    let units = match units {
+        UnitsChoice::Us => DisplayUnits::us(),
+        UnitsChoice::Project | UnitsChoice::Si => DisplayUnits::si(),
+    };
+    let liquid = tp_fluids::liquid_properties(name, p, t).map_err(|e| e.to_string())?;
+    let source = match liquid.source {
+        tp_fluids::PropertySource::CoolProp => "CoolProp",
+        tp_fluids::PropertySource::BuiltinWater => "built-in water model",
+    };
+    println!(
+        "{name} at {}, {} ({source})",
+        show(&units, QuantityKind::Temperature, t),
+        show(&units, QuantityKind::Pressure, p)
+    );
+    let rows = [
+        ("Density", QuantityKind::Density, liquid.density),
+        (
+            "Dynamic viscosity",
+            QuantityKind::DynamicViscosity,
+            liquid.dynamic_viscosity,
+        ),
+        (
+            "Kinematic viscosity",
+            QuantityKind::KinematicViscosity,
+            liquid.kinematic_viscosity(),
+        ),
+        (
+            "Vapour pressure",
+            QuantityKind::Pressure,
+            liquid.vapor_pressure,
+        ),
+    ];
+    for (label, kind, value) in rows {
+        println!("  {label:<20} {}", show(&units, kind, value));
+    }
     Ok(Outcome::Ok)
 }
 

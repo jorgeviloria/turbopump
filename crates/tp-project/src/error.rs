@@ -27,6 +27,18 @@ pub enum ProjectError {
     #[error("invalid global setup: {0}")]
     InvalidSetup(String),
 
+    #[error("{0} is not an impeller")]
+    NotAnImpeller(ComponentId),
+
+    #[error("not available yet: {0}")]
+    Unsupported(String),
+
+    #[error(transparent)]
+    Fluid(#[from] tp_fluids::FluidError),
+
+    #[error(transparent)]
+    Design(#[from] tp_design::DesignError),
+
     #[error("not a Turbopump project file (format {0:?})")]
     WrongFormat(String),
 

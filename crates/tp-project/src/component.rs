@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
+use tp_design::MainDimensionsInput;
 
 use crate::ProjectError;
 
@@ -149,6 +150,9 @@ pub struct Component {
     /// Steps not listed are pending.
     #[serde(default)]
     steps: BTreeMap<DesignStep, StepStatus>,
+    /// Inputs of the main-dimensions step; `None` means every value automatic.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    main_dimensions: Option<MainDimensionsInput>,
 }
 
 impl Component {
@@ -159,7 +163,26 @@ impl Component {
             kind,
             coupling: Coupling::default(),
             steps: BTreeMap::new(),
+            main_dimensions: None,
         }
+    }
+
+    /// Inputs of the main-dimensions step, if any were set.
+    pub fn main_dimensions(&self) -> Option<&MainDimensionsInput> {
+        self.main_dimensions.as_ref()
+    }
+
+    /// Replaces the main-dimensions inputs. A change makes the whole design stale,
+    /// since every later step builds on the main dimensions.
+    pub fn set_main_dimensions(&mut self, input: MainDimensionsInput) -> Result<(), ProjectError> {
+        if self.kind != ComponentKind::Impeller {
+            return Err(ProjectError::NotAnImpeller(self.id));
+        }
+        if self.main_dimensions.as_ref() != Some(&input) {
+            self.main_dimensions = Some(input);
+            self.invalidate_all();
+        }
+        Ok(())
     }
 
     pub fn id(&self) -> ComponentId {
