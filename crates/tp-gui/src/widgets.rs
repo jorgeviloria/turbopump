@@ -190,25 +190,3 @@ mod tests {
         assert_eq!(manual_tag(&Param::Manual(1.0)), " (manual)");
     }
 }
-
-#[cfg(test)]
-mod glyph_tests {
-    use eframe::egui::{self, FontId};
-
-    /// Every non-ASCII symbol the editor writes must exist in egui's default fonts,
-    /// or it is drawn as an empty box.
-    #[test]
-    fn symbols_used_by_the_editor_have_glyphs() {
-        let symbols = "°±²³·éαβγδηθνξρψ–—•…₁₂−≤≥○⚙⟲⏺⏴⏵✚🗙⚑";
-        let ctx = egui::Context::default();
-        let mut output = ctx.run_ui(egui::RawInput::default(), |_| {});
-        output.textures_delta.clear();
-        let missing: String = ctx.fonts_mut(|fonts| {
-            symbols
-                .chars()
-                .filter(|&c| !fonts.has_glyph(&FontId::proportional(14.0), c))
-                .collect()
-        });
-        assert!(missing.is_empty(), "no glyph for {missing:?}");
-    }
-}

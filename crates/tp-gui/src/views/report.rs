@@ -546,6 +546,9 @@ fn warnings(ui: &mut Ui, warnings: &[String]) {
     }
     ui.add_space(6.0);
     for w in warnings {
-        ui.colored_label(ui.visuals().warn_fg_color, format!("⚑ {w}"));
+        ui.colored_label(
+            ui.visuals().warn_fg_color,
+            format!("{} {w}", crate::theme::icon::WARNING),
+        );
     }
 }

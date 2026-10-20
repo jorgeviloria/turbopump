@@ -561,7 +561,10 @@ mod cad {
                         ui.label("Every solid is a single valid solid.");
                     }
                     for p in &report.problems {
-                        ui.colored_label(ui.visuals().warn_fg_color, format!("⚑ {p}"));
+                        ui.colored_label(
+                            ui.visuals().warn_fg_color,
+                            format!("{} {p}", crate::theme::icon::WARNING),
+                        );
                     }
                 }
                 Some(Err(e)) => {

@@ -231,7 +231,7 @@ impl MeridionalView {
             .sense(Sense::click_and_drag())
             .x_axis_label(format!("z [{unit}]"))
             .y_axis_label(format!("r [{unit}]"))
-            .legend(Legend::default().position(Corner::LeftTop))
+            .legend(Legend::default().position(Corner::RightBottom))
             .show(ui, |plot| {
                 if let Some(bounds) = frozen {
                     plot.set_plot_bounds(bounds);

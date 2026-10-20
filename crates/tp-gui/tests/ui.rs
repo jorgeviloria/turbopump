@@ -22,7 +22,7 @@ fn status(harness: &Harness<'_, TurbopumpApp>, step: DesignStep) -> StepStatus {
 }
 
 fn accept(harness: &mut Harness<'_, TurbopumpApp>) {
-    harness.get_by_label(ACCEPT).click();
+    harness.get_by_label_contains(ACCEPT).click();
     harness.run();
 }
 
@@ -33,8 +33,8 @@ fn starts_on_the_main_dimensions_of_the_default_pump() {
         harness.state().selection(),
         Selection::Step(_, DesignStep::MainDimensions)
     ));
-    // The report and the step panel show the specific speed of the default pump.
-    harness.get_by_label("Main dimensions");
+    // The tree lists the step, and the report shows the specific speed of the pump.
+    assert!(harness.get_all_by_label("Main dimensions").next().is_some());
     harness.get_by_label("35.92");
 }
 
@@ -85,7 +85,12 @@ fn undo_and_redo_shortcuts() {
 fn changing_the_global_setup_makes_done_steps_outdated() {
     let mut harness = harness();
     accept(&mut harness);
-    harness.get_by_label("⚙ Global setup").click();
+    // The component bar and the tree both open it.
+    harness
+        .get_all_by_label("Global setup")
+        .next()
+        .unwrap()
+        .click();
     harness.run();
     harness.get_by_label("counter-clockwise").click();
     harness.run();
@@ -112,7 +117,7 @@ fn manual_values_can_be_reset_to_automatic() {
             .manual_value()
     };
     assert!(manual(&harness).is_some());
-    harness.get_by_label("Reset to automatic").click();
+    harness.get_by_label_contains("Reset to automatic").click();
     harness.run();
     assert!(manual(&harness).is_none());
 }
@@ -136,7 +141,7 @@ fn the_volute_is_designed_after_the_impeller() {
         accept(&mut harness);
     }
     // Then every volute step, from the tree.
-    harness.get_by_label_contains("Volute setup").click();
+    harness.get_by_label("Volute setup").click();
     harness.run();
     for step in tp_project::VOLUTE_STEPS {
         assert!(matches!(harness.state().selection(), Selection::Step(_, s) if s == step));
@@ -158,9 +163,11 @@ fn the_volute_is_designed_after_the_impeller() {
 fn a_diffuser_goes_between_impeller_and_volute() {
     use tp_project::{ComponentKind, VANED_STEPS};
     let mut harness = harness();
-    harness.get_by_label("✚ Add component").click();
+    harness.get_by_label("Add component").click();
     harness.run();
-    harness.get_by_label("Stator (vaned diffuser)").click();
+    harness
+        .get_by_label_contains("Stator (vaned diffuser)")
+        .click();
     harness.run();
     let kinds: Vec<ComponentKind> = harness
         .state()
@@ -191,4 +198,47 @@ fn a_diffuser_goes_between_impeller_and_volute() {
     harness.state_mut().focus_view(View::Report);
     harness.run();
     harness.get_by_label_contains(": vaned diffuser");
+}
+
+#[test]
+fn the_toolbar_accepts_steps_and_adds_components() {
+    use tp_project::ComponentKind;
+    let mut harness = harness();
+    // The tab of the selected component accepts its step.
+    harness.get_by_label("Accept").click();
+    harness.run();
+    assert_eq!(
+        status(&harness, DesignStep::MainDimensions),
+        StepStatus::Done
+    );
+    // The home tab adds a vaneless diffuser, which goes before the outlet volute.
+    harness.get_by_label("Home tab").click();
+    harness.run();
+    harness.get_by_label("Vaneless diffuser").click();
+    harness.run();
+    let kinds: Vec<ComponentKind> = harness
+        .state()
+        .document()
+        .project()
+        .components()
+        .iter()
+        .map(|c| c.kind())
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            ComponentKind::Impeller,
+            ComponentKind::Stator { vaned: false },
+            ComponentKind::Volute
+        ]
+    );
+    // The new component is selected, and the left panel can show the 3D model tree.
+    assert!(matches!(
+        harness.state().selection(),
+        Selection::Step(id, _) if id == harness.state().document().project().components()[1].id()
+    ));
+    harness.get_by_label_contains("3D model").click();
+    harness.run();
+    harness.get_by_label("Side walls");
+    harness.get_by_label("Casing");
 }

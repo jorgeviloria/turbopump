@@ -19,6 +19,14 @@ const SAMPLES: u32 = 4;
 pub(crate) struct Uniforms {
     pub view_projection: [[f32; 4]; 4],
     pub eye: [f32; 4],
+    /// Directions toward the key and fill lights, world space.
+    pub key_light: [f32; 4],
+    pub fill_light: [f32; 4],
+    /// Screen up direction, world space.
+    pub up: [f32; 4],
+    /// Gamma-encoded background at the top and at the bottom of the view.
+    pub sky: [f32; 4],
+    pub ground: [f32; 4],
 }
 
 struct GpuMesh {
@@ -38,6 +46,7 @@ struct Target {
 
 /// GPU resources of the 3D view.
 pub(crate) struct Gpu {
+    background: wgpu::RenderPipeline,
     opaque: wgpu::RenderPipeline,
     transparent: wgpu::RenderPipeline,
     lines: wgpu::RenderPipeline,
@@ -56,28 +65,53 @@ impl std::fmt::Debug for Gpu {
     }
 }
 
+/// How a pipeline draws.
+#[derive(Clone, Copy, PartialEq)]
+enum Kind {
+    /// The gradient behind the model: no vertices, no depth.
+    Background,
+    Opaque,
+    Transparent,
+    Lines,
+}
+
 fn pipeline(
     device: &wgpu::Device,
     layout: &wgpu::PipelineLayout,
     shader: &wgpu::ShaderModule,
     label: &str,
-    topology: wgpu::PrimitiveTopology,
-    fragment: &str,
-    transparent: bool,
+    kind: Kind,
 ) -> wgpu::RenderPipeline {
     let attributes = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x4];
+    let vertex_layout = [Some(wgpu::VertexBufferLayout {
+        array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &attributes,
+    })];
+    let (vertex, fragment, topology) = match kind {
+        Kind::Background => (
+            "vs_background",
+            "fs_background",
+            wgpu::PrimitiveTopology::TriangleList,
+        ),
+        Kind::Opaque | Kind::Transparent => {
+            ("vs_main", "fs_main", wgpu::PrimitiveTopology::TriangleList)
+        }
+        Kind::Lines => ("vs_line", "fs_line", wgpu::PrimitiveTopology::LineList),
+    };
+    let transparent = kind == Kind::Transparent;
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some(label),
         layout: Some(layout),
         vertex: wgpu::VertexState {
             module: shader,
-            entry_point: Some("vs_main"),
+            entry_point: Some(vertex),
             compilation_options: Default::default(),
-            buffers: &[Some(wgpu::VertexBufferLayout {
-                array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
-                step_mode: wgpu::VertexStepMode::Vertex,
-                attributes: &attributes,
-            })],
+            buffers: if kind == Kind::Background {
+                &[]
+            } else {
+                &vertex_layout
+            },
         },
         primitive: wgpu::PrimitiveState {
             topology,
@@ -86,8 +120,12 @@ fn pipeline(
         },
         depth_stencil: Some(wgpu::DepthStencilState {
             format: DEPTH_FORMAT,
-            depth_write_enabled: Some(!transparent),
-            depth_compare: Some(wgpu::CompareFunction::LessEqual),
+            depth_write_enabled: Some(matches!(kind, Kind::Opaque | Kind::Lines)),
+            depth_compare: Some(if kind == Kind::Background {
+                wgpu::CompareFunction::Always
+            } else {
+                wgpu::CompareFunction::LessEqual
+            }),
             stencil: Default::default(),
             bias: Default::default(),
         }),
@@ -148,29 +186,11 @@ impl Gpu {
                 resource: uniforms.as_entire_binding(),
             }],
         });
-        use wgpu::PrimitiveTopology::{LineList, TriangleList};
         Self {
-            opaque: pipeline(
-                device,
-                &layout,
-                &shader,
-                "opaque",
-                TriangleList,
-                "fs_main",
-                false,
-            ),
-            transparent: pipeline(
-                device,
-                &layout,
-                &shader,
-                "transparent",
-                TriangleList,
-                "fs_main",
-                true,
-            ),
-            lines: pipeline(
-                device, &layout, &shader, "lines", LineList, "fs_line", false,
-            ),
+            background: pipeline(device, &layout, &shader, "background", Kind::Background),
+            opaque: pipeline(device, &layout, &shader, "opaque", Kind::Opaque),
+            transparent: pipeline(device, &layout, &shader, "transparent", Kind::Transparent),
+            lines: pipeline(device, &layout, &shader, "lines", Kind::Lines),
             uniforms,
             bind_group,
             mesh: None,
@@ -253,13 +273,12 @@ impl Gpu {
     }
 
     /// Draws the uploaded mesh at `size` pixels and returns the egui texture with the
-    /// image. `background` is the gamma-encoded clear color.
+    /// image.
     pub fn render(
         &mut self,
         state: &RenderState,
         size: [u32; 2],
         uniforms: &Uniforms,
-        background: egui::Color32,
     ) -> egui::TextureId {
         let texture = self.ensure_target(state, size);
         let target = self.target.as_ref().expect("created above");
@@ -272,7 +291,7 @@ impl Gpu {
                 label: Some("3d view"),
             });
         {
-            let [r, g, b, _] = background.to_array();
+            let [r, g, b, _] = uniforms.ground;
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("3d view"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -281,9 +300,9 @@ impl Gpu {
                     resolve_target: Some(&target.resolved),
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: f64::from(r) / 255.0,
-                            g: f64::from(g) / 255.0,
-                            b: f64::from(b) / 255.0,
+                            r: f64::from(r),
+                            g: f64::from(g),
+                            b: f64::from(b),
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Discard,
@@ -302,6 +321,8 @@ impl Gpu {
                 multiview_mask: None,
             });
             pass.set_bind_group(0, &self.bind_group, &[]);
+            pass.set_pipeline(&self.background);
+            pass.draw(0..3, 0..1);
             if let Some(mesh) = &self.mesh {
                 if let Some(vertices) = &mesh.vertices {
                     pass.set_vertex_buffer(0, vertices.slice(..));
@@ -309,15 +330,19 @@ impl Gpu {
                         pass.set_pipeline(&self.opaque);
                         pass.draw(0..mesh.opaque, 0..1);
                     }
-                    if mesh.total > mesh.opaque {
-                        pass.set_pipeline(&self.transparent);
-                        pass.draw(mesh.opaque..mesh.total, 0..1);
-                    }
                 }
+                // Lines before glass, so see-through parts tint the lines behind them.
                 if let Some(lines) = &mesh.lines {
                     pass.set_pipeline(&self.lines);
                     pass.set_vertex_buffer(0, lines.slice(..));
                     pass.draw(0..mesh.line_vertices, 0..1);
+                }
+                if let Some(vertices) = &mesh.vertices
+                    && mesh.total > mesh.opaque
+                {
+                    pass.set_pipeline(&self.transparent);
+                    pass.set_vertex_buffer(0, vertices.slice(..));
+                    pass.draw(mesh.opaque..mesh.total, 0..1);
                 }
             }
         }

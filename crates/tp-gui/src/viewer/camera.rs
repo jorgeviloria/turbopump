@@ -29,7 +29,7 @@ impl Camera {
             target: center,
             yaw: -0.9,
             pitch: 0.55,
-            distance: 1.08 * radius / (FOV / 2.0).sin(),
+            distance: 0.98 * radius / (FOV / 2.0).sin(),
             radius,
         }
     }
@@ -38,6 +38,27 @@ impl Camera {
     pub fn look_from(&mut self, yaw: f32, pitch: f32) {
         self.yaw = yaw;
         self.pitch = pitch.clamp(-MAX_PITCH, MAX_PITCH);
+    }
+
+    /// Looks at the target from `direction` (from the target toward the eye).
+    pub fn look_along(&mut self, direction: Vec3) {
+        let d = direction.normalize_or_zero();
+        if d == Vec3::ZERO {
+            return;
+        }
+        let pitch = (-d.z).clamp(-1.0, 1.0).asin();
+        // Straight along the axis the yaw is free: keep it.
+        if d.x.hypot(d.y) > 1e-4 {
+            self.yaw = d.y.atan2(d.x);
+        }
+        self.pitch = pitch.clamp(-MAX_PITCH, MAX_PITCH);
+    }
+
+    /// Size of one point of the view at the target, in model units, for a view
+    /// `height` points tall.
+    pub fn units_per_point(&self, width: f32, height: f32) -> f32 {
+        let fov = Self::vertical_fov(width / height.max(1.0));
+        2.0 * self.distance * (fov / 2.0).tan() / height.max(1.0)
     }
 
     pub fn eye(&self) -> Vec3 {
@@ -80,8 +101,7 @@ impl Camera {
     /// Moves the target with the pointer: (`dx`, `dy`) pixels in a view of `width` by
     /// `height` pixels.
     pub fn pan(&mut self, dx: f32, dy: f32, width: f32, height: f32) {
-        let fov = Self::vertical_fov(width / height.max(1.0));
-        let per_pixel = 2.0 * self.distance * (fov / 2.0).tan() / height.max(1.0);
+        let per_pixel = self.units_per_point(width, height);
         let view = self.view();
         let right = view.row(0).truncate();
         let up = view.row(1).truncate();
@@ -137,6 +157,19 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn looking_along_a_direction_puts_the_eye_there() {
+        let mut camera = Camera::fit(Vec3::ZERO, 0.1);
+        for d in [Vec3::X, Vec3::NEG_Y, Vec3::new(1.0, 1.0, -1.0)] {
+            camera.look_along(d);
+            let eye = (camera.eye() - camera.target).normalize();
+            assert!(eye.distance(d.normalize()) < 1e-4, "{d:?}: {eye:?}");
+        }
+        // Along the axis the pitch stops just short of the pole.
+        camera.look_along(Vec3::NEG_Z);
+        assert!((camera.pitch - MAX_PITCH).abs() < 1e-6);
     }
 
     #[test]

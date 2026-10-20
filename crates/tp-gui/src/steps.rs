@@ -15,8 +15,12 @@ use tp_project::{
 };
 use tp_units::{DisplayUnits, QuantityKind};
 
-use crate::app::{EditCtx, Selection, status_color};
-use crate::tree::{status_marker, status_text, step_title};
+use crate::app::{EditCtx, Selection};
+use crate::derived::Derived;
+use crate::icons;
+use crate::messages::{self, Severity};
+use crate::theme::{Palette, bold, component_color, icon};
+use crate::tree::{status_icon, status_text, step_title};
 use crate::widgets::{self, param_f64, param_u32, value_row};
 
 /// Steps the editor can work on today.
@@ -77,10 +81,106 @@ pub(crate) fn show(ui: &mut Ui, cx: &mut EditCtx<'_>) {
     }
 }
 
+/// Heading of a group of inputs, with a rule after it.
 pub(crate) fn section(ui: &mut Ui, title: &str) {
-    ui.add_space(8.0);
-    ui.label(RichText::new(title).strong());
+    let p = Palette::of(ui);
+    ui.add_space(10.0);
+    ui.horizontal(|ui| {
+        ui.label(bold(title).size(13.0));
+        let rect = ui.available_rect_before_wrap();
+        ui.painter().hline(
+            (rect.left() + 4.0)..=rect.right(),
+            rect.center().y,
+            egui::Stroke::new(1.0, p.border),
+        );
+    });
     ui.add_space(2.0);
+}
+
+/// Whether a step can be accepted now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AcceptState {
+    /// The step has nothing to accept.
+    NotApplicable,
+    Ready,
+    /// Why it cannot be accepted.
+    Blocked(&'static str),
+}
+
+/// Whether `step` of component `id` can be accepted now.
+pub(crate) fn accept_state(
+    project: &Project,
+    derived: &Derived,
+    id: ComponentId,
+    step: DesignStep,
+) -> AcceptState {
+    let Some(component) = project.component(id) else {
+        return AcceptState::NotApplicable;
+    };
+    let kind = component.kind();
+    if !can_accept(kind, step) {
+        return AcceptState::NotApplicable;
+    }
+    let previous_done = kind
+        .steps()
+        .iter()
+        .take_while(|&&s| s != step)
+        .all(|&s| component.status(s) == StepStatus::Done);
+    let computed = match (kind, step) {
+        (ComponentKind::Volute, _) => derived.volute(id).is_some(),
+        (ComponentKind::Stator { .. }, _) => derived.diffuser(id).is_some(),
+        (_, DesignStep::MainDimensions) => derived.main(id).is_some(),
+        _ => derived.geometry(id).is_some(),
+    };
+    if component.status(step) == StepStatus::Done {
+        AcceptState::Blocked("This step is done.")
+    } else if !previous_done {
+        AcceptState::Blocked("Complete the earlier steps first.")
+    } else if !computed {
+        AcceptState::Blocked("Fix the errors first.")
+    } else {
+        AcceptState::Ready
+    }
+}
+
+/// The available steps before and after `step`.
+pub(crate) fn neighbours(
+    kind: ComponentKind,
+    step: DesignStep,
+) -> (Option<DesignStep>, Option<DesignStep>) {
+    let steps: Vec<DesignStep> = kind
+        .steps()
+        .iter()
+        .copied()
+        .filter(|&s| is_available(kind, s))
+        .collect();
+    let Some(index) = steps.iter().position(|&s| s == step) else {
+        return (None, steps.first().copied());
+    };
+    (
+        index.checked_sub(1).map(|i| steps[i]),
+        steps.get(index + 1).copied(),
+    )
+}
+
+/// Marks `step` as done and moves on to the next step.
+pub(crate) fn accept(cx: &mut EditCtx<'_>, id: ComponentId, step: DesignStep) {
+    cx.doc.end_gesture();
+    let Some(kind) = cx.doc.project().component(id).map(|c| c.kind()) else {
+        return;
+    };
+    match cx
+        .doc
+        .edit(&format!("accept {step}"), |p| p.design_step(id, step))
+    {
+        Ok(()) => {
+            cx.info(format!("{} accepted", step_title(step)));
+            if let (_, Some(next)) = neighbours(kind, step) {
+                *cx.selection = Selection::Step(id, next);
+            }
+        }
+        Err(e) => cx.error(e.to_string()),
+    }
 }
 
 pub(crate) fn grid(id: &str) -> Grid {
@@ -354,16 +454,51 @@ fn step_panel(ui: &mut Ui, cx: &mut EditCtx<'_>, id: ComponentId, step: DesignSt
     let Some(component) = project.component(id) else {
         return;
     };
+    let p = Palette::of(ui);
+    let kind = component.kind();
     let status = component.status(step);
-    ui.add_space(4.0);
-    ui.weak(&component.name);
-    ui.heading(step_title(step));
+    ui.add_space(8.0);
     ui.horizontal(|ui| {
-        ui.colored_label(
-            status_color(ui, status),
-            format!("{}  {}", status_marker(status), status_text(status)),
+        let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(16.0), egui::Sense::hover());
+        icons::component(ui.painter(), rect, kind, component_color(kind));
+        ui.label(
+            RichText::new(&component.name)
+                .size(12.0)
+                .color(component_color(kind)),
         );
     });
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(icons::step(step)).size(20.0).color(p.weak));
+        ui.label(bold(step_title(step)).size(18.0));
+        // Previous and next step.
+        let (back, next) = neighbours(kind, step);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let next_button = egui::Button::new(format!("Next {}", icon::CARET_RIGHT));
+            if ui.add_enabled(next.is_some(), next_button).clicked()
+                && let Some(next) = next
+            {
+                *cx.selection = Selection::Step(id, next);
+            }
+            let back_button = egui::Button::new(format!("{} Back", icon::CARET_LEFT));
+            if ui.add_enabled(back.is_some(), back_button).clicked()
+                && let Some(back) = back
+            {
+                *cx.selection = Selection::Step(id, back);
+            }
+        });
+    });
+    let (glyph, color) = status_icon(&p, status);
+    egui::Frame::new()
+        .fill(color.gamma_multiply(0.14))
+        .corner_radius(10)
+        .inner_margin(egui::Margin::symmetric(8, 2))
+        .show(ui, |ui| {
+            ui.label(
+                RichText::new(format!("{glyph} {}", status_text(status)))
+                    .size(11.5)
+                    .color(color),
+            );
+        });
 
     if !is_available(component.kind(), step) {
         ui.separator();
@@ -411,87 +546,46 @@ fn buttons(
     id: ComponentId,
     step: DesignStep,
 ) {
-    let Some(component) = project.component(id) else {
-        return;
-    };
-    let kind = component.kind();
-    let steps: Vec<DesignStep> = kind
-        .steps()
-        .iter()
-        .copied()
-        .filter(|&s| is_available(kind, s))
-        .collect();
-    let index = steps.iter().position(|&s| s == step).unwrap_or(0);
-    let previous_done = kind
-        .steps()
-        .iter()
-        .take_while(|&&s| s != step)
-        .all(|&s| component.status(s) == StepStatus::Done);
-    let computed = match (kind, step) {
-        (ComponentKind::Volute, _) => cx.derived.volute(id).is_some(),
-        (ComponentKind::Stator { .. }, _) => cx.derived.diffuser(id).is_some(),
-        (_, DesignStep::MainDimensions) => cx.derived.main(id).is_some(),
-        _ => cx.derived.geometry(id).is_some(),
-    };
+    let p = Palette::of(ui);
+    let state = accept_state(project, cx.derived, id, step);
 
-    ui.add_space(4.0);
+    ui.add_space(6.0);
     ui.horizontal(|ui| {
-        if can_accept(kind, step) {
-            let done = component.status(step) == StepStatus::Done;
-            let enabled = previous_done && computed && !done;
-            let reason = if done {
-                "This step is done."
-            } else if !previous_done {
-                "Complete the earlier steps first."
+        if state != AcceptState::NotApplicable {
+            let ready = state == AcceptState::Ready;
+            let text = format!("{}  Accept step", icon::CHECK);
+            let button = if ready {
+                egui::Button::new(RichText::new(text).color(p.on_accent)).fill(p.accent)
             } else {
-                "Fix the errors below first."
+                egui::Button::new(text)
+            };
+            let reason = match state {
+                AcceptState::Blocked(reason) => reason,
+                _ => "",
             };
             if ui
-                .add_enabled(enabled, egui::Button::new("Accept step"))
+                .add_enabled(ready, button)
                 .on_hover_text("Mark this step as done with the current values")
                 .on_disabled_hover_text(reason)
                 .clicked()
             {
-                cx.doc.end_gesture();
-                match cx
-                    .doc
-                    .edit(&format!("accept {step}"), |p| p.design_step(id, step))
-                {
-                    Ok(()) => {
-                        cx.info(format!("{} accepted", step_title(step)));
-                        if let Some(&next) = steps.get(index + 1) {
-                            *cx.selection = Selection::Step(id, next);
-                        }
-                    }
-                    Err(e) => cx.error(e.to_string()),
-                }
+                accept(cx, id, step);
             }
             if ui
-                .button("Reset to automatic")
+                .button(format!(
+                    "{}  Reset to automatic",
+                    icon::ARROW_COUNTER_CLOCKWISE
+                ))
                 .on_hover_text("Return every value of this step to its automatic proposal")
                 .clicked()
             {
                 reset(cx, project, id, step);
             }
         }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui
-                .add_enabled(index + 1 < steps.len(), egui::Button::new("Next ⏵"))
-                .clicked()
-            {
-                *cx.selection = Selection::Step(id, steps[index + 1]);
-            }
-            if ui
-                .add_enabled(index > 0, egui::Button::new("⏴ Back"))
-                .clicked()
-            {
-                *cx.selection = Selection::Step(id, steps[index - 1]);
-            }
-        });
     });
 }
 
-fn reset(cx: &mut EditCtx<'_>, project: &Project, id: ComponentId, step: DesignStep) {
+pub(crate) fn reset(cx: &mut EditCtx<'_>, project: &Project, id: ComponentId, step: DesignStep) {
     cx.doc.end_gesture();
     let label = format!("reset {step}");
     match project.component(id).map(|c| c.kind()) {
@@ -577,12 +671,13 @@ fn show_problems(ui: &mut Ui, error: Option<&String>, warnings: &[String]) {
         return;
     }
     ui.add_space(10.0);
-    ui.separator();
     if let Some(e) = error {
-        ui.colored_label(ui.visuals().error_fg_color, format!("🗙 {e}"));
+        messages::card(ui, Severity::Error, e);
+        ui.add_space(3.0);
     }
     for w in warnings {
-        ui.colored_label(ui.visuals().warn_fg_color, format!("⚑ {w}"));
+        messages::card(ui, Severity::Warning, w);
+        ui.add_space(3.0);
     }
 }
 

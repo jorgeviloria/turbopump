@@ -42,7 +42,7 @@ fn main_window() {
     for (theme, suffix) in [(egui::Theme::Dark, "dark"), (egui::Theme::Light, "light")] {
         let mut harness = harness(theme);
         // Accept the main dimensions so the tree shows every state.
-        harness.get_by_label("Accept step").click();
+        harness.get_by_label_contains("Accept step").click();
         harness.run();
         save(&mut harness, &format!("main-{suffix}"));
         for view in [View::Report, View::Blade, View::FrontView] {
@@ -51,6 +51,12 @@ fn main_window() {
             let name = view.title().to_lowercase().replace(' ', "-");
             save(&mut harness, &format!("{name}-{suffix}"));
         }
+        // The home tab of the toolbar and the tree of the 3D model.
+        harness.get_by_label("Home tab").click();
+        harness.get_by_label_contains("3D model").click();
+        harness.state_mut().focus_view(View::View3d);
+        harness.run();
+        save(&mut harness, &format!("home-{suffix}"));
     }
 }
 
@@ -58,15 +64,15 @@ fn main_window() {
 #[test]
 #[ignore = "needs a GPU; run with --ignored"]
 fn documentation() {
-    let mut harness = harness(egui::Theme::Dark);
+    let mut harness = harness(egui::Theme::Light);
     for _ in 0..6 {
-        harness.get_by_label("Accept step").click();
+        harness.get_by_label_contains("Accept step").click();
         harness.run();
     }
     harness.get_by_label_contains("Volute setup").click();
     harness.run();
     for _ in 0..2 {
-        harness.get_by_label("Accept step").click();
+        harness.get_by_label_contains("Accept step").click();
         harness.run();
     }
     harness.remove_cursor();
@@ -80,13 +86,13 @@ fn documentation() {
 fn volute() {
     let mut harness = harness(egui::Theme::Dark);
     for _ in 0..6 {
-        harness.get_by_label("Accept step").click();
+        harness.get_by_label_contains("Accept step").click();
         harness.run();
     }
     harness.get_by_label_contains("Volute setup").click();
     harness.run();
     for _ in 0..2 {
-        harness.get_by_label("Accept step").click();
+        harness.get_by_label_contains("Accept step").click();
         harness.run();
     }
     harness.remove_cursor();
@@ -102,12 +108,14 @@ fn volute() {
 #[ignore = "needs a GPU; run with --ignored"]
 fn diffuser() {
     let mut harness = harness(egui::Theme::Dark);
-    harness.get_by_label("✚ Add component").click();
+    harness.get_by_label("Add component").click();
     harness.run();
-    harness.get_by_label("Stator (vaned diffuser)").click();
+    harness
+        .get_by_label_contains("Stator (vaned diffuser)")
+        .click();
     harness.run();
     for _ in 0..2 {
-        harness.get_by_label("Accept step").click();
+        harness.get_by_label_contains("Accept step").click();
         harness.run();
     }
     harness.state_mut().focus_view(View::FrontView);

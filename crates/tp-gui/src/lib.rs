@@ -1,8 +1,9 @@
 //! Graphical editor of Turbopump.
 //!
-//! The editor walks the user through the design steps of each component: the project
-//! tree on the left, the inputs of the selected step on the right, and dockable views
-//! (meridional contour, blade plots, front view, 3D view and report) in the middle.
+//! The editor walks the user through the design steps of each component: a toolbar on
+//! top, the components and the project tree on the left, the inputs of the selected
+//! step on the right, and dockable views (meridional contour, blade plots, front view,
+//! 3D view and report) in the middle.
 //! Every edit goes through [`tp_project::Document`], so it can be undone, and every
 //! result comes from the same design code as the command line.
 
@@ -10,7 +11,11 @@ mod app;
 mod derived;
 mod diffuser_steps;
 mod export;
+mod icons;
+mod messages;
+mod ribbon;
 mod steps;
+mod theme;
 mod tree;
 mod viewer;
 mod views;

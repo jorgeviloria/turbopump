@@ -18,6 +18,9 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "Turbopump",
         options,
-        Box::new(move |cc| Ok(Box::new(TurbopumpApp::new(cc, path.as_deref())))),
+        Box::new(move |cc| {
+            cc.egui_ctx.set_theme(egui::ThemePreference::Light);
+            Ok(Box::new(TurbopumpApp::new(cc, path.as_deref())))
+        }),
     )
 }

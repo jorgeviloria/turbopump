@@ -3,8 +3,8 @@
 use std::path::{Path, PathBuf};
 
 use eframe::egui::{
-    self, Button, CentralPanel, Color32, Key, KeyboardShortcut, Modal, Modifiers, Panel, RichText,
-    Ui, ViewportCommand,
+    self, Button, CentralPanel, Frame, Key, KeyboardShortcut, Margin, Modal, Modifiers, Panel,
+    RichText, Ui, ViewportCommand,
 };
 use eframe::egui_wgpu::RenderState;
 use egui_dock::{DockArea, DockState, NodeIndex, Style};
@@ -15,10 +15,18 @@ use tp_project::{
 use tp_units::{DisplayUnits, QuantityKind};
 
 use crate::derived::Derived;
-use crate::export::{self, Exports, TextExport, VoluteExport};
+use crate::export::{self, Exports};
+use crate::messages::{self, Message};
+use crate::ribbon::{Command, Ribbon, RibbonCx};
+use crate::steps::AcceptState;
+use crate::theme::{self, Palette, icon};
+use crate::tree::StageParts;
 use crate::viewer::Viewer;
 use crate::views::{blade, front, meridional::MeridionalView, report};
 use crate::{default_project, steps, tree, widgets};
+
+/// Where the documentation lives.
+const PROJECT_PAGE: &str = "https://github.com/jorgeviloria/turbopump";
 
 /// What the step panel shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,16 +117,44 @@ impl View {
             View::Report => "Report",
         }
     }
+
+    /// Name under a toolbar button.
+    pub fn short_title(self) -> &'static str {
+        match self {
+            View::Meridional => "Meridional",
+            View::Blade => "Blade",
+            View::FrontView => "Front",
+            View::View3d => "3D",
+            View::Report => "Report",
+        }
+    }
+
+    pub fn icon(self) -> &'static str {
+        match self {
+            View::Meridional => icon::BEZIER_CURVE,
+            View::Blade => icon::WAVE_SINE,
+            View::FrontView => icon::FAN,
+            View::View3d => icon::CUBE,
+            View::Report => icon::TABLE,
+        }
+    }
 }
 
 fn default_dock() -> DockState<View> {
     let mut dock = DockState::new(vec![View::Meridional, View::Blade, View::Report]);
     dock.main_surface_mut().split_right(
         NodeIndex::root(),
-        0.5,
+        0.45,
         vec![View::View3d, View::FrontView],
     );
     dock
+}
+
+/// The trees of the left panel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LeftTab {
+    Design,
+    Model,
 }
 
 /// An action that would discard unsaved changes, waiting for the user's answer.
@@ -191,6 +227,13 @@ pub struct TurbopumpApp {
     exports: Exports,
     status: Option<Status>,
     dialog: Option<Dialog>,
+    ribbon: Ribbon,
+    /// Which tree the left panel shows.
+    left: LeftTab,
+    /// Whether the messages panel is open.
+    show_messages: bool,
+    /// Fonts and styles are installed on the first frame.
+    styled: bool,
     /// Set once the user agreed to close the window.
     allow_close: bool,
     title: String,
@@ -206,8 +249,10 @@ impl std::fmt::Debug for TurbopumpApp {
 
 impl TurbopumpApp {
     /// Creates the editor, opening `path` if given.
-    pub fn new(_cc: &eframe::CreationContext<'_>, path: Option<&Path>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, path: Option<&Path>) -> Self {
+        theme::install(&cc.egui_ctx);
         let mut app = Self::with_document(Document::new(default_project()));
+        app.styled = true;
         if let Some(path) = path {
             app.open_path(path);
         }
@@ -226,6 +271,10 @@ impl TurbopumpApp {
             exports: Exports::default(),
             status: None,
             dialog: None,
+            ribbon: Ribbon::default(),
+            left: LeftTab::Design,
+            show_messages: false,
+            styled: false,
             allow_close: false,
             title: String::new(),
         };
@@ -252,35 +301,139 @@ impl TurbopumpApp {
     /// Draws the whole window. `render_state` enables the 3D view.
     pub fn show(&mut self, ui: &mut Ui, render_state: Option<&RenderState>) {
         let ctx = ui.ctx().clone();
+        if !self.styled {
+            // Fonts load at the start of the next pass: draw nothing until then.
+            theme::install(&ctx);
+            self.styled = true;
+            ctx.request_discard("installing the fonts");
+            return;
+        }
         self.handle_shortcuts(&ctx);
         self.handle_close_request(&ctx);
         self.derived.update(self.doc.project());
         self.fix_selection();
         self.update_title(&ctx);
         self.exports.poll();
+        let p = Palette::of(ui);
+        let all_messages = messages::all(self.doc.project(), &self.derived);
 
-        Panel::top("menu_bar").show(ui, |ui| {
-            egui::MenuBar::new().ui(ui, |ui| self.menu_bar(ui));
-        });
-        Panel::bottom("status_bar").show(ui, |ui| self.status_bar(ui));
-        Panel::left("project_tree")
-            .default_size(240.0)
-            .size_range(180.0..=420.0)
+        let mut command = None;
+        Panel::top("ribbon")
+            .frame(Frame::new().fill(p.ribbon))
+            .show_separator_line(false)
+            .show(ui, |ui| {
+                let accept = match self.selection {
+                    Selection::Step(id, step) => {
+                        steps::accept_state(self.doc.project(), &self.derived, id, step)
+                    }
+                    Selection::Setup => AcceptState::NotApplicable,
+                };
+                let impeller = self.active_impeller();
+                let volute = self.active_volute();
+                let history = self.doc.history();
+                let mut cx = RibbonCx {
+                    project: self.doc.project(),
+                    selection: self.selection,
+                    dirty: self.doc.is_dirty(),
+                    can_undo: history.can_undo(),
+                    can_redo: history.can_redo(),
+                    undo_label: history.undo_label(),
+                    redo_label: history.redo_label(),
+                    accept,
+                    has_geometry: impeller.is_some_and(|id| self.derived.geometry(id).is_some()),
+                    has_volute: volute.is_some_and(|id| self.derived.volute(id).is_some()),
+                    cad_running: self.exports.cad_running(),
+                    options: &mut self.viewer.options,
+                    theme: ctx.options(|o| o.theme_preference),
+                };
+                command = self.ribbon.show(ui, &mut cx);
+            });
+        Panel::bottom("status_bar")
+            .frame(
+                Frame::new()
+                    .fill(p.strip)
+                    .inner_margin(Margin::symmetric(8, 3)),
+            )
+            .show(ui, |ui| self.status_bar(ui, &all_messages));
+        if self.show_messages {
+            Panel::bottom("messages")
+                .resizable(true)
+                .default_size(140.0)
+                .size_range(70.0..=420.0)
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(theme::bold("Messages"));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui
+                                .add(Button::new(icon::X).frame(false))
+                                .on_hover_text("Close")
+                                .clicked()
+                            {
+                                self.show_messages = false;
+                            }
+                        });
+                    });
+                    if let Some(id) = messages::panel(ui, self.doc.project(), &all_messages) {
+                        let cx = self.edit_ctx();
+                        if let Some(step) = tree::entry_step(&cx, id) {
+                            *cx.selection = Selection::Step(id, step);
+                        }
+                    }
+                });
+        }
+        Panel::left("component_bar")
+            .exact_size(62.0)
+            .resizable(false)
+            .frame(Frame::new().fill(p.strip))
             .show(ui, |ui| {
                 let mut cx = self.edit_ctx();
-                tree::show(ui, &mut cx);
+                tree::component_bar(ui, &mut cx);
+            });
+        let stage = StageParts {
+            stator: self
+                .active_stator()
+                .and_then(|id| self.doc.project().component(id))
+                .map(|c| matches!(c.kind(), ComponentKind::Stator { vaned: true })),
+            volute: self.active_volute().is_some(),
+        };
+        Panel::left("project_tree")
+            .default_size(250.0)
+            .size_range(200.0..=420.0)
+            .show(ui, |ui| {
+                ui.add_space(6.0);
+                ui.columns(2, |columns| {
+                    let tabs = [
+                        (LeftTab::Design, format!("{}  Design", icon::TREE_STRUCTURE)),
+                        (LeftTab::Model, format!("{}  3D model", icon::CUBE)),
+                    ];
+                    for (ui, (tab, label)) in columns.iter_mut().zip(tabs) {
+                        let button = Button::selectable(self.left == tab, label)
+                            .min_size(egui::vec2(ui.available_width(), 24.0));
+                        if ui.add(button).clicked() {
+                            self.left = tab;
+                        }
+                    }
+                });
+                ui.separator();
+                egui::ScrollArea::vertical().show(ui, |ui| match self.left {
+                    LeftTab::Design => {
+                        let mut cx = EditCtx {
+                            doc: &mut self.doc,
+                            derived: &self.derived,
+                            selection: &mut self.selection,
+                            status: &mut self.status,
+                            exports: &mut self.exports,
+                        };
+                        tree::design_tree(ui, &mut cx);
+                    }
+                    LeftTab::Model => tree::model_tree(ui, &mut self.viewer.options, stage),
+                });
             });
         Panel::right("step_panel")
-            .default_size(380.0)
+            .default_size(390.0)
             .size_range(300.0..=600.0)
             .show(ui, |ui| {
-                let mut cx = EditCtx {
-                    doc: &mut self.doc,
-                    derived: &self.derived,
-                    selection: &mut self.selection,
-                    status: &mut self.status,
-                    exports: &mut self.exports,
-                };
+                let mut cx = self.edit_ctx();
                 steps::show(ui, &mut cx);
             });
         CentralPanel::no_frame().show(ui, |ui| {
@@ -310,6 +463,9 @@ impl TurbopumpApp {
                 .show_inside(ui, &mut views);
         });
 
+        if let Some(command) = command {
+            self.run(command, &ctx);
+        }
         self.dialogs(&ctx);
         self.exports.cad_window(
             &ctx,
@@ -324,6 +480,78 @@ impl TurbopumpApp {
         let idle = !ctx.input(|i| i.pointer.any_down()) && !ctx.text_edit_focused();
         if idle {
             self.doc.end_gesture();
+        }
+    }
+
+    /// Carries out a toolbar command.
+    fn run(&mut self, command: Command, ctx: &egui::Context) {
+        match command {
+            Command::NewProject => {
+                self.dialog = Some(Dialog::NewProject(NewProjectForm::default()));
+            }
+            Command::Open => self.open_dialog(),
+            Command::Save => {
+                self.save();
+            }
+            Command::SaveAs => {
+                self.save_as();
+            }
+            Command::Quit => ctx.send_viewport_cmd(ViewportCommand::Close),
+            Command::Undo => self.undo(),
+            Command::Redo => self.redo(),
+            Command::GlobalSetup => self.selection = Selection::Setup,
+            Command::UsUnits(us) => {
+                let preset = if us {
+                    DisplayUnits::us()
+                } else {
+                    DisplayUnits::si()
+                };
+                self.edit_ctx().edit("change units", |p| {
+                    p.display_units = preset;
+                    Ok(())
+                });
+            }
+            Command::Add(index) => tree::add_component(&mut self.edit_ctx(), index),
+            Command::Remove(id) => tree::remove_component(&mut self.edit_ctx(), id),
+            Command::Select(id, step) => self.selection = Selection::Step(id, step),
+            Command::Accept(id, step) => steps::accept(&mut self.edit_ctx(), id, step),
+            Command::Reset(id, step) => {
+                let project = self.doc.project().clone();
+                steps::reset(&mut self.edit_ctx(), &project, id, step);
+            }
+            Command::ExportText(kind) => {
+                if let Some(g) = self
+                    .active_impeller()
+                    .and_then(|id| self.derived.geometry(id))
+                {
+                    let result = export::save_text(kind, g, &self.doc.project().info.name);
+                    self.report_export(result);
+                }
+            }
+            Command::ExportVolute(kind) => {
+                if let Some(g) = self.active_volute().and_then(|id| self.derived.volute(id)) {
+                    let result = export::save_volute(kind, g, &self.doc.project().info.name);
+                    self.report_export(result);
+                }
+            }
+            Command::ExportCad => self.exports.open_cad(),
+            Command::Focus(view) => self.focus_view(view),
+            Command::Camera(view) => {
+                self.focus_view(View::View3d);
+                self.viewer.apply(view);
+            }
+            Command::ResetLayout => self.dock = default_dock(),
+            Command::Theme(preference) => ctx.set_theme(preference),
+            Command::About => self.dialog = Some(Dialog::About),
+            Command::Documentation => ctx.open_url(egui::OpenUrl::new_tab(PROJECT_PAGE)),
+        }
+    }
+
+    fn report_export(&mut self, result: Result<Option<PathBuf>, String>) {
+        match result {
+            Ok(Some(path)) => self.info(format!("Wrote {}", path.display())),
+            Ok(None) => {}
+            Err(e) => self.error(e),
         }
     }
 
@@ -576,177 +804,55 @@ impl TurbopumpApp {
         }
     }
 
-    fn menu_bar(&mut self, ui: &mut Ui) {
-        let ctx = ui.ctx().clone();
-        let text = |m, key| ctx.format_shortcut(&KeyboardShortcut::new(m, key));
-        ui.menu_button("File", |ui| {
-            if ui
-                .add(Button::new("New project…").shortcut_text(text(Modifiers::COMMAND, Key::N)))
-                .clicked()
-            {
-                self.dialog = Some(Dialog::NewProject(NewProjectForm::default()));
-            }
-            if ui
-                .add(Button::new("Open…").shortcut_text(text(Modifiers::COMMAND, Key::O)))
-                .clicked()
-            {
-                self.open_dialog();
-            }
-            if ui
-                .add(Button::new("Save").shortcut_text(text(Modifiers::COMMAND, Key::S)))
-                .clicked()
-            {
-                self.save();
-            }
-            if ui
-                .add(
-                    Button::new("Save as…")
-                        .shortcut_text(text(Modifiers::COMMAND | Modifiers::SHIFT, Key::S)),
-                )
-                .clicked()
-            {
-                self.save_as();
-            }
-            ui.separator();
-            let active = self.active_impeller();
-            let has_geometry = active.is_some_and(|id| self.derived.geometry(id).is_some());
-            ui.menu_button("Export", |ui| {
-                for kind in TextExport::ALL {
-                    if ui
-                        .add_enabled(has_geometry, Button::new(kind.menu_label()))
-                        .clicked()
-                        && let Some(g) = active.and_then(|id| self.derived.geometry(id))
-                    {
-                        let result = export::save_text(kind, g, &self.doc.project().info.name);
-                        match result {
-                            Ok(Some(path)) => self.info(format!("Wrote {}", path.display())),
-                            Ok(None) => {}
-                            Err(e) => self.error(e),
-                        }
-                    }
-                }
-                let volute = self.active_volute();
-                let has_volute = volute.is_some_and(|id| self.derived.volute(id).is_some());
-                if volute.is_some() {
-                    ui.separator();
-                    for kind in VoluteExport::ALL {
-                        if ui
-                            .add_enabled(has_volute, Button::new(kind.menu_label()))
-                            .clicked()
-                            && let Some(g) = volute.and_then(|id| self.derived.volute(id))
-                        {
-                            let result =
-                                export::save_volute(kind, g, &self.doc.project().info.name);
-                            match result {
-                                Ok(Some(path)) => self.info(format!("Wrote {}", path.display())),
-                                Ok(None) => {}
-                                Err(e) => self.error(e),
-                            }
-                        }
-                    }
-                }
-                ui.separator();
-                if ui
-                    .add_enabled(
-                        export::CAD_AVAILABLE,
-                        Button::new("CAD solids (STEP, IGES, STL)…"),
-                    )
-                    .on_disabled_hover_text("This build has no CAD support.")
-                    .clicked()
-                {
-                    self.exports.open_cad();
-                }
-            });
-            ui.separator();
-            if ui.button("Quit").clicked() {
-                ui.ctx().send_viewport_cmd(ViewportCommand::Close);
-            }
-        });
-
-        ui.menu_button("Edit", |ui| {
-            let undo = self.doc.history().undo_label().map(str::to_owned);
-            let redo = self.doc.history().redo_label().map(str::to_owned);
-            let undo_text = undo.map_or("Undo".to_owned(), |l| format!("Undo {l}"));
-            let redo_text = redo.map_or("Redo".to_owned(), |l| format!("Redo {l}"));
-            if ui
-                .add_enabled(
-                    self.doc.history().can_undo(),
-                    Button::new(undo_text).shortcut_text(text(Modifiers::COMMAND, Key::Z)),
-                )
-                .clicked()
-            {
-                self.undo();
-            }
-            if ui
-                .add_enabled(
-                    self.doc.history().can_redo(),
-                    Button::new(redo_text)
-                        .shortcut_text(text(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z)),
-                )
-                .clicked()
-            {
-                self.redo();
-            }
-        });
-
-        ui.menu_button("Project", |ui| {
-            if ui.button("Global setup").clicked() {
-                self.selection = Selection::Setup;
-            }
-            ui.separator();
-            let mut cx = self.edit_ctx();
-            tree::add_component_menu(ui, &mut cx);
-        });
-
-        ui.menu_button("View", |ui| {
-            ui.label(RichText::new("Units").strong());
-            let units = self.doc.project().display_units.clone();
-            for (label, preset) in [
-                ("SI (mm, m³/h, bar, °C)", DisplayUnits::si()),
-                ("US customary (in, gpm, psi, °F)", DisplayUnits::us()),
-            ] {
-                if ui.radio(units == preset, label).clicked() {
-                    let mut cx = self.edit_ctx();
-                    cx.edit("change units", |p| {
-                        p.display_units = preset;
-                        Ok(())
-                    });
-                }
-            }
-            ui.separator();
-            ui.label(RichText::new("Show").strong());
-            for view in View::ALL {
-                if ui.button(view.title()).clicked() {
-                    self.focus_view(view);
-                }
-            }
-            ui.separator();
-            if ui.button("Reset layout").clicked() {
-                self.dock = default_dock();
-            }
-        });
-
-        ui.menu_button("Help", |ui| {
-            if ui.button("About Turbopump").clicked() {
-                self.dialog = Some(Dialog::About);
-            }
-        });
-    }
-
-    fn status_bar(&mut self, ui: &mut Ui) {
+    fn status_bar(&mut self, ui: &mut Ui, all_messages: &[Message]) {
+        let p = Palette::of(ui);
         ui.horizontal(|ui| {
             match &self.status {
                 Some(Status { text, error: true }) => {
-                    ui.colored_label(ui.visuals().error_fg_color, text);
+                    ui.colored_label(
+                        ui.visuals().error_fg_color,
+                        format!("{}  {text}", icon::X_CIRCLE),
+                    );
                 }
                 Some(Status { text, .. }) => {
-                    ui.label(text);
+                    ui.label(format!("{}  {text}", icon::INFO));
                 }
                 None => {
-                    ui.weak("Ready");
+                    ui.label(RichText::new("Ready").color(p.weak));
                 }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let (errors, warnings) = messages::count(all_messages);
+                let text = if errors + warnings == 0 {
+                    RichText::new(format!("{}  No problems", icon::CHECK_CIRCLE)).color(p.done)
+                } else {
+                    let color = if errors > 0 {
+                        ui.visuals().error_fg_color
+                    } else {
+                        ui.visuals().warn_fg_color
+                    };
+                    RichText::new(format!(
+                        "{} {errors}   {} {warnings}",
+                        icon::X_CIRCLE,
+                        icon::WARNING
+                    ))
+                    .color(color)
+                };
+                if ui
+                    .add(Button::selectable(self.show_messages, text))
+                    .on_hover_text("Show every error and warning of the project")
+                    .clicked()
+                {
+                    self.show_messages = !self.show_messages;
+                }
+                ui.separator();
+                let units = if self.doc.project().display_units == DisplayUnits::us() {
+                    "US units"
+                } else {
+                    "SI units"
+                };
+                ui.label(RichText::new(units).color(p.weak));
+                ui.separator();
                 let source = match &self.derived.liquid {
                     Some(Ok(l)) => match l.source {
                         tp_fluids::PropertySource::CoolProp => "fluid properties: CoolProp",
@@ -757,8 +863,9 @@ impl TurbopumpApp {
                     Some(Err(_)) => "fluid properties: unavailable",
                     None => "",
                 };
-                ui.weak(source);
+                ui.label(RichText::new(source).color(p.weak));
                 if self.exports.cad_running() {
+                    ui.separator();
                     ui.spinner();
                     ui.label("Building CAD solids…");
                 }
@@ -937,7 +1044,7 @@ impl egui_dock::TabViewer for Views<'_> {
     }
 
     fn title(&mut self, tab: &mut View) -> egui::WidgetText {
-        tab.title().into()
+        format!("{}  {}", tab.icon(), tab.title()).into()
     }
 
     fn is_closeable(&self, _tab: &View) -> bool {
@@ -952,7 +1059,7 @@ impl egui_dock::TabViewer for Views<'_> {
     fn ui(&mut self, ui: &mut Ui, tab: &mut View) {
         let Some(id) = self.active else {
             ui.centered_and_justified(|ui| {
-                ui.weak("Add an impeller to see its geometry (Project > Add component).");
+                ui.weak("Add an impeller to see its geometry (Home > Components).");
             });
             return;
         };
@@ -974,6 +1081,7 @@ impl egui_dock::TabViewer for Views<'_> {
                     id,
                     self.stator,
                     self.volute,
+                    &units,
                 );
             }
             View::Report => report::show(
@@ -986,19 +1094,6 @@ impl egui_dock::TabViewer for Views<'_> {
                 &units,
             ),
         }
-    }
-}
-
-/// Colors for step states, readable on light and dark themes.
-pub(crate) fn status_color(ui: &Ui, status: tp_project::StepStatus) -> Color32 {
-    use tp_project::StepStatus;
-    let dark = ui.visuals().dark_mode;
-    match status {
-        StepStatus::Done if dark => Color32::from_rgb(110, 200, 120),
-        StepStatus::Done => Color32::from_rgb(30, 130, 50),
-        StepStatus::Stale if dark => Color32::from_rgb(230, 170, 70),
-        StepStatus::Stale => Color32::from_rgb(180, 110, 0),
-        StepStatus::Pending => ui.visuals().weak_text_color(),
     }
 }
 
