@@ -146,3 +146,19 @@ fn potential_flow() {
     harness.run();
     save(&mut harness, "potential-flow");
 }
+
+/// The properties folded to a strip: the view takes the whole window.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn properties_folded() {
+    let mut harness = harness(egui::Theme::Light);
+    harness.state_mut().focus_view(View::View3d);
+    harness.run();
+    harness.key_press(egui::Key::Escape);
+    for _ in 0..10 {
+        harness.run();
+    }
+    harness.remove_cursor();
+    harness.run();
+    save(&mut harness, "properties-folded");
+}

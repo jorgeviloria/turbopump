@@ -146,13 +146,21 @@ fn every_view_draws_without_a_gpu() {
 }
 
 #[test]
-fn the_step_dialog_opens_with_a_step_and_closes() {
+fn the_properties_panel_opens_with_a_step_and_folds() {
     let mut harness = harness();
-    assert!(harness.state().dialog_open());
+    assert!(harness.state().sidebar_open());
     harness.get_by_label_contains("Impeller 1 · Main dimensions");
     harness.key_press(Key::Escape);
     harness.run();
-    assert!(!harness.state().dialog_open());
+    // Escape folds the panel to a strip, which opens it again.
+    harness.run();
+    assert!(!harness.state().sidebar_open());
+    harness.get_by_label("Show the properties").click();
+    harness.run();
+    assert!(harness.state().sidebar_open());
+    harness.key_press(Key::Escape);
+    harness.run();
+    harness.run();
     // Picking a step in the tree opens it again, and the view follows the step.
     // The toolbar and the tree both list the step.
     harness
@@ -161,7 +169,7 @@ fn the_step_dialog_opens_with_a_step_and_closes() {
         .unwrap()
         .click();
     harness.run();
-    assert!(harness.state().dialog_open());
+    assert!(harness.state().sidebar_open());
     harness.get_by_label_contains("Impeller 1 · Blade properties");
     assert_eq!(harness.state().view(), View::Blade);
 }

@@ -83,7 +83,7 @@ pub(crate) struct RibbonCx<'a> {
     pub options: &'a mut ViewOptions,
     pub theme: ThemePreference,
     pub tree_open: bool,
-    pub dialog_open: bool,
+    pub sidebar_open: bool,
     pub messages_open: bool,
     pub follow_step: bool,
 }
@@ -801,10 +801,10 @@ fn view_tab(ui: &mut Ui, cx: &mut RibbonCx<'_>) -> Option<Command> {
             Icon::Glyph(icon::SLIDERS_HORIZONTAL),
             "Properties",
             true,
-            cx.dialog_open,
+            cx.sidebar_open,
             None,
         )
-        .on_hover_text("The dialog of the selected step")
+        .on_hover_text("The properties of the selected step")
         .clicked()
         {
             set(Command::ToggleDialog);

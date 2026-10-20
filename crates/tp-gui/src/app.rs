@@ -51,8 +51,8 @@ pub(crate) struct EditCtx<'a> {
     pub selection: &'a mut Selection,
     pub status: &'a mut Option<Status>,
     pub exports: &'a mut Exports,
-    /// Whether the dialog of the selected step is open.
-    pub dialog: &'a mut bool,
+    /// Whether the properties panel of the selected step is open.
+    pub properties: &'a mut bool,
 }
 
 impl EditCtx<'_> {
@@ -90,10 +90,10 @@ impl EditCtx<'_> {
         self.doc.project().display_units.clone()
     }
 
-    /// Selects `selection` and opens its dialog.
+    /// Selects `selection` and opens its properties.
     pub fn open(&mut self, selection: Selection) {
         *self.selection = selection;
-        *self.dialog = true;
+        *self.properties = true;
     }
 }
 
@@ -151,6 +151,51 @@ impl View {
             View::Report => icon::TABLE,
         }
     }
+}
+
+/// Default width of the properties panel.
+const SIDEBAR_WIDTH: f32 = 420.0;
+/// Width of the folded properties panel.
+const SIDEBAR_STRIP: f32 = 30.0;
+/// Gap between the properties panel and the edges of the view.
+const SIDEBAR_MARGIN: f32 = 8.0;
+
+/// The folded properties panel: a strip with its name written upward. Returns whether
+/// it was clicked.
+fn folded_strip(ui: &mut Ui, rect: egui::Rect, p: &Palette) -> bool {
+    let response = ui
+        .interact(
+            rect,
+            egui::Id::new("properties_strip"),
+            egui::Sense::click(),
+        )
+        .on_hover_text("Show the properties");
+    if response.hovered() {
+        ui.painter().rect_filled(rect, 8, p.hover);
+    }
+    let painter = ui.painter();
+    painter.text(
+        rect.center_top() + egui::vec2(0.0, 18.0),
+        egui::Align2::CENTER_CENTER,
+        icon::CARET_LEFT,
+        egui::FontId::proportional(16.0),
+        p.text,
+    );
+    let galley = painter.layout_no_wrap(
+        format!("{}  Properties", icon::SLIDERS_HORIZONTAL),
+        egui::FontId::proportional(13.0),
+        p.text,
+    );
+    let size = galley.size();
+    let anchor = egui::pos2(rect.center().x - size.y / 2.0, rect.top() + 40.0 + size.x);
+    painter.add(
+        egui::epaint::TextShape::new(anchor, galley, p.text)
+            .with_angle(-std::f32::consts::FRAC_PI_2),
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Show the properties")
+    });
+    response.clicked()
 }
 
 /// The view that suits a step best, if any.
@@ -249,15 +294,15 @@ pub struct TurbopumpApp {
     /// The view in the main area.
     view: View,
     /// Whether the dialog of the selected step is open.
-    dialog_open: bool,
+    sidebar_open: bool,
     /// The selection the dialog and the view last followed.
     followed: Option<Selection>,
     /// The main view changes to suit the step that opens.
     follow_step: bool,
     /// Whether the tree panel is open.
     tree_open: bool,
-    /// Where the step dialog was last frame, to keep the 3D overlays clear of it.
-    dialog_rect: Option<egui::Rect>,
+    /// Width of the open properties panel, set by dragging its edge.
+    sidebar_width: f32,
     meridional: MeridionalView,
     performance: PerformanceView,
     viewer: Viewer,
@@ -303,11 +348,11 @@ impl TurbopumpApp {
             derived: Derived::default(),
             selection: Selection::Setup,
             view: View::View3d,
-            dialog_open: true,
+            sidebar_open: true,
             followed: None,
             follow_step: true,
             tree_open: true,
-            dialog_rect: None,
+            sidebar_width: SIDEBAR_WIDTH,
             meridional: MeridionalView::default(),
             performance: PerformanceView::default(),
             viewer: Viewer::default(),
@@ -344,8 +389,8 @@ impl TurbopumpApp {
     }
 
     /// Whether the dialog of the selected step is open.
-    pub fn dialog_open(&self) -> bool {
-        self.dialog_open
+    pub fn sidebar_open(&self) -> bool {
+        self.sidebar_open
     }
 
     /// Draws the whole window. `render_state` enables the 3D view.
@@ -396,7 +441,7 @@ impl TurbopumpApp {
                     options: &mut self.viewer.options,
                     theme: ctx.options(|o| o.theme_preference),
                     tree_open: self.tree_open,
-                    dialog_open: self.dialog_open,
+                    sidebar_open: self.sidebar_open,
                     messages_open: self.show_messages,
                     follow_step: self.follow_step,
                 };
@@ -477,7 +522,7 @@ impl TurbopumpApp {
                             selection: &mut self.selection,
                             status: &mut self.status,
                             exports: &mut self.exports,
-                            dialog: &mut self.dialog_open,
+                            properties: &mut self.sidebar_open,
                         };
                         tree::design_tree(ui, &mut cx);
                     }
@@ -489,13 +534,8 @@ impl TurbopumpApp {
             ui.spacing_mut().item_spacing.y = 0.0;
             self.view_bar(ui);
             main_area = ui.available_rect_before_wrap();
-            // The width the dialog hides on the right of the view.
-            let cover = match self.dialog_rect {
-                Some(r) if self.dialog_open && r.left() > main_area.center().x => {
-                    (main_area.right() - r.left() + 8.0).clamp(0.0, main_area.width() / 2.0)
-                }
-                _ => 0.0,
-            };
+            // The width the floating properties panel hides on the right of the view.
+            let cover = self.sidebar_extent(ui.ctx(), main_area) + SIDEBAR_MARGIN;
             let active = self.active_impeller();
             let stator = self.active_stator();
             let volute = self.active_volute();
@@ -505,7 +545,7 @@ impl TurbopumpApp {
                 selection: &mut self.selection,
                 status: &mut self.status,
                 exports: &mut self.exports,
-                dialog: &mut self.dialog_open,
+                properties: &mut self.sidebar_open,
             };
             let Some(id) = active else {
                 ui.centered_and_justified(|ui| {
@@ -517,15 +557,12 @@ impl TurbopumpApp {
             let area = ui.available_rect_before_wrap();
             ui.painter()
                 .rect_filled(area, 0, ui.visuals().extreme_bg_color);
-            // Plots and the report fit in the part the dialog leaves free; the 3D view
-            // fills everything and keeps its model clear of the dialog itself.
-            let free =
-                egui::Rect::from_min_max(area.min, egui::pos2(area.right() - cover, area.bottom()))
-                    .shrink2(egui::vec2(6.0, 4.0));
+            // Every view fills the whole area; the properties panel floats over it. The
+            // 3D view keeps its model and controls clear of the panel.
             let target = if self.view == View::View3d {
                 area
             } else {
-                free
+                area.shrink2(egui::vec2(6.0, 4.0))
             };
             ui.scope_builder(egui::UiBuilder::new().max_rect(target), |ui| {
                 ui.set_min_size(target.size());
@@ -557,7 +594,7 @@ impl TurbopumpApp {
                 }
             });
         });
-        self.step_dialog(&ctx, main_area);
+        self.properties_panel(&ctx, main_area);
 
         if let Some(command) = command {
             self.run(command, &ctx);
@@ -574,7 +611,7 @@ impl TurbopumpApp {
 
         // A new selection opens its dialog and, if asked, the view that suits it.
         if self.followed != Some(self.selection) {
-            self.dialog_open = true;
+            self.sidebar_open = true;
             if self.follow_step
                 && let Selection::Step(id, step) = self.selection
                 && let Some(kind) = self.doc.project().component(id).map(|c| c.kind())
@@ -631,51 +668,113 @@ impl TurbopumpApp {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let text = format!("{}  Properties", icon::SLIDERS_HORIZONTAL);
                         if ui
-                            .add(Button::selectable(self.dialog_open, text))
+                            .add(Button::selectable(self.sidebar_open, text))
                             .on_hover_text("Show or hide the dialog of the selected step")
                             .clicked()
                         {
-                            self.dialog_open = !self.dialog_open;
+                            self.sidebar_open = !self.sidebar_open;
                         }
                     });
                 });
             });
     }
 
-    /// The floating dialog with the inputs of the selected step. It does not block the
-    /// views, so handles can still be dragged while it is open.
-    fn step_dialog(&mut self, ctx: &egui::Context, area: egui::Rect) {
-        if !self.dialog_open {
-            self.dialog_rect = None;
-            return;
-        }
-        let title = steps::title(self.doc.project(), self.selection);
-        let width = 430.0f32.min(area.width() - 24.0);
-        let default = egui::Rect::from_min_size(
-            egui::pos2(area.right() - width - 12.0, area.top() + 12.0),
-            egui::vec2(width, (area.height() - 24.0).max(200.0)),
+    /// Width the properties panel takes this frame, animated between folded and open.
+    fn sidebar_extent(&self, ctx: &egui::Context, area: egui::Rect) -> f32 {
+        let open =
+            ctx.animate_bool_with_time(egui::Id::new("properties_open"), self.sidebar_open, 0.15);
+        let full = self
+            .sidebar_width
+            .clamp(300.0, (area.width() * 0.7).max(300.0));
+        SIDEBAR_STRIP + (full - SIDEBAR_STRIP) * open
+    }
+
+    /// The properties of the selected step, in a panel that floats over the right of
+    /// the view. It never shrinks the view; folded, it leaves a narrow strip.
+    fn properties_panel(&mut self, ctx: &egui::Context, area: egui::Rect) {
+        let width = self.sidebar_extent(ctx, area);
+        let rect = egui::Rect::from_min_max(
+            egui::pos2(
+                area.right() - width - SIDEBAR_MARGIN,
+                area.top() + SIDEBAR_MARGIN,
+            ),
+            egui::pos2(
+                area.right() - SIDEBAR_MARGIN,
+                area.bottom() - SIDEBAR_MARGIN,
+            ),
         );
-        let mut open = true;
-        let response = egui::Window::new(theme::bold(title))
-            .id(egui::Id::new("step_dialog"))
-            .open(&mut open)
-            .collapsible(true)
-            .resizable(true)
-            .default_rect(default)
-            .constrain_to(area)
+        let style = ctx.style_of(ctx.theme());
+        let p = Palette::for_dark(style.visuals.dark_mode);
+        let shadow = style.visuals.popup_shadow;
+        let mut toggle = false;
+        egui::Area::new(egui::Id::new("properties_panel"))
+            .order(egui::Order::Middle)
+            .fixed_pos(rect.min)
             .show(ctx, |ui| {
-                let mut cx = self.edit_ctx();
-                Panel::bottom("step_dialog_footer")
-                    .frame(Frame::new().inner_margin(Margin::symmetric(0, 6)))
-                    .show(ui, |ui| steps::footer(ui, &mut cx));
-                steps::show(ui, &mut cx);
+                let frame = Frame::new()
+                    .fill(ui.visuals().window_fill)
+                    .stroke(egui::Stroke::new(1.0, p.border))
+                    .corner_radius(8)
+                    .shadow(shadow);
+                frame.show(ui, |ui| {
+                    ui.set_min_size(rect.size());
+                    ui.set_max_size(rect.size());
+                    if width < SIDEBAR_STRIP + 40.0 {
+                        toggle = folded_strip(ui, rect, &p);
+                        return;
+                    }
+                    // The left edge resizes the panel.
+                    let edge = egui::Rect::from_min_max(
+                        rect.left_top(),
+                        egui::pos2(rect.left() + 5.0, rect.bottom()),
+                    );
+                    let resize = ui
+                        .interact(
+                            edge,
+                            egui::Id::new("properties_resize"),
+                            egui::Sense::drag(),
+                        )
+                        .on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+                    if resize.dragged() {
+                        self.sidebar_width -= resize.drag_delta().x;
+                    }
+                    Frame::new()
+                        .inner_margin(Margin::symmetric(12, 8))
+                        .show(ui, |ui| {
+                            ui.set_min_size(ui.available_size());
+                            ui.horizontal(|ui| {
+                                let title = steps::title(self.doc.project(), self.selection);
+                                ui.add(egui::Label::new(theme::bold(title).size(15.0)).truncate());
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        if ui
+                                            .add(Button::new(icon::CARET_RIGHT).frame(false))
+                                            .on_hover_text("Fold the properties")
+                                            .clicked()
+                                        {
+                                            toggle = true;
+                                        }
+                                    },
+                                );
+                            });
+                            ui.separator();
+                            let mut cx = self.edit_ctx();
+                            Panel::bottom("properties_footer")
+                                .frame(Frame::new().inner_margin(Margin::symmetric(0, 6)))
+                                .show(ui, |ui| steps::footer(ui, &mut cx));
+                            steps::show(ui, &mut cx);
+                        });
+                });
             });
-        // A collapsed dialog is only its title bar: it hides nothing worth avoiding.
-        self.dialog_rect = response
-            .filter(|r| r.inner.is_some())
-            .map(|r| r.response.rect);
-        if !open || ctx.input(|i| i.key_pressed(Key::Escape)) && !ctx.text_edit_focused() {
-            self.dialog_open = false;
+        if toggle {
+            self.sidebar_open = !self.sidebar_open;
+        }
+        if self.sidebar_open
+            && ctx.input(|i| i.key_pressed(Key::Escape))
+            && !ctx.text_edit_focused()
+        {
+            self.sidebar_open = false;
         }
     }
 
@@ -737,7 +836,7 @@ impl TurbopumpApp {
                 self.viewer.apply(view);
             }
             Command::ToggleTree => self.tree_open = !self.tree_open,
-            Command::ToggleDialog => self.dialog_open = !self.dialog_open,
+            Command::ToggleDialog => self.sidebar_open = !self.sidebar_open,
             Command::ToggleMessages => self.show_messages = !self.show_messages,
             Command::FollowStep => self.follow_step = !self.follow_step,
             Command::Theme(preference) => ctx.set_theme(preference),
@@ -761,7 +860,7 @@ impl TurbopumpApp {
             selection: &mut self.selection,
             status: &mut self.status,
             exports: &mut self.exports,
-            dialog: &mut self.dialog_open,
+            properties: &mut self.sidebar_open,
         }
     }
 
@@ -1258,7 +1357,7 @@ mod tests {
         // The dialog stays open: it does not block the views.
         harness.state_mut().focus_view(View::Meridional);
         harness.run();
-        assert!(harness.state().dialog_open);
+        assert!(harness.state().sidebar_open);
         let id = harness.state().active_impeller().unwrap();
         let tangent = |app: &TurbopumpApp| {
             app.doc
