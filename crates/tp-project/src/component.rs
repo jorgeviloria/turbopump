@@ -3,6 +3,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 use tp_design::MainDimensionsInput;
+use tp_design::impeller::ImpellerGeometryInput;
 
 use crate::ProjectError;
 
@@ -153,6 +154,9 @@ pub struct Component {
     /// Inputs of the main-dimensions step; `None` means every value automatic.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     main_dimensions: Option<MainDimensionsInput>,
+    /// Inputs of the geometry steps, from meridional contour to blade edges.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    geometry: Option<ImpellerGeometryInput>,
 }
 
 impl Component {
@@ -164,7 +168,46 @@ impl Component {
             coupling: Coupling::default(),
             steps: BTreeMap::new(),
             main_dimensions: None,
+            geometry: None,
         }
+    }
+
+    /// Inputs of the geometry steps, if any were set.
+    pub fn geometry(&self) -> Option<&ImpellerGeometryInput> {
+        self.geometry.as_ref()
+    }
+
+    /// Replaces the geometry inputs. Each step whose inputs changed, and every step
+    /// after it, becomes stale.
+    pub fn set_geometry(&mut self, input: ImpellerGeometryInput) -> Result<(), ProjectError> {
+        if self.kind != ComponentKind::Impeller {
+            return Err(ProjectError::NotAnImpeller(self.id));
+        }
+        let old = self.geometry.clone().unwrap_or_default();
+        let first_changed = [
+            (
+                old.meridional != input.meridional,
+                DesignStep::MeridionalContour,
+            ),
+            (
+                old.properties != input.properties,
+                DesignStep::BladeProperties,
+            ),
+            (
+                old.mean_lines != input.mean_lines,
+                DesignStep::BladeMeanLines,
+            ),
+            (old.profiles != input.profiles, DesignStep::BladeProfiles),
+            (old.edges != input.edges, DesignStep::BladeEdges),
+        ]
+        .into_iter()
+        .find(|(changed, _)| *changed)
+        .map(|(_, step)| step);
+        self.geometry = Some(input);
+        if let Some(step) = first_changed {
+            self.invalidate_from(step)?;
+        }
+        Ok(())
     }
 
     /// Inputs of the main-dimensions step, if any were set.

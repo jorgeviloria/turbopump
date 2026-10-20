@@ -31,7 +31,7 @@ pub(crate) struct DesignArgs {
     dry_run: bool,
 }
 
-fn err(e: ProjectError) -> String {
+pub(crate) fn err(e: ProjectError) -> String {
     e.to_string()
 }
 
@@ -138,7 +138,7 @@ fn apply(
     Ok(())
 }
 
-fn tag<T>(param: &Param<T>) -> &'static str {
+pub(crate) fn tag<T>(param: &Param<T>) -> &'static str {
     match param {
         Param::Auto => "",
         Param::Manual(_) => "  (manual)",

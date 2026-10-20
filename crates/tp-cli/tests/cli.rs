@@ -237,3 +237,68 @@ fn fluid_properties_with_coolprop() {
         "{text}"
     );
 }
+
+#[test]
+fn geometry_needs_main_dimensions_first() {
+    let (dir, file) = reference_project("geometry-order");
+    let out = turbopump(&["geometry", file.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("main dimensions"));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn geometry_exports_points_mesh_and_drawings() {
+    let (dir, file) = reference_project("geometry-export");
+    let file_arg = file.to_str().unwrap();
+    assert_eq!(turbopump(&["design", file_arg]).status.code(), Some(0));
+    let export = dir.join("out");
+    let out = turbopump(&["geometry", file_arg, "--export", export.to_str().unwrap()]);
+    let text = stdout(&out);
+    assert_eq!(out.status.code(), Some(0), "{text}");
+    assert!(text.contains("Blade sections (7 blades"), "{text}");
+
+    let read = |name: &str| std::fs::read_to_string(export.join(name)).unwrap();
+    assert!(read("impeller.txt").contains("[section span=1.0000]"));
+    assert!(read("impeller.stl").starts_with("solid impeller"));
+    assert!(read("meridional.svg").trim_end().ends_with("</svg>"));
+    assert!(read("front.svg").contains("rotation clockwise"));
+
+    let info = stdout(&turbopump(&["info", file_arg]));
+    assert!(info.contains("next: CFD setup"), "{info}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn geometry_overrides() {
+    let (dir, file) = reference_project("geometry-set");
+    let file_arg = file.to_str().unwrap();
+    turbopump(&["design", file_arg]);
+    let out = turbopump(&[
+        "geometry",
+        file_arg,
+        "--set",
+        "spans=3",
+        "--set",
+        "le=round",
+        "--set",
+        "beta=smooth:0.2,0.3",
+        "--set",
+        "le-hub=0.3",
+    ]);
+    let text = stdout(&out);
+    assert_eq!(out.status.code(), Some(0), "{text}");
+    let rows = text
+        .lines()
+        .filter(|l| l.trim_start().starts_with("0."))
+        .count()
+        + text
+            .lines()
+            .filter(|l| l.trim_start().starts_with("1.00"))
+            .count();
+    assert_eq!(rows, 3, "{text}");
+
+    let bad = turbopump(&["geometry", file_arg, "--set", "le=pointy"]);
+    assert_eq!(bad.status.code(), Some(2));
+    std::fs::remove_dir_all(&dir).unwrap();
+}

@@ -1,14 +1,24 @@
 //! Running design calculations on the components of a project.
 
 use tp_design::MainDimensionsInput;
+use tp_design::impeller::{self, ImpellerBasis, ImpellerGeometry, ImpellerGeometryInput};
 use tp_design::pump::{self, CentrifugalPumpDesign, CentrifugalPumpInput, PumpDuty};
 use tp_fluids::LiquidProperties;
 use tp_units::STANDARD_GRAVITY;
 
 use crate::{
     ComponentId, ComponentKind, DesignStep, EnergyTransfer, FlowRate, MachineType, Project,
-    ProjectError,
+    ProjectError, Rotation,
 };
+
+/// Design steps completed by [`Project::design_impeller_geometry`], in order.
+pub const GEOMETRY_STEPS: [DesignStep; 5] = [
+    DesignStep::MeridionalContour,
+    DesignStep::BladeProperties,
+    DesignStep::BladeMeanLines,
+    DesignStep::BladeProfiles,
+    DesignStep::BladeEdges,
+];
 
 impl Project {
     /// Properties of the working fluid at the inlet total state.
@@ -107,6 +117,49 @@ impl Project {
     }
 }
 
+impl Project {
+    /// The geometry inputs of impeller `id`, all automatic if never set.
+    pub fn impeller_geometry_input(
+        &self,
+        id: ComponentId,
+    ) -> Result<ImpellerGeometryInput, ProjectError> {
+        let component = self
+            .component(id)
+            .ok_or(ProjectError::UnknownComponent(id))?;
+        Ok(component.geometry().cloned().unwrap_or_default())
+    }
+
+    /// Builds the meridional contour, meridional flow and blades of impeller `id` from
+    /// its main dimensions, without changing the project.
+    pub fn compute_impeller_geometry(
+        &self,
+        id: ComponentId,
+    ) -> Result<ImpellerGeometry, ProjectError> {
+        let main = self.compute_main_dimensions(id)?;
+        let main_input = self.pump_impeller_input(id)?;
+        let sign = match self.setup().rotation {
+            Rotation::Clockwise => 1.0,
+            Rotation::CounterClockwise => -1.0,
+        };
+        let basis = ImpellerBasis::from_pump(&main, &main_input, sign);
+        Ok(impeller::build(&basis, &self.impeller_geometry_input(id)?)?)
+    }
+
+    /// Builds the geometry of impeller `id` and marks the geometry steps as done.
+    /// The main dimensions must be done first.
+    pub fn design_impeller_geometry(
+        &mut self,
+        id: ComponentId,
+    ) -> Result<ImpellerGeometry, ProjectError> {
+        let geometry = self.compute_impeller_geometry(id)?;
+        let component = self.component_mut(id)?;
+        for step in GEOMETRY_STEPS {
+            component.complete(step)?;
+        }
+        Ok(geometry)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,6 +245,72 @@ mod tests {
             ),
             Err(ProjectError::NotAnImpeller(_))
         ));
+    }
+
+    #[test]
+    fn geometry_requires_main_dimensions() {
+        let mut p = pump();
+        let id = p.add_component(ComponentKind::Impeller, None).unwrap();
+        assert!(matches!(
+            p.design_impeller_geometry(id),
+            Err(ProjectError::PreviousStepIncomplete { .. })
+        ));
+        p.design_main_dimensions(id).unwrap();
+        let g = p.design_impeller_geometry(id).unwrap();
+        assert_eq!(g.blade.rotation_sign, 1.0);
+        let c = p.component(id).unwrap();
+        for step in GEOMETRY_STEPS {
+            assert_eq!(c.status(step), StepStatus::Done);
+        }
+        assert_eq!(c.next_step(), Some(DesignStep::CfdSetup));
+    }
+
+    #[test]
+    fn geometry_changes_invalidate_from_the_changed_step() {
+        let mut p = pump();
+        let id = p.add_component(ComponentKind::Impeller, None).unwrap();
+        p.design_main_dimensions(id).unwrap();
+        p.design_impeller_geometry(id).unwrap();
+
+        let mut input = p.impeller_geometry_input(id).unwrap();
+        input.edges.trailing = tp_design::impeller::blade::EdgeShape::Ellipse { ratio: 1.0 };
+        p.component_mut(id)
+            .unwrap()
+            .set_geometry(input.clone())
+            .unwrap();
+        let c = p.component(id).unwrap();
+        assert_eq!(c.status(DesignStep::BladeProfiles), StepStatus::Done);
+        assert_eq!(c.status(DesignStep::BladeEdges), StepStatus::Stale);
+
+        input.meridional.leading_edge_hub = Param::Manual(0.3);
+        p.component_mut(id).unwrap().set_geometry(input).unwrap();
+        let c = p.component(id).unwrap();
+        assert_eq!(c.status(DesignStep::MainDimensions), StepStatus::Done);
+        assert_eq!(c.status(DesignStep::MeridionalContour), StepStatus::Stale);
+
+        // Inputs survive saving.
+        let loaded = Project::from_json(&p.to_json().unwrap()).unwrap();
+        assert_eq!(
+            loaded
+                .impeller_geometry_input(id)
+                .unwrap()
+                .meridional
+                .leading_edge_hub,
+            Param::Manual(0.3)
+        );
+    }
+
+    #[test]
+    fn counter_clockwise_rotation_mirrors_the_blades() {
+        let mut p = pump();
+        let id = p.add_component(ComponentKind::Impeller, None).unwrap();
+        let mut setup = p.setup().clone();
+        setup.rotation = Rotation::CounterClockwise;
+        p.set_setup(setup).unwrap();
+        assert_eq!(
+            p.compute_impeller_geometry(id).unwrap().blade.rotation_sign,
+            -1.0
+        );
     }
 
     #[test]

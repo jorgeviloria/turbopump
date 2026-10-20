@@ -4,6 +4,7 @@
 //! warnings, 2 = error.
 
 mod design;
+mod geometry;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -70,6 +71,9 @@ enum Command {
     /// Compute the main dimensions and velocity triangles of the impellers of a pump
     /// project.
     Design(design::DesignArgs),
+    /// Build the meridional contour, meridional flow and blades of the impellers, and
+    /// optionally export points, an STL mesh and SVG drawings.
+    Geometry(geometry::GeometryArgs),
     /// Show a project summary and its open issues.
     Info {
         file: PathBuf,
@@ -165,6 +169,7 @@ fn main() -> ExitCode {
         } => fluid(&name, &temperature, &pressure, units),
         Command::New(args) => new_project(args),
         Command::Design(args) => design::run(args),
+        Command::Geometry(args) => geometry::run(args),
         Command::Info { file, units } => info(&file, units),
     };
     match result {

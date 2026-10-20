@@ -15,6 +15,7 @@ path = "src/main.rs"
 clap.workspace = true
 tp-design.workspace = true
 tp-fluids.workspace = true
+tp-io.workspace = true
 tp-project.workspace = true
 tp-units.workspace = true
 
