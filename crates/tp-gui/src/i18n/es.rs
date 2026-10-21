@@ -1126,7 +1126,7 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Cross section", "Sección transversal"),
     ("Spiral development", "Desarrollo de la espiral"),
     ("Diffuser", "Difusor"),
-    ("Cut-water", "Lengüeta"),
+    ("Cut-water", "Corte de agua"),
     ("CFD setup", "Configuración CFD"),
     ("Model settings", "Ajustes del modelo"),
     ("Model finishing", "Acabado del modelo"),
@@ -1201,7 +1201,7 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("eye d₁", "ojo d₁"),
     ("hub d_n", "cubo d_n"),
     ("diffuser vanes", "álabes del difusor"),
-    ("cutwater d_z", "lengüeta d_z"),
+    ("cutwater d_z", "corte de agua d_z"),
     ("hub inlet tangent", "tangente de entrada del cubo"),
     ("hub outlet tangent", "tangente de salida del cubo"),
     ("shroud inlet tangent", "tangente de entrada de la carcasa"),
@@ -1320,9 +1320,9 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "momento angular (ecs. 7.24–7.25)",
     ),
     ("Design flow Q_Le", "Caudal de diseño Q_Le"),
-    ("Cutwater diameter d_z", "Diámetro de la lengüeta d_z"),
+    ("Cutwater diameter d_z", "Diámetro del corte de agua d_z"),
     ("{} (minimum {}, Table 10.2)", "{} (mínimo {}, tabla 10.2)"),
-    ("Cutwater thickness e₃", "Espesor de la lengüeta e₃"),
+    ("Cutwater thickness e₃", "Espesor del corte de agua e₃"),
     ("Cross sections", "Secciones transversales"),
     ("Area law", "Ley de áreas"),
     ("Throat area A₃q", "Área de garganta A₃q"),
@@ -1334,7 +1334,7 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "{} (not much below 0.8, Table 10.2)",
         "{} (no mucho menos de 0,8, tabla 10.2)",
     ),
-    ("Cutwater angle α₃B", "Ángulo de la lengüeta α₃B"),
+    ("Cutwater angle α₃B", "Ángulo del corte de agua α₃B"),
     ("{} (flow {})", "{} (flujo {})"),
     ("Discharge diffuser", "Difusor de descarga"),
     (
@@ -1379,7 +1379,7 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ),
     (
         "Nose of the cutwater; about 0.02·d₂ (Gülich Chap. 7.8.1)",
-        "Nariz de la lengüeta; unos 0,02·d₂ (Gülich, cap. 7.8.1)",
+        "Nariz del corte de agua; unos 0,02·d₂ (Gülich, cap. 7.8.1)",
     ),
     ("Stagnation radius r'_z", "Radio de estancamiento r'_z"),
     ("c₂u of the impeller", "c₂u del rodete"),
@@ -1411,17 +1411,20 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("angular momentum", "momento angular"),
     ("constant velocity", "velocidad constante"),
     ("automatic: {}", "automática: {}"),
-    ("Cutwater correction", "Corrección de la lengüeta"),
+    ("Cutwater correction", "Corrección del corte de agua"),
     (
         "Enlarge the throat for the blockage of the cutwater (eq. 7.28)",
-        "Ampliar la garganta por el bloqueo de la lengüeta (ec. 7.28)",
+        "Ampliar la garganta por el bloqueo del corte de agua (ec. 7.28)",
     ),
     (
         "Cross sections from the start of the spiral to the throat",
         "Secciones transversales del inicio de la espiral a la garganta",
     ),
     ("Outer radius r_a", "Radio exterior r_a"),
-    ("Cutwater correction Δa₃", "Corrección de la lengüeta Δa₃"),
+    (
+        "Cutwater correction Δa₃",
+        "Corrección del corte de agua Δa₃",
+    ),
     ("Velocity c₃q", "Velocidad c₃q"),
     ("Spiral starts at", "La espiral empieza en"),
     ("Area along the spiral", "Área a lo largo de la espiral"),
@@ -1439,7 +1442,7 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Volute rotation", "Giro de la voluta"),
     (
         "Turns the whole volute about the pump axis: the angle of the cutwater from the x axis; automatic: the discharge points vertically up",
-        "Gira toda la voluta alrededor del eje de la bomba: el ángulo de la lengüeta desde el eje x; automático: la descarga apunta en vertical hacia arriba",
+        "Gira toda la voluta alrededor del eje de la bomba: el ángulo del corte de agua desde el eje x; automático: la descarga apunta en vertical hacia arriba",
     ),
     (
         "Outlet face from the pump axis",
@@ -1459,16 +1462,16 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("edit volute diffuser", "editar difusor de la voluta"),
     (
         "The cutwater meets the flow leaving the impeller; its camber angle follows the flow angle plus a small incidence (Gülich eqs. T7.7.3 to T7.7.6).",
-        "La lengüeta recibe el flujo que sale del rodete; su ángulo sigue al del flujo más una pequeña incidencia (Gülich, ecs. T7.7.3 a T7.7.6).",
+        "El corte de agua recibe el flujo que sale del rodete; su ángulo sigue al del flujo más una pequeña incidencia (Gülich, ecs. T7.7.3 a T7.7.6).",
     ),
-    ("Cutwater", "Lengüeta"),
+    ("Cutwater", "Corte de agua"),
     (
         "Between the cutwater and the approaching flow, ±3°",
-        "Entre la lengüeta y el flujo que llega, ±3°",
+        "Entre el corte de agua y el flujo que llega, ±3°",
     ),
     ("Thickness e₃", "Espesor e₃"),
     ("Diameter d_z", "Diámetro d_z"),
-    ("edit volute cutwater", "editar lengüeta de la voluta"),
+    ("edit volute cutwater", "editar corte de agua de la voluta"),
     (
         "Casing wall around the flow domain.",
         "Pared de la carcasa alrededor del dominio fluido.",
@@ -1498,7 +1501,7 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("volute setup", "configuración de la voluta"),
     ("cross section", "sección transversal"),
     ("spiral development", "desarrollo de la espiral"),
-    ("cut-water", "lengüeta"),
+    ("cut-water", "corte de agua"),
     ("wall thickness", "espesor de pared"),
     ("model settings", "ajustes del modelo"),
     ("model finishing", "acabado del modelo"),
@@ -1793,20 +1796,20 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ),
     ("single", "simple"),
     ("double", "doble"),
-    ("cutwater", "lengüeta"),
+    ("cutwater", "corte de agua"),
     ("tangent", "tangente"),
     (
         "Effective cutwater diameter",
-        "Diámetro efectivo de la lengüeta",
+        "Diámetro efectivo del corte de agua",
     ),
     ("tangential", "tangencial"),
     (
         "sharp, tip at {} with a wedge of {}",
-        "afilada, punta a {} con una cuña de {}",
+        "afilado, punta a {} con una cuña de {}",
     ),
     (
         "rounded with ρ {}, tip at {} with a wedge of {}",
-        "redondeada con ρ {}, punta a {} con una cuña de {}",
+        "redondeado con ρ {}, punta a {} con una cuña de {}",
     ),
     (
         "radial, bend R_N {} turning {}, axis at {}",
@@ -1838,22 +1841,22 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Centerline length", "Longitud de la línea media"),
     (
         "Tangent: the spiral starts where it clears the diffuser. Sharp: the spiral cuts the diffuser wall. Rounded: a nose of radius ρ on the cutwater circle (Gülich Fig. 7.41b)",
-        "Tangente: la espiral empieza donde deja libre el difusor. Afilada: la espiral corta la pared del difusor. Redondeada: una nariz de radio ρ sobre el círculo de la lengüeta (Gülich Fig. 7.41b)",
+        "Tangente: la espiral empieza donde deja libre el difusor. Afilado: la espiral corta la pared del difusor. Redondeado: una nariz de radio ρ sobre el círculo del corte de agua (Gülich Fig. 7.41b)",
     ),
     ("Nose radius ρ", "Radio de la nariz ρ"),
     (
         "Automatic: e₃/2, a nose as thick as the cutwater; its innermost point stays on the cutwater circle d_z",
-        "Automático: e₃/2, una nariz tan gruesa como la lengüeta; su punto más interior queda sobre el círculo d_z",
+        "Automático: e₃/2, una nariz tan gruesa como el corte de agua; su punto más interior queda sobre el círculo d_z",
     ),
     ("Tip of the wedge", "Punta de la cuña"),
     ("Wedge angle", "Ángulo de la cuña"),
     (
         "{} from the cutwater, {} from the axis",
-        "{} desde la lengüeta, {} desde el eje",
+        "{} desde el corte de agua, {} desde el eje",
     ),
     (
         "tangential, cutwater wall straight",
-        "tangencial, pared de la lengüeta recta",
+        "tangencial, pared del corte de agua recta",
     ),
     (
         "tangential, opening to both sides",
@@ -1864,11 +1867,11 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "tangencial, pared exterior recta",
     ),
     ("radial", "radial"),
-    ("sharp", "afilada"),
-    ("rounded", "redondeada"),
+    ("sharp", "afilado"),
+    ("rounded", "redondeado"),
     (
         "the cutwater radius cannot be negative",
-        "el radio de la lengüeta no puede ser negativo",
+        "el radio del corte de agua no puede ser negativo",
     ),
     (
         "the radial discharge cannot turn to the requested axis angle",
@@ -1876,7 +1879,7 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ),
     (
         "the spiral does not meet the inner wall of the discharge diffuser: use a tangent cutwater",
-        "la espiral no llega a la pared interior del difusor de descarga: usa una lengüeta tangente",
+        "la espiral no llega a la pared interior del difusor de descarga: usa un corte de agua tangente",
     ),
 ];
 
@@ -1918,7 +1921,7 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
     ),
     (
         "an internal volute has no cutwater of its own: it is where the spiral and the discharge diffuser cut each other",
-        "una voluta interna no tiene lengüeta propia: es donde se cortan la espiral y el difusor de descarga",
+        "una voluta interna no tiene corte de agua propio: es donde se cortan la espiral y el difusor de descarga",
     ),
     // Cross sections of the volute.
     (
@@ -2107,7 +2110,7 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
     ),
     (
         "a cutwater radius of {} mm puts the nose beyond the tip of the wedge: at most {} mm here",
-        "un radio de lengüeta de {} mm saca la nariz más allá de la punta de la cuña: aquí como mucho {} mm",
+        "un radio de corte de agua de {} mm saca la nariz más allá de la punta de la cuña: aquí como mucho {} mm",
     ),
     (
         "the inner volute of a double volute must wrap more than 90° and at most 240°, got {}°",
@@ -2123,7 +2126,7 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
     ),
     (
         "with {} blades and a rib at 180° two blades pass the cutwaters at once: Gülich advises 165° to 170° (Chap. 7.8.1)",
-        "con {} álabes y un nervio a 180° dos álabes pasan por las lengüetas a la vez: Gülich aconseja de 165° a 170° (cap. 7.8.1)",
+        "con {} álabes y un nervio a 180° dos álabes pasan por los cortes de agua a la vez: Gülich aconseja de 165° a 170° (cap. 7.8.1)",
     ),
     (
         "the volute loses {} m at the design point, more than the {} m of all the hydraulic losses: check the volute",
@@ -2303,7 +2306,7 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
     ),
     (
         "cutwater incidence {}° is outside ±3° (Gülich eq. T7.7.6)",
-        "la incidencia de la lengüeta de {}° está fuera de ±3° (Gülich, ec. T7.7.6)",
+        "la incidencia del corte de agua de {}° está fuera de ±3° (Gülich, ec. T7.7.6)",
     ),
     (
         "the discharge diffuser opens at {}°, more than the {}° allowed for its length (Gülich eq. 1.44): the flow may separate",
@@ -2323,7 +2326,7 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
     ),
     (
         "the cutwater diameter {} mm must exceed d₂ = {} mm",
-        "el diámetro de la lengüeta {} mm debe superar d₂ = {} mm",
+        "el diámetro del corte de agua {} mm debe superar d₂ = {} mm",
     ),
     (
         "the volute inlet width b₃ = {} mm cannot be smaller than b₂ = {} mm",
@@ -2331,7 +2334,7 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
     ),
     (
         "the cutwater thickness must be positive",
-        "el espesor de la lengüeta debe ser positivo",
+        "el espesor del corte de agua debe ser positivo",
     ),
     (
         "the flank angle must lie between 0° and 60°, got {}°",
