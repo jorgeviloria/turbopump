@@ -2,7 +2,7 @@
 //! required NPSH against flow, with the estimated recirculation range dashed and the
 //! losses of the volute after the impeller.
 
-use eframe::egui::{Color32, DragValue, Grid, RichText, Ui};
+use eframe::egui::{self, CollapsingHeader, Color32, DragValue, Grid, RichText, Stroke, Ui, vec2};
 use egui_plot::{
     Corner, HLine, Legend, Line, LineStyle, MarkerShape, Plot, PlotPoints, Points, VLine,
 };
@@ -71,7 +71,26 @@ fn setting(ui: &mut Ui, label: &str, hint: &str, param: &mut Param<f64>, auto_va
 }
 
 impl PerformanceView {
+    /// The view, clear of the `cover` px the floating properties panel hides on the
+    /// right.
     pub(crate) fn show(
+        &mut self,
+        ui: &mut Ui,
+        project: &Project,
+        derived: &Derived,
+        id: ComponentId,
+        units: &DisplayUnits,
+        cover: f32,
+    ) {
+        let area = ui.available_rect_before_wrap();
+        let right = (area.max.x - cover).max(area.min.x + 320.0);
+        let clear = egui::Rect::from_min_max(area.min, egui::pos2(right, area.max.y));
+        ui.scope_builder(egui::UiBuilder::new().max_rect(clear), |ui| {
+            self.content(ui, project, derived, id, units);
+        });
+    }
+
+    fn content(
         &mut self,
         ui: &mut Ui,
         project: &Project,
@@ -108,8 +127,39 @@ impl PerformanceView {
             }
         };
 
-        // Settings.
-        ui.horizontal_wrapped(|ui| {
+        // Settings, folded: they shape the curve but are seldom changed.
+        let o = curve.operation.clone();
+        CollapsingHeader::new(tr("Settings"))
+            .id_salt(("curve_settings", id.0))
+            .default_open(false)
+            .show(ui, |ui| self.settings(ui, &curve, &input, &o, id, units));
+
+        // The key numbers; the rest folded below, and in the report.
+        self.summary(ui, &curve, units);
+        CollapsingHeader::new(tr("More results"))
+            .id_salt(("curve_details", id.0))
+            .default_open(false)
+            .show(ui, |ui| details(ui, &curve, units));
+        for w in &curve.warnings {
+            messages::card(ui, Severity::Warning, w);
+        }
+        ui.add_space(4.0);
+
+        self.plots(ui, &curve, id, units);
+    }
+
+    /// The settings of the curve, the liquid and the system.
+    fn settings(
+        &mut self,
+        ui: &mut Ui,
+        curve: &PumpPerformance,
+        input: &PerformanceInput,
+        o: &tp_design::operation::Operation,
+        id: ComponentId,
+        units: &DisplayUnits,
+    ) {
+        {
+            ui.horizontal_wrapped(|ui| {
             ui.label(
                 RichText::new(tf("Collector: {}", &[&collector_name(input.collector)]))
                     .color(Palette::of(ui).guide),
@@ -154,8 +204,8 @@ impl PerformanceView {
                      force on the shrouds cancels (Gülich eq. T9.2.14)",
                 ));
         });
-        ui.collapsing(tr("Liquid"), |ui| {
-            Grid::new(("liquid", id.0)).num_columns(3).show(ui, |ui| {
+            ui.collapsing(tr("Liquid"), |ui| {
+                Grid::new(("liquid", id.0)).num_columns(3).show(ui, |ui| {
                 crate::widgets::param_f64(
                     ui,
                     tr("Kinematic viscosity ν"),
@@ -170,9 +220,8 @@ impl PerformanceView {
                     1e-7..=1e-2,
                 );
             });
-        });
-        let o = &curve.operation;
-        ui.collapsing(tr("Operation in the system"), |ui| {
+            });
+            ui.collapsing(tr("Operation in the system"), |ui| {
             use QuantityKind::{Head, Length, RotationalSpeed, VolumeFlow};
             Grid::new(("operation", id.0))
                 .num_columns(3)
@@ -232,8 +281,83 @@ impl PerformanceView {
                     );
                 });
         });
+        }
+    }
 
-        // Key numbers.
+    /// One line of key numbers: design, best efficiency, operating point, NPSH₃ and
+    /// the forces on the impeller.
+    fn summary(&self, ui: &mut Ui, curve: &PumpPerformance, units: &DisplayUnits) {
+        let s = |kind, si| units.show(kind, si);
+        use QuantityKind::{Force, Head, VolumeFlow};
+        ui.horizontal_wrapped(|ui| {
+            let item = |ui: &mut Ui, title: &str, text: String| {
+                ui.label(theme::bold(title));
+                ui.label(text);
+                ui.add_space(14.0);
+            };
+            item(
+                ui,
+                tr("Design"),
+                format!(
+                    "{} · {} · η {:.1} %",
+                    s(VolumeFlow, curve.design.flow),
+                    s(Head, curve.design.head),
+                    100.0 * curve.design.efficiency
+                ),
+            );
+            item(
+                ui,
+                tr("Best efficiency"),
+                format!(
+                    "{} ({:.0} %) · η {:.1} %",
+                    s(VolumeFlow, curve.best.flow),
+                    100.0 * curve.best.flow / curve.design.flow,
+                    100.0 * curve.best.efficiency
+                ),
+            );
+            if let Some(p) = &curve.operation.point {
+                item(
+                    ui,
+                    tr("Operating point"),
+                    format!(
+                        "{} · {} · η {:.1} %",
+                        s(VolumeFlow, p.flow),
+                        s(Head, p.head),
+                        100.0 * p.efficiency
+                    ),
+                );
+            }
+            item(
+                ui,
+                tr("NPSH₃"),
+                tf(
+                    "{} · available {}",
+                    &[
+                        &s(Head, curve.npsh_required),
+                        &s(Head, curve.npsh_available),
+                    ],
+                ),
+            );
+            let axial = curve.axial.design.total.abs();
+            item(
+                ui,
+                tr("Forces"),
+                match &curve.radial {
+                    Some(r) => tf(
+                        "radial {} · axial {}",
+                        &[&s(Force, r.design_force), &s(Force, axial)],
+                    ),
+                    None => tf("axial {}", &[&s(Force, axial)]),
+                },
+            );
+        });
+    }
+}
+
+/// Every result of the curve, as in the report.
+fn details(ui: &mut Ui, curve: &PumpPerformance, units: &DisplayUnits) {
+    let o = &curve.operation;
+    {
         let s = |kind, si| units.show(kind, si);
         use QuantityKind::{Head, Power, VolumeFlow};
         ui.horizontal_wrapped(|ui| {
@@ -446,14 +570,10 @@ impl PerformanceView {
                 );
             }
         });
-        for w in &curve.warnings {
-            messages::card(ui, Severity::Warning, w);
-        }
-        ui.add_space(4.0);
-
-        self.plots(ui, &curve, id, units);
     }
+}
 
+impl PerformanceView {
     fn plots(&self, ui: &mut Ui, curve: &PumpPerformance, id: ComponentId, units: &DisplayUnits) {
         let palette = Palette::of(ui);
         let dark = ui.visuals().dark_mode;
@@ -462,7 +582,6 @@ impl PerformanceView {
         let symbol = |kind| units.get(kind).symbol;
         let onset = units.to_display(QuantityKind::VolumeFlow, curve.recirculation_flow);
         let spacing = ui.spacing().item_spacing.y;
-        let height = ((ui.available_height() - 3.0 * spacing) / 4.0).max(100.0);
         let colors = if dark {
             [
                 Color32::from_rgb(120, 170, 235),
@@ -516,8 +635,44 @@ impl PerformanceView {
                 colors[3],
             ),
         ];
-        let last = plots.len() - 1;
-        for (index, (name, label, legend, value, color)) in plots.into_iter().enumerate() {
+        // The markers every plot shares, explained once above them.
+        let o = &curve.operation;
+        let changed = (o.speed_ratio - 1.0).abs() > 1e-9 || o.trim_ratio < 1.0 - 1e-9;
+        ui.horizontal_wrapped(|ui| {
+            marker(ui, Mark::Circle, palette.handle, tr("design point"));
+            marker(
+                ui,
+                Mark::Diamond,
+                palette.handle_active,
+                tr("best efficiency"),
+            );
+            if o.point.is_some() {
+                marker(ui, Mark::Square, palette.volute, tr("operating point"));
+            }
+            marker(
+                ui,
+                Mark::Dashed,
+                palette.guide,
+                tr("onset of recirculation"),
+            );
+            marker(
+                ui,
+                Mark::Dotted,
+                colors[1].gamma_multiply(0.7),
+                tr("continuous operation"),
+            );
+            if changed {
+                marker(
+                    ui,
+                    Mark::Dashed,
+                    ui.visuals().text_color(),
+                    tr("at the speed and diameter of operation"),
+                );
+            }
+        });
+        // Two rows of two plots.
+        let height = ((ui.available_height() - spacing) / 2.0).max(150.0);
+        let draw = |ui: &mut Ui, index: usize, (name, label, legend, value, color): Plotted| {
             let mut plot = Plot::new((name, id.0))
                 .height(height)
                 .y_axis_label(label)
@@ -529,21 +684,20 @@ impl PerformanceView {
                 .include_y(0.0)
                 .allow_scroll(false);
             // Head: every item; efficiency: its two curves; power: none; NPSH: its own.
+            let small = |corner| {
+                Legend::default()
+                    .position(corner)
+                    .text_style(egui::TextStyle::Small)
+            };
             match index {
-                0 => plot = plot.legend(Legend::default().position(Corner::LeftBottom)),
-                1 => plot = plot.legend(Legend::default().position(Corner::RightBottom)),
-                3 => plot = plot.legend(Legend::default().position(Corner::LeftTop)),
+                0 => plot = plot.legend(small(Corner::LeftBottom)),
+                1 => plot = plot.legend(small(Corner::RightBottom)),
+                3 => plot = plot.legend(small(Corner::LeftTop)),
                 _ => {}
             }
-            // Items with an empty name stay out of the legend.
-            let named = |text: &'static str| {
-                if index == 0 {
-                    tr(text).to_owned()
-                } else {
-                    String::new()
-                }
-            };
-            if index == last {
+            // The shared markers stay out of the legends: an empty name.
+            let named = |_: &'static str| String::new();
+            if index >= 2 {
                 plot = plot.x_axis_label(format!("Q [{}]", symbol(QuantityKind::VolumeFlow)));
             }
             let response = plot.show(ui, |plot| {
@@ -651,8 +805,7 @@ impl PerformanceView {
                         .color(palette.guide)
                         .style(LineStyle::dashed_loose()),
                 );
-                let o = &curve.operation;
-                // The bounds of continuous operation, out of the crowded legend.
+                // The bounds of continuous operation.
                 for q in [o.continuous.0, o.continuous.1] {
                     plot.vline(
                         VLine::new(String::new(), units.to_display(QuantityKind::VolumeFlow, q))
@@ -670,7 +823,6 @@ impl PerformanceView {
                     }
                 };
                 let x = |p: &CurvePoint| units.to_display(QuantityKind::VolumeFlow, p.flow);
-                let changed = (o.speed_ratio - 1.0).abs() > 1e-9 || o.trim_ratio < 1.0 - 1e-9;
                 if changed {
                     let points: PlotPoints = o.curve.iter().map(|p| [x(p), at(p)]).collect();
                     plot.line(
@@ -729,6 +881,79 @@ impl PerformanceView {
                 );
             });
             super::settle(ui, (name, id.0), &response.transform);
+        };
+        let mut cells = plots.into_iter().enumerate();
+        for _ in 0..2 {
+            ui.columns(2, |columns| {
+                for column in columns.iter_mut() {
+                    if let Some((index, plotted)) = cells.next() {
+                        draw(column, index, plotted);
+                    }
+                }
+            });
         }
     }
+}
+
+/// One plot: its id, axis label, legend name, values and color.
+type Plotted<'a> = (
+    &'a str,
+    String,
+    &'a str,
+    &'a dyn Fn(&PerformancePoint) -> f64,
+    Color32,
+);
+
+/// Symbols of the shared legend.
+#[derive(Clone, Copy)]
+enum Mark {
+    Circle,
+    Diamond,
+    Square,
+    Dashed,
+    Dotted,
+}
+
+/// A small drawn symbol and its name, as in a plot legend.
+fn marker(ui: &mut Ui, mark: Mark, color: Color32, text: &str) {
+    let (rect, _) = ui.allocate_exact_size(vec2(14.0, 14.0), egui::Sense::hover());
+    let painter = ui.painter_at(rect);
+    let c = rect.center();
+    match mark {
+        Mark::Circle => {
+            painter.circle_filled(c, 4.5, color);
+        }
+        Mark::Square => {
+            painter.rect_filled(egui::Rect::from_center_size(c, vec2(8.0, 8.0)), 0.0, color);
+        }
+        Mark::Diamond => {
+            painter.add(egui::Shape::convex_polygon(
+                vec![
+                    c + vec2(0.0, -5.5),
+                    c + vec2(5.5, 0.0),
+                    c + vec2(0.0, 5.5),
+                    c + vec2(-5.5, 0.0),
+                ],
+                color,
+                Stroke::NONE,
+            ));
+        }
+        Mark::Dashed | Mark::Dotted => {
+            let (dash, gap) = match mark {
+                Mark::Dashed => (3.0, 2.0),
+                _ => (1.0, 2.0),
+            };
+            let mut y = rect.top() + 1.0;
+            while y < rect.bottom() - 1.0 {
+                let end = (y + dash).min(rect.bottom() - 1.0);
+                painter.line_segment(
+                    [egui::pos2(c.x, y), egui::pos2(c.x, end)],
+                    Stroke::new(1.5, color),
+                );
+                y = end + gap;
+            }
+        }
+    }
+    ui.label(text);
+    ui.add_space(10.0);
 }

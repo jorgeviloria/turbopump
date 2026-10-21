@@ -137,8 +137,10 @@ fn every_view_draws_without_a_gpu() {
                 harness.get_by_label("Blade sections");
             }
             View::Performance => {
+                // Key numbers on top; the rest folded below.
                 harness.get_by_label("Best efficiency");
-                harness.get_by_label_contains("(estimate)");
+                harness.get_by_label("Forces");
+                harness.get_by_label_contains("More results");
             }
             _ => {}
         }

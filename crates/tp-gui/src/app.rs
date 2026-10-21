@@ -634,7 +634,7 @@ impl TurbopumpApp {
                     ),
                     View::Performance => {
                         self.performance
-                            .show(ui, cx.doc.project(), cx.derived, id, &units);
+                            .show(ui, cx.doc.project(), cx.derived, id, &units, cover);
                     }
                     View::Report => {
                         report::show(ui, cx.doc.project(), cx.derived, id, stator, volute, &units)

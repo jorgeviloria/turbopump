@@ -6,6 +6,12 @@
 
 /// English text → Spanish text.
 pub(super) static TEXTS: &[(&str, &str)] = &[
+    ("Settings", "Ajustes"),
+    ("More results", "Más resultados"),
+    ("Forces", "Empujes"),
+    ("radial {} · axial {}", "radial {} · axial {}"),
+    ("axial {}", "axial {}"),
+    ("{} · available {}", "{} · disponible {}"),
     // Side gap of internal volutes.
     ("Side gap s_ax", "Holgura lateral s_ax"),
     (
