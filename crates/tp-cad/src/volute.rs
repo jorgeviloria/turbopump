@@ -9,7 +9,7 @@
 //! of the diffuser and is open toward the impeller.
 
 use tp_design::volute::VoluteGeometry;
-use tp_math::DVec3;
+use tp_math::{DVec2, DVec3};
 
 use crate::CadError;
 use crate::occ::{self, Shape};
@@ -75,6 +75,24 @@ fn section_wire(ring: &[DVec3], breaks: &[usize]) -> Result<Shape, CadError> {
     occ::wire(&edges)
 }
 
+/// Closed wire through a meridional profile (r, z) in the plane y = 0: a line for each
+/// piece of two points, a spline through the others.
+fn profile_wire(pieces: &[Vec<DVec2>]) -> Result<Shape, CadError> {
+    let at = |p: &DVec2| DVec3::new(p.x * MM, 0.0, p.y * MM);
+    let edges = pieces
+        .iter()
+        .map(|piece| {
+            let points: Vec<DVec3> = piece.iter().map(at).collect();
+            if points.len() == 2 {
+                occ::line_edge(points[0], points[1])
+            } else {
+                occ::spline_edge(&points, false)
+            }
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    occ::wire(&edges)
+}
+
 /// Gaps in millimetres the boolean operations try in turn, until the flow domain comes
 /// out as one valid solid: first the exact algorithm, then fuzzy ones. Where the spiral
 /// leaves the throat, the diffuser and the start of the spiral share their side walls
@@ -124,24 +142,9 @@ pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
     let lofts = loft_pieces(&g.lofts(), &breaks)?;
 
     // Ring between the impeller outlet and the cutwater circle, as wide as the volute
-    // inlet. It reaches slightly into the channel so the two solids overlap.
-    let (inner, outer) = g.inlet_ring();
-    let b3 = g.design.inlet_width;
-    let zm = g.basis.midplane;
-    let overlap = 0.02 * b3;
-    let corner = |r: f64, z: f64| DVec3::new(r * MM, 0.0, z * MM);
-    let (r0, r1) = (inner, outer + overlap);
-    // A hair narrower than b₃, so that its sides do not run on the flat side walls of
-    // rectangular sections.
-    let half = 0.995 * b3 / 2.0;
-    let (z0, z1) = (zm - half, zm + half);
-    let edges = [
-        occ::line_edge(corner(r0, z0), corner(r1, z0))?,
-        occ::line_edge(corner(r1, z0), corner(r1, z1))?,
-        occ::line_edge(corner(r1, z1), corner(r0, z1))?,
-        occ::line_edge(corner(r0, z1), corner(r0, z0))?,
-    ];
-    let ring = occ::revolve_z(&occ::planar_face(&occ::wire(&edges)?)?)?;
+    // inlet, with the bend and neck of an internal volute. It reaches slightly into the
+    // channel so the two solids overlap.
+    let ring = occ::revolve_z(&occ::planar_face(&profile_wire(&g.inlet_profile())?)?)?;
 
     // The rounded nose of the cutwater and the rib of a double volute are carved out of
     // the flow domain across the whole height of the volute.
@@ -230,14 +233,24 @@ pub fn build_volute_casing(g: &VoluteGeometry, cad: &VoluteCad) -> Result<Volute
             }
         })
         .collect();
-    let outer = loft_pieces(&halves, &g.ring_breaks())?;
-    // The space of the impeller, through the whole height of the casing.
+    let mut outer = loft_pieces(&halves, &g.ring_breaks())?;
+    // The wall round the bend and neck of an internal volute.
+    if let Some(profile) = g.bend_casing_profile() {
+        let n = profile.len();
+        let pieces: Vec<Vec<DVec2>> = (0..n)
+            .map(|i| vec![profile[i], profile[(i + 1) % n]])
+            .collect();
+        outer.push(occ::revolve_z(&occ::planar_face(&profile_wire(&pieces)?)?)?);
+    }
+    // The space of the impeller, through the height of the casing on its side.
     let zs = halves.iter().flatten().flatten().map(|p| p.z);
     let (z_lo, z_hi) = zs.fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), z| {
         (lo.min(z), hi.max(z))
     });
     let margin = 0.1 * (z_hi - z_lo);
-    let (lo, hi) = ((z_lo - margin) * MM, (z_hi + margin) * MM);
+    let (band_lo, band_hi) = g.impeller_band();
+    let lo = band_lo.max(z_lo - margin) * MM;
+    let hi = band_hi.min(z_hi + margin) * MM;
     let r2 = g.inlet_ring().0 * MM;
     let point = |r: f64, z: f64| DVec3::new(r, 0.0, z);
     let impeller = occ::revolve_z(&occ::planar_face(&occ::wire(&[
@@ -542,6 +555,67 @@ mod tests {
         ];
         for edit in edits {
             double(edit);
+        }
+    }
+
+    /// Volume of the revolved profile of the inlet by Pappus: 2π times its first moment
+    /// about the axis.
+    fn revolved_volume(pieces: &[Vec<DVec2>]) -> f64 {
+        let mut points: Vec<DVec2> = pieces.iter().flatten().copied().collect();
+        points.dedup_by(|a, b| a.distance(*b) < 1e-12);
+        let n = points.len();
+        let moment: f64 = (0..n)
+            .map(|i| {
+                let (a, b) = (points[i], points[(i + 1) % n]);
+                // ∬ r dA = ∮ r²/2 dz.
+                (b.y - a.y) * (a.x * a.x + a.x * b.x + b.x * b.x) / 6.0
+            })
+            .sum();
+        2.0 * PI * moment.abs()
+    }
+
+    #[test]
+    fn an_internal_volute_is_one_solid_with_its_bend() {
+        use tp_design::volute::{InternalRound, SectionShape};
+        for open_to_right in [true, false] {
+            let input = VoluteInput {
+                cross_section: CrossSectionInput::single(SectionShape::RoundInternal(
+                    InternalRound {
+                        open_to_right,
+                        ..InternalRound::default()
+                    },
+                )),
+                ..VoluteInput::default()
+            };
+            let g = VoluteGeometry::build(&basis(), &input).unwrap();
+            let cad = build_volute(&g).unwrap();
+            for s in [&cad.channel, &cad.fluid] {
+                assert!(s.is_valid());
+                assert_eq!(s.solid_count(), 1);
+            }
+            // The spiral starts inside the diffuser, so the channel is a little less than
+            // its two pieces; the fluid adds the vaneless ring, the bend and the neck.
+            let pieces: f64 = loft_pieces(&g.lofts(), &g.ring_breaks())
+                .unwrap()
+                .iter()
+                .map(|p| p.volume_with_tolerance(1e-3))
+                .sum::<f64>()
+                / MM.powi(3);
+            let channel = cad.channel.volume_with_tolerance(1e-3) / MM.powi(3);
+            assert!(
+                channel < pieces && channel > 0.9 * pieces,
+                "{channel} vs {pieces}"
+            );
+            let inlet = revolved_volume(&g.inlet_profile());
+            let fluid = cad.fluid.volume_with_tolerance(1e-3) / MM.powi(3);
+            assert!(
+                (fluid - channel - inlet).abs() < 0.03 * fluid,
+                "{fluid} vs {channel} + {inlet}"
+            );
+            // The casing wraps the bend too, and leaves the impeller open on its side.
+            let casing = build_volute_casing(&g, &cad).unwrap();
+            assert!(casing.solid.is_valid() && casing.solid.solid_count() == 1);
+            assert!(casing.flange, "{:?}", casing.warnings);
         }
     }
 
