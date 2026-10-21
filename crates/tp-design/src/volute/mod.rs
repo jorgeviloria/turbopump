@@ -140,9 +140,9 @@ impl Default for SpiralInput {
 #[serde(rename_all = "snake_case")]
 pub enum StraightWall {
     /// The cutwater side: the diffuser widens outward only.
-    #[default]
     Inner,
     /// Neither: it widens to both sides.
+    #[default]
     Centered,
     /// The outer side: it widens toward the cutwater.
     Outer,
@@ -165,7 +165,7 @@ pub enum DischargeShape {
 impl Default for DischargeShape {
     fn default() -> Self {
         DischargeShape::Tangential {
-            straight_wall: StraightWall::Inner,
+            straight_wall: StraightWall::Centered,
         }
     }
 }
@@ -177,10 +177,15 @@ pub struct DischargeInput {
     pub shape: DischargeShape,
     /// Mean radius R_N of the bend of a radial discharge, m (eq. 7.29).
     pub bend_radius: Param<f64>,
-    /// Length of the diffuser along its axis, from the throat, m.
+    /// Length of the diffuser along its centerline from the throat, the bend of a
+    /// radial discharge included, m.
     pub length: Param<f64>,
     /// Outlet (discharge nozzle) diameter, m.
     pub outlet_diameter: Param<f64>,
+    /// Turn of the whole volute about the pump axis: the angle of the cutwater from the
+    /// x axis, counter-clockwise about z, rad. Automatic: the discharge points along +y,
+    /// vertically up in the front view.
+    pub rotation: Param<f64>,
 }
 
 /// Shape of the cutwater where the spiral meets the discharge diffuser (Gülich Chap.
@@ -258,7 +263,9 @@ pub struct DischargeDiffuser {
     pub shape: DischargeShape,
     /// Mean radius of the bend of a radial discharge; 0 for a straight one, m.
     pub bend_radius: f64,
-    /// Length of the straight part, after the bend if any, m.
+    /// Length along the centerline from the throat, m: the bend of a radial discharge
+    /// and the straight part after it. Gülich (Chap. 7.8.2, item 4) applies the data of
+    /// straight diffusers to curved nozzles.
     pub length: f64,
     /// Throat area A₃q, m².
     pub inlet_area: f64,
