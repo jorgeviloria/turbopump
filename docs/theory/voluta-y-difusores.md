@@ -255,29 +255,131 @@ las paredes curvas pierden algo de área, que se devuelve agrandando un poco la 
 
 ### 3. Desarrollo de la espiral
 
-**Conservación del momento angular** (ecs. 7.24 y 7.25). Sin rozamiento,
-$c_u r = c_{2u} r_2$ en toda la voluta. El caudal que atraviesa la sección de ángulo
-$\varepsilon$ es la fracción $\varepsilon/2\pi$ del total, y eso fija su altura:
+Cada sección lleva el caudal que el rodete entrega hasta su ángulo. Con $\varphi$ medido
+desde el inicio de la espiral,
 
-$$\int_{r'_z}^{r_a} \frac{b(r)}{r}\,dr = \frac{\varepsilon\,Q_{Le}}{2\pi\,c_{2u}\,r_2}$$
+$$Q(\varphi) = Q_0 + Q_i\,\frac{\varphi}{2\pi}$$
 
-Para un rectángulo la ecuación tiene solución cerrada (ec. T7.7.9), y para un círculo
-que toca $r'_z$, $d = X + \sqrt{2\,d'_z X}$ (ec. T7.7.7). En general, la integral sale
-del contorno de la sección en el ángulo $\varepsilon$ (apartado 2) y la altura se despeja
-con el método de Brent. La voluta doble usa las fórmulas cerradas del trapecio.
+donde $Q_i$ es el caudal de referencia (por defecto $Q_{Le}$) y $Q_0$ un *caudal ciego*
+que la espiral ya lleva en su inicio (por defecto cero; ver el ángulo de envolvimiento).
+Con $Q_0 = 0$ es la fracción $\varepsilon/2\pi$ de Gülich (ec. 7.25). Hay dos familias
+de reglas: las **de velocidad** dimensionan cada sección para una velocidad en la
+espiral, y las **geométricas** fijan directamente su tamaño.
 
-**Velocidad constante** (ecs. 7.26 y 7.27). El área de la garganta $A_{3q}$ sale del
-momento angular, y el resto de secciones crece en proporción al ángulo:
+**Pfleiderer: $c_u r^x$ constante.** El giro dentro de cada sección cumple
+$c_u = c_{u,4}\,(r_4/r)^x$, con $c_{u,4}$ la velocidad en la entrada de la voluta
+$r_4 = r'_z$. El caudal por la sección es entonces
 
-$$A(\varepsilon) = A_{3q}\,\frac{\varepsilon}{2\pi}$$
+$$Q(\varphi) = \iint c_u\,dA = c_{u,4}\iint \left(\frac{r_4}{r}\right)^{x} dA$$
+
+- Con $x = 1$, el valor por defecto, es la **conservación del momento angular** de Gülich
+  (ecs. 7.24 y 7.25): con la velocidad que llega del rodete,
+  $c_{u,4} = c_{2u} r_2/r_4$, queda
+  $\int b/r\,dr = \varepsilon\,Q_{Le}/(2\pi c_{2u} r_2)$. Para un rectángulo la
+  ecuación tiene solución cerrada (ec. T7.7.9), y para un círculo que toca $r'_z$,
+  $d = X + \sqrt{2\,d'_z X}$ (ec. T7.7.7).
+- Con $x = 0$, $c_u$ se queda en el valor de la entrada en toda la sección.
+- Entre ambos, el exponente reparte la velocidad: con $x$ menor, la velocidad lejos del
+  rodete es mayor y las secciones salen más pequeñas.
+
+La generalización con $x$ se atribuye a Pfleiderer; no tengo su libro para comprobarla.
+Por eso está verificada solo en $x = 1$ (Gülich) y en $x = 0$ (velocidad constante).
+
+La integral se calcula sobre el contorno real de la sección en ese ángulo (apartado 2)
+por el teorema de Green: $\iint (r_4/r)^x\,dA = \oint W(r)\,dz$ con $W' = (r_4/r)^x$.
+Es exacta en el polígono para $x = 1$ ($W = r_4 \ln r$) y $x = 0$ (el área). Para otro
+exponente se integra cada lado con Gauss–Legendre de tres puntos. La altura se despeja
+con el método de Brent. La voluta doble usa las fórmulas cerradas del trapecio (y
+Gauss–Legendre para $x \ne 1$).
+
+**Velocidad constante, garganta por momento angular** (Gülich ecs. 7.26 y 7.27, que
+cita a Stepanoff [B.2]). El área de la garganta $A_{3q}$ sale del momento angular, y el
+resto de secciones crece en proporción al caudal que llevan:
+
+$$A(\varphi) = A_{3q}\,\frac{Q(\varphi)}{Q(\varphi_{wrap})}$$
+
+**Stepanoff: $c_3 = K_3\sqrt{2gH}$** (Stepanoff, *Centrifugal and Axial Flow Pumps*,
+2.ª ed., ec. 7.1, p. 112). Una sola velocidad media en todas las secciones,
+$A(\varphi) = Q(\varphi)/c_3$. El factor $K_3$ depende de la velocidad específica y se
+lee en su fig. 7.5 (p. 113). En los ejes logarítmicos del libro es una recta, que leí en
+cuatro puntos del escaneado y ajusté como
+
+$$K_3 = 4{,}144\;n_s^{-0{,}325} \qquad (600 \le n_s \le 15\,000)$$
+
+con $n_s$ en unidades de EE. UU. (rpm, gpm, ft), $n_s = 51{,}64\,n_q$. En $n_q$ queda
+$K_3 \approx 1{,}15\,n_q^{-0{,}325}$, válido para $n_q$ entre 11,6 y 290. Fuera de ese
+tramo se toma el extremo del diagrama y se avisa. En la bomba de referencia
+($n_q = 35{,}9$, $H = 32$ m), $K_3 = 0{,}359$ y $c_3 = 9{,}0$ m/s. La garganta sale de
+3091 mm², frente a los 3115 mm² del momento angular. Si se da a mano la velocidad de
+referencia, esa es $c_3$ y $K_3$ no interviene.
+
+**Reglas geométricas.** La altura $H$, el área $A$ o el cociente $A/r_c$ (área sobre el
+radio de su centroide, aproximadamente $\iint dA/r$) crecen hasta un valor final en la
+garganta. Por defecto el valor final es el de la garganta por momento angular, así que
+cambiar de regla no cambia la garganta. La **progresión** puede ser lineal o una curva de
+Bézier cúbica de $(0, 0)$ a $(1, 1)$ con dos puntos interiores editables, en fracciones
+del envolvimiento y del valor final. La voluta doble no admite reglas geométricas.
 
 **Ley automática:** velocidad constante por debajo de $n_q = 30$ y momento angular por
 encima. El libro sitúa el cambio entre 25 y 35.
 
-**Corrección por el corte de agua** (ec. 7.28): el corte de agua estorba al flujo en la garganta,
-y su altura se aumenta en
+**Valores de referencia.** Por defecto $c_{u,4} = c_{2u} r_2/r_4$ (vórtice libre del rodete a
+la entrada de la voluta) y $Q_i = Q_{Le}$. Ambos se pueden fijar a mano, como $Q_0$.
+
+**Ángulo de envolvimiento** $\varphi_{wrap}$, de 300° a 360° (por defecto 360°). Una
+espiral más corta empieza $360° - \varphi_{wrap}$ después del corte de agua, y la
+garganta sigue en el mismo sitio. La carcasa entre la garganta y el inicio de la espiral
+hace de corte de agua: es **romo**, con la cara sobre $r'_z$, y las formas del apartado 5
+no se aplican. El rodete entrega en ese tramo un caudal que pasa a la espiral por su
+inicio. Por eso el caudal ciego automático es $Q_0 = Q_i\,(1 - \varphi_{wrap}/360°)$, y
+la garganta lleva siempre $Q_i$. Solo la voluta simple externa admite menos de 360°.
+
+**Corrección por el corte de agua** (ec. 7.28). El corte de agua estorba al flujo en la
+garganta, y su altura se aumenta en
 
 $$\frac{\Delta a_3}{a_3} = 0{,}2\left(\frac{e_3}{a_3}\right)^2$$
+
+El aumento se reparte linealmente desde el inicio de la espiral. Solo se aplica a las
+reglas de velocidad: en las geométricas, el valor final ya lo incluye.
+
+**Compensación del corte de agua** (construcción propia, alternativa a la ec. 7.28). A
+partir de un ángulo $\varphi_C$ (por defecto 270°), el radio interior de las secciones
+sube linealmente de $r'_z$ a $r'_z + e$ en la garganta, con $e = e_3$ por defecto.
+- La regla dimensiona la sección por encima de ese radio.
+- Debajo queda una franja tan ancha como la entrada que la une a $r'_z$.
+- Así la sección final gana justo el hueco que ocupa el corte de agua.
+
+La garganta de la bomba de referencia (trapecio de 20°, Stepanoff) pasa de 3088 a
+3183 mm². Si se activan la compensación y la corrección a la vez, se avisa: suele
+bastar con una. Solo la voluta simple externa la admite, porque la interna no tiene
+corte de agua propio.
+
+**Arcos de circunferencia** (construcción propia, como se trazan las volutas en el
+tablero de dibujo). Con secciones de paredes rectas (rectángulo o trapecio en toda la
+espiral), el contorno exterior se puede sustituir por $N$ arcos tangentes entre sí, de 2
+a 8.
+- La cadena empieza en el inicio de la espiral con una dirección libre y pasa por $N-1$
+  puntos de la espiral hasta la garganta, que no se mueve.
+- Cada arco es el círculo tangente al anterior que pasa por el siguiente punto, así que
+  los centros de dos arcos seguidos quedan alineados con su punto de unión.
+- La dirección inicial y los ángulos de los puntos se eligen para la menor desviación
+  radial máxima respecto al contorno de la regla, con el símplex de Nelder–Mead.
+- Las secciones toman entonces la altura que lleva su borde exterior al arco.
+
+En la bomba de referencia, la desviación máxima es de 3,2 mm con 2 arcos, 0,82 mm con 3,
+0,33 mm con 4 y 0,09 mm con 6.
+
+**Valores de la sección final y diagramas.** El paso de espiral muestra de la sección
+final:
+- los radios interior $r'$ y exterior $r$, y la coordenada axial mínima $z$;
+- la altura $H$, el ancho $B$ y $H/B$;
+- el diámetro equivalente $\sqrt{4A/\pi}$, el área $A$ y $A/r_c$.
+
+Debajo dibuja, a lo largo de la espiral, el área, el radio exterior, $A/r_c$ y el
+ángulo $\alpha$ del contorno con la dirección circunferencial
+($\tan\alpha = (dr_a/d\varepsilon)/r_a$). En las reglas de velocidad dibuja también
+$c_u(r)$. La vista frontal añade la pared interior compensada y, con arcos, sus
+centros unidos a los extremos de cada arco.
 
 **Secciones:** por defecto son 36. La espiral empieza donde su pared exterior deja de
 chocar con la pared interior de la tobera; en la bomba de referencia, a 13°.
@@ -828,7 +930,10 @@ Tras el difusor, la voluta recibe mucho menos momento angular: $c_u r$ baja de 1
   espiral y la tobera, sin nariz ni corrección propia. La holgura con el rodete supone
   el espesor de pared por defecto de su modelo CAD: si al exportar se pone otro, la
   comprobación no lo ve.
-- **Áreas de la espiral:** faltan las reglas de Pfleiderer y Stepanoff.
+- **Áreas de la espiral:**
+  - la ley $c_u r^x$ de Pfleiderer solo está verificada con $x = 1$ y $x = 0$;
+  - la fig. 7.5 de Stepanoff se lee como una recta;
+  - las pérdidas de la espiral salen del modelo de Japikse, no del de Aungier.
 - **Tobera:** tangencial o radial, siempre en el plano medio: no hay codo en z ni
   desplazamiento axial, y la salida es siempre circular, sin brida rectangular. Con la
   pared exterior recta, alguna combinación de corte de agua puede dar un sólido no válido.
