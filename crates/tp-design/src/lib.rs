@@ -11,6 +11,7 @@ pub mod outlet;
 mod param;
 pub mod performance;
 pub mod pump;
+pub mod radial_thrust;
 pub mod slip;
 pub mod triangle;
 pub mod volute;

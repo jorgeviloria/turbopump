@@ -132,6 +132,8 @@ pub struct OutletSection {
 pub struct CentrifugalPumpDesign {
     /// nq per stage and eye.
     pub nq: f64,
+    /// Number of impeller eyes f_q: 1 or 2.
+    pub eyes: f64,
     pub efficiencies: Efficiencies,
     /// Flow through the impeller including leakage, Q/η_v, m³/s.
     pub impeller_flow: f64,
@@ -572,6 +574,7 @@ pub fn design(
 
     Ok(CentrifugalPumpDesign {
         nq,
+        eyes,
         efficiencies: Efficiencies {
             hydraulic: eta_h,
             volumetric: eta_v,

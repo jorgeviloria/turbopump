@@ -174,6 +174,7 @@ impl Project {
                     area: design.throat.area,
                 }),
                 volute: Some(VoluteLossGeometry::from_design(&design)),
+                double_volute_wrap: None,
             })
         };
         let kind = |at: usize| components.get(at).map(|c| c.kind());
@@ -187,6 +188,7 @@ impl Project {
                         area: v.throat * diffuser.inlet_width,
                     }),
                     volute: None,
+                    double_volute_wrap: None,
                 }
             }
             Some(ComponentKind::Stator { vaned: false })

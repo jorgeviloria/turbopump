@@ -18,7 +18,9 @@
 //!    equivalent matched volute (λ₆·AR = 1) and the rest of the stage; the rest keeps
 //!    the statistical shape and the actual volute adds its own losses (our split). A
 //!    mismatched volute then loses head at the design point too;
-//! 6. the required NPSH₃ against flow after Gülich Chap. 6.3.3 ([`crate::npsh`]).
+//! 6. the required NPSH₃ against flow after Gülich Chap. 6.3.3 ([`crate::npsh`]);
+//! 7. the steady radial force on the impeller after Gülich Table 9.4
+//!    ([`crate::radial_thrust`]).
 
 use std::f64::consts::PI;
 
@@ -27,6 +29,7 @@ use tp_units::STANDARD_GRAVITY as G;
 
 use crate::npsh::{CollectorThroat, NpshCurve, NpshSettings};
 use crate::pump::{CentrifugalPumpDesign, PumpDuty};
+use crate::radial_thrust::{RadialCollector, RadialThrust, default_shroud_thickness};
 use crate::volute::loss::{VoluteLoss, VoluteLossGeometry, volute_loss};
 use crate::{DesignError, Param};
 
@@ -62,6 +65,9 @@ pub struct PerformanceInput {
     pub npsh_blade_coefficient: Param<f64>,
     /// Exponent of the steep rise of NPSH₃ (eq. 6.22); automatic: 2.5.
     pub npsh_exponent: Param<f64>,
+    /// Seal clearances twice those of Gülich eq. 3.12, which raise the radial force
+    /// (curve 2 of Fig. 9.27).
+    pub wide_seal_clearances: bool,
 }
 
 /// What the prediction knows about the collector after the impeller, beyond its kind.
@@ -71,6 +77,8 @@ pub struct CollectorData {
     pub throat: Option<CollectorThroat>,
     /// A volute after the impeller, directly or behind a vaneless diffuser.
     pub volute: Option<VoluteLossGeometry>,
+    /// Wrap angle of the inner volute when the volute is a double one, rad.
+    pub double_volute_wrap: Option<f64>,
 }
 
 impl Default for PerformanceInput {
@@ -85,6 +93,7 @@ impl Default for PerformanceInput {
             npsh_inlet_coefficient: Param::Auto,
             npsh_blade_coefficient: Param::Auto,
             npsh_exponent: Param::Auto,
+            wide_seal_clearances: false,
         }
     }
 }
@@ -108,6 +117,22 @@ pub struct PerformancePoint {
     pub npsh_required: f64,
     /// Head lost in the volute, m; NaN without a volute.
     pub volute_loss: f64,
+    /// Steady radial force on the impeller, N; NaN without data for the collector.
+    pub radial_force: f64,
+}
+
+/// Radial force on the impeller.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct RadialSummary {
+    pub law: RadialThrust,
+    /// Steady force at the design point and at shut-off, N.
+    pub design_force: f64,
+    pub shutoff_force: f64,
+    /// Largest steady force over the curve, N.
+    pub largest_force: f64,
+    /// Largest steady plus unsteady force for the mechanical design, with
+    /// k_R,tot ≥ 0.15 (Gülich Table 9.4, notes 12 and 13), N.
+    pub design_load: f64,
 }
 
 /// The volute after the impeller at the design point.
@@ -149,6 +174,8 @@ pub struct PumpPerformance {
     pub npsh: NpshCurve,
     /// Losses of the volute after the impeller, if one follows it.
     pub volute: Option<VoluteSummary>,
+    /// Radial force, when Table 9.4 covers the collector.
+    pub radial: Option<RadialSummary>,
     pub warnings: Vec<String>,
 }
 
@@ -256,6 +283,7 @@ impl Model {
             estimated: false,
             npsh_required: f64::NAN,
             volute_loss: volute,
+            radial_force: f64::NAN,
         }
     }
 }
@@ -441,6 +469,7 @@ pub fn predict(
             volute_loss: model
                 .volute_loss(flow, model.theoretical_head(flow + model.leakage))
                 .map_or(f64::NAN, |l| l.total()),
+            radial_force: f64::NAN,
         }
     };
 
@@ -458,8 +487,32 @@ pub fn predict(
     // The onset itself, so the two parts meet in the plots.
     let index = points.partition_point(|p| p.flow < at_onset.flow);
     points.insert(index, at_onset);
+    // Radial force: the volute decides it, also behind a vaneless diffuser.
+    let volute_kind = match collector.double_volute_wrap {
+        Some(wrap) => RadialCollector::DoubleVolute { wrap },
+        None => RadialCollector::SingleVolute,
+    };
+    let radial_collector = match input.collector {
+        Collector::Volute => Some(volute_kind),
+        Collector::VanedDiffuser => Some(RadialCollector::VanedDiffuser),
+        Collector::VanelessDiffuser => collector.volute.map(|_| volute_kind),
+    };
+    let radial = radial_collector.map(|kind| {
+        let d2 = design.outlet_diameter;
+        let b2tot = design.outlet_width + 2.0 * default_shroud_thickness(d2);
+        RadialThrust::new(
+            kind,
+            design.nq * design.eyes.sqrt(),
+            input.wide_seal_clearances,
+            duty.density * G * duty.head * d2 * b2tot,
+            b2tot,
+        )
+    });
     let with_npsh = |mut p: PerformancePoint| {
         p.npsh_required = npsh.at(p.flow);
+        if let Some(law) = &radial {
+            p.radial_force = law.force(p.flow / duty.flow, p.head, duty.head);
+        }
         p
     };
     for p in &mut points {
@@ -480,7 +533,7 @@ pub fn predict(
     }
     let best = with_npsh(model.point(0.5 * (a + b)));
     let design_point = with_npsh(model.point(1.0));
-    let shutoff = estimate(0.0);
+    let shutoff = with_npsh(estimate(0.0));
     let rises = points
         .windows(2)
         .any(|w| w[1].head > w[0].head + 1e-6 * duty.head);
@@ -541,6 +594,23 @@ pub fn predict(
             100.0 * q / duty.flow
         ));
     }
+    let radial = radial.map(|law| {
+        let largest_force = points.iter().map(|p| p.radial_force).fold(0.0, f64::max);
+        let design_load = points
+            .iter()
+            .map(|p| {
+                law.design_coefficient(p.flow / duty.flow) * law.reference_force * p.head
+                    / duty.head
+            })
+            .fold(0.0, f64::max);
+        RadialSummary {
+            law,
+            design_force: design_point.radial_force,
+            shutoff_force: shutoff.radial_force,
+            largest_force,
+            design_load,
+        }
+    });
     let cavitation_flow = npsh.cavitation_flow(design.npsh_available, end * duty.flow);
     if let Some(q) = cavitation_flow {
         warnings.push(format!(
@@ -564,6 +634,7 @@ pub fn predict(
         cavitation_flow,
         npsh,
         volute,
+        radial,
         warnings,
     })
 }
@@ -703,6 +774,7 @@ mod tests {
             npsh_inlet_coefficient: Param::Manual(1.3),
             npsh_blade_coefficient: Param::Manual(0.2),
             npsh_exponent: Param::Manual(3.0),
+            wide_seal_clearances: false,
         };
         let (d, p) = performance(&input);
         assert_relative_eq!(p.npsh.inlet_coefficient, 1.3);
@@ -751,6 +823,7 @@ mod tests {
                 area: geometry.throat_area,
             }),
             volute: Some(geometry),
+            double_volute_wrap: None,
         }
     }
 
@@ -816,6 +889,52 @@ mod tests {
         );
         assert_relative_eq!(p.npsh.at(q), p.npsh_available, max_relative = 1e-6);
         assert!(p.warnings.iter().any(|w| w.starts_with("NPSH₃ exceeds")));
+    }
+
+    #[test]
+    fn the_radial_force_follows_table_9_4() {
+        let d = design(&duty(), &CentrifugalPumpInput::default()).unwrap();
+        let single = with_collector(&volute_collector(&d, 1.0));
+        let r = single.radial.unwrap();
+        assert_eq!(r.law.collector, RadialCollector::SingleVolute);
+        // Least near the design point, largest against a closed valve.
+        assert!(r.design_force > 0.0 && r.shutoff_force > 5.0 * r.design_force);
+        let first = single.points.first().unwrap();
+        assert_relative_eq!(first.radial_force, r.shutoff_force);
+        assert!(r.design_load >= 0.15 * r.law.reference_force * 0.99);
+        // F_R = k_R·ρ·g·H·d₂·b₂tot at the design point.
+        let b2tot = d.outlet_width + 2.0 * default_shroud_thickness(d.outlet_diameter);
+        let expected = r.law.best_coefficient
+            * duty().density
+            * G
+            * single.design.head
+            * d.outlet_diameter
+            * b2tot;
+        assert_relative_eq!(r.design_force, expected, max_relative = 1e-9);
+        // A double volute of 180° cuts the force at shut-off to under a third.
+        let mut double = volute_collector(&d, 1.0);
+        double.double_volute_wrap = Some(PI);
+        let double = with_collector(&double).radial.unwrap();
+        assert!(double.shutoff_force < r.shutoff_force / 3.0);
+        // Wider seal clearances raise it.
+        let wide = predict(
+            &duty(),
+            &d,
+            &PerformanceInput {
+                wide_seal_clearances: true,
+                ..PerformanceInput::default()
+            },
+            &volute_collector(&d, 1.0),
+        )
+        .unwrap();
+        assert!(wide.radial.unwrap().shutoff_force > r.shutoff_force);
+        // A vaneless diffuser with nothing after it has no data.
+        let input = PerformanceInput {
+            collector: Collector::VanelessDiffuser,
+            ..PerformanceInput::default()
+        };
+        let p = predict(&duty(), &d, &input, &CollectorData::default()).unwrap();
+        assert!(p.radial.is_none() && p.design.radial_force.is_nan());
     }
 
     #[test]
