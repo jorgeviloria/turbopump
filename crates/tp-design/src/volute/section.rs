@@ -36,8 +36,11 @@ pub const MAX_TANGENT_ANGLE_DEG: f64 = 45.0;
 const ARC_STEP: f64 = 1.5 * PI / 180.0;
 /// Samples of a Bézier side.
 const BEZIER_POINTS: usize = 96;
-/// Points of the walls of every lofted outline, spread over its runs.
-const WALL_POINTS: usize = 72;
+/// Points of the walls of every lofted outline, spread over its runs. More points slow
+/// the boolean operations of the CAD model down more than they add to its accuracy: the
+/// splines through them already follow the walls closely, and the height of each lofted
+/// outline is fitted to give the design area.
+const WALL_POINTS: usize = 56;
 /// Fewest points of one run of a lofted outline.
 const MIN_RUN_POINTS: usize = 12;
 /// Points of the inlet of every lofted outline.

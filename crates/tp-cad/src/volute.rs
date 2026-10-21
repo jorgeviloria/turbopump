@@ -93,6 +93,36 @@ fn profile_wire(pieces: &[Vec<DVec2>]) -> Result<Shape, CadError> {
     occ::wire(&edges)
 }
 
+/// The closed polygon `points` split at its corners, where it turns by more than 10°:
+/// straight runs of two points and curved runs for splines, so that a revolved profile
+/// has a few faces instead of one per segment.
+fn smooth_pieces(points: &[DVec2]) -> Vec<Vec<DVec2>> {
+    let n = points.len();
+    let corner = |i: usize| {
+        let a = (points[i] - points[(i + n - 1) % n]).normalize_or_zero();
+        let b = (points[(i + 1) % n] - points[i]).normalize_or_zero();
+        a.dot(b) < 10f64.to_radians().cos()
+    };
+    let corners: Vec<usize> = (0..n).filter(|&i| corner(i)).collect();
+    if corners.is_empty() {
+        let mut all = points.to_vec();
+        all.push(points[0]);
+        return vec![all];
+    }
+    corners
+        .iter()
+        .enumerate()
+        .map(|(k, &start)| {
+            let end = corners[(k + 1) % corners.len()];
+            let span = match (end + n - start) % n {
+                0 => n,
+                span => span,
+            };
+            (0..=span).map(|j| points[(start + j) % n]).collect()
+        })
+        .collect()
+}
+
 /// Gaps in millimetres the boolean operations try in turn, until the flow domain comes
 /// out as one valid solid: first the exact algorithm, then fuzzy ones. Where the spiral
 /// leaves the throat, the diffuser and the start of the spiral share their side walls
@@ -114,11 +144,13 @@ fn loft_pieces(pieces: &[Vec<Vec<DVec3>>], breaks: &[usize]) -> Result<Vec<Shape
         .collect()
 }
 
-/// The first attempt over [`FUZZY_GAPS`] whose result is `sound`, else the first that
-/// built at all.
+/// The first attempt over [`FUZZY_GAPS`] whose result is `sound`, or turns sound once
+/// `repair`ed, else the first that built at all. Repairing a nearly valid result by
+/// shape healing costs far less than a boolean operation with the next gap.
 fn first_sound<T>(
     attempt: impl Fn(f64) -> Result<T, CadError>,
     sound: impl Fn(&T) -> bool,
+    repair: impl Fn(&T) -> Option<T>,
 ) -> Result<T, CadError> {
     let mut fallback = None;
     let mut error = None;
@@ -126,6 +158,9 @@ fn first_sound<T>(
         match attempt(fuzzy) {
             Ok(result) if sound(&result) => return Ok(result),
             Ok(result) => {
+                if let Some(fixed) = repair(&result).filter(|r| sound(r)) {
+                    return Ok(fixed);
+                }
                 fallback.get_or_insert(result);
             }
             Err(e) => {
@@ -193,6 +228,7 @@ pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
     let joined = first_sound(
         |fuzzy| fuse_all(&lofts, fuzzy),
         |channel| channel.is_valid() && channel.solid_count() == 1 && whole(channel),
+        |channel| channel.fixed().ok(),
     )?;
     let assemble = |fuzzy: f64| -> Result<(Shape, Shape), CadError> {
         // A turn by zero copies the channel for this attempt.
@@ -205,13 +241,17 @@ pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
         Ok((channel, fluid))
     };
     // The flow domain is what gets exported.
-    let (channel, fluid) = first_sound(assemble, |(channel, fluid)| {
-        fluid.is_valid()
-            && fluid.solid_count() == 1
-            && whole(channel)
-            && fluid.volume_with_tolerance(0.0)
-                > channel.volume_with_tolerance(0.0) + 0.5 * ring_volume
-    })?;
+    let (channel, fluid) = first_sound(
+        assemble,
+        |(channel, fluid)| {
+            fluid.is_valid()
+                && fluid.solid_count() == 1
+                && whole(channel)
+                && fluid.volume_with_tolerance(0.0)
+                    > channel.volume_with_tolerance(0.0) + 0.5 * ring_volume
+        },
+        |(channel, fluid)| Some((channel.fixed().ok()?, fluid.fixed().ok()?)),
+    )?;
 
     Ok(VoluteCad { channel, fluid })
 }
@@ -236,10 +276,7 @@ pub fn build_volute_casing(g: &VoluteGeometry, cad: &VoluteCad) -> Result<Volute
     let mut outer = loft_pieces(&halves, &g.ring_breaks())?;
     // The wall round the bend and neck of an internal volute.
     if let Some(profile) = g.bend_casing_profile() {
-        let n = profile.len();
-        let pieces: Vec<Vec<DVec2>> = (0..n)
-            .map(|i| vec![profile[i], profile[(i + 1) % n]])
-            .collect();
+        let pieces = smooth_pieces(&profile);
         outer.push(occ::revolve_z(&occ::planar_face(&profile_wire(&pieces)?)?)?);
     }
     // The space of the impeller, through the height of the casing on its side.
@@ -273,7 +310,9 @@ pub fn build_volute_casing(g: &VoluteGeometry, cad: &VoluteCad) -> Result<Volute
             && solid.solid_count() == 1
             && solid.volume_with_tolerance(0.0) < gross - 0.8 * channel
     };
-    let (solid, _) = first_sound(enclose, sound)?;
+    let (solid, _) = first_sound(enclose, sound, |(solid, gross)| {
+        Some((solid.fixed().ok()?, *gross))
+    })?;
     let Some(f) = &g.design.flange else {
         return Ok(VoluteCasing {
             solid,
@@ -364,6 +403,7 @@ mod tests {
             midplane: 0.0378,
             rotation_sign: 1.0,
             impeller_blades: 7,
+            sides: None,
         }
     }
 
@@ -616,6 +656,27 @@ mod tests {
             let casing = build_volute_casing(&g, &cad).unwrap();
             assert!(casing.solid.is_valid() && casing.solid.solid_count() == 1);
             assert!(casing.flange, "{:?}", casing.warnings);
+        }
+    }
+
+    #[test]
+    fn polygons_split_at_their_corners() {
+        // A unit square with the corner at (1, 1) rounded by a quarter circle of 12
+        // segments: the rounded side, tangent at both ends, is one curved run.
+        let mut points = vec![DVec2::new(0.0, 0.0), DVec2::new(1.0, 0.0)];
+        for k in 0..=12 {
+            let a = PI / 2.0 * f64::from(k) / 12.0;
+            points.push(DVec2::new(0.8, 0.8) + 0.2 * DVec2::new(a.cos(), a.sin()));
+        }
+        points.push(DVec2::new(0.0, 1.0));
+        let pieces = smooth_pieces(&points);
+        assert_eq!(pieces.len(), 3, "{pieces:?}");
+        assert_eq!(pieces.iter().filter(|p| p.len() == 2).count(), 2);
+        assert_eq!(pieces[1].len(), points.len() - 1);
+        // The pieces close the loop end to start.
+        for (k, piece) in pieces.iter().enumerate() {
+            let next = &pieces[(k + 1) % pieces.len()];
+            assert_eq!(piece.last(), next.first());
         }
     }
 

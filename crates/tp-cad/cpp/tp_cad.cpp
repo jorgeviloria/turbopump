@@ -40,6 +40,7 @@
 #include <STEPControl_Reader.hxx>
 #include <STEPControl_Writer.hxx>
 #include <ShapeAnalysis_FreeBounds.hxx>
+#include <ShapeFix_Shape.hxx>
 #include <ShapeFix_Solid.hxx>
 #include <Standard_Failure.hxx>
 #include <StlAPI_Writer.hxx>
@@ -275,6 +276,16 @@ std::unique_ptr<Shape> rotate_z(const Shape &shape, double angle) {
       fail("rotation", "failed");
     }
     return wrap(transform.Shape(), "rotation");
+  });
+}
+
+// The shape repaired by OCCT's shape healing: small gaps, edges out of tolerance and
+// wrongly oriented faces that a boolean operation may leave behind.
+std::unique_ptr<Shape> fix_shape(const Shape &shape) {
+  return guard("shape fix", [&] {
+    ShapeFix_Shape fix(shape.shape);
+    fix.Perform();
+    return wrap(fix.Shape(), "shape fix");
   });
 }
 

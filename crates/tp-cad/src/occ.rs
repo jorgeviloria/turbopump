@@ -89,6 +89,12 @@ impl Shape {
         ffi::is_valid(&self.0)
     }
 
+    /// Copy repaired by shape healing: small gaps, edges out of tolerance and wrongly
+    /// oriented faces closed or fixed.
+    pub fn fixed(&self) -> Result<Shape, CadError> {
+        op("shape fix", ffi::fix_shape(&self.0))
+    }
+
     /// Copy rotated by `angle` (rad) about the z axis.
     pub fn rotated_z(&self, angle: f64) -> Result<Shape, CadError> {
         op("rotation", ffi::rotate_z(&self.0, angle))

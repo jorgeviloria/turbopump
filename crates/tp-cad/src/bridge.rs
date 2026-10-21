@@ -33,6 +33,7 @@ pub(crate) mod ffi {
         /// Extrusion of a planar face along +z by `height`.
         fn prism_z(face: &Shape, height: f64) -> Result<UniquePtr<Shape>>;
         fn rotate_z(shape: &Shape, angle: f64) -> Result<UniquePtr<Shape>>;
+        fn fix_shape(shape: &Shape) -> Result<UniquePtr<Shape>>;
         /// `op`: 0 cut, 1 fuse, 2 common.
         fn boolean_op(a: &Shape, b: &Shape, op: u8, fuzzy: f64) -> Result<UniquePtr<Shape>>;
         fn make_compound(shapes: &ShapeList) -> Result<UniquePtr<Shape>>;
