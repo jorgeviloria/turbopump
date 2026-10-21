@@ -8,19 +8,21 @@ Implementación:
 - [`crates/tp-math/src/sparse.rs`](../../crates/tp-math/src/sparse.rs) (sistemas dispersos);
 - [`crates/tp-design/src/npsh.rs`](../../crates/tp-design/src/npsh.rs) (NPSH₃ frente al caudal);
 - [`crates/tp-design/src/volute/loss.rs`](../../crates/tp-design/src/volute/loss.rs) (pérdidas de la voluta);
-- [`crates/tp-design/src/radial_thrust.rs`](../../crates/tp-design/src/radial_thrust.rs) (empuje radial).
+- [`crates/tp-design/src/radial_thrust.rs`](../../crates/tp-design/src/radial_thrust.rs) (empuje radial);
+- [`crates/tp-design/src/axial_thrust.rs`](../../crates/tp-design/src/axial_thrust.rs) (empuje axial).
 
-Este documento recoge seis análisis de un rodete ya diseñado:
+Este documento recoge siete análisis de un rodete ya diseñado:
 
 - la **curva característica** prevista: altura, potencia y rendimiento frente al caudal;
 - el **flujo potencial** en la sección meridional;
 - las **velocidades relativas en las dos caras** de cada sección del álabe;
 - el **NPSH₃ necesario** frente al caudal;
 - las **pérdidas de la voluta** frente al caudal, que entran en la curva;
-- el **empuje radial** sobre el rodete frente al caudal.
+- el **empuje radial** sobre el rodete frente al caudal;
+- el **empuje axial** sobre el rodete frente al caudal.
 
 Las referencias principales son de Gülich, *Centrifugal Pumps*, 2.ª edición: capítulos 3
-a 6. El modelo de la voluta es el de D. Japikse, W. D. Marscher y R. B. Furst,
+a 6 y 9. El modelo de la voluta es el de D. Japikse, W. D. Marscher y R. B. Furst,
 *Centrifugal Pump Design and Performance*, Concepts ETI 1997, capítulo 4.3. Aquí solo se
 citan los números de ecuación; la redacción, las derivaciones y las elecciones propias se
 señalan como tales.
@@ -407,6 +409,86 @@ datos.
 | Válvula cerrada | 0,304 | 487 N |
 | Para el diseño mecánico | — | 640 N |
 
+## 7. Empuje axial
+
+Las presiones sobre los dos discos del rodete no se compensan: el trasero tiene más área
+mojada, desde el sello del eje $d_D$ hasta $d_2$, que el delantero, desde el anillo de
+desgaste $d_{sp}$. La fuerza resultante empuja el rodete hacia la aspiración y la carga
+el cojinete axial. Turbopump sigue la tabla 9.2 de Gülich (cap. 9.2), con el signo del
+libro: **positivo hacia la aspiración**.
+
+**Subida de presión en el rodete** (ec. T9.2.2, con $\eta_{h,La}/\eta_h = 1$ como
+aconseja el libro y $H/\eta_h = H_{th}$):
+
+$$\Delta p_{La} = \rho\,g\,H\left(1 - \frac{g\,H_{th}}{2\,u_2^2}\right)$$
+
+**Giro del líquido en las cámaras laterales** (tabla 9.1):
+
+- Sin fuga, $k_o = 0{,}5$: es la ec. T9.1.3 para cámaras abiertas al colector
+  ($r_w = r_2$, $t_{ax} = 0$) con el mismo rozamiento en la carcasa y en el rodete. Se
+  puede cambiar.
+- La fuga hacia dentro por el anillo delantero acelera el giro:
+  $k = k_o\,e^{300\,\varphi_{sp}(r_2/r_{sp} - 1)}$ (ec. T9.1.4 con $b = 1$).
+- $\varphi_{sp} = 5{,}5\cdot10^{-4}\,\psi_{opt}^{1,5}(n_q/20)^{0,4}$ para las holguras de
+  la ec. 3.12 (ec. T9.1.2a). Con `clearances=wide` se dobla (elección propia, como en el
+  empuje radial).
+- Fuera del diseño la fuga se escala con $\sqrt{H/H_{opt}}$, porque sigue a la
+  diferencia de presión en el anillo (elección propia).
+
+**Fuerzas** (tabla 9.2):
+
+- Sobre cada disco, ec. T9.2.3, con $x = d_{sp}/d_2$ delante y $x = d_D/d_2$ detrás:
+  $$F = \pi r_2^2\left\{(1 - x^2)\,\Delta p_{La} - \frac{\rho}{4}\,u_2^2\,\bar k^2\,(1 - x^2)^2\right\}$$
+  Es la integral de la presión de la ec. T9.1.7 entre $x$ y $r_2$; una prueba lo
+  comprueba.
+- $F_{Hy} = F_{RS} - F_{FS}$ (ecs. T9.2.6 y T9.2.8, con un $k$ distinto en cada disco).
+- Cantidad de movimiento $F_I = \rho\,Q_{La}\,c_{1m}$, con $\varepsilon_2 = 90°$ en
+  rodetes radiales (ec. T9.2.9). $Q_{La}$ incluye la fuga del anillo delantero.
+- Fuerza sobre el eje $F_w = \frac{\pi}{4}\,d_D^2\,(p_{amb} - p_1)$ (ec. T9.2.10), con
+  $p_1$ la presión estática en el ojo y la atmósfera estándar fuera del sello.
+- Total $F_{ax} = F_{Hy} - F_I + F_w$ (ec. T9.2.11), sin la fuerza del acoplamiento.
+
+**Con agujeros de equilibrado** y un anillo trasero de diámetro $d_{s2}$ (por defecto
+$d_{sp}$):
+
+- Queda una fracción de la fuerza sin agujeros, de 0,1 a 0,2 según la ec. T9.2.14;
+  tomamos 0,15.
+- Se suma la fuerza de la ec. T9.2.13 cuando $d_{s2} \ne d_{sp}$. Un anillo trasero
+  mayor empuja hacia la impulsión.
+
+**Rodete de doble aspiración:** se equilibra solo, salvo un resto de signo desconocido,
+$F_{ax} = f_{ax}\,\frac{\rho}{2}\,u_2^2\,(d_2^2 - d_{sp}^2)$ (ec. T9.2.15). Tomamos
+$f_{ax}$ = 0,015, el centro del rango estacionario de 0,01 a 0,02. La parte variable
+puede llegar a 0,02–0,06.
+
+**Diámetros por defecto (elección propia):**
+
+- $d_{sp}$: el ojo $d_1$ más el espesor del disco por los dos lados, el mismo
+  $\max(3\ \text{mm};\ 0{,}02\,d_2)$ del modelo CAD.
+- $d_D$: el diámetro del cubo.
+
+**Comprobación:** el informe da también la estimación rápida de la ec. T9.2.12,
+$(0{,}7\ \text{a}\ 0{,}9)\,\rho\,g\,H\,\frac{\pi}{4}(d_{sp}^2 - d_D^2)$.
+
+**Bomba de referencia** (sin agujeros, $d_{sp}$ = 84,1 mm, $d_D$ = 19,3 mm):
+
+| Parte | Diseño |
+|---|---|
+| $\Delta p_{La}$ | 234 kPa (0,75 $\rho g H$) |
+| $\bar k$ delante / detrás | 0,61 / 0,50 |
+| Discos $F_{Hy}$ | 1107 N |
+| Cantidad de movimiento $F_I$ | 180 N |
+| Eje $F_w$ | 6 N |
+| **Total** | **933 N hacia la aspiración** |
+| A válvula cerrada | 1105 N |
+| Estimación rápida (ec. T9.2.12) | 1152 a 1481 N |
+
+Con agujeros de equilibrado el total baja a unos −8 N.
+
+**Avisos:** si sin agujeros la fuerza apunta hacia la impulsión, el programa avisa. Pasa
+con presiones de aspiración altas, como en las bombas de circulación de calderas (cap.
+9.2.2).
+
 ## Dónde se usa
 
 - **Interfaz:**
@@ -419,8 +501,12 @@ datos.
 - **Línea de comandos:** `turbopump performance`, que escribe la curva también en CSV
   (con el NPSH₃ y la pérdida en la voluta), y `turbopump analysis`, con el flujo
   potencial y las caras del álabe, también en CSV. Los coeficientes del NPSH₃ se fijan
-  con `--set npsh_inlet=`, `npsh_blade=` y `npsh_exponent=`, y las holguras del empuje
-  radial con `--set clearances=wide`.
+  con `--set npsh_inlet=`, `npsh_blade=` y `npsh_exponent=`, y las holguras de los
+  empujes con `--set clearances=wide`. Para el empuje axial están `seal=`,
+  `shaft_seal=`, `balance=on`, `rear_seal=` y `k0=`. El CSV añade la columna
+  `axial_force_n`.
+- **Interfaz:** la vista *Curves* da el empuje axial en el diseño y a válvula cerrada,
+  con una casilla para los agujeros de equilibrado; el informe da sus partes.
 
 ## Limitaciones
 
@@ -438,4 +524,12 @@ datos.
   para construir los álabes; el diseño sigue con el flujo cuasi unidimensional.
 - **Velocidades en las caras:** sin deslizamiento, la carga no se anula en el borde de
   salida como en el flujo real.
+- **Empuje axial:**
+  - el giro de entrada a las cámaras laterales y la recirculación a carga parcial, que
+    según Gülich son la mayor incertidumbre, no se modelan;
+  - $k$ es un promedio (opción A del libro), no la integración paso a paso de la ec.
+    T9.1.9;
+  - en bombas multietapa la cifra es la de un rodete; faltan los tambores y discos de
+    equilibrado (cap. 9.2.3);
+  - faltan los rodetes semiaxiales y axiales (ecs. T9.2.16 a T9.2.18).
 - **Pendiente:** el análisis álabe a álabe en dos dimensiones.
