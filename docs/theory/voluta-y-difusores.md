@@ -225,10 +225,14 @@ el empuje radial (cap. 9.3.4 y tabla 9.4). Se elige en el paso de datos de parti
 - **Voluta interior:** de la nariz del nervio a la garganta, en $2\pi$. Abarca
   $\varepsilon_{sp}$ y recoge su parte del caudal.
 - **Canal exterior:** lleva el caudal de la primera voluta parcial por fuera del nervio
-  hasta la descarga. Su área va de la garganta de la primera voluta parcial a esa área
-  por la relación $A_{sal}/A_{ent}$, que por defecto es 1 (área constante, elección
-  propia). Gülich dice que a $n_q$ bajo y medio el canal frena el flujo y se dimensiona
-  como un difusor (cap. 1.6); el usuario puede fijar la relación.
+  hasta la descarga. Es la parte de cada sección más allá del nervio, así que la pared
+  exterior sigue sin escalón desde la primera voluta parcial.
+  - En la nariz su área es la garganta de la primera voluta parcial menos lo que ocupa
+    el nervio: una aceleración local, como la que provoca la lengüeta.
+  - En la descarga es esa garganta por la relación $A_{sal}/A_{3q,1}$, que por defecto
+    es 1 (elección propia). Entre medias el área crece de forma lineal.
+  - Gülich dice que a $n_q$ bajo y medio el canal frena el flujo y se dimensiona como un
+    difusor (cap. 1.6); el usuario puede fijar la relación.
 - **Descarga:** empieza en la sección que abarca la voluta interior, el nervio y el
   canal exterior, y sigue como en la voluta simple con el área de los dos canales.
 
@@ -237,7 +241,8 @@ el empuje radial (cap. 9.3.4 y tabla 9.4). Se elige en el paso de datos de parti
 - Cada voluta parcial de ángulo $\varepsilon_{sp}$ se dimensiona para el caudal
   $Q_{Le}\,\varepsilon_{sp}/2\pi$ con la conservación del momento angular (cap. 7.8.1,
   punto 8). Su garganta cumple $\int b/r\,dr = \varepsilon_{sp}\,Q_{Le}/(2\pi c_{2u} r_2)$
-  y lleva la corrección por la lengüeta (ec. 7.28).
+  y lleva la corrección de la ec. 7.28: la garganta interior por la lengüeta, con
+  $e_3$, y la de la primera voluta parcial por la nariz del nervio, con su espesor.
 - Con la ley de velocidad constante, el área crece en proporción al ángulo dentro de
   cada voluta parcial.
 - Como $\int b/r\,dr$ crece con el logaritmo del radio, la garganta para la mitad del
@@ -252,6 +257,28 @@ el empuje radial (cap. 9.3.4 y tabla 9.4). Se elige en el paso de datos de parti
 | Por debajo de 90° | error: no reduce el empuje radial | idem |
 | Por encima de 180° | aviso: el canal exterior largo añade pérdidas y empuje en sobrecarga | idem |
 | Espesor del nervio | $e_3$, el de la lengüeta (Gülich lo deja al cálculo resistente y a la fundición) | elección propia |
+| Nariz y cola | largo/espesor 1, un semicírculo; de 1 a 5 | elección propia |
+| Nervio más grueso que 2/3 de la primera garganta | error | elección propia |
+| Secciones circulares | error: el nervio va a un radio fijo a lo ancho de la sección | — |
+
+**El nervio:**
+
+- **Caras:** la interior es la pared exterior de la voluta interior, que sale de
+  $r'_z$ en su comienzo; la exterior está un espesor más allá. Van a radio constante a
+  lo ancho de la sección, así que la carcasa es una única espiral partida por el
+  nervio: voluta interior, nervio y canal exterior llenan cada sección.
+- **Nariz y cola:** medias elipses delante del comienzo de la voluta interior y detrás
+  de la garganta. Sus semidiámetros son $e/2$ a través del nervio y $k\,e/2$ a lo
+  largo de su línea media, con $k$ la relación largo/espesor. Así tocan las dos caras
+  con tangente continua.
+- **Dirección:** la nariz apunta a lo largo de la pared de la voluta interior. Al
+  empezar en $r'_z$ con un área casi nula, esa pared sale con el ángulo del flujo
+  $\alpha'_3$ (ecs. T7.7.3 a T7.7.5), que es lo que Gülich pide a la lengüeta (cap.
+  7.8.1, punto 7: ángulo de calado según el flujo, incidencia de ±3°). La nariz queda
+  así con incidencia casi nula sin otro dato.
+- **Perfil:** Gülich aconseja perfilar la lengüeta de forma elíptica para que acepte
+  cambios de dirección del flujo, y definir su espesor por un círculo (mismo punto).
+  Por defecto la nariz es un semicírculo; una relación mayor la alarga.
 
 **En la predicción:**
 
@@ -271,14 +298,21 @@ En la bomba de referencia (7 álabes, 180°):
 | $F_R$ en el diseño | 30 N | 102 N |
 | Carga para el diseño mecánico | 640 N | 277 N |
 
+El nervio de 3,4 mm deja el canal exterior en 1306 mm² en la nariz, que crece hasta
+1408 mm² en la descarga. Su nariz semicircular apunta a 7,9° de la dirección
+circunferencial, frente a $\alpha'_3$ = 8,0°. La punta queda a 179,0° y el punto más
+cercano al eje, a 98,3 mm, que es $r'_z$.
+
 La voluta doble tiene un empuje casi constante con el caudal (Fig. 9.29): en el diseño
 es algo mayor que el de la simple, pero el máximo, y con él la carga del eje, baja a
 menos de la mitad.
 
-**CAD:** la primera voluta parcial con el canal exterior, la voluta interior y la
-descarga se construyen como tres sólidos que se unen; los dos canales entran un poco en
-la descarga para que la unión no trabaje con caras coincidentes. El resultado es un único
-sólido válido.
+**CAD:** las secciones completas forman una espiral única, de la primera voluta parcial
+a la garganta, que se une a la descarga. El nervio se le resta como un prisma con su
+contorno en el plano medio (caras, nariz y cola), en toda la altura de la voluta. El
+resultado es un único sólido válido. La malla de superficie de la vista 3D y del STL
+une en cambio los canales por separado, con la entrada del canal exterior en rampa en
+vez de la nariz.
 
 ### Comprobaciones
 
@@ -411,7 +445,8 @@ También avisan:
   tobera para que la unión no trabaje con caras coincidentes, y la lengüeta queda
   donde la pared de la espiral sale de la tobera.
 - La nariz redondeada se talla en el dominio fluido como un prisma con el contorno de
-  la nariz en el plano medio, en toda la altura de la voluta.
+  la nariz en el plano medio, en toda la altura de la voluta. El nervio de la voluta
+  doble se resta del mismo modo.
 
 Los sólidos se construyen en milímetros con Open CASCADE:
 
@@ -477,9 +512,12 @@ Tras el difusor, la voluta recibe mucho menos momento angular: $c_u r$ baja de 1
 ## Limitaciones
 
 - **Volutas:** no hay volutas gemelas (con dos descargas), volutas de entrada ni voluta
-  detrás de otra voluta. En la voluta doble, el nervio acaba en la entrada de la
-  descarga, y el reparto de caudal entre los dos canales según sus resistencias
-  (Gülich tabla 1.5) no se calcula: cada uno lleva la parte de su ángulo.
+  detrás de otra voluta. En la voluta doble:
+  - el nervio acaba en la entrada de la descarga, sin prolongarse dentro de ella;
+  - su espesor es constante, sin estrechamiento hacia la garganta ni redondeos con las
+    paredes ni ángulo de desmoldeo;
+  - el reparto de caudal entre los dos canales según sus resistencias (Gülich tabla
+    1.5) no se calcula: cada uno lleva la parte de su ángulo.
 - **Multietapa:** no hay canales de retorno.
 - **Secciones:** solo rectangulares, trapezoidales y circulares, simétricas. Faltan las
   de Bézier, las asimétricas y las externas.
