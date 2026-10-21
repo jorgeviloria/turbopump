@@ -164,6 +164,33 @@ su punto de entrada, que crece hacia el lado abierto ($-z$ por defecto). Opcione
 - **esquina cuadrada arriba:** el cuarto del lado cerrado se sustituye por una esquina
   en ángulo recto.
 
+**Redonda asimétrica interna.** Para volutas que deben quedar pequeñas de diámetro, la
+espiral se coloca al lado del rodete, por dentro del radio de la entrada, y se llega a ella
+por un codo y un cuello que son iguales en toda la vuelta (como el anillo sin álabes).
+Por defecto va hacia $+z$, detrás del rodete, donde está el disco del cubo; hacia $-z$
+quedaría delante de la tapa, en el lado de aspiración. La construcción es propia:
+
+- **Codo:** gira el flujo de radial a axial. Su pared interior, del lado hacia el que gira
+  el flujo, parte de ese punto de entrada y puede ser una esquina viva, un chaflán recto o
+  un cuarto de elipse de semiejes $c$ (axial) y $\kappa\,c$ (radial), con $c = b_3/2$ y
+  $\kappa$ la relación del codo. La exterior gira alrededor del mismo centro desde el otro
+  punto de entrada hasta el techo del cuello, también viva, recta o elíptica.
+- **Cuello:** recto, de altura $A_R\,b_3$ (la relación de áreas del codo: su salida entre
+  su entrada, por unidad de longitud a lo largo de la espiral) y de largo $0{,}5\,b_3$
+  por defecto. Termina en la cara donde empieza la espiral.
+- **Espiral:** la sección asimétrica estrictamente externa, girada 90°: apoyada en la cara
+  del cuello en vez de en la entrada, cerrada con una esquina recta del lado del techo
+  del cuello, y creciendo hacia fuera de la cara (lejos del rodete) y hacia dentro, hacia
+  el eje. Así nunca pasa del radio del techo del cuello ni vuelve hacia el cuello. Su
+  tamaño $H$ es lo que se aleja de la cara.
+
+El codo y el cuello no cuentan en la integral del momento angular, igual que el anillo
+sin álabes en las volutas externas. Como recorren toda la vuelta, todas las definiciones
+internas comparten el mismo codo (solo cambia la relación de la elipse) y no se mezclan
+con otras formas. En la bomba de referencia la garganta interna por defecto sale de
+2492 mm² frente a los 3123 mm² del trapecio externo: a menor radio, la misma integral
+$\int b/r\,dr$ necesita menos área, a cambio de más velocidad.
+
 **Propiedades de cualquier forma** (teorema de Green). Las magnitudes que necesita la
 espiral salen del contorno cerrado, recorrido en sentido antihorario en $(r, z)$:
 
@@ -655,7 +682,14 @@ También avisan:
 Los sólidos se construyen en milímetros con Open CASCADE:
 
 - **Voluta:** cada sección es un contorno cerrado con una arista por tramo (apartado 2),
-  para que la spline no suavice los quiebros entre tramos. El loft recorre la
+  para que la spline no suavice los quiebros entre tramos.
+- **Voluta interna:** la espiral empieza a 3° de la lengüeta y se funde con la tobera, que
+  la atraviesa al principio: la lengüeta sale de esa intersección, como en las volutas de
+  lengüeta afilada. El anillo de entrada se revoluciona junto con el codo y el cuello, que
+  entran un poco en la espiral, algo más bajos que el cuello en la cara para no correr
+  sobre su techo plano. La carcasa añade el perfil del codo y el cuello desplazado el
+  espesor de pared, y el hueco del rodete ($r < r_2$) se abre solo en el lado opuesto a
+  la espiral, porque esta queda por dentro de $r_2$. El loft recorre la
   espiral y la tobera, y se une al anillo que va de la salida del rodete al círculo de
   la lengüeta. El resultado es el dominio fluido, `volute.<ext>`.
 - **Carcasa de la voluta,** `volute-casing.<ext>` (construcción propia):
@@ -750,10 +784,11 @@ Tras el difusor, la voluta recibe mucho menos momento angular: $c_u r$ baja de 1
   - el reparto de caudal entre los dos canales según sus resistencias (Gülich tabla
     1.5) no se calcula: cada uno lleva la parte de su ángulo.
 - **Multietapa:** no hay canales de retorno.
-- **Secciones:** falta la redonda asimétrica interna, la que queda junto al rodete por
-  debajo de $r'_z$ y necesita un codo desde la entrada. La voluta doble solo admite
-  paredes rectas con un ángulo de cono. Si las definiciones mezclan formas de esquinas
-  distintas, las esquinas vivas que no comparten se suavizan en el CAD.
+- **Secciones:** la voluta doble solo admite paredes rectas con un ángulo de cono. Si las
+  definiciones mezclan formas de esquinas distintas, las esquinas vivas que no comparten
+  se suavizan en el CAD. En la voluta interna, la lengüeta es solo la intersección de la
+  espiral y la tobera, sin nariz ni corrección propia, y no se comprueba la holgura con
+  el disco del rodete (no se conoce su espesor).
 - **Áreas de la espiral:** faltan las reglas de Pfleiderer y Stepanoff.
 - **Tobera:** tangencial o radial, siempre en el plano medio: no hay codo en z ni
   desplazamiento axial, y la salida es siempre circular, sin brida rectangular. Con la
