@@ -9,6 +9,7 @@ use std::f64::consts::{PI, TAU};
 
 use tp_math::{DVec2, DVec3};
 
+use super::stress::WallStress;
 use super::{
     CutwaterShape, DischargeShape, SectionShape, SectionSize, StraightWall, VoluteDesign,
     VoluteInput,
@@ -193,6 +194,8 @@ pub struct VoluteGeometry {
     /// Outer wall of the spiral in the midplane, finely sampled from the start of the
     /// spiral to the throat.
     pub outer_wall: Vec<DVec3>,
+    /// Membrane stresses in the casing wall.
+    pub wall_stress: WallStress,
     pub cutwater: CutwaterGeometry,
     pub warnings: Vec<String>,
 }
@@ -757,7 +760,7 @@ impl VoluteGeometry {
                 design.diffuser.length * 1e3
             ));
         }
-        Ok(Self {
+        let mut volute = Self {
             basis: *basis,
             design,
             start_angle: start,
@@ -773,9 +776,22 @@ impl VoluteGeometry {
             outlet_height,
             rotation,
             outer_wall,
+            wall_stress: WallStress::default(),
             cutwater,
             warnings,
-        })
+        };
+        let stress = WallStress::new(&volute, &input.wall.pressure, &input.wall.allowable_stress)?;
+        if stress.hoop > stress.allowable {
+            volute.warnings.push(format!(
+                "the casing wall carries {:.1} MPa, above the allowable {:.1} MPa: make it at \
+                 least {:.1} mm thick",
+                stress.hoop * 1e-6,
+                stress.allowable * 1e-6,
+                stress.required_thickness * 1e3
+            ));
+        }
+        volute.wall_stress = stress;
+        Ok(volute)
     }
 }
 

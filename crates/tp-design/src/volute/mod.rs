@@ -24,6 +24,7 @@
 
 mod geometry;
 pub mod loss;
+pub mod stress;
 
 use std::f64::consts::{PI, TAU};
 
@@ -234,6 +235,11 @@ pub struct WallInput {
     /// Casing wall thickness, m.
     pub thickness: Param<f64>,
     pub flange: FlangeInput,
+    /// Design pressure of the casing over the suction pressure, Pa; automatic: the rise
+    /// at shut-off.
+    pub pressure: Param<f64>,
+    /// Allowable stress of the casing material, Pa; automatic: 50 MPa.
+    pub allowable_stress: Param<f64>,
 }
 
 /// The flange at the outlet of the discharge diffuser. Every size is automatic by
