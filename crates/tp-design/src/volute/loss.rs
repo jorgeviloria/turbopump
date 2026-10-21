@@ -18,14 +18,25 @@
 //! A spiral sized by angular momentum then has its least loss at its design flow, as
 //! Gülich 2nd ed., Chap. 4.2, observes.
 //!
+//! The model of Japikse leaves wall friction out. The walls of the spiral lose
+//! Σ(c_f + 0.0015)·c³·ΔA/(2g·Q) (Gülich eq. T3.8.21), with c_u·r constant over each
+//! section ([`super::VoluteDesign::friction_integral`]), and c_f of a flat plate
+//! (eq. T3.8.3) as long as the spiral at the throat velocity of the design point in
+//! cold water, on 16 µm walls (our choice, the roughness of the impeller channels).
+//! [`VoluteLossGeometry::wall_friction_loss`] gives it apart: the loss analysis of the
+//! performance adds it at the design point only (Gülich Table 3.8).
+//!
 //! The discharge cone after the throat loses (c_p,id − c_p)·c₇²/2g, with the ideal
 //! recovery c_p,id = 1 − 1/A_R² (Gülich eq. 1.40) and the real one limited by the
 //! best recovery a diffuser of that length reaches, c_p,opt = 0.36·(L/R₁)^0.26
 //! (Gülich eq. 7.31).
 
-use std::f64::consts::PI;
+use std::f64::consts::{PI, TAU};
 
 use tp_units::STANDARD_GRAVITY as G;
+
+use crate::losses::plate_friction;
+use crate::viscous::{CHANNEL_ROUGHNESS, WATER_VISCOSITY};
 
 /// What the loss model needs from a volute, in SI units.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -45,6 +56,10 @@ pub struct VoluteLossGeometry {
     pub meridional_factor: f64,
     /// Factor F₂ on the sudden-expansion loss of the swirl.
     pub swirl_factor: f64,
+    /// ∫ (q/A)³·P·r dφ of the spiral walls, m⁻⁴ ([`super::VoluteDesign::friction_integral`]),
+    /// and c_f + 0.0015 on them; zero leaves wall friction out.
+    pub friction_integral: f64,
+    pub wall_friction: f64,
 }
 
 impl VoluteLossGeometry {
@@ -56,6 +71,8 @@ impl VoluteLossGeometry {
         let cone = &volute.diffuser;
         let throat_radius = (cone.inlet_area / PI).sqrt();
         let throat_area = volute.throat.area + volute.rib.map_or(0.0, |r| r.outer_throat.area);
+        let length = TAU * volute.throat.centroid_radius;
+        let reynolds = volute.flow / throat_area * length / WATER_VISCOSITY;
         Self {
             inlet_radius: volute.cutwater_diameter / 2.0,
             inlet_width: volute.inlet_width,
@@ -65,7 +82,15 @@ impl VoluteLossGeometry {
             cone_recovery: cone_recovery(cone.area_ratio, cone.length / throat_radius),
             meridional_factor: 1.0,
             swirl_factor: 1.0,
+            friction_integral: volute.friction_integral(),
+            wall_friction: plate_friction(reynolds, CHANNEL_ROUGHNESS / length) + 0.0015,
         }
+    }
+
+    /// Head lost by friction on the walls of the spiral at flow `flow` (m³/s), m
+    /// (Gülich eq. T3.8.21).
+    pub fn wall_friction_loss(&self, flow: f64) -> f64 {
+        self.wall_friction * flow * flow * self.friction_integral / (2.0 * G)
     }
 }
 
@@ -171,6 +196,8 @@ mod tests {
             cone_recovery: 0.377,
             meridional_factor: 1.0,
             swirl_factor: 1.0,
+            friction_integral: 0.0,
+            wall_friction: 0.0,
         };
         let flow = 6.84 * FT * 2.0 * PI * r5 * b5;
         (geometry, flow, 28.58 * FT)

@@ -347,6 +347,135 @@ impl SecondaryLosses {
     }
 }
 
+/// Friction coefficient of a flat plate in parallel flow at Reynolds number `re` with
+/// relative roughness `roughness` (ε/L): c_f = 0.136/{−log(0.2·ε/L + 12.5/Re)}^2.15
+/// (Gülich eq. T3.8.3).
+pub fn plate_friction(re: f64, roughness: f64) -> f64 {
+    0.136 / (-(0.2 * roughness + 12.5 / re.max(1.0)).log10()).powf(2.15)
+}
+
+/// Shock loss where the flow leaves the impeller into a wider collector, m:
+/// ζ_LS = φ₂²·(τ₂ − b₂/b₃)² with ζ = 2gZ/u₂² (Gülich eq. T3.8.24), for flow coefficient
+/// `flow_coefficient` φ₂ = c₂m/u₂, outlet blockage τ₂ and width ratio b₂/b₃.
+pub fn outlet_shock(flow_coefficient: f64, blockage: f64, width_ratio: f64, u2: f64) -> f64 {
+    (flow_coefficient * (blockage - width_ratio)).powi(2) * u2 * u2 / (2.0 * G)
+}
+
+/// The blade channels of an impeller for its hydraulic losses (Gülich Table 3.8 (1)).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct ImpellerChannels {
+    pub blades: f64,
+    pub eyes: f64,
+    /// Inlet throat of one channel a₁ × b₁: width across the blades × height, m.
+    pub inlet_throat_width: f64,
+    pub inlet_height: f64,
+    /// Outlet throat of one channel a₂ × b₂, m.
+    pub outlet_throat_width: f64,
+    pub outlet_width: f64,
+    /// Channel length L_sch, m.
+    pub length: f64,
+    /// Sand roughness of the channels, m.
+    pub roughness: f64,
+    /// b₂/d₂.
+    pub width_ratio: f64,
+    /// u₂ and u₁ at the mean inlet diameter, m/s.
+    pub tip_speed: f64,
+    pub inlet_speed: f64,
+    /// Flow area of one eye, m².
+    pub eye_area: f64,
+}
+
+/// Head lost in the impeller at one flow, m (Gülich Table 3.8 (1)).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct ImpellerLosses {
+    /// Friction and mixing in the channels Z_La,R (eqs. T3.8.2 to T3.8.6).
+    pub friction: f64,
+    /// Shock at the inlet throat Z_La,C (eqs. T3.8.7 to T3.8.9).
+    pub inlet_shock: f64,
+    /// Friction factor c_f of the channels (eq. T3.8.3).
+    pub friction_coefficient: f64,
+    /// w₁q/w₁m.
+    pub throat_ratio: f64,
+}
+
+impl ImpellerLosses {
+    pub fn total(&self) -> f64 {
+        self.friction + self.inlet_shock
+    }
+}
+
+impl ImpellerChannels {
+    /// The channels of `design` turning at `omega` (rad/s), with channel roughness
+    /// `roughness` (m). The inlet throat is the one the NPSH₃ uses: height (d₁ − d_n)/2
+    /// and width π·d₁m·sin β₁B/z − e; the outlet throat π·d₂·sin β₂B/z − e. The channel
+    /// length is (r₂ − r₁m)/sin β_m with β_m the mean of the inlet and outlet blade
+    /// angles, a logarithmic spiral (our choice).
+    pub fn new(design: &CentrifugalPumpDesign, omega: f64, roughness: f64) -> Self {
+        let z = f64::from(design.blade_count);
+        let e = design.blade_thickness;
+        let mean = &design.inlet_mean;
+        let d1m = mean.diameter;
+        let (d1, dn, d2) = (
+            design.inlet_diameter,
+            design.hub_diameter,
+            design.outlet_diameter,
+        );
+        let beta2 = design.outlet.blade_angle;
+        let beta_m = 0.5 * (mean.blade_angle + beta2);
+        Self {
+            blades: z,
+            eyes: design.eyes,
+            inlet_throat_width: (PI * d1m * mean.blade_angle.sin() / z - e).max(1e-4),
+            inlet_height: 0.5 * (d1 - dn),
+            outlet_throat_width: (PI * d2 * beta2.sin() / z - e).max(1e-4),
+            outlet_width: design.outlet_width,
+            length: (0.5 * (d2 - d1m) / beta_m.sin()).max(0.1 * d2),
+            roughness,
+            width_ratio: design.outlet_width / d2,
+            tip_speed: omega * d2 / 2.0,
+            inlet_speed: omega * d1m / 2.0,
+            eye_area: PI / 4.0 * (d1 * d1 - dn * dn),
+        }
+    }
+
+    /// Losses at impeller flow `impeller_flow` (m³/s, all eyes) for a liquid of
+    /// kinematic viscosity `nu` (m²/s).
+    pub fn losses(&self, impeller_flow: f64, nu: f64) -> ImpellerLosses {
+        let channel = self.eyes * self.blades;
+        let inlet_area = self.inlet_throat_width * self.inlet_height;
+        let outlet_area = self.outlet_throat_width * self.outlet_width;
+        let u2 = self.tip_speed;
+        // Friction and mixing (eqs. T3.8.2 to T3.8.6).
+        let w_av = 2.0 * impeller_flow / (channel * (outlet_area + inlet_area));
+        let cf = plate_friction(w_av * self.length / nu, self.roughness / self.length);
+        let hydraulic_diameter = 2.0 * (outlet_area + inlet_area)
+            / (self.inlet_throat_width
+                + self.inlet_height
+                + self.outlet_throat_width
+                + self.outlet_width);
+        let cd = (cf + 0.0015) * (1.1 + 4.0 * self.width_ratio);
+        let zeta_r = 4.0 * cd * self.length / hydraulic_diameter * (w_av / u2).powi(2);
+        // Shock at the inlet throat (eqs. T3.8.7 to T3.8.9): 30 % of a Carnot shock
+        // from w₁m to w₁q, swirl-free inflow; nothing when the flow accelerates into
+        // the throat (our choice).
+        let c1m = impeller_flow / (self.eyes * self.eye_area);
+        let w1m = c1m.hypot(self.inlet_speed);
+        let w1q = impeller_flow / (channel * inlet_area);
+        let zeta_c = if w1q < w1m {
+            0.3 * ((w1m - w1q) / u2).powi(2)
+        } else {
+            0.0
+        };
+        let to_head = u2 * u2 / (2.0 * G);
+        ImpellerLosses {
+            friction: zeta_r * to_head,
+            inlet_shock: zeta_c * to_head,
+            friction_coefficient: cf,
+            throat_ratio: w1q / w1m,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -407,6 +536,58 @@ mod tests {
         let k = disk_friction_coefficient(re, r2, AXIAL_GAP_RATIO * r2, 1.0);
         let power = 2.0 * disk_friction_power(k, 998.0, omega, r2, 0.0);
         assert_relative_eq!(power / 745.7, 1.46, max_relative = 0.1);
+    }
+
+    #[test]
+    fn impeller_losses_follow_table_3_8() {
+        let channels = ImpellerChannels {
+            blades: 7.0,
+            eyes: 1.0,
+            inlet_throat_width: 0.02,
+            inlet_height: 0.03,
+            outlet_throat_width: 0.025,
+            outlet_width: 0.017,
+            length: 0.13,
+            roughness: 16e-6,
+            width_ratio: 0.1,
+            tip_speed: 26.0,
+            inlet_speed: 12.0,
+            eye_area: 4.4e-3,
+        };
+        let flow = 0.028;
+        let l = channels.losses(flow, 1e-6);
+        // Eq. T3.8.6 by hand.
+        let (a1, a2) = (0.02 * 0.03, 0.025 * 0.017);
+        let w_av = 2.0 * flow / (7.0 * (a1 + a2));
+        let dh = 2.0 * (a1 + a2) / (0.02 + 0.03 + 0.025 + 0.017);
+        let zeta =
+            4.0 * (l.friction_coefficient + 0.0015) * 1.5 * 0.13 / dh * (w_av / 26.0).powi(2);
+        assert_relative_eq!(
+            l.friction,
+            zeta * 26.0 * 26.0 / (2.0 * G),
+            max_relative = 1e-12
+        );
+        // The shock loss vanishes where the throat no longer decelerates the flow.
+        assert!(l.inlet_shock > 0.0 && l.throat_ratio < 1.0);
+        assert_relative_eq!(channels.losses(10.0 * flow, 1e-6).inlet_shock, 0.0);
+        // A rougher or more viscous channel loses more.
+        let rough = ImpellerChannels {
+            roughness: 200e-6,
+            ..channels
+        };
+        assert!(rough.losses(flow, 1e-6).friction > l.friction);
+        assert!(channels.losses(flow, 1e-4).friction > l.friction);
+    }
+
+    #[test]
+    fn outlet_shock_follows_eq_t3_8_24() {
+        // ζ_LS = 0.1²·(1.1 − 0.8)² = 9·10⁻⁴.
+        assert_relative_eq!(
+            outlet_shock(0.1, 1.1, 0.8, 26.0),
+            9e-4 * 26.0 * 26.0 / (2.0 * G),
+            max_relative = 1e-12
+        );
+        assert_relative_eq!(outlet_shock(0.1, 1.0, 1.0, 26.0), 0.0);
     }
 
     #[test]

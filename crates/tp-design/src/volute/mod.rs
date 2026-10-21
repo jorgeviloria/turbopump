@@ -431,6 +431,39 @@ impl Shape {
         }
     }
 
+    /// Wetted perimeter of the section of height (or diameter) `a`: all walls but the
+    /// opening of width b₃ toward the impeller.
+    fn wetted_perimeter(&self, a: f64) -> f64 {
+        match self.kind {
+            SectionShape::Circular => (PI * a - self.b3.min(a)).max(0.0),
+            _ => {
+                let t = self.slope();
+                self.b3 + 2.0 * t * a + 2.0 * a * t.hypot(1.0)
+            }
+        }
+    }
+
+    /// ∮ r⁻² dℓ along the wetted walls of the section of height (or diameter) `a`, all
+    /// but the opening of width b₃ toward the impeller, 1/m.
+    fn wall_inverse_square(&self, a: f64) -> f64 {
+        let rz = self.rz;
+        match self.kind {
+            SectionShape::Circular => {
+                // ∫ ρ dθ/(R + ρ·cos θ)² = 2π·ρ·R/(R² − ρ²)^(3/2) round the circle.
+                let rho = a / 2.0;
+                let centre = rz + rho;
+                let whole = TAU * rho * centre / (centre * centre - rho * rho).powf(1.5);
+                (whole - self.b3.min(a) / (rz * rz)).max(0.0)
+            }
+            _ => {
+                let t = self.slope();
+                let outer = rz + a;
+                (self.b3 + 2.0 * t * a) / (outer * outer)
+                    + 2.0 * t.hypot(1.0) * (1.0 / rz - 1.0 / outer)
+            }
+        }
+    }
+
     fn centroid_radius(&self, a: f64) -> f64 {
         let rz = self.rz;
         match self.kind {
@@ -874,6 +907,42 @@ impl VoluteDesign {
         Ok(shape.size(height + correction * fraction))
     }
 
+    /// Σ c³·ΔA over the walls of the spiral (Gülich eq. T3.8.21) over Q³, m⁻⁴. As
+    /// Gülich prescribes (Chap. 3.8), c_u·r = K is constant over each cross section and
+    /// K changes round the circumference: K = q·Q/∫(b/r)dr, with q the fraction of the
+    /// flow collected up to wrap angle φ, the flow spread evenly over the wrap. A wall
+    /// element ΔA = r·dφ·dℓ then gives ∫ (q/∫(b/r)dr)³·∮ r⁻² dℓ dφ. A double volute
+    /// sums both partial volutes and adds its outer channel, closed all round, at the
+    /// radius just outside the rib with its mean velocity (our estimate).
+    pub fn friction_integral(&self) -> f64 {
+        const STEPS: u32 = 360;
+        let shape = self.shape();
+        let step = TAU / f64::from(STEPS);
+        let mut sum = 0.0;
+        for k in 0..STEPS {
+            let angle = (f64::from(k) + 0.5) * step;
+            let Ok(section) = self.section(angle) else {
+                continue;
+            };
+            let collected = match &self.rib {
+                Some(rib) if angle > rib.start => (angle - rib.start) / TAU,
+                _ => angle / TAU,
+            };
+            let momentum = shape.momentum_integral(section.height);
+            if momentum > 0.0 {
+                sum += (collected / momentum).powi(3) * shape.wall_inverse_square(section.height);
+            }
+            if let Some(rib) = self.rib.as_ref().filter(|r| angle > r.start) {
+                let area = rib.channel_area(angle);
+                let height = shape.height_for_area(area);
+                let perimeter = shape.wetted_perimeter(height) + self.inlet_width;
+                let radius = section.outer_radius + rib.thickness + height / 2.0;
+                sum += (rib.start / TAU / area).powi(3) * perimeter * radius;
+            }
+        }
+        sum * step
+    }
+
     /// ∫ b/r dr of a section of the given height.
     pub fn momentum_integral(&self, height: f64) -> f64 {
         self.shape().momentum_integral(height)
@@ -1040,6 +1109,46 @@ mod tests {
                 assert_relative_eq!(numeric_integral(&d, height), k, max_relative = 1e-6);
             }
         }
+    }
+
+    #[test]
+    fn wall_friction_integrates_over_the_spiral() {
+        // Rectangular sections under angular momentum: c_u·r = c₂u·r₂ everywhere, so
+        // Σ c³·ΔA = (c₂u·r₂)³·∫∮ r⁻² dℓ dφ, with the outer wall b₃/r_a² and the side
+        // walls 2·(1/r'_z − 1/r_a).
+        let mut input = VoluteInput::default();
+        input.cross_section.shape = SectionShape::Rectangular;
+        input.spiral.law = AreaLaw::AngularMomentum;
+        input.spiral.cutwater_correction = false;
+        let b = reference_basis();
+        let d = VoluteDesign::new(&b, &input).unwrap();
+        let (b3, rz) = (d.inlet_width, d.stagnation_radius);
+        let walls = |phi: f64| {
+            let ra = d.section(phi).unwrap().outer_radius;
+            b3 / (ra * ra) + 2.0 * (1.0 / rz - 1.0 / ra)
+        };
+        let k = b.cu * b.impeller_diameter / 2.0 / d.flow;
+        assert_relative_eq!(
+            d.friction_integral(),
+            k.powi(3) * gauss_legendre(walls, 0.0, TAU, 200),
+            max_relative = 1e-4
+        );
+        // A circle: the integral round it, less the opening, at a radius far out
+        // tends to its perimeter over r².
+        let circle = Shape {
+            kind: SectionShape::Circular,
+            b3: 0.0,
+            rz: 10.0,
+        };
+        assert_relative_eq!(
+            circle.wall_inverse_square(0.02),
+            PI * 0.02 / (10.01 * 10.01),
+            max_relative = 1e-5
+        );
+        // The outer channel of a double volute rubs too.
+        let double = double_with(|_| {}).unwrap();
+        let single = VoluteDesign::new(&reference_basis(), &VoluteInput::default()).unwrap();
+        assert!(double.friction_integral() > single.friction_integral());
     }
 
     #[test]

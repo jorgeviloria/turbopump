@@ -17,7 +17,11 @@
 //!    sized volutes, so at the design point the hydraulic losses are split between an
 //!    equivalent matched volute (λ₆·AR = 1) and the rest of the stage; the rest keeps
 //!    the statistical shape and the actual volute adds its own losses (our split). A
-//!    mismatched volute then loses head at the design point too;
+//!    mismatched volute then loses head at the design point too. With the loss
+//!    analysis the hydraulic losses of the design point are summed instead (Gülich
+//!    Table 3.8): friction and inlet shock in the impeller, the shock where the flow
+//!    widens into the volute and the volute itself; eq. 4.14 keeps their shape against
+//!    flow. Without a volute the statistical η_h stays;
 //! 6. the required NPSH₃ against flow after Gülich Chap. 6.3.3 ([`crate::npsh`]);
 //! 7. the steady radial force on the impeller after Gülich Table 9.4
 //!    ([`crate::radial_thrust`]).
@@ -28,12 +32,14 @@ use serde::{Deserialize, Serialize};
 use tp_units::STANDARD_GRAVITY as G;
 
 use crate::axial_thrust::{AxialForces, AxialThrust, AxialThrustInput};
-use crate::losses::{LossInput, SecondaryLosses};
+use crate::losses::{ImpellerChannels, ImpellerLosses, LossInput, SecondaryLosses, outlet_shock};
 use crate::npsh::{CollectorThroat, NpshCurve, NpshSettings};
 use crate::operation::{Operation, OperationInput};
 use crate::pump::{CentrifugalPumpDesign, PumpDuty};
 use crate::radial_thrust::{RadialCollector, RadialThrust, default_shroud_thickness};
-use crate::viscous::{VISCOSITY_TOLERANCE, ViscousCorrection, WATER_VISCOSITY, WaterBaseline};
+use crate::viscous::{
+    CHANNEL_ROUGHNESS, VISCOSITY_TOLERANCE, ViscousCorrection, WATER_VISCOSITY, WaterBaseline,
+};
 use crate::volute::loss::{VoluteLoss, VoluteLossGeometry, volute_loss};
 use crate::{DesignError, Param};
 
@@ -213,6 +219,9 @@ pub struct PumpPerformance {
     /// Leakage, disk friction and mechanical losses of the loss analysis for water;
     /// `None` when the statistics of the design stand for them.
     pub losses: Option<SecondaryLosses>,
+    /// Hydraulic losses of the loss analysis for water, when a volute follows the
+    /// impeller; `None` when the statistical η_h stands for them.
+    pub hydraulic: Option<HydraulicLosses>,
     /// The correction from the water characteristic to the liquid of the project
     /// (Gülich Chap. 13.1); all factors 1 for cold water.
     pub viscous: ViscousCorrection,
@@ -221,6 +230,31 @@ pub struct PumpPerformance {
     pub statistical_efficiency: f64,
     pub efficiency_tolerance: f64,
     pub warnings: Vec<String>,
+}
+
+/// The hydraulic losses of the design point as a sum (Gülich Table 3.8), m.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct HydraulicLosses {
+    /// Euler head H_th of the design point, m.
+    pub theoretical_head: f64,
+    /// Friction and inlet shock in the impeller channels.
+    pub impeller: ImpellerLosses,
+    /// Shock where the flow leaves the impeller into the volute (eq. T3.8.24).
+    pub outlet_shock: f64,
+    /// Friction on the walls of the spiral (eq. T3.8.21).
+    pub volute_friction: f64,
+    /// Mixing in the spiral and the discharge cone, from the model of
+    /// [`crate::volute::loss`].
+    pub volute: f64,
+    /// η_h = 1 − ΣZ/H_th and the η_h of the design statistics.
+    pub efficiency: f64,
+    pub statistical_efficiency: f64,
+}
+
+impl HydraulicLosses {
+    pub fn total(&self) -> f64 {
+        self.impeller.total() + self.outlet_shock + self.volute_friction + self.volute
+    }
 }
 
 /// Hydraulic efficiency relative to its maximum at flow ratio q* = Q/Q_opt:
@@ -396,8 +430,10 @@ pub fn predict(
         model.secondary_power = l.secondary_power();
         model.losses = Some(*l);
     }
+    let mut hydraulic = None;
     if let Some(geometry) = collector.volute {
-        let theoretical = model.theoretical_head(design.impeller_flow);
+        let impeller_flow = duty.flow + model.leakage;
+        let theoretical = model.theoretical_head(impeller_flow);
         let design_losses = (1.0 - eta.hydraulic) * theoretical;
         model.volute = Some(VoluteSplit {
             geometry,
@@ -415,13 +451,53 @@ pub fn predict(
         };
         let swirl = G * theoretical / model.u2 * model.impeller_radius / geometry.inlet_radius;
         let reference = volute_loss(&matched, duty.flow, swirl).total();
-        if reference > design_losses {
+        if losses.is_some() {
+            // The loss analysis sums the losses of the design point instead (Gülich
+            // Table 3.8). Its estimates hold near the best point only (Chap. 3.8), so
+            // eq. 4.14 keeps giving the shape of all but the volute model against flow,
+            // wall friction of the volute included.
+            let omega = 2.0 * model.u2 / design.outlet_diameter;
+            let impeller = ImpellerChannels::new(design, omega, CHANNEL_ROUGHNESS)
+                .losses(impeller_flow, WATER_VISCOSITY);
+            let shock = outlet_shock(
+                impeller_flow / model.area2 / model.u2,
+                outlet.blockage,
+                design.outlet_width / geometry.inlet_width,
+                model.u2,
+            );
+            let walls = geometry.wall_friction_loss(duty.flow);
+            let rest = impeller.total() + shock + walls;
+            let total = rest + actual.total();
+            let efficiency = 1.0 - total / theoretical;
+            if efficiency.is_nan() || efficiency <= 0.3 {
+                return Err(DesignError::Infeasible(format!(
+                    "the hydraulic losses add up to {total:.1} m of the {theoretical:.1} m of \
+                     Euler head: check the impeller and the volute"
+                )));
+            }
+            model.peak_hydraulic_efficiency = efficiency / hydraulic_efficiency_ratio(1.0);
+            if let Some(split) = &mut model.volute {
+                split.design_losses = total;
+                split.design_rest = rest;
+            }
+            hydraulic = Some(HydraulicLosses {
+                theoretical_head: theoretical,
+                impeller,
+                outlet_shock: shock,
+                volute_friction: walls,
+                volute: actual.total(),
+                efficiency,
+                statistical_efficiency: eta.hydraulic,
+            });
+        } else if reference > design_losses {
             warnings.push(format!(
                 "the volute loses {reference:.2} m at the design point, more than the \
                  {design_losses:.2} m of all the hydraulic losses: check the volute"
             ));
         }
-        if let Some(split) = &mut model.volute {
+        if hydraulic.is_none()
+            && let Some(split) = &mut model.volute
+        {
             split.design_rest = (design_losses - reference).max(0.0);
         }
     }
@@ -840,6 +916,7 @@ pub fn predict(
         axial,
         operation,
         losses,
+        hydraulic,
         viscous,
         statistical_efficiency: design.efficiencies.overall,
         efficiency_tolerance: design.efficiency_tolerance,
@@ -1417,6 +1494,50 @@ mod tests {
     fn with_collector(collector: &CollectorData) -> PumpPerformance {
         let d = design(&duty(), &CentrifugalPumpInput::default()).unwrap();
         predict(&duty(), &d, &PerformanceInput::default(), collector).unwrap()
+    }
+
+    #[test]
+    fn the_hydraulic_losses_add_up_to_the_hydraulic_efficiency() {
+        let d = design(&duty(), &CentrifugalPumpInput::default()).unwrap();
+        let collector = volute_collector(&d, 1.0);
+        let p = with_collector(&collector);
+        let h = p.hydraulic.unwrap();
+        // Impeller, outlet shock and volute leave the design head (Gülich Table 3.8).
+        assert_relative_eq!(
+            p.design.head,
+            h.theoretical_head - h.total(),
+            max_relative = 0.005
+        );
+        assert_relative_eq!(h.efficiency, 1.0 - h.total() / h.theoretical_head);
+        assert!(h.impeller.friction > 0.0 && h.outlet_shock > 0.0 && h.volute_friction > 0.0);
+        assert_relative_eq!(h.volute, p.volute.unwrap().design.total());
+        // The sum lands within the scatter of the statistics for the reference pump.
+        assert!((h.efficiency - d.efficiencies.hydraulic).abs() < 0.03);
+        assert_relative_eq!(h.statistical_efficiency, d.efficiencies.hydraulic);
+        // A volute with too small a throat loses more, and so does the stage.
+        let narrow = with_collector(&volute_collector(&d, 0.6))
+            .hydraulic
+            .unwrap();
+        assert!(narrow.volute > h.volute && narrow.efficiency < h.efficiency);
+        // The statistics, or no volute to sum, keep the statistical η_h.
+        let statistics = PerformanceInput {
+            losses: LossInput {
+                statistics: true,
+                ..LossInput::default()
+            },
+            ..PerformanceInput::default()
+        };
+        assert!(
+            predict(&duty(), &d, &statistics, &collector)
+                .unwrap()
+                .hydraulic
+                .is_none()
+        );
+        assert!(
+            with_collector(&CollectorData::default())
+                .hydraulic
+                .is_none()
+        );
     }
 
     #[test]

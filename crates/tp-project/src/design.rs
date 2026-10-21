@@ -979,7 +979,9 @@ mod tests {
         let double = p.compute_performance(impeller, &input).unwrap();
         let (s, d) = (single.radial.unwrap(), double.radial.unwrap());
         assert!(d.shutoff_force < s.shutoff_force / 3.0);
-        // The matched spiral changes little: the same impeller, the same head.
-        assert_relative_eq!(double.design.head, single.design.head, max_relative = 0.01);
+        // Two partial volutes and the outer channel rub on more wall (Gülich Chap. 3.8):
+        // a little less head.
+        assert!(double.design.head < single.design.head);
+        assert_relative_eq!(double.design.head, single.design.head, max_relative = 0.03);
     }
 }
