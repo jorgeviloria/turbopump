@@ -295,6 +295,55 @@ impl VoluteGeometry {
             self.design.stagnation_radius,
         )
     }
+
+    /// The outer walls of the casing: every outline of [`Self::lofts`] offset outward by
+    /// the wall thickness in its own plane, with the same points and pieces. The inlet
+    /// side of the spiral sections moves inward too; the CAD model cuts the flow domain
+    /// and the space of the impeller out of the solid these outlines enclose.
+    pub fn casing_lofts(&self) -> Vec<Vec<Vec<DVec3>>> {
+        let t = self.design.wall_thickness;
+        self.lofts()
+            .iter()
+            .map(|rings| rings.iter().map(|ring| offset_ring(ring, t)).collect())
+            .collect()
+    }
+}
+
+/// The closed planar outline `ring` offset outward by `distance` in its plane: each
+/// point moves along the bisector of the normals of its two edges, by `distance` over
+/// the cosine of half the turn between them (a mitred corner). The outlines are convex.
+pub fn offset_ring(ring: &[DVec3], distance: f64) -> Vec<DVec3> {
+    let n = ring.len();
+    if n < 3 {
+        return ring.to_vec();
+    }
+    let center = ring.iter().copied().sum::<DVec3>() / n as f64;
+    // Newell's normal: the outline runs counterclockwise about it.
+    let normal = (0..n)
+        .map(|i| (ring[i] - center).cross(ring[(i + 1) % n] - center))
+        .sum::<DVec3>()
+        .normalize();
+    let u = (ring[0] - center).reject_from(normal).normalize();
+    let v = normal.cross(u);
+    let flat: Vec<DVec2> = ring
+        .iter()
+        .map(|p| DVec2::new((*p - center).dot(u), (*p - center).dot(v)))
+        .collect();
+    // Outward normal of the edge from `a` to `b` of a counterclockwise outline.
+    let outward = |a: DVec2, b: DVec2| {
+        let e = (b - a).normalize_or_zero();
+        DVec2::new(e.y, -e.x)
+    };
+    (0..n)
+        .map(|i| {
+            let p = flat[i];
+            let before = outward(flat[(i + n - 1) % n], p);
+            let after = outward(p, flat[(i + 1) % n]);
+            let miter = (before + after) / (1.0 + before.dot(after)).max(0.25);
+            let q = p + distance * miter;
+            center + u * q.x + v * q.y
+        })
+        .collect()
 }
 
 /// Points from `a` (included) to `b` (excluded).
@@ -1064,6 +1113,58 @@ mod tests {
     use super::super::tests::reference_basis;
     use super::*;
     use crate::volute::AreaLaw;
+
+    #[test]
+    fn outlines_offset_outward_in_their_plane() {
+        // A circle in a tilted plane grows by the offset, in that plane, either way
+        // round.
+        let (u, v) = (
+            DVec3::new(1.0, 1.0, 0.0).normalize(),
+            DVec3::new(0.0, 0.0, 1.0),
+        );
+        let c = DVec3::new(0.3, -0.1, 0.05);
+        let circle: Vec<DVec3> = (0..72)
+            .map(|k| {
+                let a = TAU * f64::from(k) / 72.0;
+                c + 0.02 * (u * a.cos() + v * a.sin())
+            })
+            .collect();
+        for ring in [circle.clone(), circle.iter().rev().copied().collect()] {
+            for p in offset_ring(&ring, 0.005) {
+                assert_relative_eq!(p.distance(c), 0.025, max_relative = 2e-3);
+                assert_relative_eq!((p - c).dot(u.cross(v)), 0.0, epsilon = 1e-12);
+            }
+        }
+        // A rectangle keeps its sharp corners, mitred.
+        let rect = [
+            DVec3::new(0.0, 0.0, 0.0),
+            DVec3::new(0.04, 0.0, 0.0),
+            DVec3::new(0.04, 0.0, 0.02),
+            DVec3::new(0.0, 0.0, 0.02),
+        ];
+        let out = offset_ring(&rect, 0.005);
+        assert!(out[0].distance(DVec3::new(-0.005, 0.0, -0.005)) < 1e-12);
+        assert!(out[2].distance(DVec3::new(0.045, 0.0, 0.025)) < 1e-12);
+    }
+
+    #[test]
+    fn the_casing_wraps_every_section_of_the_flow_domain() {
+        let g = VoluteGeometry::build(&reference_basis(), &VoluteInput::default()).unwrap();
+        let t = g.design.wall_thickness;
+        let (flow, casing) = (g.lofts(), g.casing_lofts());
+        assert_eq!(flow.len(), casing.len());
+        for (rings, outer) in flow.iter().zip(&casing) {
+            assert_eq!(rings.len(), outer.len());
+            for (ring, wall) in rings.iter().zip(outer) {
+                assert_eq!(ring.len(), wall.len());
+                // Each point keeps at least the wall thickness from the flow outline.
+                for p in wall {
+                    let gap = ring.iter().map(|q| q.distance(*p)).fold(f64::MAX, f64::min);
+                    assert!(gap > 0.95 * t, "{gap} vs {t}");
+                }
+            }
+        }
+    }
     use approx::assert_relative_eq;
 
     /// Default inputs with a straight (tangential) discharge and the cutwater kept on
