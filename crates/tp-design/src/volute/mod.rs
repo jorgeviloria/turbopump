@@ -32,7 +32,7 @@ use std::f64::consts::{PI, TAU};
 use serde::{Deserialize, Serialize};
 use tp_math::roots;
 
-use crate::outlet::ImpellerOutlet;
+use crate::outlet::{ImpellerOutlet, Reach};
 use crate::pump::correlations::{CorrelationInfo, Verification};
 use crate::{DesignError, Param};
 
@@ -457,6 +457,8 @@ pub struct VoluteDesign {
     pub wall_thickness: f64,
     /// The flange at the outlet, if drawn.
     pub flange: Option<Flange>,
+    /// An internal volute: the axial gap between its spiral and the impeller beside it.
+    pub side_gap: Option<SideGap>,
     pub warnings: Vec<String>,
     /// Constant K of the angular momentum law: ∫b/r dr = K·ε.
     momentum_constant: f64,
@@ -468,6 +470,22 @@ pub struct VoluteDesign {
     base_throat: (f64, f64),
 }
 
+/// The axial gap between the spiral of an internal volute and the impeller beside it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SideGap {
+    /// The gap s_ax asked for, m.
+    pub required: f64,
+    /// How far the impeller reaches beside the spiral.
+    pub reach: Reach,
+    /// The gap left between the casing wall round the spiral and the impeller, when they
+    /// lie side by side, m.
+    pub gap: Option<f64>,
+}
+
+/// Automatic side gap s_ax/r₂ between an internal spiral and the impeller: the value of
+/// Gülich's examples of impeller sidewall gaps (Figs. 9.7 to 9.10), which he leaves to
+/// the mechanical design (Chap. 9.1).
+pub const SIDE_GAP_RATIO: f64 = 0.065;
 /// Specific speed separating the constant-velocity and angular-momentum laws.
 pub const AREA_LAW_NQ: f64 = 30.0;
 /// Above this specific speed the discharge nozzle should not decelerate further.
@@ -666,7 +684,7 @@ impl VoluteDesign {
                 SectionShape::trapezoidal(cone)
             });
         }
-        let cross_sections = CrossSections::new(&sections, inlet_width, stagnation_radius)?;
+        let mut cross_sections = CrossSections::new(&sections, inlet_width, stagnation_radius)?;
         let section = Shape {
             slope: cross_sections.definitions()[0]
                 .shape
@@ -803,6 +821,55 @@ impl VoluteDesign {
         require(wall_thickness > 0.0, || {
             "the wall thickness must be positive".into()
         })?;
+        // An internal spiral beside the impeller keeps the side gap from it, past its own
+        // casing wall. The neck only moves the spiral sideways, so the automatic neck grows
+        // by what the gap lacks.
+        let mut side_gap = None;
+        if let (Some(round), Some(bend)) =
+            (cross_sections.internal().copied(), cross_sections.bend())
+        {
+            let required = round.side_gap.resolve(|| SIDE_GAP_RATIO * r2);
+            let toward = bend.face.signum();
+            let inner = cross_sections.properties(TAU, throat.height)?.inner_radius;
+            let reach = basis.sides.map_or(Reach::Clear, |s| {
+                s.farthest(toward, inner, stagnation_radius + bend.top)
+            });
+            let gap_at = |face: f64, z: f64| toward * (basis.midplane + face - z) - wall_thickness;
+            let mut gap = None;
+            if let Reach::At(z) = reach {
+                let left = gap_at(bend.face, z);
+                if round.neck_width.is_auto() && left < required {
+                    let neck = round.neck_width.resolve(|| 0.5 * inlet_width) + required - left;
+                    for d in sections.sections.iter_mut() {
+                        if let SectionShape::RoundInternal(r) = &mut d.shape {
+                            r.neck_width = Param::Manual(neck);
+                        }
+                    }
+                    cross_sections = CrossSections::new(&sections, inlet_width, stagnation_radius)?;
+                }
+                let face = cross_sections.bend().map_or(bend.face, |b| b.face);
+                gap = Some(gap_at(face, z));
+            }
+            match (reach, gap) {
+                (Reach::Eye, _) => warnings.push(
+                    "the internal spiral reaches into the suction eye of the impeller: turn it \
+                     toward +z or make it smaller"
+                        .into(),
+                ),
+                (_, Some(g)) if g < required * (1.0 - 1e-9) => warnings.push(format!(
+                    "the internal spiral leaves {:.1} mm to the impeller beside it, less than \
+                     the side gap of {:.1} mm: lengthen the neck",
+                    g * 1e3,
+                    required * 1e3
+                )),
+                _ => {}
+            }
+            side_gap = Some(SideGap {
+                required,
+                reach,
+                gap,
+            });
+        }
         let flange = input
             .wall
             .flange
@@ -886,6 +953,7 @@ impl VoluteDesign {
             diffuser,
             wall_thickness,
             flange,
+            side_gap,
             warnings,
             momentum_constant,
             throat_corrected: input.spiral.cutwater_correction,
@@ -1153,6 +1221,14 @@ pub const VOLUTE_CORRELATIONS: &[CorrelationInfo] = &[
         verification: Verification::EngineeringDefault,
     },
     CorrelationInfo {
+        id: "volute.side_gap",
+        description: "s_ax = 0.065·r₂ between the casing wall round an internal spiral and \
+                      the impeller beside it (hub disk and shroud 0.02·d₂, at least 3 mm)",
+        reference: "Gülich 2nd ed., Chap. 9.1: sidewall gaps are left to the mechanical \
+                    design; s_ax/r₂ = 0.065 in Figs. 9.7 to 9.10. The value is our choice",
+        verification: Verification::EngineeringDefault,
+    },
+    CorrelationInfo {
         id: "volute.deceleration",
         description: "c₃q/c₂ not much below 0.8",
         reference: "Gülich 2nd ed., Table 10.2",
@@ -1180,6 +1256,7 @@ mod tests {
             midplane: 0.0378,
             rotation_sign: 1.0,
             impeller_blades: 7,
+            sides: None,
         }
     }
 
@@ -1477,6 +1554,107 @@ mod tests {
         input.setup.cutwater_diameter = Param::Manual(0.18);
         let close = VoluteDesign::new(&b, &input).unwrap();
         assert!(close.warnings.iter().any(|w| w.contains("Table 10.2")));
+    }
+
+    /// Radius of the suction eye of [`with_sides`], m.
+    const EYE: f64 = 0.07;
+
+    /// The reference impeller beside the volute: a hub disk flat at the outlet plus the
+    /// wall toward +z, a shroud reaching back to the eye at r = 70 mm toward −z.
+    fn with_sides() -> ImpellerOutlet {
+        use crate::outlet::{ImpellerSides, SIDE_POINTS};
+        let b = reference_basis();
+        let (r2, half, wall) = (0.086, b.impeller_width / 2.0, 0.00344);
+        let last = (SIDE_POINTS - 1) as f64;
+        ImpellerOutlet {
+            sides: Some(ImpellerSides {
+                plus: std::array::from_fn(|i| {
+                    tp_math::DVec2::new(r2 * (1.0 - i as f64 / last), b.midplane + half + wall)
+                }),
+                minus: std::array::from_fn(|i| {
+                    let t = i as f64 / last;
+                    tp_math::DVec2::new(r2 + (EYE - r2) * t, (b.midplane - half - wall) * (1.0 - t))
+                }),
+            }),
+            ..b
+        }
+    }
+
+    fn internal(round: InternalRound) -> VoluteDesign {
+        let input = VoluteInput {
+            cross_section: CrossSectionInput::single(SectionShape::RoundInternal(round)),
+            ..VoluteInput::default()
+        };
+        VoluteDesign::new(&with_sides(), &input).unwrap()
+    }
+
+    #[test]
+    fn the_impeller_reaches_its_farthest_over_a_range_of_radii() {
+        let sides = with_sides().sides.unwrap();
+        let b = reference_basis();
+        let back = b.midplane + b.impeller_width / 2.0 + 0.00344;
+        assert_eq!(sides.farthest(1.0, 0.05, 0.2), Reach::At(back));
+        assert_eq!(sides.farthest(1.0, 0.09, 0.2), Reach::Clear);
+        // The shroud comes nearer the axis at smaller radii.
+        let Reach::At(z) = sides.farthest(-1.0, 0.075, 0.2) else {
+            panic!();
+        };
+        let t = (0.086 - 0.075) / (0.086 - EYE);
+        assert_relative_eq!(
+            z,
+            (b.midplane - b.impeller_width / 2.0 - 0.00344) * (1.0 - t)
+        );
+        assert_eq!(sides.farthest(-1.0, 0.06, 0.2), Reach::Eye);
+    }
+
+    #[test]
+    fn an_internal_spiral_keeps_the_side_gap_from_the_impeller() {
+        let r2 = 0.086;
+        // Behind the hub disk the automatic neck leaves exactly the side gap.
+        let d = internal(InternalRound::default());
+        let gap = d.side_gap.unwrap();
+        assert_relative_eq!(gap.required, SIDE_GAP_RATIO * r2);
+        assert!(matches!(gap.reach, Reach::At(_)));
+        let left = gap.gap.unwrap();
+        assert!(left >= gap.required - 1e-12, "{left} vs {}", gap.required);
+        assert!(d.warnings.iter().all(|w| !w.contains("side gap")));
+        // A short manual neck: warned.
+        let short = internal(InternalRound {
+            neck_width: Param::Manual(0.001),
+            side_gap: Param::Manual(0.03),
+            ..InternalRound::default()
+        });
+        assert!(short.side_gap.unwrap().gap.unwrap() < 0.03);
+        assert!(
+            short.warnings.iter().any(|w| w.contains("side gap")),
+            "{:?}",
+            short.warnings
+        );
+        // A gap larger than the default neck leaves moves the spiral away; the throat
+        // stays the same.
+        assert!(left > 0.02, "{left}");
+        let wide = internal(InternalRound {
+            side_gap: Param::Manual(0.03),
+            ..InternalRound::default()
+        });
+        assert_relative_eq!(wide.side_gap.unwrap().gap.unwrap(), 0.03, epsilon = 1e-12);
+        assert_relative_eq!(wide.throat.area, d.throat.area, max_relative = 1e-12);
+        // Toward the suction side the spiral runs into the eye.
+        let front = internal(InternalRound {
+            open_to_right: false,
+            ..InternalRound::default()
+        });
+        assert_eq!(front.side_gap.unwrap().reach, Reach::Eye);
+        assert!(front.warnings.iter().any(|w| w.contains("suction eye")));
+        // Without the impeller (after a diffuser) nothing is checked.
+        let input = VoluteInput {
+            cross_section: CrossSectionInput::single(SectionShape::RoundInternal(
+                InternalRound::default(),
+            )),
+            ..VoluteInput::default()
+        };
+        let free = VoluteDesign::new(&reference_basis(), &input).unwrap();
+        assert_eq!(free.side_gap.unwrap().reach, Reach::Clear);
     }
 
     fn double_with(input: impl FnOnce(&mut VoluteInput)) -> Result<VoluteDesign, DesignError> {

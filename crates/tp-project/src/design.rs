@@ -433,6 +433,8 @@ impl Project {
                     impeller_width: d.outlet_width,
                     cu: d.outlet.cu,
                     cm: d.outlet.cm,
+                    // The diffuser walls, not the impeller, stand beside what follows.
+                    sides: None,
                     ..inlet
                 });
             }
@@ -453,12 +455,14 @@ impl Project {
             Suction::Single => length - geometry.basis.outlet_width / 2.0,
             Suction::Double => length,
         };
-        Ok(ImpellerOutlet::from_pump(
-            &main,
-            &duty,
-            midplane,
-            geometry.blade.rotation_sign,
-        ))
+        // The faces of the impeller, with the walls of its CAD model, for a casing
+        // beside it.
+        let double_entry = self.pump_impeller_input(impeller)?.suction == Suction::Double;
+        let wall = tp_design::impeller::default_wall_thickness(geometry.basis.outlet_diameter);
+        Ok(ImpellerOutlet {
+            sides: Some(geometry.sides(wall, double_entry)),
+            ..ImpellerOutlet::from_pump(&main, &duty, midplane, geometry.blade.rotation_sign)
+        })
     }
 
     fn index_of(&self, id: ComponentId) -> Result<usize, ProjectError> {
@@ -798,6 +802,27 @@ mod tests {
         );
         let v = p.compute_volute(volute).unwrap();
         assert!(v.design.cutwater_diameter > main.outlet_diameter);
+        // The faces of the impeller beside it, with the walls of its CAD model: the hub
+        // disk flat behind the outlet, the shroud in front coming back to the eye.
+        let sides = basis.sides.unwrap();
+        let wall = tp_design::impeller::default_wall_thickness(main.outlet_diameter);
+        let length = g.contour.axial_length;
+        for q in sides.plus {
+            assert_relative_eq!(q.y, length + wall, epsilon = 1e-12);
+        }
+        let r2 = main.outlet_diameter / 2.0;
+        assert_relative_eq!(sides.minus[0].x, r2, max_relative = 1e-4);
+        assert_relative_eq!(
+            sides.minus[0].y,
+            length - main.outlet_width - wall,
+            epsilon = 1e-5
+        );
+        let eye = sides.minus.last().unwrap();
+        assert!(eye.y.abs() < 1e-4, "{eye:?}");
+        assert!(eye.x > main.inlet_diameter / 2.0, "{eye:?}");
+        for w in sides.minus.windows(2) {
+            assert!(w[1].x < w[0].x && w[1].y <= w[0].y + 1e-12, "{w:?}");
+        }
     }
 
     #[test]
@@ -920,6 +945,8 @@ mod tests {
         let basis = p.volute_basis(volute).unwrap();
         assert_relative_eq!(basis.impeller_diameter, d.outlet_diameter);
         assert_relative_eq!(basis.cu, d.outlet.cu);
+        // The diffuser walls, not the impeller, stand beside the volute.
+        assert!(basis.sides.is_none());
         let v = p.compute_volute(volute).unwrap();
         assert!(v.design.cutwater_diameter > d.outlet_diameter);
     }

@@ -309,6 +309,9 @@ pub struct InternalRound {
     pub bend_ratio: f64,
     /// Height of the neck over the inlet width b₃.
     pub area_ratio: f64,
+    /// Axial gap s_ax between the casing wall round the spiral and the impeller beside
+    /// it, m (automatic: 0.065·r₂). The automatic neck grows to keep it.
+    pub side_gap: Param<f64>,
 }
 
 impl Default for InternalRound {
@@ -321,6 +324,7 @@ impl Default for InternalRound {
             outer_bend: BendWall::Round,
             bend_ratio: 1.0,
             area_ratio: 1.0,
+            side_gap: Param::Auto,
         }
     }
 }
@@ -1522,6 +1526,9 @@ impl SectionShape {
                 if round.neck_width.manual_value().is_some_and(|w| w < 0.0) {
                     return Err("the neck width cannot be negative".into());
                 }
+                if round.side_gap.manual_value().is_some_and(|g| g < 0.0) {
+                    return Err("the side gap cannot be negative".into());
+                }
                 Ok(())
             }
         }
@@ -2154,6 +2161,7 @@ mod tests {
                         bend_ratio: 1.5,
                         area_ratio: 0.8,
                         neck_width: Param::Manual(0.01),
+                        side_gap: Param::Auto,
                     });
                 }
             }

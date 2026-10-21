@@ -118,6 +118,7 @@ mod tests {
             midplane: 0.0378,
             rotation_sign: 1.0,
             impeller_blades: 7,
+            sides: None,
         }
     }
 

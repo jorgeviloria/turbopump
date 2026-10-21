@@ -269,7 +269,7 @@ pub fn build_impeller(g: &ImpellerGeometry, options: &CadOptions) -> Result<Impe
     let length = g.contour.axial_length;
     let t = options
         .wall_thickness
-        .unwrap_or_else(|| (0.02 * b.outlet_diameter).max(0.003));
+        .unwrap_or_else(|| tp_design::impeller::default_wall_thickness(b.outlet_diameter));
     let rb = options.bore_diameter.map_or(rn, |d| d / 2.0);
     if !(t > 0.0 && t.is_finite()) {
         return Err(CadError::Input("wall thickness must be positive".into()));

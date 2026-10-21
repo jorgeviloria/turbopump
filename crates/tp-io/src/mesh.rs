@@ -298,6 +298,7 @@ pub(crate) mod tests {
             midplane: 0.0378,
             rotation_sign: 1.0,
             impeller_blades: 7,
+            sides: None,
         };
         let g = VoluteGeometry::build(&basis, &VoluteInput::default()).unwrap();
         let tris = volute_triangles(&g);
@@ -350,6 +351,7 @@ pub(crate) mod tests {
             midplane: 0.0378,
             rotation_sign: 1.0,
             impeller_blades: 7,
+            sides: None,
         };
         let vaned = DiffuserDesign::new(&outlet, &DiffuserInput::default(), true).unwrap();
         let mesh = diffuser_parts(&vaned);

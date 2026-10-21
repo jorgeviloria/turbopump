@@ -11,6 +11,7 @@ pub mod potential;
 use std::f64::consts::PI;
 
 use serde::{Deserialize, Serialize};
+use tp_math::DVec2;
 
 use crate::DesignError;
 use crate::pump::correlations::{CorrelationInfo, Verification};
@@ -103,6 +104,44 @@ pub struct ImpellerGeometry {
     pub channel: Channel,
     pub blade: Blade,
     pub warnings: Vec<String>,
+}
+
+/// Thickness of the hub disk and the shroud of the CAD model unless given: 0.02·d₂, at
+/// least 3 mm (our choice for a cast impeller).
+pub fn default_wall_thickness(outlet_diameter: f64) -> f64 {
+    (0.02 * outlet_diameter).max(0.003)
+}
+
+impl ImpellerGeometry {
+    /// The outer faces of the impeller of walls `wall` thick, as the casing beside it sees
+    /// them. Toward −z, the front face of the shroud: its contour offset outward by the
+    /// wall, from r₂ in to the eye. Toward +z, the rear face of the hub disk, flat at the
+    /// outlet plus the wall, from r₂ to the axis; a double-entry impeller, modelled as
+    /// one half whose hub is the plane of symmetry, has its other shroud there instead.
+    pub fn sides(&self, wall: f64, double_entry: bool) -> crate::outlet::ImpellerSides {
+        use crate::outlet::SIDE_POINTS;
+        let c = &self.contour;
+        let length = c.axial_length;
+        let last = (SIDE_POINTS - 1) as f64;
+        // The shroud from the outlet (t = 1) to the eye (t = 0), (z, r), moved outward:
+        // to the left of the way from the eye to the outlet.
+        let front: [DVec2; SIDE_POINTS] = std::array::from_fn(|i| {
+            let t = 1.0 - i as f64 / last;
+            let h = 1e-4;
+            let a = c.shroud_at((t - h).max(0.0));
+            let b = c.shroud_at((t + h).min(1.0));
+            let along = (b - a).normalize_or_zero();
+            let p = c.shroud_at(t) + DVec2::new(-along.y, along.x) * wall;
+            DVec2::new(p.y, p.x)
+        });
+        let r2 = self.basis.outlet_diameter / 2.0;
+        let plus = if double_entry {
+            front.map(|p| DVec2::new(p.x, 2.0 * length - p.y))
+        } else {
+            std::array::from_fn(|i| DVec2::new(r2 * (1.0 - i as f64 / last), length + wall))
+        };
+        crate::outlet::ImpellerSides { minus: front, plus }
+    }
 }
 
 /// Builds the meridional contour, the meridional flow and the blades.
