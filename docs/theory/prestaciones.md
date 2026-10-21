@@ -9,9 +9,10 @@ Implementación:
 - [`crates/tp-design/src/npsh.rs`](../../crates/tp-design/src/npsh.rs) (NPSH₃ frente al caudal);
 - [`crates/tp-design/src/volute/loss.rs`](../../crates/tp-design/src/volute/loss.rs) (pérdidas de la voluta);
 - [`crates/tp-design/src/radial_thrust.rs`](../../crates/tp-design/src/radial_thrust.rs) (empuje radial);
-- [`crates/tp-design/src/axial_thrust.rs`](../../crates/tp-design/src/axial_thrust.rs) (empuje axial).
+- [`crates/tp-design/src/axial_thrust.rs`](../../crates/tp-design/src/axial_thrust.rs) (empuje axial);
+- [`crates/tp-design/src/operation.rs`](../../crates/tp-design/src/operation.rs) (punto de trabajo).
 
-Este documento recoge siete análisis de un rodete ya diseñado:
+Este documento recoge ocho análisis de un rodete ya diseñado:
 
 - la **curva característica** prevista: altura, potencia y rendimiento frente al caudal;
 - el **flujo potencial** en la sección meridional;
@@ -19,10 +20,12 @@ Este documento recoge siete análisis de un rodete ya diseñado:
 - el **NPSH₃ necesario** frente al caudal;
 - las **pérdidas de la voluta** frente al caudal, que entran en la curva;
 - el **empuje radial** sobre el rodete frente al caudal;
-- el **empuje axial** sobre el rodete frente al caudal.
+- el **empuje axial** sobre el rodete frente al caudal;
+- el **punto de trabajo** en la instalación, con otra velocidad o el rodete recortado, y
+  el rango de funcionamiento continuo.
 
 Las referencias principales son de Gülich, *Centrifugal Pumps*, 2.ª edición: capítulos 3
-a 6 y 9. El modelo de la voluta es el de D. Japikse, W. D. Marscher y R. B. Furst,
+a 6, 9 y 11. El modelo de la voluta es el de D. Japikse, W. D. Marscher y R. B. Furst,
 *Centrifugal Pump Design and Performance*, Concepts ETI 1997, capítulo 4.3. Aquí solo se
 citan los números de ecuación; la redacción, las derivaciones y las elecciones propias se
 señalan como tales.
@@ -489,6 +492,76 @@ Con agujeros de equilibrado el total baja a unos −8 N.
 con presiones de aspiración altas, como en las bombas de circulación de calderas (cap.
 9.2.2).
 
+## 8. Punto de trabajo, velocidad, recorte y rango de operación
+
+**Curva de la instalación** (Gülich cap. 11.1, ecs. 11.1 a 11.3):
+
+$$H_A = H_{est} + R\,Q^2, \qquad R = \frac{H_{A,r} - H_{est}}{Q_r^2}$$
+
+- La parábola pasa por un punto dado $(Q_r, H_{A,r})$, por defecto el de diseño.
+- La altura estática es 0 si no se da (elección propia): una instalación solo de
+  rozamiento.
+- El **punto de trabajo** es el corte con la curva de la bomba. Si hay varios, por
+  ejemplo con una curva inestable, se toma el de mayor caudal, que es el estable.
+
+**Otra velocidad** (tabla 3.4, primera aproximación con los mismos rendimientos):
+
+- $Q \propto n$, $H \propto n^2$, $P \propto n^3$ y $NPSH \propto n^2$.
+- Una instalación sin altura estática es una parábola de semejanza: el punto de trabajo
+  se desliza por ella, y una prueba lo comprueba.
+
+**Rodete recortado** (cap. 4.5):
+
+- Cada punto se mueve por la recta que lo une con el origen:
+  $Q'/Q = H'/H = (d_2'/d_2)^m$ (ec. 4.15).
+- $m$ vale 2 por defecto, la ley que Gülich cita de [B.5]. El libro da de 2 a 3: cerca de
+  3 para recortes pequeños con los álabes afilados por la salida, y cerca de 2 por
+  encima del 5 %.
+- El mejor rendimiento baja $\Delta\eta = \varepsilon\,(1 - d_2'/d_2)$ (ec. 4.19).
+  Tomamos $\varepsilon$ = 0,2 en bombas de voluta y 0,45 con difusor, el centro de
+  0,15–0,25 y 0,4–0,5. Aplicamos la misma caída a toda la curva (elección propia).
+- La potencia sigue a $\rho g Q' H'/\eta'$. El NPSH₃ conserva su valor a cada caudal,
+  porque la entrada no cambia (elección propia).
+- **Límites** (ec. 4.23):
+  - bombas de voluta: $d_2'/d_2 \ge 0{,}8$ hasta $n_q$ = 40, más
+    $0{,}0025\,(n_q - 40)$ hasta $n_q$ = 100. Tomamos el extremo bajo de 0,8 a 0,85;
+    Gülich aconseja 0,85 si hay poco margen de NPSH;
+  - bombas con difusor: no más del 5 % sin ensayos.
+
+**Para pasar por el punto de la instalación:**
+
+- **Recorte:** se busca en la curva completa el punto de la recta que pasa por el
+  origen y por $(Q_r, H_{A,r})$. Luego $d_2'/d_2 = (H_{A,r}/H)^{1/m}$ (ec. 4.17).
+- **Velocidad:** se busca el corte de la curva con la parábola $H \propto Q^2$ por ese
+  punto, y la velocidad sale de la relación de caudales.
+
+**Rango de funcionamiento continuo** (cap. 11.6):
+
+- Gülich lo define donde el rendimiento no baja del 80–85 % del máximo. Tomamos el 80 %
+  (ajustable).
+- El extremo alto se recorta donde el NPSH₃ alcanza el NPSH disponible.
+- La figura 11.15 da bandas frente a $n_q$, pero solo como gráfico; no se digitalizó.
+
+**Bomba de referencia** (100 m³/h, 32 m, 2900 rpm, $d_2$ = 172,2 mm):
+
+| Caso | Punto de trabajo | Rango continuo |
+|---|---|---|
+| Por defecto (sistema por el punto de diseño) | 99,97 m³/h, 31,98 m, η 81,4 % | 41,7 a 143,3 m³/h |
+| $H_{est}$ = 15 m, por 28 m a 100 m³/h | 107,5 m³/h, 30,0 m | — |
+| Lo mismo con $d_2'$ = 165 mm | 98,4 m³/h, 27,6 m, η 79,6 % | 38,5 a 132,8 m³/h |
+| 2600 rpm | 89,6 m³/h, 25,7 m | 37,4 a 129,9 m³/h |
+
+Para que la instalación de 15 m pase por 28 m a 100 m³/h hace falta $d_2'/d_2$ = 0,965,
+o 0,954 de la velocidad con el diámetro completo. Con $d_2'$ = 130 mm (0,755) salta el
+aviso de la ec. 4.23.
+
+**Avisos:**
+
+- el recorte por debajo del límite;
+- curvas que no se cortan;
+- un punto de trabajo fuera del rango continuo;
+- un NPSH₃ en el punto de trabajo mayor que el disponible.
+
 ## Dónde se usa
 
 - **Interfaz:**
@@ -506,7 +579,13 @@ con presiones de aspiración altas, como en las bombas de circulación de calder
   `shaft_seal=`, `balance=on`, `rear_seal=` y `k0=`. El CSV añade la columna
   `axial_force_n`.
 - **Interfaz:** la vista *Curves* da el empuje axial en el diseño y a válvula cerrada,
-  con una casilla para los agujeros de equilibrado; el informe da sus partes.
+  con una casilla para los agujeros de equilibrado; el informe da sus partes. Su
+  apartado *Operation in the system* fija la altura estática, el punto de la
+  instalación, la velocidad y el diámetro recortado. Dibuja la curva de la instalación,
+  el punto de trabajo, la curva a la velocidad y el diámetro de funcionamiento y los
+  límites del rango continuo.
+- **Línea de comandos, funcionamiento:** `--set static=`, `system_flow=`,
+  `system_head=`, `speed=`, `d2=`, `trim_exponent=` y `continuous=`.
 
 ## Limitaciones
 
@@ -532,4 +611,11 @@ con presiones de aspiración altas, como en las bombas de circulación de calder
   - en bombas multietapa la cifra es la de un rodete; faltan los tambores y discos de
     equilibrado (cap. 9.2.3);
   - faltan los rodetes semiaxiales y axiales (ecs. T9.2.16 a T9.2.18).
+- **Punto de trabajo:**
+  - la velocidad no cambia el rendimiento (sin efecto de Reynolds);
+  - el recorte aplica la misma caída de rendimiento a toda la curva y deja el NPSH₃ como
+    está;
+  - no hay bombas en paralelo ni en serie, ni curvas de instalación que no sean
+    parábolas;
+  - los empujes y el resto del informe siguen en la velocidad y el diámetro de diseño.
 - **Pendiente:** el análisis álabe a álabe en dos dimensiones.
