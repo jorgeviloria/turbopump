@@ -15,7 +15,10 @@
 //! first partial volute runs from the cutwater to the rib nose and goes on as the outer
 //! channel around the second, inner volute, which wraps ε_sp from the rib nose to the
 //! throat. Each partial volute is sized like a single one for the flow of its wrap
-//! (item 8), and both meet the discharge diffuser.
+//! (item 8), and both meet the discharge diffuser. The rib runs at a constant radius
+//! across each section, so the casing is one spiral split by it: the outer channel
+//! takes the part of each section beyond the inner volute and the rib. Its nose and tail
+//! are profiled like a cutwater (item 7): elliptic, as thick as the rib.
 //!
 //! [`loss`] estimates the hydraulic losses of a volute against flow.
 
@@ -87,7 +90,11 @@ pub struct VoluteSetupInput {
     pub rib_wrap: Param<f64>,
     /// Thickness of the rib of a double volute, m.
     pub rib_thickness: Param<f64>,
-    /// Outlet over inlet area of the outer channel of a double volute.
+    /// Length over thickness of the elliptic nose and tail of the rib: 1 for a
+    /// semicircle.
+    pub rib_nose_ratio: Param<f64>,
+    /// Outlet area of the outer channel of a double volute over the throat area of the
+    /// first partial volute.
     pub channel_area_ratio: Param<f64>,
     /// Q_Le/Q_opt: allowance for leakage that flows through the volute (eq. T7.7.1).
     pub flow_factor: Param<f64>,
@@ -274,18 +281,29 @@ pub struct DischargeDiffuser {
 pub struct Rib {
     /// Wrap angle ε_sp of the inner volute, rad.
     pub wrap: f64,
-    /// Wrap angle of the rib nose from the cutwater, 2π − ε_sp, rad.
+    /// Wrap angle of the rib nose from the cutwater, 2π − ε_sp, rad: where the inner
+    /// volute starts. The elliptic nose reaches a little ahead of it.
     pub start: f64,
     /// m
     pub thickness: f64,
-    /// Throat of the first partial volute, at the rib nose.
+    /// Length over thickness of the elliptic nose and tail.
+    pub nose_ratio: f64,
+    /// Throat of the first partial volute, at the rib nose, corrected for the rib like a
+    /// cutwater (eq. 7.28).
     pub outer_throat: SectionSize,
-    /// Area of the outer channel at the rib nose and at the discharge, m².
+    /// Area of the outer channel at the rib nose (the throat of the first partial volute
+    /// less the rib) and at the discharge, m².
     pub channel_inlet_area: f64,
     pub channel_outlet_area: f64,
 }
 
 impl Rib {
+    /// Length of the nose ahead of the start of the inner volute, and of the tail after
+    /// the throat, m.
+    pub fn nose_length(&self) -> f64 {
+        self.nose_ratio * self.thickness / 2.0
+    }
+
     /// Area of the outer channel at wrap angle `angle` between the rib nose and 2π.
     pub fn channel_area(&self, angle: f64) -> f64 {
         let s = ((angle - self.start) / (TAU - self.start)).clamp(0.0, 1.0);
@@ -573,18 +591,20 @@ impl VoluteDesign {
         };
 
         // Throat of a partial volute of wrap `wrap` from angular momentum, for both
-        // laws, then the cutwater correction Δa₃/a₃ = 0.2·(e₃/a₃)² (eq. 7.28).
-        let partial_throat = |wrap: f64| -> Result<(SectionSize, f64), DesignError> {
-            let a = section.height_for_integral(momentum_constant * wrap)?;
-            let correction = if input.spiral.cutwater_correction {
-                0.2 * cutwater_thickness * cutwater_thickness / a
-            } else {
-                0.0
+        // laws, then the correction Δa₃/a₃ = 0.2·(e/a₃)² for a cutwater or rib nose of
+        // thickness e (eq. 7.28).
+        let partial_throat =
+            |wrap: f64, blockage: f64| -> Result<(SectionSize, f64), DesignError> {
+                let a = section.height_for_integral(momentum_constant * wrap)?;
+                let correction = if input.spiral.cutwater_correction {
+                    0.2 * blockage * blockage / a
+                } else {
+                    0.0
+                };
+                Ok((section.size(a + correction), correction))
             };
-            Ok((section.size(a + correction), correction))
-        };
         let inner_wrap = rib_wrap.unwrap_or(TAU);
-        let (throat, throat_correction) = partial_throat(inner_wrap)?;
+        let (throat, throat_correction) = partial_throat(inner_wrap, cutwater_thickness)?;
         let throat_velocity = flow * inner_wrap / TAU / throat.area;
         let throat_aspect = match shape {
             SectionShape::Circular => 1.0,
@@ -612,11 +632,28 @@ impl VoluteDesign {
         let rib = match rib_wrap {
             None => None,
             Some(wrap) => {
+                require(!matches!(shape, SectionShape::Circular), || {
+                    "a double volute needs rectangular or trapezoidal sections: its rib runs \
+                     at one radius across each section"
+                        .into()
+                })?;
                 let start = TAU - wrap;
-                let (outer_throat, _) = partial_throat(start)?;
                 let thickness = setup.rib_thickness.resolve(|| cutwater_thickness);
                 require(thickness > 0.0, || {
                     "the rib thickness must be positive".into()
+                })?;
+                let (outer_throat, _) = partial_throat(start, thickness)?;
+                require(outer_throat.height > 1.5 * thickness, || {
+                    format!(
+                        "the rib ({:.1} mm) is too thick for the {:.1} mm high throat of the \
+                         first partial volute",
+                        thickness * 1e3,
+                        outer_throat.height * 1e3
+                    )
+                })?;
+                let nose_ratio = setup.rib_nose_ratio.resolve(|| 1.0);
+                require((1.0..=5.0).contains(&nose_ratio), || {
+                    format!("the nose ratio of the rib must lie between 1 and 5, got {nose_ratio}")
                 })?;
                 let ratio = setup.channel_area_ratio.resolve(|| 1.0);
                 require((0.8..=3.0).contains(&ratio), || {
@@ -629,8 +666,9 @@ impl VoluteDesign {
                     wrap,
                     start,
                     thickness,
+                    nose_ratio,
                     outer_throat,
-                    channel_inlet_area: outer_throat.area,
+                    channel_inlet_area: outer_throat.area - section.area(thickness),
                     channel_outlet_area: outer_throat.area * ratio,
                 })
             }
@@ -795,20 +833,28 @@ impl VoluteDesign {
     /// In a double volute the first partial volute runs to the rib nose and the inner
     /// one from there to 2π.
     pub fn section(&self, angle: f64) -> Result<SectionSize, DesignError> {
+        let e3 = self.cutwater_thickness;
         match &self.rib {
-            Some(rib) if angle > rib.start => self.partial_section(angle - rib.start, rib.wrap),
-            Some(rib) => self.partial_section(angle, rib.start),
-            None => self.partial_section(angle, TAU),
+            Some(rib) if angle > rib.start => self.partial_section(angle - rib.start, rib.wrap, e3),
+            // The first partial volute ends at the rib nose.
+            Some(rib) => self.partial_section(angle, rib.start, rib.thickness),
+            None => self.partial_section(angle, TAU, e3),
         }
     }
 
     /// Section at `angle` of a partial volute of wrap `wrap`, whose throat is sized by
-    /// angular momentum for the flow of its wrap (Gülich Chap. 7.8.1, item 8).
-    fn partial_section(&self, angle: f64, wrap: f64) -> Result<SectionSize, DesignError> {
+    /// angular momentum for the flow of its wrap (Gülich Chap. 7.8.1, item 8) and
+    /// enlarged for a nose of thickness `blockage` at its end (eq. 7.28).
+    fn partial_section(
+        &self,
+        angle: f64,
+        wrap: f64,
+        blockage: f64,
+    ) -> Result<SectionSize, DesignError> {
         let shape = self.shape();
         let end = shape.height_for_integral(self.momentum_constant * wrap)?;
         let correction = if self.throat_corrected {
-            0.2 * self.cutwater_thickness * self.cutwater_thickness / end
+            0.2 * blockage * blockage / end
         } else {
             0.0
         };
@@ -1148,6 +1194,39 @@ mod tests {
             max_relative = 1e-12
         );
         assert_relative_eq!(rib.thickness, d.cutwater_thickness);
+        // The outer channel starts as the first throat less the rib, and its nose is a
+        // semicircle as thick as the rib.
+        assert_relative_eq!(
+            rib.channel_inlet_area,
+            rib.outer_throat.area - d.inlet_width * rib.thickness,
+            max_relative = 1e-12
+        );
+        assert_relative_eq!(rib.nose_ratio, 1.0);
+        assert_relative_eq!(rib.nose_length(), rib.thickness / 2.0);
+    }
+
+    #[test]
+    fn the_rib_nose_enlarges_the_first_throat_like_a_cutwater() {
+        let plain = double_with(|v| v.spiral.cutwater_correction = false).unwrap();
+        let e = 0.008;
+        let d = double_with(|v| v.setup.rib_thickness = Param::Manual(e)).unwrap();
+        let (a, rib) = (plain.rib.unwrap().outer_throat.height, d.rib.unwrap());
+        // Eq. 7.28 with the rib for the first throat, the cutwater for the inner one.
+        assert_relative_eq!(
+            rib.outer_throat.height - a,
+            0.2 * e * e / a,
+            max_relative = 1e-9
+        );
+        assert_relative_eq!(
+            d.throat.height - plain.throat.height,
+            0.2 * d.cutwater_thickness.powi(2) / plain.throat.height,
+            max_relative = 1e-9
+        );
+        assert_relative_eq!(
+            d.section(rib.start).unwrap().height,
+            rib.outer_throat.height,
+            max_relative = 1e-12
+        );
     }
 
     #[test]
@@ -1167,13 +1246,17 @@ mod tests {
         assert!(d.warnings.iter().any(|w| w.contains("past 180°")));
         assert!(double_with(|v| v.setup.rib_wrap = Param::Manual(80f64.to_radians())).is_err());
         assert!(double_with(|v| v.setup.channel_area_ratio = Param::Manual(5.0)).is_err());
-        // A widening outer channel.
+        assert!(double_with(|v| v.setup.rib_nose_ratio = Param::Manual(0.5)).is_err());
+        assert!(double_with(|v| v.setup.rib_nose_ratio = Param::Manual(6.0)).is_err());
+        assert!(double_with(|v| v.setup.rib_thickness = Param::Manual(0.025)).is_err());
+        assert!(double_with(|v| v.cross_section.shape = SectionShape::Circular).is_err());
+        // A widening outer channel, against the first throat.
         let d = double_with(|v| v.setup.channel_area_ratio = Param::Manual(1.5)).unwrap();
         let rib = d.rib.unwrap();
-        assert_relative_eq!(rib.channel_outlet_area, 1.5 * rib.channel_inlet_area);
+        assert_relative_eq!(rib.channel_outlet_area, 1.5 * rib.outer_throat.area);
         assert_relative_eq!(
             rib.channel_area(0.5 * (rib.start + TAU)),
-            1.25 * rib.channel_inlet_area,
+            0.5 * (rib.channel_inlet_area + rib.channel_outlet_area),
             max_relative = 1e-12
         );
     }
