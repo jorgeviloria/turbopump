@@ -41,6 +41,11 @@ std::unique_ptr<Shape> boolean_op(const Shape &a, const Shape &b, std::uint8_t o
                                   double fuzzy);
 std::unique_ptr<Shape> make_compound(const ShapeList &shapes);
 
+std::unique_ptr<Shape> cylinder_z(const P3 &base, double radius, double height);
+rust::Vec<P3> edge_samples(const Shape &shape, std::size_t samples);
+std::unique_ptr<Shape> fillet_edges(const Shape &shape, rust::Slice<const std::uint32_t> edges,
+                                    double radius);
+
 double volume(const Shape &shape, double eps);
 rust::Vec<double> solid_volumes(const Shape &shape);
 std::size_t count_subshapes(const Shape &shape, std::uint8_t kind);

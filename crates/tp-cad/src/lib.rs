@@ -12,7 +12,7 @@ mod occ;
 mod volute;
 
 pub use diffuser::{DiffuserCad, build_diffuser};
-pub use impeller::{CadOptions, ImpellerCad, build_impeller};
+pub use impeller::{BalanceHoleOptions, BalanceHoles, CadOptions, ImpellerCad, build_impeller};
 pub use occ::{Shape, read_step, write_iges, write_step, write_stl};
 pub use volute::{VoluteCad, VoluteCasing, build_volute, build_volute_casing};
 

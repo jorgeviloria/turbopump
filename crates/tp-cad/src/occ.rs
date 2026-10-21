@@ -94,6 +94,31 @@ impl Shape {
         op("rotation", ffi::rotate_z(&self.0, angle))
     }
 
+    /// `samples` points along each edge, in the order of OCCT's indexed edge map; empty
+    /// for degenerate edges.
+    pub fn edge_samples(&self, samples: usize) -> Vec<Vec<DVec3>> {
+        let flat = ffi::edge_samples(&self.0, samples.max(1));
+        flat.chunks(samples.max(1))
+            .map(|chunk| {
+                if chunk.iter().any(|p| p.x.is_nan()) {
+                    Vec::new()
+                } else {
+                    chunk.iter().map(|p| DVec3::new(p.x, p.y, p.z)).collect()
+                }
+            })
+            .collect()
+    }
+
+    /// The shape with the edges at positions `edges` of [`Self::edge_samples`] rounded
+    /// with `radius`, mm.
+    pub fn filleted(&self, edges: &[usize], radius: f64) -> Result<Shape, CadError> {
+        let indices: Vec<u32> = edges
+            .iter()
+            .map(|&i| u32::try_from(i + 1).map_err(|_| CadError::Input("edge index".into())))
+            .collect::<Result<_, _>>()?;
+        op("fillet", ffi::fillet_edges(&self.0, &indices, radius))
+    }
+
     /// Boolean difference `self − tool`.
     pub fn cut(&self, tool: &Shape) -> Result<Shape, CadError> {
         self.cut_fuzzy(tool, 0.0)
@@ -165,6 +190,16 @@ pub fn planar_face(wire: &Shape) -> Result<Shape, CadError> {
 /// Solid swept by a planar face moved along +z by `height`.
 pub fn prism_z(face: &Shape, height: f64) -> Result<Shape, CadError> {
     op("extrusion", ffi::prism_z(&face.0, height))
+}
+
+/// Cylinder of `radius` along +z from `base` over `height`, mm.
+pub fn cylinder_z(base: DVec3, radius: f64, height: f64) -> Result<Shape, CadError> {
+    if !(radius > 0.0 && height > 0.0) {
+        return Err(CadError::Input(
+            "a cylinder needs a positive radius and height".into(),
+        ));
+    }
+    op("cylinder", ffi::cylinder_z(&p3(base), radius, height))
 }
 
 /// Solid of revolution of a planar face through 360° about the z axis.

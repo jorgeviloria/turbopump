@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <string>
 
+#include <BRepAdaptor_Curve.hxx>
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
@@ -19,9 +20,12 @@
 #include <BRepBuilderAPI_Sewing.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepCheck_Analyzer.hxx>
+#include <BRepFilletAPI_MakeFillet.hxx>
 #include <BRepGProp.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepOffsetAPI_MakeFilling.hxx>
+#include <BRepPrimAPI_MakeCylinder.hxx>
+#include <BRep_Tool.hxx>
 #include <BRepOffsetAPI_ThruSections.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRepPrimAPI_MakeRevol.hxx>
@@ -348,6 +352,63 @@ rust::Vec<double> solid_volumes(const Shape &shape) {
     }
   }
   return volumes;
+}
+
+std::unique_ptr<Shape> cylinder_z(const P3 &base, double radius, double height) {
+  return guard("cylinder", [&] {
+    BRepPrimAPI_MakeCylinder cylinder(gp_Ax2(point(base), gp::DZ()), radius, height);
+    return wrap(cylinder.Shape(), "cylinder");
+  });
+}
+
+rust::Vec<P3> edge_samples(const Shape &shape, std::size_t samples) {
+  rust::Vec<P3> out;
+  TopTools_IndexedMapOfShape edges;
+  TopExp::MapShapes(shape.shape, TopAbs_EDGE, edges);
+  const double nan = std::nan("");
+  for (int i = 1; i <= edges.Extent(); ++i) {
+    const TopoDS_Edge &edge = TopoDS::Edge(edges(i));
+    bool usable = !BRep_Tool::Degenerated(edge);
+    std::unique_ptr<BRepAdaptor_Curve> curve;
+    if (usable) {
+      try {
+        curve = std::make_unique<BRepAdaptor_Curve>(edge);
+      } catch (...) {
+        usable = false;
+      }
+    }
+    for (std::size_t k = 0; k < samples; ++k) {
+      if (!usable) {
+        out.push_back(P3{nan, nan, nan});
+        continue;
+      }
+      const double t = samples > 1 ? double(k) / double(samples - 1) : 0.5;
+      const gp_Pnt p = curve->Value(curve->FirstParameter() +
+                                    t * (curve->LastParameter() - curve->FirstParameter()));
+      out.push_back(P3{p.X(), p.Y(), p.Z()});
+    }
+  }
+  return out;
+}
+
+std::unique_ptr<Shape> fillet_edges(const Shape &shape, rust::Slice<const std::uint32_t> edges,
+                                    double radius) {
+  return guard("fillet", [&] {
+    TopTools_IndexedMapOfShape map;
+    TopExp::MapShapes(shape.shape, TopAbs_EDGE, map);
+    BRepFilletAPI_MakeFillet fillet(shape.shape);
+    for (std::uint32_t index : edges) {
+      if (index < 1 || int(index) > map.Extent()) {
+        fail("fillet", "edge index out of range");
+      }
+      fillet.Add(radius, TopoDS::Edge(map(int(index))));
+    }
+    fillet.Build();
+    if (!fillet.IsDone()) {
+      fail("fillet", "the rounded edges could not be built");
+    }
+    return wrap(fillet.Shape(), "fillet");
+  });
 }
 
 std::size_t count_subshapes(const Shape &shape, std::uint8_t kind) {
