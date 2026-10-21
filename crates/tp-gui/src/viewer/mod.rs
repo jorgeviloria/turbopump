@@ -299,27 +299,9 @@ impl Viewer {
                                 .on_hover_text(tr(tip))
                                 .clicked()
                         };
-                        for (glyph, tip, v) in [
-                            (
-                                icon::CORNERS_OUT,
-                                "Fit the model (double-click)",
-                                CameraView::Fit,
-                            ),
-                            (
-                                icon::CUBE,
-                                "Oblique view from the inlet side",
-                                CameraView::Iso,
-                            ),
-                            (
-                                icon::ARROW_LINE_DOWN,
-                                "Along the axis, from the inlet",
-                                CameraView::Inlet,
-                            ),
-                            (icon::COLUMNS, "Across the axis", CameraView::Side),
-                        ] {
-                            if tool(ui, glyph, tip, false) {
-                                view = Some(v);
-                            }
+                        // The standard views are on the view cube; fitting is here.
+                        if tool(ui, icon::CORNERS_OUT, "Fit the model (double-click)", false) {
+                            view = Some(CameraView::Fit);
                         }
                         ui.add_space(4.0);
                         ui.separator();
