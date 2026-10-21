@@ -81,7 +81,8 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
   El menú *File* abre, guarda y exporta.
 - **Columna de componentes** (izquierda): la configuración global y un pictograma por
   componente, con un punto verde si está terminado o naranja si quedó desactualizado.
-  El botón + añade un rodete, un difusor con o sin álabes o una voluta.
+  El botón + añade un rodete, un difusor con o sin álabes o una voluta, simple o doble
+  (con nervio, que reduce el empuje radial).
 - **Panel izquierdo**, que se pliega con un botón para dejar más sitio a la vista, con
   dos pestañas:
   - *Design*: los pasos de cada componente, con su estado (pendiente, hecho o

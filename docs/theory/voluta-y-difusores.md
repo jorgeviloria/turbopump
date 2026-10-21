@@ -156,6 +156,74 @@ vale 0 por defecto, y fuera de ±3° el programa avisa.
 Por defecto es $\max(0{,}03\,d_2,\ 6\ \text{mm})$, un valor propio. De momento solo se
 guarda y se dibuja: el sólido de la carcasa llega en una fase posterior.
 
+### 7. Voluta doble
+
+Una voluta doble (Gülich, cap. 7.8.1 y Fig. 7.39) parte la espiral con un **nervio**
+para que la presión alrededor del rodete se equilibre fuera del punto de diseño y baje
+el empuje radial (cap. 9.3.4 y tabla 9.4). Se elige en el paso de datos de partida.
+
+**Partes:**
+
+- **Primera voluta parcial:** de la lengüeta a la nariz del nervio, en
+  $\varepsilon_r = 2\pi - \varepsilon_{sp}$. Sus secciones son las de la voluta simple.
+- **Voluta interior:** de la nariz del nervio a la garganta, en $2\pi$. Abarca
+  $\varepsilon_{sp}$ y recoge su parte del caudal.
+- **Canal exterior:** lleva el caudal de la primera voluta parcial por fuera del nervio
+  hasta la descarga. Su área va de la garganta de la primera voluta parcial a esa área
+  por la relación $A_{sal}/A_{ent}$, que por defecto es 1 (área constante, elección
+  propia). Gülich dice que a $n_q$ bajo y medio el canal frena el flujo y se dimensiona
+  como un difusor (cap. 1.6); el usuario puede fijar la relación.
+- **Descarga:** empieza en la sección que abarca la voluta interior, el nervio y el
+  canal exterior, y sigue como en la voluta simple con el área de los dos canales.
+
+**Dimensiones:**
+
+- Cada voluta parcial de ángulo $\varepsilon_{sp}$ se dimensiona para el caudal
+  $Q_{Le}\,\varepsilon_{sp}/2\pi$ con la conservación del momento angular (cap. 7.8.1,
+  punto 8). Su garganta cumple $\int b/r\,dr = \varepsilon_{sp}\,Q_{Le}/(2\pi c_{2u} r_2)$
+  y lleva la corrección por la lengüeta (ec. 7.28).
+- Con la ley de velocidad constante, el área crece en proporción al ángulo dentro de
+  cada voluta parcial.
+- Como $\int b/r\,dr$ crece con el logaritmo del radio, la garganta para la mitad del
+  caudal es **menor que la mitad** de la garganta simple. Con secciones rectangulares es
+  $1/(1 + \sqrt{1 + a/r'_z})$ veces la simple.
+
+**Valores por defecto y límites:**
+
+| Dato | Valor | Fuente |
+|---|---|---|
+| $\varepsilon_{sp}$ | 180°, o 170° con un número par de álabes, para que dos álabes no pasen a la vez por las dos lengüetas | Gülich cap. 7.8.1, punto 1 |
+| Por debajo de 90° | error: no reduce el empuje radial | idem |
+| Por encima de 180° | aviso: el canal exterior largo añade pérdidas y empuje en sobrecarga | idem |
+| Espesor del nervio | $e_3$, el de la lengüeta (Gülich lo deja al cálculo resistente y a la fundición) | elección propia |
+
+**En la predicción:**
+
+- La garganta del colector del NPSH₃ es la media de las dos, con $z_{Le} = 2$.
+- El modelo de pérdidas suma las dos gargantas: cada voluta parcial recoge su parte del
+  caudal sobre su parte de la entrada, así que $AR$ es el mismo.
+- El empuje radial usa $F_{Dsp}$ de la tabla 9.4 con el ángulo del nervio.
+
+En la bomba de referencia (7 álabes, 180°):
+
+| Magnitud | Simple | Doble |
+|---|---|---|
+| Garganta | 3123 mm² | 2 × 1408 mm² |
+| $c_{3q}/c_2$ | 0,65 | 0,73 |
+| $B/H$ | 1,67 | 2,04 |
+| $F_R$ a válvula cerrada | 487 N | 125 N |
+| $F_R$ en el diseño | 30 N | 102 N |
+| Carga para el diseño mecánico | 640 N | 277 N |
+
+La voluta doble tiene un empuje casi constante con el caudal (Fig. 9.29): en el diseño
+es algo mayor que el de la simple, pero el máximo, y con él la carga del eje, baja a
+menos de la mitad.
+
+**CAD:** la primera voluta parcial con el canal exterior, la voluta interior y la
+descarga se construyen como tres sólidos que se unen; los dos canales entran un poco en
+la descarga para que la unión no trabaje con caras coincidentes. El resultado es un único
+sólido válido.
+
 ### Comprobaciones
 
 Estas dos cifras se informan sin aviso:
@@ -343,7 +411,10 @@ Tras el difusor, la voluta recibe mucho menos momento angular: $c_u r$ baja de 1
 
 ## Limitaciones
 
-- **Volutas:** no hay volutas dobles, volutas de entrada ni voluta detrás de otra voluta.
+- **Volutas:** no hay volutas gemelas (con dos descargas), volutas de entrada ni voluta
+  detrás de otra voluta. En la voluta doble, el nervio acaba en la entrada de la
+  descarga, y el reparto de caudal entre los dos canales según sus resistencias
+  (Gülich tabla 1.5) no se calcula: cada uno lleva la parte de su ángulo.
 - **Multietapa:** no hay canales de retorno.
 - **Secciones:** solo rectangulares, trapezoidales y circulares, simétricas. Faltan las
   de Bézier, las asimétricas y las externas.
