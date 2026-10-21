@@ -144,6 +144,14 @@ La longitud $L$ se mide a lo largo de la línea media e **incluye el codo**: Gü
 7.8.2, punto 4) aplica a las toberas curvas los datos de los difusores rectos. Si el
 codo es más largo que $L$, la tobera acaba con el codo y el programa avisa.
 
+**Altura de la brida.** En lugar de la longitud se puede fijar la altura $H$ de la cara
+de salida, su distancia al eje de la bomba, que es la cota que dan los planos de
+bombas. Pasado el codo, la tobera sigue recta en la dirección de salida, así que la
+cara se aleja del eje lo mismo que crece la tobera: con una primera geometría de
+longitud $L_0$ y altura $H_0$, la longitud buscada es $L = L_0 + (H - H_0)$, siempre que
+quede más allá del codo (construcción propia). Con $H$ fijada, la longitud se ignora, y
+la predicción de prestaciones usa la tobera que resulta.
+
 **Giro de la voluta:** por defecto toda la voluta gira alrededor del eje de la bomba
 hasta que la descarga apunta en vertical hacia arriba (+y), como en los planos de
 bombas. Con la descarga central, la brida queda justo encima del eje. También se puede
@@ -163,7 +171,9 @@ $$\tan\vartheta_{eq} = \frac{R_1}{L}\left(\sqrt{A_R} - 1\right)$$
 Valores automáticos:
 
 - longitud $L = 4\,R_1$, codo incluido;
-- diámetro de salida para abrir al 85 % de $\vartheta_{al}$;
+- diámetro de salida para abrir al 85 % de $\vartheta_{al}$, que puede redondearse al
+  diámetro nominal DN más próximo de la serie de ISO 6708 (10, 15, 20, 25, 32, 40, 50,
+  65, 80, 100, 125, 150, 200… mm);
 - por encima de $n_q = 80$ la tobera no decelera más ($A_R = 1$), y si se fuerza otra
   cosa el programa avisa.
 
@@ -228,6 +238,24 @@ salida queda a 224,6 mm del eje (1,30 $d_2$) y el codo gira 63,7°.
 
 Por defecto es $\max(0{,}03\,d_2,\ 6\ \text{mm})$, un valor propio. Con él se construye
 el sólido de la carcasa en el CAD (sección *CAD*).
+
+**Brida de salida.** Un disco cuya cara delantera es la cara de salida, con el diámetro
+interior de la tobera y unos taladros para los pernos repartidos por igual, a caballo
+del plano que contiene el eje de la bomba. Las medidas automáticas son **proporciones
+propias, no las de una norma de bridas**; cada una se puede fijar a la norma que se use:
+
+| Medida | Valor automático |
+|---|---|
+| Taladro de perno $h$ | $\max(14\ \text{mm},\ 0{,}12\,d)$ |
+| Círculo de pernos $K$ | $d + 2\,(s + 1{,}5\,h)$, con $s$ el espesor de pared |
+| Diámetro exterior $D$ | $K + 3\,h$ |
+| Espesor $b$ | $\max(2\,s,\ 0{,}15\,d + 6\ \text{mm})$ |
+| Pernos | de cuatro en cuatro, a unos seis taladros de distancia |
+
+El programa comprueba que los taladros no corten la pared de la tobera, que queden
+dentro del disco y que quepan en el círculo. En la bomba de referencia (salida de
+94,1 mm, pared de 6 mm) sale una brida de 190 × 20 mm con 8 taladros de 14 mm en un
+círculo de 148 mm.
 
 ### 7. Voluta doble
 
@@ -494,8 +522,11 @@ Los sólidos se construyen en milímetros con Open CASCADE:
     $r_2$ en toda la altura, el espacio del rodete;
   - quedan macizos la lengüeta y su nariz, el nervio de la voluta doble y unas paredes
     laterales a ambos lados del anillo de entrada, entre $r'_z$ menos el espesor y
-    $r'_z$. La carcasa es abierta hacia el rodete y acaba plana en la brida de
-    salida;
+    $r'_z$. La carcasa es abierta hacia el rodete y termina en la brida de salida;
+  - la brida es un disco que se une a la carcasa. Su diámetro interior es medio
+    espesor de pared mayor que la tobera, para que su cilindro corra dentro de la pared
+    y no sobre la superficie del flujo. Si la unión falla, la carcasa acaba plana y el
+    programa avisa;
   - las operaciones booleanas usan las mismas tolerancias de contacto que el fluido.
     Un intento solo vale si da un único sólido válido que además ha perdido el volumen
     del canal (comprobado con volúmenes rápidos): una booleana fallida puede devolver
@@ -572,14 +603,14 @@ Tras el difusor, la voluta recibe mucho menos momento angular: $c_u r$ baja de 1
   de Bézier, las asimétricas y las externas.
 - **Áreas de la espiral:** faltan las reglas de Pfleiderer y Stepanoff.
 - **Tobera:** tangencial o radial, siempre en el plano medio: no hay codo en z ni
-  desplazamiento axial, y la brida es siempre circular. La longitud se fija a lo largo
-  de la línea media, no por la altura de la brida. Con la pared exterior recta, alguna
-  combinación de lengüeta puede dar un sólido no válido.
+  desplazamiento axial, y la salida es siempre circular, sin brida rectangular. Con la
+  pared exterior recta, alguna combinación de lengüeta puede dar un sólido no válido.
 - **Lengüeta:** su nariz es un arco con tangentes rectas hasta la punta, sin un perfil
   elíptico ni una curva editable. En la vista 3D, la espiral y la tobera de una
   lengüeta afilada o redondeada se ven solapadas; el corte limpio y la nariz salen en
   el CAD.
-- **Carcasa:** su espesor es constante y no hay bridas, tapas ni pies; la pared que
+- **Carcasa:** su espesor es constante y no hay tapas ni pies; la brida no lleva
+  resalte ni medidas de una norma de bridas, y la pared que
   rodea el anillo de entrada termina en un cilindro, sin los extremos cónicos que
   llevan algunas carcasas. No se calculan las tensiones en la pared.
 - **Flujo:**

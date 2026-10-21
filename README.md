@@ -196,8 +196,9 @@ cargo run -p tp-cli -- cad bomba.tpj --format step,iges,stl --balance-holes
 Una bomba completa se crea con sus componentes de la entrada a la salida: rodete,
 estator con álabes (`stator`) o sin ellos (`vaneless-stator`) y voluta. Cada uno se
 diseña con su orden, y `cad` construye los sólidos de todos; de la voluta salen el
-dominio fluido (`volute.step`) y la carcasa con su espesor de pared
-(`volute-casing.step`):
+dominio fluido (`volute.step`) y la carcasa con su espesor de pared y la brida de
+salida (`volute-casing.step`). La altura de la cara de salida se puede fijar con
+`turbopump volute --set height=…`:
 
 ```bash
 cargo run -p tp-cli -- new etapa.tpj --machine pump --flow "100 m3/h" --head "32 m" --speed "2900 rpm" --components impeller,stator,volute
