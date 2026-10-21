@@ -9,6 +9,7 @@ mod bspline;
 mod error;
 mod interp;
 pub mod linalg;
+pub mod optim;
 mod point;
 mod polyline;
 pub mod quad;
