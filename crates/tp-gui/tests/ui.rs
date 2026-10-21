@@ -512,6 +512,8 @@ fn file_menu_offers_the_drawings_as_svg_dxf_and_dwg() {
 fn the_new_project_assistant_builds_the_chosen_components() {
     use tp_project::ComponentKind;
     let mut harness = harness();
+    // A new window has nothing to save.
+    assert!(!harness.state().document().is_dirty());
     harness.key_press_modifiers(Modifiers::COMMAND, Key::N);
     harness.run();
     // Machine and global setup keep their defaults; the panel behind has a "Next" too.
@@ -527,11 +529,10 @@ fn the_new_project_assistant_builds_the_chosen_components() {
     harness.run();
     harness.get_by_label("vaned").click();
     harness.run();
+    // The window's first project is untouched: it is replaced without asking.
     harness.get_by_label("Create").click();
     harness.run();
-    // The window's first project was never saved: the editor asks before replacing it.
-    harness.get_by_label("Don't save").click();
-    harness.run();
+    assert!(harness.query_by_label("Don't save").is_none());
     let kinds: Vec<ComponentKind> = harness
         .state()
         .document()

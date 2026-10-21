@@ -10,20 +10,22 @@ pub struct Document {
     project: Project,
     history: History<Project>,
     path: Option<PathBuf>,
-    /// The project as last saved or loaded; `None` if it was never written.
-    saved: Option<Project>,
+    /// The project with no changes: as last saved or loaded, or as created for a new
+    /// document, so that an untouched new project has nothing to save.
+    clean: Project,
     /// Label of the gesture whose edits are merging into the last undo step.
     gesture: Option<String>,
 }
 
 impl Document {
-    /// A new, unsaved document.
+    /// A new document, not yet written to a file. Until it is edited it has no
+    /// unsaved changes.
     pub fn new(project: Project) -> Self {
         Self {
+            clean: project.clone(),
             project,
             history: History::new(UNDO_LIMIT),
             path: None,
-            saved: None,
             gesture: None,
         }
     }
@@ -32,7 +34,7 @@ impl Document {
         let path = path.as_ref();
         let project = Project::load(path)?;
         Ok(Self {
-            saved: Some(project.clone()),
+            clean: project.clone(),
             project,
             history: History::new(UNDO_LIMIT),
             path: Some(path.to_owned()),
@@ -52,9 +54,10 @@ impl Document {
         &self.history
     }
 
-    /// Whether the project differs from what is on disk.
+    /// Whether the project has changes to save: it differs from what is on disk, or,
+    /// for a new document, from the project it was created with.
     pub fn is_dirty(&self) -> bool {
-        self.saved.as_ref() != Some(&self.project)
+        self.clean != self.project
     }
 
     /// Applies an edit as one undoable step named `label`. If `edit` fails, the project
@@ -126,7 +129,7 @@ impl Document {
     pub fn save(&mut self) -> Result<(), ProjectError> {
         let path = self.path.clone().ok_or(ProjectError::NoPath)?;
         self.project.save(&path)?;
-        self.saved = Some(self.project.clone());
+        self.clean = self.project.clone();
         Ok(())
     }
 
@@ -219,8 +222,17 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("doc.tpj");
 
+        // An untouched new project has nothing to save; an edit changes that.
         let mut doc = Document::new(pump());
+        assert!(!doc.is_dirty());
+        doc.edit("rename", |p| {
+            p.info.name = "First".into();
+            Ok(())
+        })
+        .unwrap();
         assert!(doc.is_dirty());
+        doc.undo();
+        assert!(!doc.is_dirty());
         assert!(matches!(doc.save(), Err(ProjectError::NoPath)));
         doc.save_as(&path).unwrap();
         assert!(!doc.is_dirty());
