@@ -80,7 +80,7 @@ fn section_wire(ring: &[DVec3], breaks: &[usize]) -> Result<Shape, CadError> {
 /// leaves the throat, the diffuser and the start of the spiral share their side walls
 /// for a stretch, and lofted walls run nearly coincident with each other or with the
 /// inlet ring.
-const FUZZY_GAPS: [f64; 4] = [0.0, 1e-3, 1e-4, 1e-2];
+const FUZZY_GAPS: [f64; 5] = [0.0, 1e-3, 1e-4, 1e-2, 1e-1];
 
 /// One solid lofted through each sequence of outlines.
 fn loft_pieces(pieces: &[Vec<Vec<DVec3>>], breaks: &[usize]) -> Result<Vec<Shape>, CadError> {
@@ -180,8 +180,20 @@ pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
         ])?);
     }
 
+    // A failed fusion may still give one valid solid that lost a piece: the channel must
+    // keep about the volume of its pieces, which only overlap where the spiral reaches
+    // into the diffuser, and the flow domain most of the ring besides (quick estimates).
+    // The channel and the flow domain may each need their own gap.
+    let pieces: f64 = lofts.iter().map(|l| l.volume_with_tolerance(0.0)).sum();
+    let ring_volume = ring.volume_with_tolerance(0.0);
+    let whole = |channel: &Shape| channel.volume_with_tolerance(0.0) > 0.9 * pieces;
+    let joined = first_sound(
+        |fuzzy| fuse_all(&lofts, fuzzy),
+        |channel| channel.is_valid() && channel.solid_count() == 1 && whole(channel),
+    )?;
     let assemble = |fuzzy: f64| -> Result<(Shape, Shape), CadError> {
-        let mut channel = fuse_all(&lofts, fuzzy)?;
+        // A turn by zero copies the channel for this attempt.
+        let mut channel = joined.rotated_z(0.0)?;
         let mut fluid = ring.fuse_fuzzy(&channel, fuzzy)?;
         for tool in &tools {
             fluid = fluid.cut_fuzzy(tool, fuzzy)?;
@@ -190,8 +202,12 @@ pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
         Ok((channel, fluid))
     };
     // The flow domain is what gets exported.
-    let (channel, fluid) = first_sound(assemble, |(_, fluid)| {
-        fluid.is_valid() && fluid.solid_count() == 1
+    let (channel, fluid) = first_sound(assemble, |(channel, fluid)| {
+        fluid.is_valid()
+            && fluid.solid_count() == 1
+            && whole(channel)
+            && fluid.volume_with_tolerance(0.0)
+                > channel.volume_with_tolerance(0.0) + 0.5 * ring_volume
     })?;
 
     Ok(VoluteCad { channel, fluid })
@@ -320,7 +336,7 @@ mod tests {
     use super::*;
     use std::f64::consts::PI;
     use tp_design::outlet::ImpellerOutlet;
-    use tp_design::volute::{SectionShape, VoluteInput};
+    use tp_design::volute::{CrossSectionInput, SectionShape, VoluteInput};
 
     fn basis() -> ImpellerOutlet {
         ImpellerOutlet {
@@ -362,11 +378,48 @@ mod tests {
         spiral + nozzle
     }
 
+    /// Every kind of cross section, and definitions that change round the spiral.
+    fn every_cross_section() -> Vec<CrossSectionInput> {
+        use tp_design::volute::{
+            BezierSide, ExternalRound, RadiusSide, SectionDefinition, SideShape, section,
+        };
+        let single = |shape| CrossSectionInput::single(shape);
+        vec![
+            CrossSectionInput::default(),
+            single(SectionShape::round()),
+            single(SectionShape::symmetric(SideShape::RadiusBased(
+                RadiusSide::default(),
+            ))),
+            single(SectionShape::symmetric(SideShape::Bezier(
+                BezierSide::default(),
+            ))),
+            single(SectionShape::symmetric(SideShape::LineSegments {
+                points: section::default_segments(),
+            })),
+            single(SectionShape::RoundExternal(ExternalRound::default())),
+            CrossSectionInput {
+                sections: vec![
+                    SectionDefinition {
+                        angle: PI / 2.0,
+                        active: true,
+                        shape: SectionShape::rectangular(),
+                    },
+                    SectionDefinition::at_throat(SectionShape::symmetric(SideShape::Round {
+                        ellipse_ratio: 1.2,
+                    })),
+                ],
+            },
+        ]
+    }
+
     #[test]
     fn volute_channel_and_fluid_domain_are_valid_solids() {
-        for shape in [SectionShape::default(), SectionShape::Circular] {
-            let mut input = VoluteInput::default();
-            input.cross_section.shape = shape;
+        for sections in every_cross_section() {
+            let input = VoluteInput {
+                cross_section: sections,
+                ..VoluteInput::default()
+            };
+            let shape = &input.cross_section;
             let g = VoluteGeometry::build(&basis(), &input).unwrap();
             let cad = build_volute(&g).unwrap();
             for s in [&cad.channel, &cad.fluid] {
@@ -383,7 +436,10 @@ mod tests {
             let (inner, outer) = g.inlet_ring();
             let ring = PI * (outer * outer - inner * inner) * g.design.inlet_width;
             let fluid = cad.fluid.volume_with_tolerance(1e-3) / MM.powi(3);
-            assert!(fluid > channel + 0.8 * ring && fluid < channel + 1.3 * ring);
+            assert!(
+                fluid > channel + 0.8 * ring && fluid < channel + 1.3 * ring,
+                "{shape:?}: fluid {fluid}, channel {channel}, ring {ring}"
+            );
         }
     }
 
@@ -415,7 +471,7 @@ mod tests {
         // a double volute.
         let edits: [&dyn Fn(&mut VoluteInput); 3] = [
             &|_| {},
-            &|v| v.cross_section.shape = SectionShape::Rectangular,
+            &|v| v.cross_section = CrossSectionInput::single(SectionShape::rectangular()),
             &|v| v.setup.kind = VoluteKind::Double,
         ];
         for edit in edits {
@@ -439,7 +495,7 @@ mod tests {
             assert!(
                 volume > 0.9 * shell && volume < 1.6 * shell,
                 "{:?}: {volume} vs {shell}",
-                input.cross_section.shape
+                input.cross_section
             );
         }
     }
@@ -478,7 +534,7 @@ mod tests {
         let edits: [&dyn Fn(&mut VoluteInput); 4] = [
             &|v| v.setup.rib_nose_ratio = tp_design::Param::Manual(3.0),
             &|v| v.setup.rib_thickness = tp_design::Param::Manual(0.008),
-            &|v| v.cross_section.shape = SectionShape::Rectangular,
+            &|v| v.cross_section = CrossSectionInput::single(SectionShape::rectangular()),
             &|v| {
                 v.cutwater.shape = tp_design::volute::CutwaterShape::Tangent;
                 v.setup.rib_wrap = tp_design::Param::Manual(170f64.to_radians());
@@ -492,7 +548,7 @@ mod tests {
     #[test]
     fn common_volute_options_give_one_valid_flow_domain() {
         use tp_design::volute::{CutwaterShape, DischargeShape, StraightWall};
-        for shape in [SectionShape::default(), SectionShape::Rectangular] {
+        for shape in [SectionShape::default(), SectionShape::rectangular()] {
             for discharge in [
                 DischargeShape::default(),
                 DischargeShape::Tangential {
@@ -503,8 +559,10 @@ mod tests {
                 },
             ] {
                 for cutwater in [CutwaterShape::default(), CutwaterShape::Tangent] {
-                    let mut input = VoluteInput::default();
-                    input.cross_section.shape = shape;
+                    let mut input = VoluteInput {
+                        cross_section: CrossSectionInput::single(shape.clone()),
+                        ..VoluteInput::default()
+                    };
                     input.diffuser.shape = discharge;
                     input.cutwater.shape = cutwater;
                     let g = VoluteGeometry::build(&basis(), &input).unwrap();
