@@ -27,6 +27,7 @@ use std::f64::consts::PI;
 use serde::{Deserialize, Serialize};
 use tp_units::STANDARD_GRAVITY as G;
 
+use crate::axial_thrust::{AxialForces, AxialThrust, AxialThrustInput};
 use crate::npsh::{CollectorThroat, NpshCurve, NpshSettings};
 use crate::pump::{CentrifugalPumpDesign, PumpDuty};
 use crate::radial_thrust::{RadialCollector, RadialThrust, default_shroud_thickness};
@@ -66,8 +67,10 @@ pub struct PerformanceInput {
     /// Exponent of the steep rise of NPSH₃ (eq. 6.22); automatic: 2.5.
     pub npsh_exponent: Param<f64>,
     /// Seal clearances twice those of Gülich eq. 3.12, which raise the radial force
-    /// (curve 2 of Fig. 9.27).
+    /// (curve 2 of Fig. 9.27) and the leakage that sets the axial force.
     pub wide_seal_clearances: bool,
+    /// Seals and balance holes for the axial force.
+    pub axial: AxialThrustInput,
 }
 
 /// What the prediction knows about the collector after the impeller, beyond its kind.
@@ -94,6 +97,7 @@ impl Default for PerformanceInput {
             npsh_blade_coefficient: Param::Auto,
             npsh_exponent: Param::Auto,
             wide_seal_clearances: false,
+            axial: AxialThrustInput::default(),
         }
     }
 }
@@ -119,6 +123,21 @@ pub struct PerformancePoint {
     pub volute_loss: f64,
     /// Steady radial force on the impeller, N; NaN without data for the collector.
     pub radial_force: f64,
+    /// Axial force on the impeller, N, positive toward the suction side.
+    pub axial_force: f64,
+}
+
+/// Axial force on the impeller.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct AxialSummary {
+    pub law: AxialThrust,
+    /// Its parts at the design point and at shut-off.
+    pub design: AxialForces,
+    pub shutoff: AxialForces,
+    /// Largest magnitude over the curve, N.
+    pub largest: f64,
+    /// The rough estimate of Gülich eq. T9.2.12 at the design point, N.
+    pub estimate: (f64, f64),
 }
 
 /// Radial force on the impeller.
@@ -176,6 +195,7 @@ pub struct PumpPerformance {
     pub volute: Option<VoluteSummary>,
     /// Radial force, when Table 9.4 covers the collector.
     pub radial: Option<RadialSummary>,
+    pub axial: AxialSummary,
     pub warnings: Vec<String>,
 }
 
@@ -284,6 +304,7 @@ impl Model {
             npsh_required: f64::NAN,
             volute_loss: volute,
             radial_force: f64::NAN,
+            axial_force: f64::NAN,
         }
     }
 }
@@ -470,6 +491,7 @@ pub fn predict(
                 .volute_loss(flow, model.theoretical_head(flow + model.leakage))
                 .map_or(f64::NAN, |l| l.total()),
             radial_force: f64::NAN,
+            axial_force: f64::NAN,
         }
     };
 
@@ -508,11 +530,22 @@ pub fn predict(
             b2tot,
         )
     });
+    let axial = AxialThrust::new(duty, design, &input.axial, input.wide_seal_clearances)?;
+    // In the recirculation range the Euler head comes from the model without it.
+    let axial_forces = |p: &PerformancePoint| {
+        let theoretical = if p.theoretical_head.is_finite() {
+            p.theoretical_head
+        } else {
+            model.theoretical_head(p.flow + model.leakage)
+        };
+        axial.forces(p.flow, p.head, theoretical)
+    };
     let with_npsh = |mut p: PerformancePoint| {
         p.npsh_required = npsh.at(p.flow);
         if let Some(law) = &radial {
             p.radial_force = law.force(p.flow / duty.flow, p.head, duty.head);
         }
+        p.axial_force = axial_forces(&p).total;
         p
     };
     for p in &mut points {
@@ -611,6 +644,25 @@ pub fn predict(
             design_load,
         }
     });
+    let axial = AxialSummary {
+        law: axial,
+        design: axial_forces(&design_point),
+        shutoff: axial_forces(&shutoff),
+        largest: points
+            .iter()
+            .map(|p| p.axial_force.abs())
+            .fold(0.0, f64::max),
+        estimate: axial.estimate(design_point.head),
+    };
+    // Without balance holes the shrouds push toward the suction side; a reversed force
+    // comes from a high suction pressure.
+    if axial.design.total < 0.0 && axial.law.eyes < 1.5 && axial.law.rear_seal_diameter.is_none() {
+        warnings.push(format!(
+            "the axial force points to the pressure side ({:.0} N at design): the suction \
+             pressure on the shaft outweighs the shrouds (Gülich Chap. 9.2.2)",
+            axial.design.total
+        ));
+    }
     let cavitation_flow = npsh.cavitation_flow(design.npsh_available, end * duty.flow);
     if let Some(q) = cavitation_flow {
         warnings.push(format!(
@@ -635,6 +687,7 @@ pub fn predict(
         npsh,
         volute,
         radial,
+        axial,
         warnings,
     })
 }
@@ -666,6 +719,26 @@ pub const PERFORMANCE_CORRELATIONS: &[crate::pump::correlations::CorrelationInfo
         reference: "Gülich 2nd ed., Chap. 4.1.2; the leakage law is the orifice law",
         verification: crate::pump::correlations::Verification::EngineeringDefault,
     },
+    crate::pump::correlations::CorrelationInfo {
+        id: "performance.axial_force",
+        description: "F = π·r₂²·{(1 − x²)·Δp_La − ρ/4·u₂²·k²·(1 − x²)²} on each shroud, \
+                      Δp_La = ρ·g·H·(1 − g·H_th/(2u₂²)), F_ax = F_Hy − F_I + F_w",
+        reference: "Gülich 2nd ed., Table 9.2, eqs. T9.2.2, T9.2.3, T9.2.8 to T9.2.11",
+        verification: crate::pump::correlations::Verification::Verified,
+    },
+    crate::pump::correlations::CorrelationInfo {
+        id: "performance.sidewall_rotation",
+        description: "k_o = 0.5 for open sidewall gaps; k = k_o·exp{300·φ_sp·(r₂/r_sp − 1)} \
+                      with φ_sp = 5.5·10⁻⁴·ψ^1.5·(nq/20)^0.4",
+        reference: "Gülich 2nd ed., Table 9.1, eqs. T9.1.2a to T9.1.4",
+        verification: crate::pump::correlations::Verification::Verified,
+    },
+    crate::pump::correlations::CorrelationInfo {
+        id: "performance.axial_balance",
+        description: "balance holes leave 0.15 of the force; double entry f_ax = 0.015",
+        reference: "middle of the ranges of Gülich eqs. T9.2.14 and T9.2.15",
+        verification: crate::pump::correlations::Verification::EngineeringDefault,
+    },
 ];
 
 #[cfg(test)]
@@ -691,6 +764,121 @@ mod tests {
         let d = design(&duty(), &CentrifugalPumpInput::default()).unwrap();
         let p = predict(&duty(), &d, input, &CollectorData::default()).unwrap();
         (d, p)
+    }
+
+    #[test]
+    fn axial_force_of_an_overhung_impeller_follows_table_9_2() {
+        let (d, p) = performance(&PerformanceInput::default());
+        let a = &p.axial;
+        let f = &a.design;
+        // Default seals: the eye plus the shroud on both sides, the hub at the rear.
+        assert_relative_eq!(
+            a.law.seal_diameter,
+            d.inlet_diameter + 2.0 * default_shroud_thickness(d.outlet_diameter)
+        );
+        assert_relative_eq!(a.law.shaft_seal_diameter, d.hub_diameter);
+        // Δp_La = ρ·g·H·(1 − g·H_th/(2u₂²)) (eq. T9.2.2).
+        let u2 = a.law.tip_speed;
+        assert_relative_eq!(
+            f.pressure_rise,
+            998.2 * G * p.design.head * (1.0 - G * p.design.theoretical_head / (2.0 * u2 * u2)),
+            max_relative = 1e-12
+        );
+        // The leakage speeds up the liquid on the front shroud only.
+        assert!(f.front_rotation > f.rear_rotation);
+        assert_relative_eq!(f.rear_rotation, 0.5);
+        assert_relative_eq!(f.hydraulic, f.rear - f.front, max_relative = 1e-12);
+        assert_relative_eq!(
+            f.total,
+            f.hydraulic - f.momentum + f.shaft,
+            max_relative = 1e-12
+        );
+        // Toward the suction side, a little below the rough estimate of eq. T9.2.12.
+        assert!(f.total > 0.0);
+        assert!(f.hydraulic > 0.8 * a.estimate.0 && f.hydraulic < a.estimate.1);
+        assert_relative_eq!(p.design.axial_force, f.total, max_relative = 1e-12);
+        assert!(a.largest >= f.total && a.largest >= a.shutoff.total.abs());
+        assert!(p.points.iter().all(|q| q.axial_force.is_finite()));
+    }
+
+    #[test]
+    fn balance_holes_seals_and_suction_pressure_change_the_axial_force() {
+        let plain = performance(&PerformanceInput::default()).1.axial.design;
+        let force = |edit: &dyn Fn(&mut PerformanceInput)| {
+            let mut input = PerformanceInput::default();
+            edit(&mut input);
+            performance(&input).1
+        };
+        // Balance holes leave 15 % of the force on the shrouds (eq. T9.2.14).
+        let holes = force(&|i| i.axial.balance_holes = true);
+        assert_relative_eq!(
+            holes.axial.design.hydraulic,
+            0.15 * plain.hydraulic,
+            max_relative = 1e-9
+        );
+        assert!(!holes.warnings.iter().any(|w| w.contains("pressure side")));
+        // A larger rear seal pushes toward the pressure side (eq. T9.2.13).
+        let wide_rear = force(&|i| {
+            i.axial.balance_holes = true;
+            i.axial.rear_seal_diameter = Param::Manual(0.1);
+        });
+        assert!(wide_rear.axial.design.hydraulic < holes.axial.design.hydraulic);
+        // Wider clearances leak more and lower the force on the front shroud.
+        let wide = force(&|i| i.wide_seal_clearances = true);
+        assert!(wide.axial.design.front_rotation > plain.front_rotation);
+        assert!(wide.axial.design.total > plain.total);
+        // A high suction pressure on the shaft can reverse the force.
+        let mut duty = duty();
+        duty.inlet_total_pressure = 40e5;
+        let d = design(&duty, &CentrifugalPumpInput::default()).unwrap();
+        let p = predict(
+            &duty,
+            &d,
+            &PerformanceInput::default(),
+            &CollectorData::default(),
+        )
+        .unwrap();
+        assert!(p.axial.design.shaft < -1000.0);
+        assert!(p.axial.design.total < 0.0);
+        assert!(p.warnings.iter().any(|w| w.contains("pressure side")));
+        // Impossible seals.
+        let mut input = PerformanceInput::default();
+        input.axial.seal_diameter = Param::Manual(0.5);
+        let d = design(&self::duty(), &CentrifugalPumpInput::default()).unwrap();
+        assert!(predict(&self::duty(), &d, &input, &CollectorData::default()).is_err());
+    }
+
+    #[test]
+    fn a_double_entry_impeller_keeps_a_small_residual() {
+        let pump = CentrifugalPumpInput {
+            suction: crate::pump::Suction::Double,
+            ..CentrifugalPumpInput::default()
+        };
+        let d = design(&duty(), &pump).unwrap();
+        let p = predict(
+            &duty(),
+            &d,
+            &PerformanceInput::default(),
+            &CollectorData::default(),
+        )
+        .unwrap();
+        let a = &p.axial;
+        let u2 = a.law.tip_speed;
+        // Eq. T9.2.15 with f_ax = 0.015.
+        assert_relative_eq!(
+            a.design.total,
+            0.015 * 998.2 / 2.0
+                * u2
+                * u2
+                * (d.outlet_diameter.powi(2) - a.law.seal_diameter.powi(2)),
+            max_relative = 1e-12
+        );
+        let single = performance(&PerformanceInput::default())
+            .1
+            .axial
+            .design
+            .total;
+        assert!(a.design.total < 0.5 * single);
     }
 
     #[test]
@@ -775,6 +963,7 @@ mod tests {
             npsh_blade_coefficient: Param::Manual(0.2),
             npsh_exponent: Param::Manual(3.0),
             wide_seal_clearances: false,
+            axial: AxialThrustInput::default(),
         };
         let (d, p) = performance(&input);
         assert_relative_eq!(p.npsh.inlet_coefficient, 1.3);
