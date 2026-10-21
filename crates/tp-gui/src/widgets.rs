@@ -2,9 +2,10 @@
 //! parameters.
 //!
 //! Values are stored in SI and shown in the project's display units. Every group of
-//! properties is a [`props`] grid of three columns: the label, with an ⓘ that tells
-//! where the value comes from; the input or the computed value; and the "auto" toggle.
-//! All grids of the panel share the column widths, so the values line up.
+//! properties is a [`props`] grid of two columns: the label, with an ⓘ that tells
+//! where the value comes from and, at its right end, just before the input, the check
+//! box for "automatic" of the parameters that have one; and the input or the computed
+//! value. All grids of the panel share the column widths, so the values line up.
 
 use std::hash::Hash;
 use std::ops::RangeInclusive;
@@ -15,8 +16,8 @@ use eframe::egui::{self, Align, DragValue, Layout, RichText, Sense, Ui, vec2};
 use tp_design::Param;
 use tp_units::{DisplayUnits, QuantityKind, decimals_for};
 
-/// Width of the "auto" column.
-const AUTO_WIDTH: f32 = 44.0;
+/// Room for the "automatic" check box at the right end of the label cell.
+const AUTO_WIDTH: f32 = 20.0;
 /// Space between the columns.
 const GAP: f32 = 8.0;
 /// Height of a property row.
@@ -32,7 +33,9 @@ struct Columns {
 impl Columns {
     /// The columns for a panel `width` points wide.
     fn for_width(width: f32) -> Self {
-        let free = (width - AUTO_WIDTH - 2.0 * GAP).max(160.0);
+        // A little slack: rows exactly as wide as the panel would nudge its width
+        // through rounding, and the columns would take frames to settle.
+        let free = (width - GAP - 12.0).max(160.0);
         let label = (free * 0.56).clamp(100.0, 260.0);
         Self {
             label,
@@ -57,7 +60,7 @@ pub fn props(ui: &mut Ui, id: impl Hash + std::fmt::Debug, add: impl FnOnce(&mut
     let columns = Columns::for_width(ui.available_width());
     ui.data_mut(|d| d.insert_temp(Columns::id(), columns));
     egui::Grid::new(id)
-        .num_columns(3)
+        .num_columns(2)
         .spacing([GAP, 4.0])
         .min_row_height(ROW_HEIGHT)
         .show(ui, |ui| {
@@ -92,8 +95,20 @@ pub fn info(ui: &mut Ui, text: &str) {
     });
 }
 
-/// The label cell of a property row, with an ⓘ for `hint` when there is one.
+/// The label cell of a property row, with an ⓘ for `hint` when there is one, and the
+/// empty "automatic" cell after it: the input or value comes next.
 pub fn label(ui: &mut Ui, text: &str, hint: &str) {
+    label_cell(ui, text, hint, None);
+}
+
+/// The label cell; with `auto`, the "automatic" check box at its right end, just
+/// before the input. Returns the check box's response.
+fn label_cell(
+    ui: &mut Ui,
+    text: &str,
+    hint: &str,
+    auto: Option<&mut bool>,
+) -> Option<egui::Response> {
     let width = Columns::of(ui).label;
     ui.allocate_ui_with_layout(
         vec2(width, ROW_HEIGHT),
@@ -101,7 +116,7 @@ pub fn label(ui: &mut Ui, text: &str, hint: &str) {
         |ui| {
             ui.set_min_width(width);
             ui.spacing_mut().item_spacing.x = 4.0;
-            let room = if hint.is_empty() { 0.0 } else { 18.0 };
+            let room = if hint.is_empty() { 0.0 } else { 18.0 } + AUTO_WIDTH;
             ui.scope(|ui| {
                 ui.set_max_width(width - room);
                 ui.add(egui::Label::new(text).truncate());
@@ -109,8 +124,16 @@ pub fn label(ui: &mut Ui, text: &str, hint: &str) {
             if !hint.is_empty() {
                 info(ui, hint);
             }
+            auto.map(|auto| {
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.spacing_mut().interact_size.x = 0.0;
+                    ui.add(egui::Checkbox::without_text(auto))
+                })
+                .inner
+            })
         },
-    );
+    )
+    .inner
 }
 
 /// A one-line text field as wide as the value column, or as the half of it that
@@ -221,8 +244,11 @@ pub fn param_f64(
     units: &DisplayUnits,
     range: RangeInclusive<f64>,
 ) -> bool {
-    self::label(ui, label, hint);
-    let mut changed = false;
+    let mut changed = auto_toggle(ui, label, hint, param, || {
+        effective
+            .unwrap_or(*range.start())
+            .clamp(*range.start(), *range.end())
+    });
     match param {
         Param::Auto => match effective {
             Some(value) => {
@@ -235,11 +261,6 @@ pub fn param_f64(
             changed |= quantity(ui, value, kind, units, range.clone());
         }
     }
-    changed |= auto_toggle(ui, param, || {
-        effective
-            .unwrap_or(*range.start())
-            .clamp(*range.start(), *range.end())
-    });
     ui.end_row();
     changed
 }
@@ -253,8 +274,11 @@ pub fn param_u32(
     effective: Option<u32>,
     range: RangeInclusive<u32>,
 ) -> bool {
-    self::label(ui, label, hint);
-    let mut changed = false;
+    let mut changed = auto_toggle(ui, label, hint, param, || {
+        effective
+            .unwrap_or(*range.start())
+            .clamp(*range.start(), *range.end())
+    });
     match param {
         Param::Auto => match effective {
             Some(mut value) => {
@@ -268,32 +292,35 @@ pub fn param_u32(
                 .changed();
         }
     }
-    changed |= auto_toggle(ui, param, || {
-        effective
-            .unwrap_or(*range.start())
-            .clamp(*range.start(), *range.end())
-    });
     ui.end_row();
     changed
 }
 
+/// The label cell of a parameter, with its "automatic" check box. Returns whether
+/// the parameter changed.
 fn auto_toggle<T: Copy>(
     ui: &mut Ui,
+    label: &str,
+    hint: &str,
     param: &mut Param<T>,
     manual_start: impl FnOnce() -> T,
 ) -> bool {
-    let auto = param.is_auto();
-    let chip = egui::Button::selectable(auto, RichText::new(tr("auto")).size(11.5))
-        .min_size(vec2(AUTO_WIDTH, ROW_HEIGHT - 4.0));
-    let response = ui.add(chip).on_hover_text(tr(
+    let mut auto = param.is_auto();
+    let Some(response) = label_cell(ui, label, hint, Some(&mut auto)) else {
+        return false;
+    };
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, auto, tr("auto"))
+    });
+    let response = response.on_hover_text(tr(
         "Automatic: the program proposes the value from a correlation and updates it when \
          earlier inputs change. Clear it to fix your own value.",
     ));
-    if response.clicked() {
+    if response.changed() {
         *param = if auto {
-            Param::Manual(manual_start())
-        } else {
             Param::Auto
+        } else {
+            Param::Manual(manual_start())
         };
         true
     } else {
