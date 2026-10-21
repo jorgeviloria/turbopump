@@ -10,8 +10,11 @@
 //!    7.27), corrected for the cutwater thickness (eq. 7.28);
 //! 3. flow angle at the cutwater (eqs. T7.7.3 to T7.7.6);
 //! 4. discharge diffuser checked against the allowable opening angle (eqs. 1.44, 1.45).
+//!
+//! [`loss`] estimates the hydraulic losses of a volute against flow.
 
 mod geometry;
+pub mod loss;
 
 use std::f64::consts::{PI, TAU};
 
