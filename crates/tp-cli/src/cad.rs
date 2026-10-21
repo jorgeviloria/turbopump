@@ -50,7 +50,7 @@ pub(crate) struct CadArgs {
     /// Bore diameter of the hub (default: hub diameter at the eye).
     #[arg(long)]
     bore: Option<String>,
-    /// Material density for the impeller mass.
+    /// Material density for the masses of the impeller and the volute casing.
     #[arg(long, default_value = "7850 kg/m3")]
     density: String,
 }
@@ -218,9 +218,20 @@ pub(crate) fn run(args: CadArgs) -> CliResult {
         println!("{name} ({id}): building CAD solids…");
         let cad = tp_cad::build_volute(&geometry).map_err(|e| e.to_string())?;
         println!("  Volute flow domain {:.1} cm³", cad.fluid_volume() * 1e6);
-        if !cad.fluid.is_valid() || cad.fluid.solid_count() != 1 {
-            println!("  warning: the volute flow domain is not a single valid solid");
-            warned = true;
+        let casing = tp_cad::build_volute_casing(&geometry, &cad).map_err(|e| e.to_string())?;
+        let material = casing.volume();
+        println!(
+            "  Volute casing      {:.1} cm³, {} at {}, wall {}",
+            material * 1e6,
+            format_mass(material * density),
+            show(&units, QuantityKind::Density, density),
+            show(&units, QuantityKind::Length, geometry.design.wall_thickness)
+        );
+        for (label, shape) in [("flow domain", &cad.fluid), ("casing", &casing.solid)] {
+            if !shape.is_valid() || shape.solid_count() != 1 {
+                println!("  warning: the volute {label} is not a single valid solid");
+                warned = true;
+            }
         }
         std::fs::create_dir_all(&base).map_err(|e| format!("{}: {e}", base.display()))?;
         let stem = if volutes.len() > 1 {
@@ -232,6 +243,8 @@ pub(crate) fn run(args: CadArgs) -> CliResult {
         for &format in &args.format {
             let path = base.join(format!("{stem}.{}", format.extension()));
             write(&cad.fluid, &path, format, deflection)?;
+            let path = base.join(format!("{stem}-casing.{}", format.extension()));
+            write(&casing.solid, &path, format, deflection)?;
         }
         println!();
     }

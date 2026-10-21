@@ -461,10 +461,15 @@ fn cad_exports_impeller_and_flow_domain() {
         "step",
     ]);
     assert_eq!(again.status.code(), Some(0), "{}", stdout(&again));
-    let volute = std::fs::metadata(out_dir.join("volute.step"))
-        .unwrap()
-        .len();
-    assert!(volute > 100_000, "volute.step: {volute} bytes");
+    for name in ["volute.step", "volute-casing.step"] {
+        let size = std::fs::metadata(out_dir.join(name)).unwrap().len();
+        assert!(size > 100_000, "{name}: {size} bytes");
+    }
+    assert!(
+        stdout(&again).contains("Volute casing      "),
+        "{}",
+        stdout(&again)
+    );
 
     let step = std::fs::read_to_string(out_dir.join("impeller.step")).unwrap();
     assert!(step.starts_with("ISO-10303-21;"));
