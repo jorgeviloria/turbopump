@@ -135,6 +135,18 @@ pub fn volute_txt(g: &VoluteGeometry) -> String {
             }
         }
     }
+    // The rib of a double volute in the midplane, nose first.
+    if let (Some(rib), Some(r)) = (&d.rib, &g.rib) {
+        let _ = writeln!(
+            out,
+            "[rib outline thickness={} nose_ratio={}]",
+            number(rib.thickness),
+            number(rib.nose_ratio)
+        );
+        for p in r.outline() {
+            let _ = writeln!(out, "{} {} {}", number(p.x), number(p.y), number(p.z));
+        }
+    }
     // A double volute's diffuser starts from both channels: its first outline is new.
     let first = if g.design.rib.is_some() { 0 } else { 1 };
     for (i, n) in g.nozzle.iter().enumerate().skip(first) {
