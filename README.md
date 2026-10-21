@@ -22,7 +22,7 @@ compresores y turbinas.
 | [`tp-fluids`](crates/tp-fluids) | Propiedades de líquidos con CoolProp, cargado al ejecutar, y un modelo propio del agua (IAPWS) para cuando falta |
 | [`tp-design`](crates/tp-design) | Triángulos de velocidad, deslizamiento (Wiesner), correlaciones de bomba, dimensiones principales y geometría del rodete (contorno meridional, flujo meridional, álabes y espesores), voluta y difusores con o sin álabes, curva característica, flujo potencial meridional y velocidades en las caras del álabe |
 | [`tp-io`](crates/tp-io) | Exportación: lista de puntos, malla STL y dibujos SVG |
-| [`tp-cad`](crates/tp-cad) | Sólidos del rodete, los difusores, la voluta y sus dominios fluidos con Open CASCADE, y exportación STEP, IGES y STL |
+| [`tp-cad`](crates/tp-cad) | Sólidos del rodete, los difusores, la voluta con su carcasa y sus dominios fluidos con Open CASCADE, y exportación STEP, IGES y STL |
 | [`tp-project`](crates/tp-project) | Modelo de proyecto, parámetros automáticos o manuales, componentes y sus reglas, pasos de diseño, archivo `.tpj` y deshacer/rehacer |
 | [`tp-cli`](crates/tp-cli) | Ejecutable `turbopump` para la línea de comandos |
 | [`tp-gui`](crates/tp-gui) | Ejecutable `turbopump-gui`: editor gráfico con egui y vista 3D con wgpu |
@@ -193,7 +193,9 @@ cargo run -p tp-cli -- cad bomba.tpj --format step,iges,stl
 
 Una bomba completa se crea con sus componentes de la entrada a la salida: rodete,
 estator con álabes (`stator`) o sin ellos (`vaneless-stator`) y voluta. Cada uno se
-diseña con su orden, y `cad` construye los sólidos de todos:
+diseña con su orden, y `cad` construye los sólidos de todos; de la voluta salen el
+dominio fluido (`volute.step`) y la carcasa con su espesor de pared
+(`volute-casing.step`):
 
 ```bash
 cargo run -p tp-cli -- new etapa.tpj --machine pump --flow "100 m3/h" --head "32 m" --speed "2900 rpm" --components impeller,stator,volute

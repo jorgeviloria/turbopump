@@ -226,8 +226,8 @@ salida queda a 224,6 mm del eje (1,30 $d_2$) y el codo gira 63,7°.
 
 ### 6. Espesor de pared
 
-Por defecto es $\max(0{,}03\,d_2,\ 6\ \text{mm})$, un valor propio. De momento solo se
-guarda y se dibuja: el sólido de la carcasa llega en una fase posterior.
+Por defecto es $\max(0{,}03\,d_2,\ 6\ \text{mm})$, un valor propio. Con él se construye
+el sólido de la carcasa en el CAD (sección *CAD*).
 
 ### 7. Voluta doble
 
@@ -479,6 +479,30 @@ Los sólidos se construyen en milímetros con Open CASCADE:
   que la spline no suavice los quiebros entre flancos y esquinas. El loft recorre la
   espiral y la tobera, y se une al anillo que va de la salida del rodete al círculo de
   la lengüeta. El resultado es el dominio fluido, `volute.<ext>`.
+- **Carcasa de la voluta,** `volute-casing.<ext>` (construcción propia):
+  - cada contorno del loft del fluido se desplaza hacia fuera el espesor de pared en su
+    propio plano: cada punto se mueve por la bisectriz de las normales de sus dos
+    aristas, una distancia igual al espesor dividido por el coseno de la mitad del
+    giro entre ellas. Así las esquinas vivas siguen vivas y los arcos crecen en el
+    espesor;
+  - con los contornos desplazados se hacen los mismos lofts que en el fluido, pero cada
+    uno en dos mitades que se tocan en su contorno central. El comienzo de la espiral
+    corre justo por dentro de su garganta, con la lengüeta entre ambos; desplazados
+    hacia fuera se cortarían dentro de un mismo loft, y Open CASCADE da entonces
+    resultados sin sentido aunque el sólido parezca válido;
+  - a la unión de las mitades se le restan el dominio fluido y un cilindro con el radio
+    $r_2$ en toda la altura, el espacio del rodete;
+  - quedan macizos la lengüeta y su nariz, el nervio de la voluta doble y unas paredes
+    laterales a ambos lados del anillo de entrada, entre $r'_z$ menos el espesor y
+    $r'_z$. La carcasa es abierta hacia el rodete y acaba plana en la brida de
+    salida;
+  - las operaciones booleanas usan las mismas tolerancias de contacto que el fluido.
+    Un intento solo vale si da un único sólido válido que además ha perdido el volumen
+    del canal (comprobado con volúmenes rápidos): una booleana fallida puede devolver
+    un sólido válido sin la resta. Las booleanas corren en paralelo y con cajas
+    orientadas; aun así la carcasa tarda de unos segundos a medio minuto;
+  - el informe da el volumen y la masa con la densidad del material
+    (`turbopump cad --density`, 7850 kg/m³ por defecto).
 - **Difusor:** el canal entre las paredes laterales se obtiene por revolución, y se le
   restan los álabes, que son prismas entre las dos paredes. Salen el dominio fluido,
   `diffuser-N.<ext>`, y los álabes recortados a las paredes, `diffuser-N-vanes.<ext>`.
@@ -555,7 +579,9 @@ Tras el difusor, la voluta recibe mucho menos momento angular: $c_u r$ baja de 1
   elíptico ni una curva editable. En la vista 3D, la espiral y la tobera de una
   lengüeta afilada o redondeada se ven solapadas; el corte limpio y la nariz salen en
   el CAD.
-- **Sólidos:** el CAD da el dominio fluido, no la carcasa con su espesor de pared.
+- **Carcasa:** su espesor es constante y no hay bridas, tapas ni pies; la pared que
+  rodea el anillo de entrada termina en un cilindro, sin los extremos cónicos que
+  llevan algunas carcasas. No se calculan las tensiones en la pared.
 - **Flujo:**
   - el difusor sin álabes no tiene rozamiento;
   - en el difusor con álabes el flujo sale sin desviación.
