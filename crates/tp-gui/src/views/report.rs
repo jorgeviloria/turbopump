@@ -562,6 +562,26 @@ pub(crate) fn show(
                                         ],
                                     ),
                                 );
+                                if let Some(h) = &c.hydraulic {
+                                    value_row(
+                                        ui,
+                                        tr("Hydraulic losses"),
+                                        tf(
+                                            "η_h {} (statistics {}) of H_th {}: impeller friction {} (c_f {}), inlet shock {}, outlet shock {}, volute walls {}, volute {} (Gülich Table 3.8)",
+                                            &[
+                                                &format!("{:.3}", h.efficiency),
+                                                &format!("{:.3}", h.statistical_efficiency),
+                                                &s(Head, h.theoretical_head),
+                                                &s(Head, h.impeller.friction),
+                                                &format!("{:.4}", h.impeller.friction_coefficient),
+                                                &s(Head, h.impeller.inlet_shock),
+                                                &s(Head, h.outlet_shock),
+                                                &s(Head, h.volute_friction),
+                                                &s(Head, h.volute),
+                                            ],
+                                        ),
+                                    );
+                                }
                             }
                             None => value_row(
                                 ui,

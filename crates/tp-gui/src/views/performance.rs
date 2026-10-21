@@ -334,6 +334,23 @@ impl PerformanceView {
                     ),
                 },
             );
+            if let Some(h) = &curve.hydraulic {
+                line(
+                    ui,
+                    tr("Hydraulic losses"),
+                    tf(
+                        "η_h {} (statistics {}) · impeller {} · outlet shock {} · volute {} + walls {}",
+                        &[
+                            &format!("{:.3}", h.efficiency),
+                            &format!("{:.3}", h.statistical_efficiency),
+                            &s(Head, h.impeller.total()),
+                            &s(Head, h.outlet_shock),
+                            &s(Head, h.volute),
+                            &s(Head, h.volute_friction),
+                        ],
+                    ),
+                );
+            }
             line(
                 ui,
                 tr("Operating point"),

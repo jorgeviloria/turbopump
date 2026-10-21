@@ -6,6 +6,15 @@
 
 /// English text → Spanish text.
 pub(super) static TEXTS: &[(&str, &str)] = &[
+    ("Hydraulic losses", "Pérdidas hidráulicas"),
+    (
+        "η_h {} (statistics {}) · impeller {} · outlet shock {} · volute {} + walls {}",
+        "η_h {} (estadística {}) · rodete {} · choque a la salida {} · voluta {} + paredes {}",
+    ),
+    (
+        "η_h {} (statistics {}) of H_th {}: impeller friction {} (c_f {}), inlet shock {}, outlet shock {}, volute walls {}, volute {} (Gülich Table 3.8)",
+        "η_h {} (estadística {}) de H_th {}: fricción en el rodete {} (c_f {}), choque a la entrada {}, choque a la salida {}, paredes de la voluta {}, voluta {} (Gülich, tabla 3.8)",
+    ),
     ("Liquid", "Líquido"),
     ("Kinematic viscosity ν", "Viscosidad cinemática ν"),
     (
