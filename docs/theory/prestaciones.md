@@ -5,17 +5,23 @@ Implementación:
 - [`crates/tp-design/src/performance.rs`](../../crates/tp-design/src/performance.rs) (curva característica);
 - [`crates/tp-design/src/impeller/potential.rs`](../../crates/tp-design/src/impeller/potential.rs) (flujo potencial meridional);
 - [`crates/tp-design/src/impeller/loading.rs`](../../crates/tp-design/src/impeller/loading.rs) (velocidades en las caras del álabe);
-- [`crates/tp-math/src/sparse.rs`](../../crates/tp-math/src/sparse.rs) (sistemas dispersos).
+- [`crates/tp-math/src/sparse.rs`](../../crates/tp-math/src/sparse.rs) (sistemas dispersos);
+- [`crates/tp-design/src/npsh.rs`](../../crates/tp-design/src/npsh.rs) (NPSH₃ frente al caudal);
+- [`crates/tp-design/src/volute/loss.rs`](../../crates/tp-design/src/volute/loss.rs) (pérdidas de la voluta).
 
-Este documento recoge tres análisis de un rodete ya diseñado:
+Este documento recoge cinco análisis de un rodete ya diseñado:
 
 - la **curva característica** prevista: altura, potencia y rendimiento frente al caudal;
 - el **flujo potencial** en la sección meridional;
-- las **velocidades relativas en las dos caras** de cada sección del álabe.
+- las **velocidades relativas en las dos caras** de cada sección del álabe;
+- el **NPSH₃ necesario** frente al caudal;
+- las **pérdidas de la voluta** frente al caudal, que entran en la curva.
 
-Las referencias son de Gülich, *Centrifugal Pumps*, 2.ª edición: capítulos 3, 4 y 5. Aquí
-solo se citan los números de ecuación; la redacción, las derivaciones y las elecciones
-propias se señalan como tales.
+Las referencias principales son de Gülich, *Centrifugal Pumps*, 2.ª edición: capítulos 3
+a 6. El modelo de la voluta es el de D. Japikse, W. D. Marscher y R. B. Furst,
+*Centrifugal Pump Design and Performance*, Concepts ETI 1997, capítulo 4.3. Aquí solo se
+citan los números de ecuación; la redacción, las derivaciones y las elecciones propias se
+señalan como tales.
 
 ## 1. Curva característica
 
@@ -217,16 +223,153 @@ flujo se despegaría allí.
 | 0,5 | 0,626 | 0,065 | 0,377 | 0,345 |
 | 1 (carcasa) | 0,661 | 0,034 | 0,454 | 0,345 |
 
+## 4. NPSH₃ frente al caudal
+
+El procedimiento es el del capítulo 6.3.3 de Gülich. La entrada se supone sin
+prerrotación.
+
+**Ecuación base** (ec. 6.10):
+
+$$NPSH_3 = \lambda_c\,\frac{c_{1m}^2}{2g} + \lambda_w\,\frac{w_1^2}{2g}$$
+
+- $c_{1m}$ es la velocidad meridional en la boca y $w_1$ la relativa en la línea de
+  corriente exterior del borde de ataque.
+- $\lambda_c = 1{,}1$ con entrada axial (de 1,2 a 1,35 con carcasa de entrada radial).
+- En el punto de diseño, $\lambda_{w,3} = 0{,}3\,(\tan\beta_{1a})^{0,57}$, con
+  $\beta_{1a}$ el ángulo del flujo en la línea exterior (Fig. 6.20, dispersión de
+  ±25 %). Los datos de la figura van de 10° a 25°; fuera de ese rango el informe dice
+  que el valor está extrapolado.
+
+**Tres caudales característicos:**
+
+| Caudal | Qué pasa | Ec. |
+|---|---|---|
+| $Q_{SF}$ | entrada sin choque en la línea exterior: por encima, la incidencia es negativa y la cavitación pasa a la cara de presión | 6.17 |
+| $Q_W$ | la velocidad relativa $w_1$ iguala a la de la garganta de entrada $w_{1q}$: por encima, el flujo acelera hacia la garganta | 6.18 |
+| $Q_c$ | la velocidad media en la garganta del colector iguala a $c_{2u}$ | 6.19 |
+
+La garganta de entrada de los álabes se estima con las dimensiones principales: el paso
+por el seno del ángulo del álabe menos el espesor, en el diámetro medio, por el ancho de
+la boca. Es una estimación propia; la geometría real la afinará.
+
+**La curva:**
+
+- El codo es $Q_{sa}$, el menor entre $Q_c$ y $Q_{PS} = (Q_{SF} + Q_W)/2$ (ec. 6.20).
+- Por debajo de $Q_{sa}$ se usa la ec. 6.10 con
+  $\lambda_w = \lambda_{w,opt}\,(\tan\beta_1/\tan\beta_{1,opt})^{0,57}$ (ec. 6.21).
+- Por encima sube como $NPSH_{sa}\,(Q/Q_{sa})^x$ (ec. 6.22). El libro da $x$ de 2 a 3;
+  usamos 2,5 por defecto.
+- Los valores por debajo del inicio de la recirculación se marcan como estimación, igual
+  que la altura.
+
+El NPSH disponible sale de la presión total de entrada y la presión de vapor. Si la
+curva lo alcanza dentro del rango calculado, el programa avisa del caudal.
+
+El NPSH₃ del paso de dimensiones principales sigue siendo el de la velocidad específica
+de aspiración $n_{ss}$: es el objetivo de diseño. El de la curva sale de la geometría de
+la entrada.
+
+**Comprobación con el libro de Japikse:** en su ejemplo del capítulo 7.5, la ec. 6.10
+con $\lambda_c = 1$, $\lambda_w = 0{,}20$ y las velocidades en la punta de la entrada
+($c_{1m} = 13{,}343$ ft/s, $w_1 = 55{,}88$ ft/s) da exactamente el NPSH que publica,
+12,47 ft. Es una prueba automática.
+
+**Bomba de referencia** (con su voluta):
+
+| Magnitud | Valor |
+|---|---|
+| $\beta_{1a}$, $\lambda_{w,3}$ | 28,8° (por encima de los datos), 0,215 |
+| $NPSH_3$ en el diseño | 4,36 m |
+| $Q_{SF}$ / $Q_W$ / $Q_c$ | 100 % / 113 % / 125 % |
+| $Q_{sa}$ | 107 % |
+| NPSH disponible | 10,1 m, que la curva alcanza al 143 % |
+
+El valor de diseño es mayor que el de $n_{ss} = 200$ (3,2 m) porque el ojo de la
+referencia es pequeño: el ángulo $\beta_{1a}$ queda por encima de los de la figura 6.20.
+
+## 5. Pérdidas de la voluta frente al caudal
+
+**Modelo de la espiral** (Japikse, ecs. 4.4 a 4.8). En la entrada de la voluta
+(estación 5) se definen el parámetro de giro $\lambda = c_{\theta 5}/c_{m5}$ y la
+relación de áreas $AR = A_7/A_5$, la garganta frente a $2\pi r_5 b_5$:
+
+- la energía cinética meridional que entra en la espiral se pierde:
+  $K_m = 1/(1 + \lambda^2)$ (ec. 4.7);
+- si el giro tiene que frenar hasta la velocidad de la garganta $c_7$, se pierde como en
+  un ensanchamiento brusco: $K_\theta = (\lambda - 1/AR)^2/(1 + \lambda^2)$ (ec. 4.8);
+  si acelera, no se pierde nada más;
+- la recuperación estática es $C_p = 1 - 1/(AR^2(1 + \lambda^2)) - K$ (ec. 4.6).
+
+**Lectura propia del vórtice libre.** El libro deja que el giro se frene como vórtice
+libre de $r_5$ a un radio $r_6$ antes del ensanchamiento. Lo leemos como el giro en el
+centro de la garganta, $\lambda_6 = \lambda\,r_5/r_6$, que es el que se compara con
+$c_7$. (El libro escribe en su lugar un factor $(r_5/r_6)^2$ sobre la pérdida.) Con
+$r_6 = r_5$ las dos formas son la ec. 4.8. Con nuestra lectura, una espiral dimensionada
+por momento angular tiene su menor pérdida en su caudal de diseño, como dice Gülich en el
+capítulo 4.2.
+
+**Entrada y garganta.** La entrada es el círculo de la lengüeta con el ancho $b_3$; el
+giro llega a ella como vórtice libre desde $r_2$, también a través de un difusor sin
+álabes. La garganta y su radio de centro salen del diseño de la voluta.
+
+**Tobera.** Pierde $(c_{p,id} - c_p)\,c_7^2/2g$, con $c_{p,id} = 1 - 1/A_R^2$
+(Gülich ec. 1.40) y una recuperación real limitada por la mejor que alcanza un difusor
+de esa longitud, $c_{p,opt} = 0{,}36\,(L/R_1)^{0,26}$ (Gülich ec. 7.31).
+
+**Cómo entra en la curva (reparto propio).** La estadística de la ec. 4.14 describe
+bombas con volutas bien dimensionadas. Por eso:
+
+1. En el punto de diseño, las pérdidas hidráulicas $(1 - \eta_h)H_{th}$ se reparten entre
+   una **voluta ajustada equivalente** (la misma con la garganta que da
+   $\lambda_6 \cdot AR = 1$) y el resto de la etapa.
+2. El resto conserva la forma estadística de la ec. 4.14.
+3. La voluta real añade sus propias pérdidas a cada caudal:
+   $H = H_{th} - h_{voluta}(Q) - h_{resto}(Q)$.
+
+Una voluta ajustada deja la curva casi igual. Una garganta pequeña pierde altura en el
+diseño, adelanta el máximo rendimiento y pierde mucha altura en sobrecarga. Una garganta
+grande retrasa el máximo y pierde menos en la tobera; Gülich recomienda algo de exceso
+de garganta cuando la sigue un difusor con pérdidas (cap. 4.2).
+
+**Comprobación con el libro de Japikse** (ejemplo del capítulo 7.5, tras un difusor sin
+álabes, $\lambda \cdot AR = 1$). Son pruebas automáticas:
+
+| Magnitud | Modelo | Libro |
+|---|---|---|
+| $AR$ | 0,2393 | 0,24 |
+| $K$ de la espiral | 0,0542 | 0,054 |
+| $C_p$ de la espiral | 0,000 | 0,000 |
+| $K$ de espiral y tobera | 0,234 | 0,234 |
+| $C_p$ de espiral y tobera | 0,356 | 0,356 |
+
+Además, la etapa diseñada por Turbopump para el mismo punto (5000 gpm, 84,05 ft,
+1000 rpm, con difusor sin álabes y voluta) sale ajustada como la del libro:
+$\lambda = 4{,}23$ frente a 4,18 y $K = 0{,}053$ frente a 0,054.
+
+**Bomba de referencia:**
+
+| Magnitud | Valor |
+|---|---|
+| $\lambda$, $AR$, $\lambda_6 \cdot AR$ | 7,11, 0,187, 0,99 |
+| Pérdida en el diseño | 1,28 m, el 39 % de las pérdidas hidráulicas |
+| Espiral / tobera | 0,14 m ($K$ = 0,019) / 1,14 m |
+| Menor pérdida | al 99 % del caudal de diseño |
+| Altura en el diseño | 31,97 m (la voluta está ajustada al 99 %) |
+| Máximo rendimiento | 93 % del caudal, η = 0,817 |
+
 ## Dónde se usa
 
 - **Interfaz:**
   - vista *Curves*, con el inicio de la recirculación, $\psi_0$ y el caudal máximo
-    ajustables;
+    ajustables, y una cuarta gráfica con el NPSH₃, el NPSH disponible y la pérdida en
+    la voluta;
   - opción *potential flow* de la vista meridional;
   - cuarta gráfica de la vista *Blade*;
   - secciones nuevas del informe.
-- **Línea de comandos:** `turbopump performance`, que escribe la curva también en CSV, y
-  `turbopump analysis`, con el flujo potencial y las caras del álabe, también en CSV.
+- **Línea de comandos:** `turbopump performance`, que escribe la curva también en CSV
+  (con el NPSH₃ y la pérdida en la voluta), y `turbopump analysis`, con el flujo
+  potencial y las caras del álabe, también en CSV. Los coeficientes del NPSH₃ se fijan
+  con `--set npsh_inlet=`, `npsh_blade=` y `npsh_exponent=`.
 
 ## Limitaciones
 
@@ -234,7 +377,12 @@ flujo se despegaría allí.
   - el deslizamiento es constante con el caudal; la dependencia que muestra la estadística
     del libro solo está en una figura;
   - la potencia a válvula cerrada es una extrapolación.
-- **NPSH:** solo se da en el punto de diseño; falta la curva NPSH₃(Q).
+- **NPSH₃:** la garganta de entrada de los álabes es una estimación. Con recirculación a
+  la entrada el NPSH₃ real deja de bajar o sube, y eso no está modelado.
+- **Voluta:** solo se modela una voluta detrás del rodete, directamente o tras un difusor
+  sin álabes. La pérdida de la tobera es una estimación por la longitud. Tras un difusor
+  con álabes, su garganta fija el codo del NPSH₃, pero sus pérdidas siguen en la
+  estadística.
 - **Flujo potencial:** no tiene en cuenta el giro ni el rozamiento, y no se usa todavía
   para construir los álabes; el diseño sigue con el flujo cuasi unidimensional.
 - **Velocidades en las caras:** sin deslizamiento, la carga no se anula en el borde de

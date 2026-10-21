@@ -96,8 +96,9 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
   - vista frontal de la etapa, con los álabes del difusor y la espiral;
   - vista 3D, con aristas de las piezas, secciones de la voluta, cubo de vistas (un clic
     en una cara gira la cámara), ejes y barra de escala;
-  - curvas: altura, rendimiento y potencia previstos frente al caudal, con la zona de
-    recirculación estimada a trazos;
+  - curvas: altura, rendimiento, potencia y NPSH₃ previstos frente al caudal, con la
+    zona de recirculación estimada a trazos, el NPSH disponible y la pérdida en la
+    voluta, que entra en la curva de altura;
   - informe con las mismas cifras que la línea de comandos.
 
   La vista meridional muestra también, si se pide, el flujo potencial y la velocidad
