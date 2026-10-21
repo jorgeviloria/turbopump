@@ -38,9 +38,9 @@ use crate::{DesignError, Param};
 
 pub use geometry::{NozzleSection, VoluteGeometry, VoluteSection};
 pub use section::{
-    BezierBase, BezierSide, CrossSectionInput, CrossSections, DEFAULT_CONE_ANGLE_DEG,
-    ExternalRound, InnerPosition, RadiusSide, SectionDefinition, SectionShape, SegmentPoint,
-    SideShape,
+    BendWall, BezierBase, BezierSide, CrossSectionInput, CrossSections, DEFAULT_CONE_ANGLE_DEG,
+    ExternalRound, InnerPosition, InternalRound, RadiusSide, SectionDefinition, SectionShape,
+    SegmentPoint, SideShape,
 };
 
 /// How the cross sections grow with the wrap angle.
@@ -734,7 +734,8 @@ impl VoluteDesign {
             let base_area = cross_sections.properties(TAU, a)?.area;
             let correction = correction_for(cutwater_thickness, a);
             let p = cross_sections.properties(TAU, a + correction)?;
-            (size_of(&p), correction, p.width / p.height, (a, base_area))
+            let aspect = p.width / (p.outer_radius - p.inner_radius);
+            (size_of(&p), correction, aspect, (a, base_area))
         };
         let throat_velocity = flow * inner_wrap / TAU / throat.area;
         let c2 = basis.cu.hypot(basis.cm);
@@ -809,6 +810,13 @@ impl VoluteDesign {
             .then(|| Flange::new(diffuser.outlet_diameter, wall_thickness, &input.wall.flange))
             .transpose()?;
 
+        if cross_sections.internal().is_some() {
+            warnings.push(
+                "an internal volute has no cutwater of its own: it is where the spiral and \
+                 the discharge diffuser cut each other"
+                    .into(),
+            );
+        }
         if cutwater_diameter < min_cutwater_diameter * (1.0 - 1e-9) {
             warnings.push(format!(
                 "d_z/d₂ = {:.3} is below the {:.3} of Gülich Table 10.2: expect pressure \

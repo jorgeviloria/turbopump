@@ -269,6 +269,201 @@ impl Default for ExternalRound {
     }
 }
 
+/// The shape of a wall of the bend of an internal section, where it turns from radial to
+/// axial.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BendWall {
+    /// A sharp corner.
+    Sharp,
+    /// A straight chamfer across the corner.
+    Straight,
+    /// A quarter ellipse.
+    #[default]
+    Round,
+}
+
+/// A round section beside the impeller that keeps within the radius of the volute inlet:
+/// a bend turns the outflow of the inlet from radial to axial, a straight neck leads it
+/// sideways, and the spiral grows from the end of the neck away from the impeller and
+/// inward toward the axis, under the top wall of the neck.
+///
+/// The bend is shaped by its two walls. The inner one, on the side the flow turns to,
+/// starts at that inlet point; rounded or chamfered, it spans half the inlet width across
+/// and `bend_ratio` times that up. The outer one turns about the same centre from the other
+/// inlet point to the top of the neck. The neck is `area_ratio`·b₃ high (the outlet of the
+/// bend over its inlet, per unit length round the spiral) and `neck_width` long. All of it
+/// is the same round the whole spiral, so every internal definition shares it.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct InternalRound {
+    /// Axial over radial semi-axis of the spiral part, kept as it grows: 1 for a circle.
+    pub ellipse_ratio: f64,
+    /// Toward +z, the back of the impeller where its hub disk is; otherwise toward −z.
+    pub open_to_right: bool,
+    /// Length of the straight neck after the bend, m (automatic: 0.5·b₃).
+    pub neck_width: Param<f64>,
+    pub inner_bend: BendWall,
+    pub outer_bend: BendWall,
+    /// Radial over axial semi-axis of the inner wall of the bend.
+    pub bend_ratio: f64,
+    /// Height of the neck over the inlet width b₃.
+    pub area_ratio: f64,
+}
+
+impl Default for InternalRound {
+    fn default() -> Self {
+        Self {
+            ellipse_ratio: 1.0,
+            open_to_right: true,
+            neck_width: Param::Auto,
+            inner_bend: BendWall::Round,
+            outer_bend: BendWall::Round,
+            bend_ratio: 1.0,
+            area_ratio: 1.0,
+        }
+    }
+}
+
+/// The bend and the neck of an internal section in the plane of the section (s, h). Each
+/// wall is a list of pieces, smooth inside and joined at corners or tangent points, the
+/// last piece ending on the face where the spiral starts.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Bend {
+    /// From the inlet point on the side away from the spiral round the outside of the
+    /// bend and along the top of the neck.
+    pub outer: Vec<Vec<DVec2>>,
+    /// From the other inlet point round the inside of the bend and along the floor of
+    /// the neck.
+    pub inner: Vec<Vec<DVec2>>,
+    /// Axial position s of the face, m.
+    pub face: f64,
+    /// Heights h of the floor and the top of the neck, m.
+    pub floor: f64,
+    pub top: f64,
+}
+
+impl Bend {
+    /// The region of the bend and the neck as one closed polygon, counter-clockwise in
+    /// (r, z): the inlet, the outer wall, the face and the inner wall.
+    pub fn region(&self) -> Vec<DVec2> {
+        let mut points: Vec<DVec2> = self.outer.iter().flatten().copied().collect();
+        points.extend(
+            self.inner
+                .iter()
+                .rev()
+                .flat_map(|p| p.iter().rev())
+                .copied(),
+        );
+        points.dedup_by(|a, b| a.distance(*b) < 1e-12);
+        orient(points)
+    }
+}
+
+/// `points` turned counter-clockwise in (r, z), with (s, h) coordinates.
+fn orient(mut points: Vec<DVec2>) -> Vec<DVec2> {
+    let n = points.len();
+    let area: f64 = (0..n)
+        .map(|i| {
+            let (a, b) = (points[i], points[(i + 1) % n]);
+            a.y * b.x - b.y * a.x
+        })
+        .sum();
+    if area < 0.0 {
+        points.reverse();
+    }
+    points
+}
+
+impl InternalRound {
+    /// The bend and the neck for an inlet of width `b3`.
+    pub fn bend(&self, b3: f64) -> Bend {
+        let c = 0.5 * b3;
+        let neck = self.area_ratio * b3;
+        // Built toward −z: the flow turns from the inlet point at −c, the inner corner.
+        let (a_inner, b_inner) = match self.inner_bend {
+            BendWall::Sharp => (0.0, 0.0),
+            _ => (c, self.bend_ratio * c),
+        };
+        let centre = DVec2::new(-c - a_inner, 0.0);
+        let floor = b_inner;
+        let top = floor + neck;
+        let face = centre.x - self.neck_width.resolve(|| 0.5 * b3);
+        let quarter = |a: f64, b: f64| -> Vec<DVec2> {
+            let steps = (FRAC_PI_2 / ARC_STEP).ceil() as usize;
+            (0..=steps)
+                .map(|i| {
+                    let t = FRAC_PI_2 * i as f64 / steps as f64;
+                    centre + DVec2::new(a * t.cos(), b * t.sin())
+                })
+                .collect()
+        };
+        let corner = |a: f64, b: f64, wall: BendWall| -> Vec<Vec<DVec2>> {
+            let (start, end) = (centre + DVec2::new(a, 0.0), centre + DVec2::new(0.0, b));
+            match wall {
+                BendWall::Sharp => vec![
+                    vec![start, centre + DVec2::new(a, b)],
+                    vec![centre + DVec2::new(a, b), end],
+                ],
+                BendWall::Straight => vec![vec![start, end]],
+                BendWall::Round => vec![quarter(a, b)],
+            }
+        };
+        let mut inner = if a_inner > 0.0 {
+            corner(a_inner, b_inner, self.inner_bend)
+        } else {
+            Vec::new()
+        };
+        inner.push(vec![DVec2::new(centre.x, floor), DVec2::new(face, floor)]);
+        let mut outer = corner(c - centre.x, top, self.outer_bend);
+        outer.push(vec![DVec2::new(centre.x, top), DVec2::new(face, top)]);
+        let mut bend = Bend {
+            outer,
+            inner,
+            face,
+            floor,
+            top,
+        };
+        if self.open_to_right {
+            let mirror = |pieces: &mut Vec<Vec<DVec2>>| {
+                for p in pieces.iter_mut().flatten() {
+                    p.x = -p.x;
+                }
+            };
+            mirror(&mut bend.outer);
+            mirror(&mut bend.inner);
+            bend.face = -bend.face;
+        }
+        bend
+    }
+}
+
+/// The spiral part of an internal section of depth `h` from the face of the neck: the
+/// asymmetric round section built on the face instead of the inlet, closed on the side
+/// of the top of the neck with a square corner, growing away from the impeller and
+/// inward.
+fn internal_round(b3: f64, h: f64, shape: &InternalRound) -> Outline {
+    let bend = shape.bend(b3);
+    let half = 0.5 * (bend.top - bend.floor);
+    let middle = 0.5 * (bend.top + bend.floor);
+    let on_face = external_round(
+        half,
+        h,
+        &ExternalRound {
+            ellipse_ratio: shape.ellipse_ratio,
+            strictly_external: true,
+            open_to_right: false,
+            square_on_top: true,
+        },
+    );
+    // Across the face toward the top, out from the face away from the impeller.
+    let away = if shape.open_to_right { 1.0 } else { -1.0 };
+    on_face.mapped(
+        |p| DVec2::new(bend.face + away * p.y, middle + p.x),
+        shape.open_to_right,
+    )
+}
+
 /// The shape of a whole cross section.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -279,6 +474,7 @@ pub enum SectionShape {
         right: Option<SideShape>,
     },
     RoundExternal(ExternalRound),
+    RoundInternal(InternalRound),
 }
 
 impl Default for SectionShape {
@@ -311,7 +507,7 @@ impl SectionShape {
     pub fn right_side(&self) -> Option<&SideShape> {
         match self {
             SectionShape::Sides { left, right } => Some(right.as_ref().unwrap_or(left)),
-            SectionShape::RoundExternal(_) => None,
+            SectionShape::RoundExternal(_) | SectionShape::RoundInternal(_) => None,
         }
     }
 
@@ -334,7 +530,7 @@ impl SectionShape {
                     _ => Some(a),
                 }
             }
-            SectionShape::RoundExternal(_) => None,
+            SectionShape::RoundExternal(_) | SectionShape::RoundInternal(_) => None,
         }
     }
 
@@ -349,7 +545,7 @@ impl SectionShape {
                 SideShape::RadiusBased(r) => Some(r.cone_angle),
                 SideShape::Round { .. } | SideShape::LineSegments { .. } => None,
             },
-            SectionShape::RoundExternal(_) => None,
+            SectionShape::RoundExternal(_) | SectionShape::RoundInternal(_) => None,
         }
     }
 }
@@ -523,6 +719,26 @@ impl Outline {
             wetted_perimeter: perimeter,
             wall_inverse_square: inverse,
         })
+    }
+
+    /// The outline with every point moved by `f`. A map that `flips` the orientation, a
+    /// mirror, is followed by a reversal that keeps the outline counter-clockwise and
+    /// starting at an end of the inlet.
+    fn mapped(self, f: impl Fn(DVec2) -> DVec2, flips: bool) -> Outline {
+        let mut points: Vec<DVec2> = self.points.iter().map(|p| f(*p)).collect();
+        if !flips {
+            return Outline { points, ..self };
+        }
+        let last = self.inlet_end;
+        points.reverse();
+        let mut breaks: Vec<usize> = self.breaks.iter().map(|&b| last - b).collect();
+        breaks.sort_unstable();
+        Outline {
+            points,
+            top: last - self.top,
+            inlet_end: last,
+            breaks,
+        }
     }
 
     /// Breaks of the three runs every outline has: the −z inlet point, the top and the
@@ -1158,18 +1374,7 @@ fn external_round(c: f64, h: f64, shape: &ExternalRound) -> Outline {
         points: path.points,
     };
     if shape.open_to_right {
-        // Mirrored: reversing keeps the outline counter-clockwise from (−c, 0).
-        let last = outline.inlet_end;
-        outline.points = outline
-            .points
-            .iter()
-            .rev()
-            .map(|p| DVec2::new(-p.x, p.y))
-            .collect();
-        outline.top = last - outline.top;
-        let mut breaks: Vec<usize> = outline.breaks.iter().map(|&b| last - b).collect();
-        breaks.sort_unstable();
-        outline.breaks = breaks;
+        outline = outline.mapped(|p| DVec2::new(-p.x, p.y), true);
     }
     outline
 }
@@ -1189,6 +1394,7 @@ impl SectionShape {
                 join_sides(l, r)
             }
             SectionShape::RoundExternal(round) => external_round(c, height, round),
+            SectionShape::RoundInternal(round) => internal_round(b3, height, round),
         }
     }
 
@@ -1299,6 +1505,25 @@ impl SectionShape {
                 Ok(())
             }
             SectionShape::RoundExternal(round) => ratio(round.ellipse_ratio),
+            SectionShape::RoundInternal(round) => {
+                ratio(round.ellipse_ratio)?;
+                if !(0.2..=5.0).contains(&round.bend_ratio) {
+                    return Err(format!(
+                        "the bend ratio must lie between 0.2 and 5, got {}",
+                        round.bend_ratio
+                    ));
+                }
+                if !(0.3..=3.0).contains(&round.area_ratio) {
+                    return Err(format!(
+                        "the area ratio of the bend must lie between 0.3 and 3, got {}",
+                        round.area_ratio
+                    ));
+                }
+                if round.neck_width.manual_value().is_some_and(|w| w < 0.0) {
+                    return Err("the neck width cannot be negative".into());
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -1352,6 +1577,33 @@ impl CrossSections {
                 )));
             }
         }
+        // The bend and the neck of internal sections run all round the spiral.
+        let internal: Vec<InternalRound> = definitions
+            .iter()
+            .filter_map(|d| match &d.shape {
+                SectionShape::RoundInternal(r) => Some(InternalRound {
+                    ellipse_ratio: 1.0,
+                    ..*r
+                }),
+                _ => None,
+            })
+            .collect();
+        if !internal.is_empty() {
+            if internal.len() != definitions.len() {
+                return Err(invalid(
+                    "internal cross sections cannot be mixed with other shapes: their bend \
+                     and neck run all round the spiral"
+                        .into(),
+                ));
+            }
+            if internal.iter().any(|r| *r != internal[0]) {
+                return Err(invalid(
+                    "every internal cross section must share one bend and neck: only the \
+                     ellipse ratio may change"
+                        .into(),
+                ));
+            }
+        }
         // Each shape must bound one region at any size.
         let mut signatures = Vec::new();
         for d in &definitions {
@@ -1384,6 +1636,20 @@ impl CrossSections {
     /// The active definitions in order of wrap angle.
     pub fn definitions(&self) -> &[SectionDefinition] {
         &self.definitions
+    }
+
+    /// The internal shape of these sections, if they are internal: they all share its
+    /// bend and neck.
+    pub fn internal(&self) -> Option<&InternalRound> {
+        match &self.definitions[0].shape {
+            SectionShape::RoundInternal(r) => Some(r),
+            _ => None,
+        }
+    }
+
+    /// The bend and the neck of internal sections.
+    pub fn bend(&self) -> Option<Bend> {
+        self.internal().map(|r| r.bend(self.inlet_width))
     }
 
     /// The same shapes on an inlet of width `b3` at radius `rz`, as the outer channel of a
@@ -1873,6 +2139,157 @@ mod tests {
             extra,
             max_relative = 1e-3
         );
+    }
+
+    fn internal_shapes() -> Vec<InternalRound> {
+        let mut out = Vec::new();
+        for inner_bend in [BendWall::Sharp, BendWall::Straight, BendWall::Round] {
+            for outer_bend in [BendWall::Sharp, BendWall::Straight, BendWall::Round] {
+                for open_to_right in [true, false] {
+                    out.push(InternalRound {
+                        inner_bend,
+                        outer_bend,
+                        open_to_right,
+                        ellipse_ratio: 0.8,
+                        bend_ratio: 1.5,
+                        area_ratio: 0.8,
+                        neck_width: Param::Manual(0.01),
+                    });
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn the_bend_turns_the_inlet_to_the_neck() {
+        let c = B3 / 2.0;
+        for round in internal_shapes() {
+            let b = round.bend(B3);
+            let side = if round.open_to_right { 1.0 } else { -1.0 };
+            // The walls start at the inlet points and end on the face, a neck high.
+            let (outer, inner) = (&b.outer, &b.inner);
+            assert_eq!(outer[0][0], DVec2::new(-side * c, 0.0), "{round:?}");
+            assert_eq!(inner[0][0], DVec2::new(side * c, 0.0), "{round:?}");
+            let end = |w: &Vec<Vec<DVec2>>| *w.last().unwrap().last().unwrap();
+            assert!(end(outer).distance(DVec2::new(b.face, b.top)) < 1e-15);
+            assert!(end(inner).distance(DVec2::new(b.face, b.floor)) < 1e-15);
+            assert_relative_eq!(b.top - b.floor, 0.8 * B3, epsilon = 1e-15);
+            // The face lies beyond the bend, a neck width past it.
+            assert!(side * b.face >= c + 0.01 - 1e-15, "{round:?}");
+            let floor = match round.inner_bend {
+                BendWall::Sharp => 0.0,
+                _ => 1.5 * c,
+            };
+            assert_relative_eq!(b.floor, floor, epsilon = 1e-15);
+            let region = b.region();
+            let o = Outline {
+                top: 1,
+                inlet_end: region.len() - 1,
+                breaks: vec![0, 1, region.len() - 1],
+                points: region,
+            };
+            assert!(o.is_simple() && o.signed_area() > 0.0, "{round:?}");
+        }
+    }
+
+    #[test]
+    fn the_internal_spiral_grows_from_the_face_inward() {
+        for round in internal_shapes() {
+            let shape = SectionShape::RoundInternal(round);
+            let b = round.bend(B3);
+            let away = if round.open_to_right { 1.0 } else { -1.0 };
+            let mut previous = 0.0;
+            for i in 1..=30 {
+                let h = 0.002 * f64::from(i);
+                let o = shape.outline(B3, h);
+                assert!(o.is_simple(), "{round:?} at {h}");
+                // It starts and ends on the face, between the floor and the top of the neck.
+                let (first, last) = (o.points[0], o.points[o.inlet_end]);
+                assert_relative_eq!(first.x, b.face, epsilon = 1e-12);
+                assert_relative_eq!(last.x, b.face, epsilon = 1e-12);
+                let mut ends = [first.y, last.y];
+                ends.sort_by(f64::total_cmp);
+                assert_relative_eq!(ends[0], b.floor, epsilon = 1e-12);
+                assert_relative_eq!(ends[1], b.top, epsilon = 1e-12);
+                for p in &o.points {
+                    // Away from the impeller and never above the top of the neck.
+                    assert!(away * (p.x - b.face) >= -1e-12, "{round:?} at {h}: {p:?}");
+                    assert!(p.y <= b.top + 1e-12);
+                }
+                // It reaches h out from the face.
+                let depth = o
+                    .points
+                    .iter()
+                    .map(|p| away * (p.x - b.face))
+                    .fold(0.0, f64::max);
+                assert_relative_eq!(depth, h, max_relative = 1e-9);
+                let p = o.properties(RZ, h).unwrap();
+                assert!(p.area > previous, "{round:?} at {h}");
+                assert_relative_eq!(p.outer_radius, RZ + b.top, epsilon = 1e-12);
+                previous = p.area;
+            }
+            // Large sections reach inward, below the inlet radius.
+            let deep = shape.outline(B3, 0.05).properties(RZ, 0.05).unwrap();
+            assert!(deep.inner_radius < RZ - 0.02, "{round:?}");
+        }
+    }
+
+    #[test]
+    fn internal_sections_share_one_bend() {
+        let round = InternalRound::default();
+        let def = |angle: f64, shape: SectionShape| SectionDefinition {
+            angle,
+            active: true,
+            shape,
+        };
+        let with = |sections| CrossSections::new(&CrossSectionInput { sections }, B3, RZ);
+        let ok = with(vec![
+            def(
+                PI,
+                SectionShape::RoundInternal(InternalRound {
+                    ellipse_ratio: 0.7,
+                    ..round
+                }),
+            ),
+            def(TAU, SectionShape::RoundInternal(round)),
+        ])
+        .unwrap();
+        assert_eq!(ok.bend(), Some(round.bend(B3)));
+        assert!(ok.internal().is_some());
+        assert!(
+            with(vec![
+                def(PI, SectionShape::default()),
+                def(TAU, SectionShape::RoundInternal(round)),
+            ])
+            .is_err()
+        );
+        assert!(
+            with(vec![
+                def(
+                    PI,
+                    SectionShape::RoundInternal(InternalRound {
+                        area_ratio: 1.2,
+                        ..round
+                    })
+                ),
+                def(TAU, SectionShape::RoundInternal(round)),
+            ])
+            .is_err()
+        );
+        assert!(
+            with(vec![def(
+                TAU,
+                SectionShape::RoundInternal(InternalRound {
+                    bend_ratio: 9.0,
+                    ..round
+                })
+            )])
+            .is_err()
+        );
+        // The automatic neck is half the inlet wide.
+        let b = round.bend(B3);
+        assert_relative_eq!(b.face, B3 / 2.0 + B3 / 2.0 + 0.5 * B3, epsilon = 1e-15);
     }
 
     #[test]

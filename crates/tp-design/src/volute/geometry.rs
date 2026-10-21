@@ -9,6 +9,7 @@ use std::f64::consts::{PI, TAU};
 
 use tp_math::{DVec2, DVec3};
 
+use super::section::Bend;
 use super::stress::WallStress;
 use super::{
     CrossSections, CutwaterShape, DischargeShape, SectionSize, StraightWall, VoluteDesign,
@@ -189,6 +190,9 @@ pub struct VoluteGeometry {
     /// Membrane stresses in the casing wall.
     pub wall_stress: WallStress,
     pub cutwater: CutwaterGeometry,
+    /// Internal sections: the bend and the neck from the inlet to the spiral, in the
+    /// plane of a section (s, h), the same all round.
+    pub bend: Option<Bend>,
     pub warnings: Vec<String>,
 }
 
@@ -203,7 +207,9 @@ impl VoluteGeometry {
     /// volute with the outer channel, the inner volute, and the discharge diffuser; the
     /// first two reach a little into the third.
     pub fn channels(&self) -> Vec<Vec<Vec<DVec3>>> {
-        let joined = matches!(self.design.cutwater_shape, CutwaterShape::Tangent);
+        // An internal spiral starts inside the diffuser: they cut each other.
+        let joined =
+            matches!(self.design.cutwater_shape, CutwaterShape::Tangent) && self.bend.is_none();
         if self.design.rib.is_none() && joined {
             let sign = self.basis.rotation_sign;
             return vec![
@@ -288,6 +294,122 @@ impl VoluteGeometry {
             self.basis.impeller_diameter / 2.0,
             self.design.stagnation_radius,
         )
+    }
+
+    /// (r, z) of a point (s, h) in the plane of a section.
+    fn meridional(&self, p: DVec2) -> DVec2 {
+        DVec2::new(
+            self.design.stagnation_radius + p.y,
+            self.basis.midplane + p.x,
+        )
+    }
+
+    /// The profile in the meridional plane (r, z) to revolve into the fluid between the
+    /// impeller and the spiral, as pieces that are smooth inside and closed together.
+    ///
+    /// For a volute outside r'_z it is the vaneless ring from the impeller outlet to a
+    /// little past r'_z, so that it overlaps the spiral, and a hair narrower than b₃, so
+    /// that its sides do not run on the flat side walls of rectangular sections. An
+    /// internal volute adds its bend and neck. Their end reaches a little into the
+    /// spiral, a hair lower than the neck at the face, so that no wall of the neck runs
+    /// on the flat top of the spiral.
+    pub fn inlet_profile(&self) -> Vec<Vec<DVec2>> {
+        let (inner, outer) = self.inlet_ring();
+        let b3 = self.design.inlet_width;
+        let at = |p: DVec2| self.meridional(p);
+        let Some(bend) = &self.bend else {
+            let half = 0.995 * b3 / 2.0;
+            let h = (outer + 0.02 * b3) - self.design.stagnation_radius;
+            let low = inner - self.design.stagnation_radius;
+            let corners = [
+                DVec2::new(-half, low),
+                DVec2::new(-half, h),
+                DVec2::new(half, h),
+                DVec2::new(half, low),
+            ];
+            return (0..4)
+                .map(|i| vec![at(corners[i]), at(corners[(i + 1) % 4])])
+                .collect();
+        };
+        let low = inner - self.design.stagnation_radius;
+        let neck = bend.top - bend.floor;
+        // Toward the spiral: the sign of the face.
+        let away = bend.face.signum();
+        let (lip, overlap, hair) = (0.02 * neck, 0.02 * neck, 0.005 * neck);
+        let end = |wall: &[Vec<DVec2>]| -> Vec<Vec<DVec2>> {
+            // The wall with its last piece, along the neck, stopped short of the face.
+            let mut pieces = wall.to_vec();
+            if let Some(last) = pieces.last_mut() {
+                let n = last.len();
+                last[n - 1].x = bend.face - away * lip;
+            }
+            pieces
+        };
+        let mut pieces: Vec<Vec<DVec2>> = Vec::new();
+        // Up the vaneless ring on the side of the outer wall, round the bend and along
+        // the top of the neck.
+        let outer_start = bend.outer[0][0];
+        pieces.push(vec![DVec2::new(outer_start.x, low), outer_start]);
+        pieces.extend(end(&bend.outer));
+        let top_end = DVec2::new(bend.face - away * lip, bend.top);
+        let floor_end = DVec2::new(bend.face - away * lip, bend.floor);
+        let top_in = DVec2::new(bend.face + away * overlap, bend.top - hair);
+        let floor_in = DVec2::new(bend.face + away * overlap, bend.floor + hair);
+        pieces.push(vec![top_end, top_in]);
+        pieces.push(vec![top_in, floor_in]);
+        pieces.push(vec![floor_in, floor_end]);
+        // Back along the floor of the neck, round the inner wall to the inlet and down
+        // the vaneless ring.
+        for piece in end(&bend.inner).iter().rev() {
+            pieces.push(piece.iter().rev().copied().collect());
+        }
+        let inner_start = bend.inner[0][0];
+        pieces.push(vec![inner_start, DVec2::new(inner_start.x, low)]);
+        pieces.push(vec![
+            DVec2::new(inner_start.x, low),
+            DVec2::new(outer_start.x, low),
+        ]);
+        pieces
+            .into_iter()
+            .map(|piece| piece.into_iter().map(at).collect())
+            .collect()
+    }
+
+    /// For an internal volute, the outline (r, z) of the casing round its bend and neck:
+    /// their region offset outward by the wall thickness.
+    pub fn bend_casing_profile(&self) -> Option<Vec<DVec2>> {
+        let bend = self.bend.as_ref()?;
+        let ring: Vec<DVec3> = bend
+            .region()
+            .into_iter()
+            .map(|p| {
+                let m = self.meridional(p);
+                DVec3::new(m.x, 0.0, m.y)
+            })
+            .collect();
+        Some(
+            offset_ring(&ring, self.design.wall_thickness)
+                .into_iter()
+                .map(|p| DVec2::new(p.x, p.z))
+                .collect(),
+        )
+    }
+
+    /// The axial range (z) of the space of the impeller, which the casing leaves open
+    /// inside r₂: all of it for a volute outside r'_z, and only the side away from an
+    /// internal spiral, which lies beside the impeller inside r₂.
+    pub fn impeller_band(&self) -> (f64, f64) {
+        match &self.bend {
+            None => (f64::NEG_INFINITY, f64::INFINITY),
+            Some(bend) => {
+                let face = self.basis.midplane + bend.face;
+                if bend.face > 0.0 {
+                    (f64::NEG_INFINITY, face)
+                } else {
+                    (face, f64::INFINITY)
+                }
+            }
+        }
     }
 
     /// The outer walls of the casing: every outline of [`Self::lofts`] offset outward by
@@ -500,8 +622,9 @@ impl VoluteGeometry {
             let s = make(angle)?;
             Ok(s.points(sign).iter().all(|p| side(*p) * inside >= 0.0))
         };
+        let bend = design.cross_sections.bend();
         let mut start = 2f64.to_radians();
-        while !clear(start)? || !clear(start + 0.05)? {
+        while bend.is_none() && (!clear(start)? || !clear(start + 0.05)?) {
             start += 1f64.to_radians();
             if start > 90f64.to_radians() {
                 return Err(DesignError::Infeasible(
@@ -517,6 +640,24 @@ impl VoluteGeometry {
         // discharge), the spiral starts where it clears the wall and the cutwater sits
         // there.
         let (start, cutwater) = match design.cutwater_shape {
+            // An internal spiral starts beside the face of the neck, inside the diffuser:
+            // the cutwater is where the two cut each other, with no nose of its own.
+            _ if bend.is_some() => {
+                let b = bend.as_ref().expect("an internal volute");
+                let r = design.stagnation_radius + b.top;
+                let tip = DVec3::new(r, 0.0, zm + b.face);
+                (
+                    CUTWATER_START,
+                    CutwaterGeometry {
+                        tip,
+                        angle: 0.0,
+                        wedge: 0.0,
+                        radius: 0.0,
+                        nose_center: tip,
+                        nose_distance: r,
+                    },
+                )
+            }
             CutwaterShape::Tangent => (
                 clear_start,
                 cutwater(&design, &nozzle, sign, zm, clear_start)?,
@@ -675,6 +816,7 @@ impl VoluteGeometry {
             outer_wall,
             wall_stress: WallStress::default(),
             cutwater,
+            bend,
             warnings,
         };
         let stress = WallStress::new(&volute, &input.wall.pressure, &input.wall.allowable_stress)?;
@@ -1462,6 +1604,70 @@ mod tests {
         // A shorter rib moves the nose later.
         let short = double(Some(150f64.to_radians()));
         assert_relative_eq!(short.design.rib.unwrap().start, 210f64.to_radians());
+    }
+
+    fn internal(round: crate::volute::InternalRound) -> VoluteGeometry {
+        let mut input = unturned();
+        input.cross_section = CrossSectionInput::single(SectionShape::RoundInternal(round));
+        VoluteGeometry::build(&reference_basis(), &input).unwrap()
+    }
+
+    #[test]
+    fn an_internal_volute_starts_inside_its_diffuser() {
+        use crate::volute::InternalRound;
+        for open_to_right in [true, false] {
+            let g = internal(InternalRound {
+                open_to_right,
+                ..InternalRound::default()
+            });
+            let bend = g.bend.as_ref().unwrap();
+            assert_relative_eq!(g.start_angle, CUTWATER_START);
+            assert_eq!(g.channels().len(), 2);
+            assert!(g.warnings.iter().any(|w| w.contains("internal volute")));
+            // Every section lies beyond the face, away from the impeller, and reaches
+            // inside r'_z.
+            let zm = reference_basis().midplane;
+            let face = zm + bend.face;
+            let away = bend.face.signum();
+            for s in &g.sections {
+                for p in &s.outline {
+                    assert!(away * (p.y - face) >= -1e-9, "{p:?}");
+                }
+            }
+            let throat = g.sections.last().unwrap();
+            let lowest = throat.outline.iter().map(|p| p.x).fold(f64::MAX, f64::min);
+            assert!(lowest < g.design.stagnation_radius - 0.01, "{lowest}");
+            // The fluid of the inlet: one closed loop of pieces over the bend and neck,
+            // reaching past the face.
+            let profile = g.inlet_profile();
+            for w in profile.windows(2) {
+                assert!(w[0].last().unwrap().distance(w[1][0]) < 1e-12);
+            }
+            assert!(profile[0][0].distance(*profile.last().unwrap().last().unwrap()) < 1e-12);
+            let reach = profile
+                .iter()
+                .flatten()
+                .map(|p| away * (p.y - face))
+                .fold(f64::MIN, f64::max);
+            assert!(
+                reach > 0.0 && reach < 0.05 * g.design.inlet_width,
+                "{reach}"
+            );
+            // The casing round the bend, and the impeller left open on the other side.
+            let casing = g.bend_casing_profile().unwrap();
+            assert_eq!(casing.len(), bend.region().len());
+            let (lo, hi) = g.impeller_band();
+            if open_to_right {
+                assert!(lo.is_infinite() && (hi - face).abs() < 1e-12);
+            } else {
+                assert!(hi.is_infinite() && (lo - face).abs() < 1e-12);
+            }
+        }
+        // A volute outside r'_z keeps its ring and the whole impeller band.
+        let g = VoluteGeometry::build(&reference_basis(), &unturned()).unwrap();
+        assert!(g.bend.is_none() && g.bend_casing_profile().is_none());
+        assert_eq!(g.inlet_profile().len(), 4);
+        assert!(g.impeller_band().0.is_infinite() && g.impeller_band().1.is_infinite());
     }
 
     fn with_discharge(shape: DischargeShape) -> VoluteGeometry {
