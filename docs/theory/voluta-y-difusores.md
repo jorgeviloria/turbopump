@@ -184,6 +184,31 @@ quedaría delante de la tapa, en el lado de aspiración. La construcción es pro
   el eje. Así nunca pasa del radio del techo del cuello ni vuelve hacia el cuello. Su
   tamaño $H$ es lo que se aleja de la cara.
 
+**Holgura con el rodete.** La espiral interna queda al lado del rodete, por dentro de
+$r_2$, y entre los dos queda la pared de la carcasa y una holgura axial $s_{ax}$. Gülich
+deja estas holguras laterales al diseño mecánico (cap. 9.1) y en sus ejemplos usa
+$s_{ax}/r_2 = 0{,}065$ (figs. 9.7 a 9.10). Ese es el valor automático (elección propia),
+que se puede cambiar. Para comprobarla, la voluta recibe las caras exteriores del rodete
+que la precede:
+
+- hacia $+z$, la cara trasera del disco del cubo, plana a la salida más el espesor de
+  pared;
+- hacia $-z$, la cara delantera de la tapa: su contorno desplazado hacia fuera el
+  espesor, desde $r_2$ hasta el ojo. Más adentro está el ojo de aspiración.
+
+El espesor es el del modelo CAD del rodete: $0{,}02\,d_2$ y al menos 3 mm. Un rodete de
+doble entrada tiene tapas a los dos lados. Con la espiral en el radio interior de su
+garganta, la holgura es la distancia axial desde la cara del cuello, menos la pared de
+la carcasa, hasta lo más lejos que llega el rodete en ese tramo de radios. El cuello
+solo desplaza la espiral de lado, sin cambiar sus secciones, así que el cuello automático
+crece lo que le falte a la holgura. Con un cuello manual demasiado corto, o con la
+espiral entrando en el ojo de aspiración, hay aviso. Tras un difusor no se comprueba:
+al lado quedan sus paredes, no el rodete.
+
+En la bomba de referencia el cuello por defecto deja 23,2 mm detrás del disco del cubo,
+frente a los 5,6 mm de $0{,}065\,r_2$; hacia el lado de aspiración quedan 20 mm hasta la
+tapa.
+
 El codo y el cuello no cuentan en la integral del momento angular, igual que el anillo
 sin álabes en las volutas externas. Como recorren toda la vuelta, todas las definiciones
 internas comparten el mismo codo (solo cambia la relación de la elipse) y no se mezclan
@@ -671,6 +696,9 @@ También avisan:
   - las operaciones booleanas se repiten con una tolerancia de contacto de 0; 0,001;
     0,0001; 0,01 y 0,1 mm, en dos etapas: primero la unión de las piezas del canal y
     después la del anillo y los cortes de la lengüeta y el nervio;
+  - si un intento deja un sólido con el volumen correcto pero con un defecto topológico
+    pequeño, se repara con la sanación de formas de Open CASCADE antes de probar la
+    siguiente tolerancia: cuesta mucho menos que repetir la operación;
   - una unión fallida puede dar un sólido válido al que le falta una pieza. Por eso
     cada etapa exige además un volumen: el canal, al menos el 90 % de la suma de sus
     piezas, y el dominio fluido, el canal más la mitad del anillo. Con secciones de
@@ -683,13 +711,23 @@ Los sólidos se construyen en milímetros con Open CASCADE:
 
 - **Voluta:** cada sección es un contorno cerrado con una arista por tramo (apartado 2),
   para que la spline no suavice los quiebros entre tramos.
+- **Contornos del loft:** 56 puntos en las paredes y 8 en la entrada. Más puntos
+  ralentizan las operaciones booleanas mucho más de lo que mejoran la forma: las splines
+  ya siguen las paredes, y la altura de cada contorno se ajusta al área de diseño. Con 48,
+  la voluta rectangular con descarga tangencial de pared interior recta y corte de agua
+  tangente partía el dominio fluido en dos sólidos.
+- **Tiempos de la carcasa** en la bomba de referencia, medidos en las mismas condiciones
+  con y sin estas tres medidas (contornos de 56 puntos, perfil del codo con splines,
+  reparación de formas): la externa pasa de 55 a 34 s y la interna de 90 a 38 s. Casi
+  todo es un único corte booleano, que Open CASCADE ya reparte entre núcleos.
 - **Voluta interna:** la espiral empieza a 3° de la lengüeta y se funde con la tobera, que
   la atraviesa al principio: la lengüeta sale de esa intersección, como en las volutas de
   lengüeta afilada. El anillo de entrada se revoluciona junto con el codo y el cuello, que
   entran un poco en la espiral, algo más bajos que el cuello en la cara para no correr
   sobre su techo plano. La carcasa añade el perfil del codo y el cuello desplazado el
-  espesor de pared, y el hueco del rodete ($r < r_2$) se abre solo en el lado opuesto a
-  la espiral, porque esta queda por dentro de $r_2$. El loft recorre la
+  espesor de pared, trazado con splines entre sus esquinas para que tenga pocas caras,
+  y el hueco del rodete ($r < r_2$) se abre solo en el lado opuesto a la espiral, porque
+  esta queda por dentro de $r_2$. El loft recorre la
   espiral y la tobera, y se une al anillo que va de la salida del rodete al círculo de
   la lengüeta. El resultado es el dominio fluido, `volute.<ext>`.
 - **Carcasa de la voluta,** `volute-casing.<ext>` (construcción propia):
@@ -787,8 +825,9 @@ Tras el difusor, la voluta recibe mucho menos momento angular: $c_u r$ baja de 1
 - **Secciones:** la voluta doble solo admite paredes rectas con un ángulo de cono. Si las
   definiciones mezclan formas de esquinas distintas, las esquinas vivas que no comparten
   se suavizan en el CAD. En la voluta interna, la lengüeta es solo la intersección de la
-  espiral y la tobera, sin nariz ni corrección propia, y no se comprueba la holgura con
-  el disco del rodete (no se conoce su espesor).
+  espiral y la tobera, sin nariz ni corrección propia. La holgura con el rodete supone
+  el espesor de pared por defecto de su modelo CAD: si al exportar se pone otro, la
+  comprobación no lo ve.
 - **Áreas de la espiral:** faltan las reglas de Pfleiderer y Stepanoff.
 - **Tobera:** tangencial o radial, siempre en el plano medio: no hay codo en z ni
   desplazamiento axial, y la salida es siempre circular, sin brida rectangular. Con la
