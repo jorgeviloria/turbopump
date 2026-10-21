@@ -22,6 +22,7 @@ use crate::steps::AcceptState;
 use crate::theme::{self, Palette, icon};
 use crate::tree::StageParts;
 use crate::viewer::Viewer;
+use crate::views::cross_section::CrossSectionView;
 use crate::views::performance::PerformanceView;
 use crate::views::{blade, front, meridional::MeridionalView, report};
 use crate::{default_project, steps, tree, widgets};
@@ -102,6 +103,7 @@ impl EditCtx<'_> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum View {
     Meridional,
+    CrossSection,
     Blade,
     FrontView,
     View3d,
@@ -110,8 +112,9 @@ pub enum View {
 }
 
 impl View {
-    pub const ALL: [View; 6] = [
+    pub const ALL: [View; 7] = [
         View::Meridional,
+        View::CrossSection,
         View::Blade,
         View::FrontView,
         View::View3d,
@@ -122,6 +125,7 @@ impl View {
     pub fn title(self) -> &'static str {
         tr(match self {
             View::Meridional => "Meridional view",
+            View::CrossSection => "Volute cross sections",
             View::Blade => "Blade",
             View::FrontView => "Front view",
             View::View3d => "3D view",
@@ -134,6 +138,7 @@ impl View {
     pub fn short_title(self) -> &'static str {
         tr(match self {
             View::Meridional => "Meridional",
+            View::CrossSection => "Section",
             View::Blade => "Blade",
             View::FrontView => "Front",
             View::View3d => "3D",
@@ -145,6 +150,7 @@ impl View {
     pub fn icon(self) -> &'static str {
         match self {
             View::Meridional => icon::BEZIER_CURVE,
+            View::CrossSection => icon::CIRCLE_HALF,
             View::Blade => icon::WAVE_SINE,
             View::FrontView => icon::FAN,
             View::View3d => icon::CUBE,
@@ -225,7 +231,8 @@ fn view_for(kind: ComponentKind, step: DesignStep) -> Option<View> {
             ComponentKind::Impeller,
             BladeProperties | BladeMeanLines | BladeProfiles | BladeEdges,
         ) => Some(View::Blade),
-        (ComponentKind::Volute, CrossSection | WallThickness) => Some(View::Meridional),
+        (ComponentKind::Volute, CrossSection) => Some(View::CrossSection),
+        (ComponentKind::Volute, WallThickness) => Some(View::Meridional),
         (ComponentKind::Volute, VoluteSetup | SpiralDevelopment | Diffuser | CutWater) => {
             Some(View::FrontView)
         }
@@ -323,6 +330,7 @@ pub struct TurbopumpApp {
     /// Width of the open properties panel, set by dragging its edge.
     sidebar_width: f32,
     meridional: MeridionalView,
+    cross_section: CrossSectionView,
     performance: PerformanceView,
     viewer: Viewer,
     exports: Exports,
@@ -382,6 +390,7 @@ impl TurbopumpApp {
             language: Language::English,
             sidebar_width: SIDEBAR_WIDTH,
             meridional: MeridionalView::default(),
+            cross_section: CrossSectionView::default(),
             performance: PerformanceView::default(),
             viewer: Viewer::default(),
             exports: Exports::default(),
@@ -608,6 +617,7 @@ impl TurbopumpApp {
                     View::Meridional => {
                         self.meridional.show(ui, &mut cx, id, stator, volute);
                     }
+                    View::CrossSection => self.cross_section.show(ui, &mut cx, volute),
                     View::Blade => blade::show(ui, cx.derived, id, &units),
                     View::FrontView => {
                         front::show(ui, cx.derived, id, stator, volute, &units);

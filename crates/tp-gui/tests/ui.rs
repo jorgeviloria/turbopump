@@ -319,3 +319,65 @@ fn the_interface_switches_to_spanish_and_back() {
     harness.run();
     harness.get_by_label_contains(ACCEPT);
 }
+
+#[test]
+fn cross_sections_are_defined_round_the_spiral() {
+    use tp_design::volute::{SectionShape, SideShape};
+    let mut harness = harness();
+    for _ in 0..6 {
+        accept(&mut harness);
+    }
+    harness.get_by_label("Volute setup").click();
+    harness.run();
+    accept(&mut harness);
+    assert!(matches!(
+        harness.state().selection(),
+        Selection::Step(_, DesignStep::CrossSection)
+    ));
+    assert_eq!(harness.state().view(), View::CrossSection);
+    let input = |harness: &Harness<'_, TurbopumpApp>| {
+        let project = harness.state().document().project();
+        project.volute_input(project.components()[1].id()).unwrap()
+    };
+    // The −z side becomes radius based, still symmetric.
+    harness.get_by_value("Trapezoid").click();
+    harness.run();
+    harness.get_by_label("Radius based").click();
+    harness.run();
+    let sections = input(&harness).cross_section.sections;
+    assert!(
+        matches!(
+            &sections[0].shape,
+            SectionShape::Sides {
+                left: SideShape::RadiusBased(_),
+                right: None
+            }
+        ),
+        "{sections:?}"
+    );
+    // A second definition, halfway round, with its own +z side.
+    harness.get_by_label_contains("Add section").click();
+    harness.run();
+    let sections = input(&harness).cross_section.sections;
+    assert_eq!(sections.len(), 2);
+    assert!((sections[1].angle - std::f64::consts::PI).abs() < 1e-9);
+    harness
+        .get_all_by_value("symmetric")
+        .last()
+        .unwrap()
+        .click();
+    harness.run();
+    harness.get_by_label("Rectangular").click();
+    harness.run();
+    let sections = input(&harness).cross_section.sections;
+    assert!(matches!(
+        &sections[1].shape,
+        SectionShape::Sides {
+            right: Some(SideShape::Rectangular { .. }),
+            ..
+        }
+    ));
+    // Both shape the design, which still builds.
+    let project = harness.state().document().project();
+    assert!(project.compute_volute(project.components()[1].id()).is_ok());
+}

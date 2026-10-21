@@ -6,6 +6,200 @@
 
 /// English text → Spanish text.
 pub(super) static TEXTS: &[(&str, &str)] = &[
+    // Cross sections of the volute.
+    ("Rectangular", "Rectangular"),
+    ("Trapezoid", "Trapecio"),
+    ("Round", "Redonda"),
+    ("Round, asymmetric", "Redonda, asimétrica"),
+    ("Bézier, rectangle type", "Bézier, tipo rectángulo"),
+    ("Bézier, trapezoid type", "Bézier, tipo trapecio"),
+    ("Line segments", "Segmentos de recta"),
+    ("Radius based", "Basada en radios"),
+    (
+        "Simplest shape; it cannot be cast and grows large, sensible only at low specific speed",
+        "La forma más simple; no se puede fundir y crece mucho: solo tiene sentido a baja velocidad específica",
+    ),
+    (
+        "Flanks opening at the cone angle: flatter than a rectangle, with weaker secondary flow; it cannot be cast",
+        "Flancos que se abren con el ángulo de cono: más plana que un rectángulo y con flujo secundario más débil; no se puede fundir",
+    ),
+    (
+        "Elliptic arc through the inlet point: good for stresses",
+        "Arco elíptico por el punto de entrada: favorable para las tensiones",
+    ),
+    (
+        "Round section growing toward one side: a more favourable secondary flow, often after mixed-flow impellers",
+        "Sección redonda que crece hacia un lado: flujo secundario más favorable, frecuente tras rodetes semiaxiales",
+    ),
+    (
+        "A rectangle with cast radii, shaped by a Bézier curve",
+        "Un rectángulo con radios de fundición, trazado con una curva de Bézier",
+    ),
+    (
+        "A trapezoid with cast radii, shaped by a Bézier curve",
+        "Un trapecio con radios de fundición, trazado con una curva de Bézier",
+    ),
+    (
+        "Corners you place and round, scaled with the section",
+        "Esquinas que colocas y redondeas, escaladas con la sección",
+    ),
+    (
+        "Radial base, cone and main arc, joined by two radii",
+        "Base radial, cono y arco principal, unidos por dos radios",
+    ),
+    ("{}, flanks at {}", "{}, flancos a {}"),
+    ("{} (−z) / {} (+z)", "{} (−z) / {} (+z)"),
+    ("{}, growing toward {}", "{}, creciendo hacia {}"),
+    ("{} at {}", "{} a {}"),
+    (", blending to ", ", con transición a "),
+    (
+        "Each definition gives the shape of the sections at one wrap angle φ; the spiral development scales it to the height its flow needs, and the shape blends smoothly between definitions. Flat sections with B/H = 2 to 3 lose least (Gülich p. 414).",
+        "Cada definición da la forma de las secciones en un ángulo de envolvente φ; el desarrollo de la espiral la escala a la altura que pide su caudal y la forma pasa suavemente de una definición a otra. Las secciones planas con B/H = 2 a 3 son las que menos pierden (Gülich p. 414).",
+    ),
+    ("−z side", "Lado −z"),
+    ("+z side", "Lado +z"),
+    (
+        "Active: only active definitions shape the spiral",
+        "Activa: solo las definiciones activas dan forma a la espiral",
+    ),
+    ("symmetric", "simétrica"),
+    ("(the whole section)", "(toda la sección)"),
+    ("Edit this definition", "Editar esta definición"),
+    ("Delete this definition", "Borrar esta definición"),
+    ("Add section", "Añadir sección"),
+    (
+        "A new definition in the largest gap round the spiral, as the selected one",
+        "Una definición nueva, como la seleccionada, en el mayor hueco de la espiral",
+    ),
+    ("Section at {}", "Sección a {}"),
+    (
+        "Drag the control points of Bézier and line-segment sides in the cross-section view; right-click there to add or remove a corner.",
+        "Arrastra los puntos de control de los lados Bézier y de segmentos en la vista de secciones; con el botón derecho añades o quitas una esquina.",
+    ),
+    ("Tangent angle λ", "Ángulo tangente λ"),
+    ("Cone angle δ", "Ángulo de cono δ"),
+    (
+        "Angle δ of the flank from the radial direction",
+        "Ángulo δ del flanco respecto a la dirección radial",
+    ),
+    (
+        "Angle λ of the top where it meets the centre line; above 0 the two sides meet in a ridge",
+        "Ángulo λ del techo donde llega a la línea central; por encima de 0 los dos lados forman una arista",
+    ),
+    ("Ellipse ratio", "Relación de la elipse"),
+    (
+        "Axial over radial semi-axis, kept as the section grows: 1 for a circle",
+        "Semieje axial entre semieje radial, constante al crecer la sección: 1 para un círculo",
+    ),
+    ("Base height h", "Altura de la base h"),
+    (
+        "Radial part from the inlet; automatic: 0.1·b₃",
+        "Tramo radial desde la entrada; automático: 0,1·b₃",
+    ),
+    ("Base radius R_B", "Radio de la base R_B"),
+    (
+        "Rounds the base into the cone, limited by their lengths; automatic: 0.1·b₃",
+        "Redondea la base con el cono, limitado por sus longitudes; automático: 0,1·b₃",
+    ),
+    ("Corner radius R_C", "Radio de esquina R_C"),
+    (
+        "Rounds the cone into the main arc, limited by their lengths; automatic: 0.3·b₃",
+        "Redondea el cono con el arco principal, limitado por sus longitudes; automático: 0,3·b₃",
+    ),
+    ("Main radius R", "Radio principal R"),
+    (
+        "Arc of the top, centred on the centre line; enlarged where it cannot reach the cone. Automatic: b₃",
+        "Arco del techo, centrado en la línea central; se agranda donde no alcanza el cono. Automático: b₃",
+    ),
+    ("Inner point position", "Posición de los puntos interiores"),
+    (
+        "Points 1 and 3 as a fraction of the way from the end point to the corner S (relative), or as their distance from S (absolute)",
+        "Puntos 1 y 3 como fracción del camino del punto extremo a la esquina S (relativa) o como su distancia a S (absoluta)",
+    ),
+    ("relative", "relativa"),
+    ("absolute", "absoluta"),
+    ("Point 1", "Punto 1"),
+    ("Point 3", "Punto 3"),
+    (
+        "0 at the end point, 1 at the corner S",
+        "0 en el punto extremo, 1 en la esquina S",
+    ),
+    ("Distance from the corner S", "Distancia a la esquina S"),
+    ("Point 2 toward point 0", "Punto 2 hacia el punto 0"),
+    ("Point 2 toward point 4", "Punto 2 hacia el punto 4"),
+    (
+        "Point 2 from S, as a fraction of the way to point 0; 0 puts it on S",
+        "Punto 2 desde S, como fracción del camino al punto 0; 0 lo pone en S",
+    ),
+    (
+        "Point 2 from S, as a fraction of the way to point 4; 0 puts it on S",
+        "Punto 2 desde S, como fracción del camino al punto 4; 0 lo pone en S",
+    ),
+    (
+        "Corners from the inlet point, in units of the section height H: out from the side wall, up from r'_z, and the radius that rounds them (0: sharp).",
+        "Esquinas desde el punto de entrada, en unidades de la altura H de la sección: hacia fuera desde la pared lateral, hacia arriba desde r'_z, y el radio que las redondea (0: viva).",
+    ),
+    ("out/H", "fuera/H"),
+    ("up/H", "arriba/H"),
+    ("radius/H", "radio/H"),
+    ("Remove this corner", "Quitar esta esquina"),
+    ("Add corner", "Añadir esquina"),
+    (
+        "A corner halfway between the last one and the top",
+        "Una esquina a medio camino entre la última y el techo",
+    ),
+    ("Strictly external", "Estrictamente externa"),
+    (
+        "Keep the section outside r'_z; otherwise it also grows inward beside the inlet",
+        "Mantiene la sección fuera de r'_z; si no, también crece hacia dentro junto a la entrada",
+    ),
+    ("Open to +z", "Abierta hacia +z"),
+    (
+        "Grow toward +z instead of −z",
+        "Crece hacia +z en vez de −z",
+    ),
+    ("Square on top", "Esquina cuadrada arriba"),
+    (
+        "A square corner on the closed side of the top",
+        "Una esquina en ángulo recto en el lado cerrado del techo",
+    ),
+    ("Volute cross sections", "Secciones de la voluta"),
+    ("Section", "Sección"),
+    (
+        "Add a volute to see its cross sections.",
+        "Añade una voluta para ver sus secciones.",
+    ),
+    (
+        "Definition at {}, shown {} high as the spiral sizes it there",
+        "Definición a {}, mostrada con {} de altura, como la dimensiona la espiral ahí",
+    ),
+    (
+        "Drag the round handles to shape Bézier and line-segment sides; right-click to add or remove a corner. Ctrl (⌘) keeps a corner's distance to the previous one, Alt keeps it on its line; add Shift for the next one. Drag the background to pan, scroll to zoom, double-click to fit.",
+        "Arrastra los tiradores redondos para dar forma a los lados Bézier y de segmentos; con el botón derecho añades o quitas una esquina. Ctrl (⌘) mantiene la distancia de una esquina a la anterior y Alt la mantiene en su recta; añade Mayús para la siguiente. Arrastra el fondo para desplazar, rueda para el zoom, doble clic para encajar.",
+    ),
+    (
+        "sections round the spiral",
+        "secciones a lo largo de la espiral",
+    ),
+    ("inlet b₃", "entrada b₃"),
+    ("selected definition", "definición seleccionada"),
+    ("Add a corner here", "Añadir una esquina aquí"),
+    (
+        "Only line-segment sides have corners to add or remove.",
+        "Solo los lados de segmentos tienen esquinas que añadir o quitar.",
+    ),
+    (
+        "drag a cross-section point",
+        "arrastrar un punto de la sección",
+    ),
+    (
+        "add a cross-section corner",
+        "añadir una esquina a la sección",
+    ),
+    (
+        "remove a cross-section corner",
+        "quitar una esquina de la sección",
+    ),
     ("Wall stresses", "Tensiones en la pared"),
     (
         "σ₁ {} round the section, σ₂ {} along, at {}; {} wall for {} (thin torus, our estimate)",
@@ -1632,6 +1826,83 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
 
 /// Messages of the design code, most specific first.
 pub(super) static MESSAGES: &[(&str, &str)] = &[
+    // Cross sections of the volute.
+    (
+        "a double volute needs straight walls at one cone angle: the cross sections were made trapezoidal at {}°",
+        "una voluta doble necesita paredes rectas con un solo ángulo de cono: las secciones se hicieron trapeciales a {}°",
+    ),
+    (
+        "at least one cross section must be active",
+        "al menos una sección transversal debe estar activa",
+    ),
+    (
+        "cross sections are defined between 0° and 360°, got {}°",
+        "las secciones transversales se definen entre 0° y 360°; se dio {}°",
+    ),
+    (
+        "two active cross sections share the angle {}°",
+        "dos secciones activas comparten el ángulo {}°",
+    ),
+    (
+        "the cross section at {}° crosses itself at H = {}·b₃",
+        "la sección transversal a {}° se corta a sí misma con H = {}·b₃",
+    ),
+    (
+        "the cross section at {}°: {}",
+        "la sección transversal a {}°: {}",
+    ),
+    (
+        "the volute cross section reaches the pump axis",
+        "la sección de la voluta llega al eje de la bomba",
+    ),
+    (
+        "the cone angle must lie between 0° and {}°, got {}°",
+        "el ángulo de cono debe estar entre 0° y {}°; se dio {}°",
+    ),
+    (
+        "the tangent angle must lie between 0° and {}°, got {}°",
+        "el ángulo tangente debe estar entre 0° y {}°; se dio {}°",
+    ),
+    (
+        "the ellipse ratio must lie between 0.2 and 5, got {}",
+        "la relación de la elipse debe estar entre 0,2 y 5; se dio {}",
+    ),
+    (
+        "relative Bézier points must lie between 0 and 1, got {}",
+        "los puntos Bézier relativos deben estar entre 0 y 1; se dio {}",
+    ),
+    (
+        "absolute Bézier points cannot lie beyond S, got {}",
+        "los puntos Bézier absolutos no pueden quedar más allá de S; se dio {}",
+    ),
+    (
+        "Bézier point 2 lies too far from S",
+        "el punto 2 de Bézier queda demasiado lejos de S",
+    ),
+    (
+        "a line-segment corner lies out of range: {}·H out, {}·H up",
+        "una esquina de segmentos queda fuera de rango: {}·H hacia fuera, {}·H hacia arriba",
+    ),
+    (
+        "a corner radius must lie between 0 and H, got {}·H",
+        "un radio de esquina debe estar entre 0 y H; se dio {}·H",
+    ),
+    (
+        "the base height cannot be negative",
+        "la altura de la base no puede ser negativa",
+    ),
+    (
+        "the base radius cannot be negative",
+        "el radio de la base no puede ser negativo",
+    ),
+    (
+        "the corner radius cannot be negative",
+        "el radio de esquina no puede ser negativo",
+    ),
+    (
+        "the main radius must be positive",
+        "el radio principal debe ser positivo",
+    ),
     (
         "the correction for a viscosity of {} mm²/s goes beyond the tests behind it (Gülich Table 13.1: 7 < nq < 50, up to 4000 mm²/s)",
         "la corrección para una viscosidad de {} mm²/s va más allá de los ensayos en que se basa (Gülich tabla 13.1: 7 < nq < 50, hasta 4000 mm²/s)",

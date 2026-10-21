@@ -6,7 +6,7 @@ use tp_design::impeller::BladeLoading;
 use tp_design::impeller::loading::blade_velocities;
 use tp_design::pump::{InletSection, correlations as corr};
 use tp_design::radial_thrust::RadialCollector;
-use tp_design::volute::{AreaLaw, CutwaterShape, DischargeShape, SectionShape};
+use tp_design::volute::{AreaLaw, CutwaterShape, DischargeShape};
 use tp_project::{ComponentId, Project};
 use tp_units::{DisplayUnits, QuantityKind};
 
@@ -797,12 +797,22 @@ pub(crate) fn show(
             None => return,
         };
         let d = &v.design;
-        let shape = match d.shape {
-            SectionShape::Rectangular => tr("rectangular").to_owned(),
-            SectionShape::Circular => tr("circular").to_owned(),
-            SectionShape::Trapezoidal { flank_angle } => {
-                tf("trapezoidal, flanks at {}", &[&s(Angle, flank_angle)])
-            }
+        let definitions = d.cross_sections.definitions();
+        let shape = match definitions {
+            [only] => crate::section_editor::describe(&only.shape, units),
+            _ => definitions
+                .iter()
+                .map(|def| {
+                    tf(
+                        "{} at {}",
+                        &[
+                            &crate::section_editor::describe(&def.shape, units),
+                            &s(Angle, def.angle),
+                        ],
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(tr(", blending to ")),
         };
         let law = tr(match d.law {
             AreaLaw::ConstantVelocity => "constant velocity (eqs. 7.26–7.27)",

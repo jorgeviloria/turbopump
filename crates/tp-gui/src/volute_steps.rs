@@ -1,13 +1,12 @@
 //! Step editors of the volute: setup, cross section, spiral, discharge diffuser,
 //! cutwater and wall thickness.
 
-use eframe::egui::{ComboBox, DragValue, Grid, Ui};
+use eframe::egui::{ComboBox, Grid, Ui};
 use egui_plot::{Line, Plot, PlotPoints};
 use tp_design::Param;
 use tp_design::volute::stress::StressPlace;
 use tp_design::volute::{
-    AreaLaw, CutwaterShape, DEFAULT_FLANK_ANGLE_DEG, DischargeShape, SectionShape, StraightWall,
-    VoluteInput, VoluteKind,
+    AreaLaw, CutwaterShape, DischargeShape, StraightWall, VoluteInput, VoluteKind,
 };
 use tp_project::{ComponentId, DesignStep, Project};
 use tp_units::QuantityKind;
@@ -30,7 +29,7 @@ pub(crate) fn show(
     let before = input.clone();
     let label = match step {
         DesignStep::VoluteSetup => setup(ui, cx, id, &mut input),
-        DesignStep::CrossSection => cross_section(ui, cx, id, &mut input),
+        DesignStep::CrossSection => crate::section_editor::step(ui, cx, id, &mut input),
         DesignStep::SpiralDevelopment => spiral(ui, cx, id, &mut input),
         DesignStep::Diffuser => diffuser(ui, cx, id, &mut input),
         DesignStep::CutWater => cutwater(ui, cx, id, &mut input),
@@ -252,101 +251,6 @@ fn setup(
             });
     }
     "edit volute setup"
-}
-
-fn cross_section(
-    ui: &mut Ui,
-    cx: &mut EditCtx<'_>,
-    id: ComponentId,
-    input: &mut VoluteInput,
-) -> &'static str {
-    let units = cx.units();
-    let angle_unit = units.get(QuantityKind::Angle).symbol;
-    ui.weak(tr(
-        "Flat sections with B/H = 2 to 3 lose least (Gülich p. 414).",
-    ));
-    section(ui, tr("Shape"));
-    Grid::new("volute_shape")
-        .num_columns(2)
-        .spacing([10.0, 4.0])
-        .show(ui, |ui| {
-            let shape = &mut input.cross_section.shape;
-            ui.label(tr("Cross section"));
-            let name = match shape {
-                SectionShape::Rectangular => "rectangular",
-                SectionShape::Trapezoidal { .. } => "trapezoidal",
-                SectionShape::Circular => "circular",
-            };
-            ComboBox::from_id_salt("volute_shape")
-                .selected_text(name)
-                .show_ui(ui, |ui| {
-                    if ui
-                        .selectable_label(name == tr("rectangular"), tr("rectangular"))
-                        .clicked()
-                    {
-                        *shape = SectionShape::Rectangular;
-                    }
-                    if ui
-                        .selectable_label(name == tr("trapezoidal"), tr("trapezoidal"))
-                        .clicked()
-                        && name != "trapezoidal"
-                    {
-                        *shape = SectionShape::Trapezoidal {
-                            flank_angle: DEFAULT_FLANK_ANGLE_DEG.to_radians(),
-                        };
-                    }
-                    if ui
-                        .selectable_label(name == tr("circular"), tr("circular"))
-                        .clicked()
-                    {
-                        *shape = SectionShape::Circular;
-                    }
-                });
-            ui.end_row();
-            if let SectionShape::Trapezoidal { flank_angle } = shape {
-                ui.label(tr("Flank angle δ"))
-                    .on_hover_text(tr("Angle of the side walls from the radial plane"));
-                let mut shown = units.to_display(QuantityKind::Angle, *flank_angle);
-                let max = units.to_display(QuantityKind::Angle, 60f64.to_radians());
-                if ui
-                    .add(
-                        DragValue::new(&mut shown)
-                            .range(0.0..=max)
-                            .speed(0.1)
-                            .suffix(format!(" {angle_unit}"))
-                            .update_while_editing(false),
-                    )
-                    .changed()
-                {
-                    *flank_angle = units.from_display(QuantityKind::Angle, shown);
-                }
-                ui.end_row();
-            }
-        });
-    if let Some(g) = cx.derived.volute(id) {
-        let d = &g.design;
-        section(ui, tr("Throat"));
-        Grid::new("volute_shape_results")
-            .num_columns(2)
-            .show(ui, |ui| {
-                value_row(
-                    ui,
-                    tr("Height"),
-                    units.show(QuantityKind::Length, d.throat.height),
-                );
-                value_row(
-                    ui,
-                    tr("Width over height B/H"),
-                    tf("{} (2 to 3)", &[&format!("{:.2}", d.throat_aspect)]),
-                );
-                value_row(
-                    ui,
-                    tr("Area A₃q"),
-                    units.show(QuantityKind::Area, d.throat.area),
-                );
-            });
-    }
-    "edit volute cross section"
 }
 
 fn spiral(

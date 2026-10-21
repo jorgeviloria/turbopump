@@ -15,6 +15,7 @@ mod i18n;
 mod icons;
 mod messages;
 mod ribbon;
+mod section_editor;
 mod steps;
 mod theme;
 mod tree;

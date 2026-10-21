@@ -109,6 +109,43 @@ fn volute() {
     save(&mut harness, "volute-front");
 }
 
+/// The cross-section step: the default trapezoid, then a radius-based section with a
+/// second definition of line segments, its corners ready to drag.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn cross_sections() {
+    let mut harness = harness(egui::Theme::Light);
+    for _ in 0..6 {
+        harness.get_by_label_contains("Accept step").click();
+        harness.run();
+    }
+    harness.get_by_label_contains("Volute setup").click();
+    harness.run();
+    harness.get_by_label_contains("Accept step").click();
+    harness.run();
+    harness.state_mut().focus_view(View::CrossSection);
+    harness.remove_cursor();
+    harness.run();
+    save(&mut harness, "cross-section-trapezoid");
+    harness.get_by_value("Trapezoid").click();
+    harness.run();
+    harness.get_by_label("Radius based").click();
+    harness.run();
+    save(&mut harness, "cross-section-radius");
+    harness.get_by_label_contains("Add section").click();
+    harness.run();
+    harness
+        .get_all_by_value("Radius based")
+        .last()
+        .unwrap()
+        .click();
+    harness.run();
+    harness.get_by_label("Line segments").click();
+    harness.remove_cursor();
+    harness.run();
+    save(&mut harness, "cross-section-segments");
+}
+
 /// A stage with a vaned diffuser between impeller and volute.
 #[test]
 #[ignore = "needs a GPU; run with --ignored"]

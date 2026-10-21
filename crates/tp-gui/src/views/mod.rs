@@ -1,6 +1,7 @@
 //! The views of the active stage, one at a time in the main area.
 
 pub(crate) mod blade;
+pub(crate) mod cross_section;
 pub(crate) mod front;
 pub(crate) mod meridional;
 pub(crate) mod performance;
