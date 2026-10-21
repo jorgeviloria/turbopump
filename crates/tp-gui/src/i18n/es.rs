@@ -6,6 +6,21 @@
 
 /// English text → Spanish text.
 pub(super) static TEXTS: &[(&str, &str)] = &[
+    ("Liquid", "Líquido"),
+    ("Kinematic viscosity ν", "Viscosidad cinemática ν"),
+    (
+        "The curve is predicted for cold water and corrected for this viscosity (Gülich Chap. 13.1); automatic: the liquid of the project",
+        "La curva se prevé para agua fría y se corrige para esta viscosidad (Gülich cap. 13.1); automático: el líquido del proyecto",
+    ),
+    (
+        "ν {}: f_Q = f_H {}, f_η {} by loss analysis (correlation {}, {})",
+        "ν {}: f_Q = f_H {}, f_η {} por análisis de pérdidas (correlación {}, {})",
+    ),
+    ("Viscous correction", "Corrección por viscosidad"),
+    (
+        "ν {} (Re {}): f_Q = f_H {}, f_η {} by loss analysis (Gülich Table 3.10); correlation f_H {}, f_η {} (Table 13.1)",
+        "ν {} (Re {}): f_Q = f_H {}, f_η {} por análisis de pérdidas (Gülich tabla 3.10); correlación f_H {}, f_η {} (tabla 13.1)",
+    ),
     ("Meridional view", "Vista meridional"),
     ("Blade", "Álabe"),
     ("Front view", "Vista frontal"),
@@ -1508,6 +1523,14 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
 
 /// Messages of the design code, most specific first.
 pub(super) static MESSAGES: &[(&str, &str)] = &[
+    (
+        "the correction for a viscosity of {} mm²/s goes beyond the tests behind it (Gülich Table 13.1: 7 < nq < 50, up to 4000 mm²/s)",
+        "la corrección para una viscosidad de {} mm²/s va más allá de los ensayos en que se basa (Gülich tabla 13.1: 7 < nq < 50, hasta 4000 mm²/s)",
+    ),
+    (
+        "the viscosity must be positive",
+        "la viscosidad debe ser positiva",
+    ),
     (
         "the seal clearance must be positive",
         "la holgura del anillo debe ser positiva",

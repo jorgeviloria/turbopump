@@ -29,6 +29,7 @@ pub(crate) struct PerformanceView {
     max_flow: Param<f64>,
     balance_holes: bool,
     statistics: bool,
+    viscosity: Param<f64>,
     operation: OperationInput,
     cache: Option<(Key, Result<PumpPerformance, String>)>,
 }
@@ -87,6 +88,7 @@ impl PerformanceView {
         input.max_flow_ratio = self.max_flow;
         input.axial.balance_holes = self.balance_holes;
         input.losses.statistics = self.statistics;
+        input.viscosity = self.viscosity;
         input.operation = self.operation.clone();
         let key = (derived.revision(), id, input.clone());
         if self.cache.as_ref().is_none_or(|(k, _)| *k != key) {
@@ -151,6 +153,23 @@ impl PerformanceView {
                     "Holes in the rear shroud with an annular seal there: most of the axial \
                      force on the shrouds cancels (Gülich eq. T9.2.14)",
                 ));
+        });
+        ui.collapsing(tr("Liquid"), |ui| {
+            Grid::new(("liquid", id.0)).num_columns(3).show(ui, |ui| {
+                crate::widgets::param_f64(
+                    ui,
+                    tr("Kinematic viscosity ν"),
+                    tr(
+                        "The curve is predicted for cold water and corrected for this viscosity \
+                         (Gülich Chap. 13.1); automatic: the liquid of the project",
+                    ),
+                    &mut self.viscosity,
+                    QuantityKind::KinematicViscosity,
+                    Some(curve.viscous.viscosity),
+                    units,
+                    1e-7..=1e-2,
+                );
+            });
         });
         let o = &curve.operation;
         ui.collapsing(tr("Operation in the system"), |ui| {
@@ -272,6 +291,24 @@ impl PerformanceView {
                         &[
                             &s(QuantityKind::Force, r.design_force),
                             &s(QuantityKind::Force, r.shutoff_force),
+                        ],
+                    ),
+                );
+            }
+            let v = &curve.viscous;
+            if (v.viscosity / tp_design::viscous::WATER_VISCOSITY - 1.0).abs()
+            >= tp_design::viscous::VISCOSITY_TOLERANCE {
+                line(
+                    ui,
+                    tr("Liquid"),
+                    tf(
+                        "ν {}: f_Q = f_H {}, f_η {} by loss analysis (correlation {}, {})",
+                        &[
+                            &s(QuantityKind::KinematicViscosity, v.viscosity),
+                            &format!("{:.3}", v.head_factor),
+                            &format!("{:.3}", v.efficiency_factor),
+                            &format!("{:.3}", v.correlation_head_factor),
+                            &format!("{:.3}", v.correlation_efficiency_factor),
                         ],
                     ),
                 );

@@ -500,6 +500,25 @@ pub(crate) fn show(
                                 ),
                             );
                         }
+                        let v = &c.viscous;
+                        if (v.viscosity / tp_design::viscous::WATER_VISCOSITY - 1.0).abs()
+            >= tp_design::viscous::VISCOSITY_TOLERANCE {
+                            value_row(
+                                ui,
+                                tr("Viscous correction"),
+                                tf(
+                                    "ν {} (Re {}): f_Q = f_H {}, f_η {} by loss analysis (Gülich Table 3.10); correlation f_H {}, f_η {} (Table 13.1)",
+                                    &[
+                                        &s(QuantityKind::KinematicViscosity, v.viscosity),
+                                        &format!("{:.3e}", v.reynolds),
+                                        &format!("{:.3}", v.head_factor),
+                                        &format!("{:.3}", v.efficiency_factor),
+                                        &format!("{:.3}", v.correlation_head_factor),
+                                        &format!("{:.3}", v.correlation_efficiency_factor),
+                                    ],
+                                ),
+                            );
+                        }
                         match &c.losses {
                             Some(l) => {
                                 value_row(
