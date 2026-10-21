@@ -125,7 +125,7 @@ Hay dos formas (Gülich, cap. 7.8.1, punto 4):
 
 - **Tangencial:** recto, en la dirección del flujo en la garganta. Se elige qué pared
   queda recta:
-  - ninguna (por defecto): se abre por igual a los dos lados de su eje, como un cono;
+  - ninguna: se abre por igual a los dos lados de su eje, como un cono;
   - la del lado de la lengüeta: la tobera solo se abre hacia fuera;
   - la exterior: se abre hacia la lengüeta.
 - **Radial** (Fig. 7.42): un codo que gira el flujo hacia fuera, en sentido contrario
@@ -133,7 +133,12 @@ Hay dos formas (Gülich, cap. 7.8.1, punto 4):
   - El radio medio del codo es $R_N \approx 1{,}5\sqrt{4A_{3q}/\pi}$ (ec. 7.29).
   - El codo gira hasta que el tramo recto forma el ángulo pedido con la línea que va del
     eje de la bomba al final del codo. Con 0° la descarga queda **sobre la línea del
-    eje** de la bomba: es la descarga central de las bombas de proceso.
+    eje** de la bomba: es la descarga central de las bombas de proceso, y la forma por
+    defecto (elección propia).
+  - Gülich (cap. 7.8.3) advierte que a $n_q$ bajo la tobera radial pierde algo de
+    rendimiento frente a la tangencial: un 4 % a $n_q$ = 23 y un 1 % a $n_q$ = 45 en los
+    ensayos que cita. A $n_q$ alto la diferencia desaparece. El programa todavía no
+    modela esa pérdida.
 
 La longitud $L$ se mide a lo largo de la línea media e **incluye el codo**: Gülich (cap.
 7.8.2, punto 4) aplica a las toberas curvas los datos de los difusores rectos. Si el
