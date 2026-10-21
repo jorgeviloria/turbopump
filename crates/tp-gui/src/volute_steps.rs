@@ -4,6 +4,7 @@
 use eframe::egui::{ComboBox, DragValue, Grid, Ui};
 use egui_plot::{Line, Plot, PlotPoints};
 use tp_design::Param;
+use tp_design::volute::stress::StressPlace;
 use tp_design::volute::{
     AreaLaw, CutwaterShape, DEFAULT_FLANK_ANGLE_DEG, DischargeShape, SectionShape, StraightWall,
     VoluteInput, VoluteKind,
@@ -784,6 +785,64 @@ fn wall(
             0.0005..=0.2,
         );
     });
+    section(ui, tr("Wall stresses"));
+    ui.weak(tr(
+        "Each section as a thin torus of the same area: an estimate to choose the thickness",
+    ));
+    let w = g.map(|g| g.wall_stress);
+    grid("volute_wall_stress").show(ui, |ui| {
+        param_f64(
+            ui,
+            tr("Casing pressure"),
+            tr("Over the suction pressure; automatic: the rise at shut-off (Gülich eqs. 3.26 and 3.28)"),
+            &mut input.wall.pressure,
+            QuantityKind::Pressure,
+            w.map(|w| w.pressure),
+            &units,
+            1e3..=1e9,
+        );
+        param_f64(
+            ui,
+            tr("Allowable stress"),
+            tr("Of the casing material; automatic: 50 MPa, about a fifth of a grey cast iron of 250 MPa"),
+            &mut input.wall.allowable_stress,
+            QuantityKind::Pressure,
+            w.map(|w| w.allowable),
+            &units,
+            1e5..=1e10,
+        );
+    });
+    if let Some(w) = w {
+        Grid::new("volute_wall_stress_results")
+            .num_columns(2)
+            .show(ui, |ui| {
+                let place = match w.place {
+                    StressPlace::Spiral { angle } => {
+                        tf("section at {}", &[&units.show(QuantityKind::Angle, angle)])
+                    }
+                    StressPlace::Bend => tr("bend of the discharge").to_owned(),
+                    StressPlace::Straight => tr("straight discharge").to_owned(),
+                };
+                value_row(
+                    ui,
+                    tr("Stress round the section σ₁"),
+                    tf(
+                        "{} at the {}",
+                        &[&units.show(QuantityKind::Pressure, w.hoop), &place],
+                    ),
+                );
+                value_row(
+                    ui,
+                    tr("Stress along σ₂"),
+                    units.show(QuantityKind::Pressure, w.longitudinal),
+                );
+                value_row(
+                    ui,
+                    tr("Wall for the allowable stress"),
+                    units.show(QuantityKind::Length, w.required_thickness),
+                );
+            });
+    }
     section(ui, tr("Outlet flange"));
     ui.checkbox(&mut input.wall.flange.enabled, tr("Flange on the casing"))
         .on_hover_text(tr(

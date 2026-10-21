@@ -963,6 +963,21 @@ pub(crate) fn show(
                 );
                 value_row(ui, tr("Outlet velocity"), s(Velocity, dif.outlet_velocity));
                 value_row(ui, tr("Wall thickness"), s(Length, d.wall_thickness));
+                let w = &v.wall_stress;
+                value_row(
+                    ui,
+                    tr("Wall stresses"),
+                    tf(
+                        "σ₁ {} round the section, σ₂ {} along, at {}; {} wall for {} (thin torus, our estimate)",
+                        &[
+                            &s(Pressure, w.hoop),
+                            &s(Pressure, w.longitudinal),
+                            &s(Pressure, w.pressure),
+                            &s(Length, w.required_thickness),
+                            &s(Pressure, w.allowable),
+                        ],
+                    ),
+                );
                 if let Some(f) = &d.flange {
                     value_row(
                         ui,

@@ -6,6 +6,35 @@
 
 /// English text → Spanish text.
 pub(super) static TEXTS: &[(&str, &str)] = &[
+    ("Wall stresses", "Tensiones en la pared"),
+    (
+        "σ₁ {} round the section, σ₂ {} along, at {}; {} wall for {} (thin torus, our estimate)",
+        "σ₁ {} en la sección, σ₂ {} a lo largo, a {}; pared de {} para {} (toro de pared delgada, estimación propia)",
+    ),
+    (
+        "Each section as a thin torus of the same area: an estimate to choose the thickness",
+        "Cada sección como un toro de pared delgada de la misma área: una estimación para elegir el espesor",
+    ),
+    ("Casing pressure", "Presión en la carcasa"),
+    (
+        "Over the suction pressure; automatic: the rise at shut-off (Gülich eqs. 3.26 and 3.28)",
+        "Sobre la presión de aspiración; automático: la subida a válvula cerrada (Gülich, ecs. 3.26 y 3.28)",
+    ),
+    ("Allowable stress", "Tensión admisible"),
+    (
+        "Of the casing material; automatic: 50 MPa, about a fifth of a grey cast iron of 250 MPa",
+        "Del material de la carcasa; automático: 50 MPa, alrededor de un quinto de una fundición gris de 250 MPa",
+    ),
+    ("section at {}", "sección a {}"),
+    ("bend of the discharge", "codo de la descarga"),
+    ("straight discharge", "tramo recto de la descarga"),
+    ("Stress round the section σ₁", "Tensión en la sección σ₁"),
+    ("{} at the {}", "{} en {}"),
+    ("Stress along σ₂", "Tensión a lo largo σ₂"),
+    (
+        "Wall for the allowable stress",
+        "Pared para la tensión admisible",
+    ),
     (
         "{} × {}, {} bolt holes of {} on {} (our proportions, not a standard)",
         "{} × {}, {} taladros de {} en {} (proporciones propias, no de una norma)",
