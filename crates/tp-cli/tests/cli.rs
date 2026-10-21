@@ -420,6 +420,18 @@ fn volute_designs_and_exports() {
         "{internal}"
     );
     assert!(internal.contains("10.00 mm long"), "{internal}");
+    // The automatic neck grows to keep a wide side gap from the impeller.
+    let gap = stdout(&turbopump(&[
+        "volute",
+        file_arg,
+        "--set",
+        "shape=internal:gap=40mm",
+        "--dry-run",
+    ]));
+    assert!(
+        gap.contains("side gap 40.00 mm to the impeller (at least 40.00 mm)"),
+        "{gap}"
+    );
     let mixed = turbopump(&[
         "volute",
         file_arg,

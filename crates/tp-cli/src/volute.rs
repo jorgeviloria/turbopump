@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use clap::Args;
 use tp_design::Param;
+use tp_design::outlet::Reach;
 use tp_design::volute::stress::StressPlace;
 use tp_design::volute::{
     AreaLaw, BendWall, BezierBase, BezierSide, CutwaterShape, DEFAULT_CONE_ANGLE_DEG,
@@ -29,8 +30,9 @@ pub(crate) struct VoluteArgs {
     /// bezier-trapezoid, segments, radius or external, each with optional parameters
     /// after a colon, e.g. trapezoid:30, round:ratio=1.2, radius:main=40mm,cone=30,
     /// segments:points=0/0.08+0.55/1/0.4, external:right,square, internal:neck=10mm,
-    /// inner=sharp (an internal section beside the impeller, through a bend whose walls
-    /// are sharp, straight or round, toward +z unless left); shape@DEGREES=… defines
+    /// inner=sharp,gap=5mm (an internal section beside the impeller, through a bend whose
+    /// walls are sharp, straight or round, toward +z unless left, its automatic neck long
+    /// enough to keep the side gap to the impeller); shape@DEGREES=… defines
     /// it at one wrap angle, blending between angles, and remove, off or on drop or
     /// toggle that definition; shape.right=… or shape@DEGREES.right=… gives the +z side
     /// its own shape, symmetric undoes it), law (auto, momentum or velocity),
@@ -339,14 +341,19 @@ fn parse_internal(rest: &str, units: &DisplayUnits) -> Result<InternalRound, Str
             "ratio" => round.ellipse_ratio = number(name, value)?,
             "left" => round.open_to_right = false,
             "right" => round.open_to_right = true,
-            "neck" => {
-                round.neck_width = if value.eq_ignore_ascii_case("auto") {
+            "neck" | "gap" => {
+                let length = if value.eq_ignore_ascii_case("auto") {
                     Param::Auto
                 } else {
                     parse_quantity_or(value, QuantityKind::Length, units.get(QuantityKind::Length))
                         .map(Param::Manual)
-                        .map_err(|e| format!("neck: {e}"))?
+                        .map_err(|e| format!("{name}: {e}"))?
                 };
+                if name == "neck" {
+                    round.neck_width = length;
+                } else {
+                    round.side_gap = length;
+                }
             }
             "inner" => round.inner_bend = wall(name, value)?,
             "outer" => round.outer_bend = wall(name, value)?,
@@ -355,7 +362,7 @@ fn parse_internal(rest: &str, units: &DisplayUnits) -> Result<InternalRound, Str
             _ => {
                 return Err(format!(
                     "internal sections have no parameter {name:?}; valid: ratio, left, right, \
-                     neck, inner, outer, bend, area"
+                     neck, gap, inner, outer, bend, area"
                 ));
             }
         }
@@ -742,6 +749,18 @@ fn print_report(name: &str, id: ComponentId, g: &VoluteGeometry, units: &Display
             s(Length, bend.floor),
             s(Length, (bend.face.abs() - bend_end(bend)).max(0.0)),
             s(Length, bend.face.abs()),
+        );
+    }
+    if let Some(side) = &d.side_gap {
+        let gap = match (side.reach, side.gap) {
+            (Reach::Eye, _) => "the spiral reaches into the suction eye".to_owned(),
+            (_, Some(gap)) => format!("{} to the impeller", s(Length, gap)),
+            _ => "the spiral stays outside r2".to_owned(),
+        };
+        println!(
+            "           side gap {} (at least {})",
+            gap,
+            s(Length, side.required)
         );
     }
     println!(
