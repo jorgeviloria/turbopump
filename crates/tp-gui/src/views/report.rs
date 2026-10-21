@@ -500,6 +500,74 @@ pub(crate) fn show(
                                 ),
                             );
                         }
+                        let o = &c.operation;
+                        value_row(
+                            ui,
+                            tr("System curve"),
+                            tf(
+                                "H = {} + R·Q² through {} at {} (Gülich eqs. 11.1–11.3)",
+                                &[
+                                    &s(Head, o.system.static_head),
+                                    &s(Head, o.system_head),
+                                    &s(VolumeFlow, o.system_flow),
+                                ],
+                            ),
+                        );
+                        value_row(
+                            ui,
+                            tr("Speed and diameter"),
+                            tf(
+                                "{} ({} of design), d₂' {} (d₂'/d₂ {}, Δη {}, advised ≥ {})",
+                                &[
+                                    &s(QuantityKind::RotationalSpeed, o.speed),
+                                    &format!("{:.3}", o.speed_ratio),
+                                    &s(Length, o.diameter),
+                                    &format!("{:.3}", o.trim_ratio),
+                                    &format!("{:.3}", o.efficiency_drop),
+                                    &format!("{:.2}", o.trim_limit),
+                                ],
+                            ),
+                        );
+                        value_row(
+                            ui,
+                            tr("Operating point"),
+                            match &o.point {
+                                Some(p) => tf(
+                                    "{} · {} · {} · η {} % ({} % of the best flow)",
+                                    &[
+                                        &s(VolumeFlow, p.flow),
+                                        &s(Head, p.head),
+                                        &s(Power, p.power),
+                                        &format!("{:.1}", 100.0 * p.efficiency),
+                                        &format!("{:.0}", 100.0 * p.flow / o.best.flow),
+                                    ],
+                                ),
+                                None => tr("the pump and system curves do not cross").to_owned(),
+                            },
+                        );
+                        value_row(
+                            ui,
+                            tr("Continuous operation"),
+                            tf(
+                                "{} to {} (η ≥ 0.8·η_max)",
+                                &[&s(VolumeFlow, o.continuous.0), &s(VolumeFlow, o.continuous.1)],
+                            ),
+                        );
+                        value_row(
+                            ui,
+                            tr("Through the system point"),
+                            tf(
+                                "d₂' {} or {} at full diameter",
+                                &[
+                                    &o.required_trim.map_or("—".into(), |t| {
+                                        s(Length, t * o.diameter / o.trim_ratio)
+                                    }),
+                                    &o.required_speed.map_or("—".into(), |r| {
+                                        s(QuantityKind::RotationalSpeed, r * o.speed / o.speed_ratio)
+                                    }),
+                                ],
+                            ),
+                        );
                         let a = &c.axial;
                         let f = &a.design;
                         if a.law.eyes > 1.5 {

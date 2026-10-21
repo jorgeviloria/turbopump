@@ -2,11 +2,12 @@
 //! required NPSH against flow, with the estimated recirculation range dashed and the
 //! losses of the volute after the impeller.
 
-use eframe::egui::{Color32, DragValue, RichText, Ui};
+use eframe::egui::{Color32, DragValue, Grid, RichText, Ui};
 use egui_plot::{
     Corner, HLine, Legend, Line, LineStyle, MarkerShape, Plot, PlotPoints, Points, VLine,
 };
 use tp_design::Param;
+use tp_design::operation::{CurvePoint, OperationInput};
 use tp_design::performance::{Collector, PerformanceInput, PerformancePoint, PumpPerformance};
 use tp_project::{ComponentId, Project};
 use tp_units::{DisplayUnits, QuantityKind};
@@ -27,6 +28,7 @@ pub(crate) struct PerformanceView {
     shutoff: Param<f64>,
     max_flow: Param<f64>,
     balance_holes: bool,
+    operation: OperationInput,
     cache: Option<(Key, Result<PumpPerformance, String>)>,
 }
 
@@ -83,6 +85,7 @@ impl PerformanceView {
         input.shutoff_coefficient = self.shutoff;
         input.max_flow_ratio = self.max_flow;
         input.axial.balance_holes = self.balance_holes;
+        input.operation = self.operation.clone();
         let key = (derived.revision(), id, input.clone());
         if self.cache.as_ref().is_none_or(|(k, _)| *k != key) {
             let curve = project
@@ -141,6 +144,67 @@ impl PerformanceView {
                     "Holes in the rear shroud with an annular seal there: most of the axial \
                      force on the shrouds cancels (Gülich eq. T9.2.14)",
                 ));
+        });
+        let o = &curve.operation;
+        ui.collapsing(tr("Operation in the system"), |ui| {
+            use QuantityKind::{Head, Length, RotationalSpeed, VolumeFlow};
+            Grid::new(("operation", id.0))
+                .num_columns(3)
+                .show(ui, |ui| {
+                    crate::widgets::param_f64(
+                        ui,
+                        tr("Static head H_stat"),
+                        tr("Head of the system at zero flow; automatic: 0 (Gülich eq. 11.2)"),
+                        &mut self.operation.static_head,
+                        Head,
+                        Some(o.system.static_head),
+                        units,
+                        0.0..=1e4,
+                    );
+                    crate::widgets::param_f64(
+                        ui,
+                        tr("System flow"),
+                        tr("The system curve passes through this flow and head; automatic: the design point"),
+                        &mut self.operation.system_flow,
+                        VolumeFlow,
+                        Some(o.system_flow),
+                        units,
+                        1e-6..=1e3,
+                    );
+                    crate::widgets::param_f64(
+                        ui,
+                        tr("System head"),
+                        tr("Head the system needs at that flow"),
+                        &mut self.operation.system_head,
+                        Head,
+                        Some(o.system_head),
+                        units,
+                        1e-3..=1e4,
+                    );
+                    crate::widgets::param_f64(
+                        ui,
+                        tr("Speed"),
+                        tr("Q ∝ n, H ∝ n², P ∝ n³ (Gülich Table 3.4); automatic: the design speed"),
+                        &mut self.operation.speed,
+                        RotationalSpeed,
+                        Some(o.speed),
+                        units,
+                        1.0..=1e4,
+                    );
+                    crate::widgets::param_f64(
+                        ui,
+                        tr("Trimmed diameter d₂'"),
+                        tr(
+                            "Q'/Q = H'/H = (d₂'/d₂)² along rays from the origin, with a drop of the \
+                             best efficiency (Gülich eqs. 4.15 and 4.19); automatic: d₂",
+                        ),
+                        &mut self.operation.trimmed_diameter,
+                        Length,
+                        Some(o.diameter),
+                        units,
+                        0.001..=o.diameter / o.trim_ratio,
+                    );
+                });
         });
 
         // Key numbers.
@@ -205,6 +269,49 @@ impl PerformanceView {
                     ),
                 );
             }
+            line(
+                ui,
+                tr("Operating point"),
+                match &o.point {
+                    Some(p) => tf(
+                        "{} · {} · {} · η {} % ({} % of the best flow)",
+                        &[
+                            &s(VolumeFlow, p.flow),
+                            &s(Head, p.head),
+                            &s(Power, p.power),
+                            &format!("{:.1}", 100.0 * p.efficiency),
+                            &format!("{:.0}", 100.0 * p.flow / o.best.flow),
+                        ],
+                    ),
+                    None => tr("the pump and system curves do not cross").to_owned(),
+                },
+            );
+            line(
+                ui,
+                tr("Continuous operation"),
+                tf(
+                    "{} to {} (η ≥ 0.8·η_max)",
+                    &[
+                        &s(VolumeFlow, o.continuous.0),
+                        &s(VolumeFlow, o.continuous.1),
+                    ],
+                ),
+            );
+            line(
+                ui,
+                tr("Through the system point"),
+                tf(
+                    "d₂' {} or {} at full diameter",
+                    &[
+                        &o.required_trim.map_or("—".into(), |t| {
+                            s(QuantityKind::Length, t * o.diameter / o.trim_ratio)
+                        }),
+                        &o.required_speed.map_or("—".into(), |r| {
+                            s(QuantityKind::RotationalSpeed, r * o.speed / o.speed_ratio)
+                        }),
+                    ],
+                ),
+            );
             let axial = &curve.axial;
             line(
                 ui,
@@ -448,6 +555,64 @@ impl PerformanceView {
                         .color(palette.guide)
                         .style(LineStyle::dashed_loose()),
                 );
+                let o = &curve.operation;
+                // The bounds of continuous operation, out of the crowded legend.
+                for q in [o.continuous.0, o.continuous.1] {
+                    plot.vline(
+                        VLine::new(String::new(), units.to_display(QuantityKind::VolumeFlow, q))
+                            .color(colors[1].gamma_multiply(0.7))
+                            .style(LineStyle::dotted_dense()),
+                    );
+                }
+                // The value of a curve point at operation in this plot.
+                let at = |p: &CurvePoint| -> f64 {
+                    match index {
+                        0 => units.to_display(QuantityKind::Head, p.head),
+                        1 => 100.0 * p.efficiency,
+                        2 => units.to_display(QuantityKind::Power, p.power),
+                        _ => units.to_display(QuantityKind::Head, p.npsh_required),
+                    }
+                };
+                let x = |p: &CurvePoint| units.to_display(QuantityKind::VolumeFlow, p.flow);
+                let changed = (o.speed_ratio - 1.0).abs() > 1e-9 || o.trim_ratio < 1.0 - 1e-9;
+                if changed {
+                    let points: PlotPoints = o.curve.iter().map(|p| [x(p), at(p)]).collect();
+                    plot.line(
+                        Line::new(named("at the speed and diameter of operation"), points)
+                            .color(color.gamma_multiply(0.75))
+                            .width(1.5)
+                            .style(LineStyle::dashed_dense()),
+                    );
+                }
+                if index == 0 {
+                    let end = o
+                        .curve
+                        .last()
+                        .map_or(curve.max_flow, |p| p.flow)
+                        .max(curve.max_flow);
+                    let system: PlotPoints = (0..=60)
+                        .map(|i| {
+                            let q = end * f64::from(i) / 60.0;
+                            [
+                                units.to_display(QuantityKind::VolumeFlow, q),
+                                units.to_display(QuantityKind::Head, o.system.head(q)),
+                            ]
+                        })
+                        .collect();
+                    plot.line(
+                        Line::new(tr("system curve"), system)
+                            .color(palette.volute)
+                            .width(1.5),
+                    );
+                }
+                if let Some(p) = &o.point {
+                    plot.points(
+                        Points::new(named("operating point"), vec![[x(p), at(p)]])
+                            .shape(MarkerShape::Square)
+                            .radius(5.0)
+                            .color(palette.volute),
+                    );
+                }
                 plot.points(
                     Points::new(
                         named("design point"),

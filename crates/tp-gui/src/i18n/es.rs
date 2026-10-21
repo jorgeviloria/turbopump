@@ -1199,6 +1199,71 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("NPSH₃ exponent", "exponente del NPSH₃"),
     ("Radial force", "Empuje radial"),
     ("Axial force", "Empuje axial"),
+    (
+        "Operation in the system",
+        "Funcionamiento en la instalación",
+    ),
+    ("System curve", "Curva de la instalación"),
+    (
+        "H = {} + R·Q² through {} at {} (Gülich eqs. 11.1–11.3)",
+        "H = {} + R·Q² por {} a {} (Gülich ecs. 11.1–11.3)",
+    ),
+    ("Speed and diameter", "Velocidad y diámetro"),
+    (
+        "{} ({} of design), d₂' {} (d₂'/d₂ {}, Δη {}, advised ≥ {})",
+        "{} ({} de la de diseño), d₂' {} (d₂'/d₂ {}, Δη {}, aconsejado ≥ {})",
+    ),
+    ("Static head H_stat", "Altura estática H_est"),
+    (
+        "Head of the system at zero flow; automatic: 0 (Gülich eq. 11.2)",
+        "Altura de la instalación a caudal nulo; automático: 0 (Gülich ec. 11.2)",
+    ),
+    ("System flow", "Caudal de la instalación"),
+    (
+        "The system curve passes through this flow and head; automatic: the design point",
+        "La curva de la instalación pasa por este caudal y esta altura; automático: el punto de diseño",
+    ),
+    ("System head", "Altura de la instalación"),
+    (
+        "Head the system needs at that flow",
+        "Altura que necesita la instalación con ese caudal",
+    ),
+    ("Speed", "Velocidad"),
+    (
+        "Q ∝ n, H ∝ n², P ∝ n³ (Gülich Table 3.4); automatic: the design speed",
+        "Q ∝ n, H ∝ n², P ∝ n³ (Gülich tabla 3.4); automático: la velocidad de diseño",
+    ),
+    ("Trimmed diameter d₂'", "Diámetro recortado d₂'"),
+    (
+        "Q'/Q = H'/H = (d₂'/d₂)² along rays from the origin, with a drop of the best efficiency (Gülich eqs. 4.15 and 4.19); automatic: d₂",
+        "Q'/Q = H'/H = (d₂'/d₂)² a lo largo de rectas desde el origen, con una caída del mejor rendimiento (Gülich ecs. 4.15 y 4.19); automático: d₂",
+    ),
+    ("Operating point", "Punto de trabajo"),
+    (
+        "{} · {} · {} · η {} % ({} % of the best flow)",
+        "{} · {} · {} · η {} % ({} % del caudal óptimo)",
+    ),
+    (
+        "the pump and system curves do not cross",
+        "las curvas de la bomba y de la instalación no se cortan",
+    ),
+    ("Continuous operation", "Funcionamiento continuo"),
+    ("{} to {} (η ≥ 0.8·η_max)", "de {} a {} (η ≥ 0,8·η_máx)"),
+    (
+        "Through the system point",
+        "Para pasar por el punto de la instalación",
+    ),
+    (
+        "d₂' {} or {} at full diameter",
+        "d₂' {} o {} con el diámetro completo",
+    ),
+    ("continuous operation", "funcionamiento continuo"),
+    (
+        "at the speed and diameter of operation",
+        "a la velocidad y el diámetro de funcionamiento",
+    ),
+    ("system curve", "curva de la instalación"),
+    ("operating point", "punto de trabajo"),
     ("toward the suction side", "hacia la aspiración"),
     ("toward the pressure side", "hacia la impulsión"),
     (
@@ -1408,6 +1473,42 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
 
 /// Messages of the design code, most specific first.
 pub(super) static MESSAGES: &[(&str, &str)] = &[
+    (
+        "d₂'/d₂ = {} is below the {} advised for this pump (Gülich eq. 4.23): expect noise, vibration and a poor efficiency",
+        "d₂'/d₂ = {} queda por debajo del {} aconsejado para esta bomba (Gülich ec. 4.23): cabe esperar ruido, vibraciones y un rendimiento pobre",
+    ),
+    (
+        "the pump and system curves do not cross: there is no operating point",
+        "las curvas de la bomba y de la instalación no se cortan: no hay punto de trabajo",
+    ),
+    (
+        "the operating point at {} % of the best efficiency flow lies outside continuous operation ({} to {} %, Gülich Chap. 11.6)",
+        "el punto de trabajo, al {} % del caudal óptimo, queda fuera del funcionamiento continuo ({} a {} %, Gülich cap. 11.6)",
+    ),
+    (
+        "NPSH₃ at the operating point is {} m, above the {} m available",
+        "el NPSH₃ en el punto de trabajo es de {} m, por encima de los {} m disponibles",
+    ),
+    (
+        "the speed must be positive",
+        "la velocidad debe ser positiva",
+    ),
+    (
+        "the trimmed diameter must be positive and at most d₂ = {} mm",
+        "el diámetro recortado debe ser positivo y como mucho d₂ = {} mm",
+    ),
+    (
+        "the trimming exponent must lie between 1 and 3.5, got {}",
+        "el exponente del recorte debe estar entre 1 y 3,5; se recibió {}",
+    ),
+    (
+        "the efficiency fraction of continuous operation must lie between 0.3 and 1, got {}",
+        "la fracción de rendimiento del funcionamiento continuo debe estar entre 0,3 y 1; se recibió {}",
+    ),
+    (
+        "the system point needs a positive flow and a head above the static head of {} m",
+        "el punto de la instalación necesita un caudal positivo y una altura por encima de la estática de {} m",
+    ),
     (
         "the axial force points to the pressure side ({} N at design): the suction pressure on the shaft outweighs the shrouds (Gülich Chap. 9.2.2)",
         "el empuje axial apunta hacia la impulsión ({} N en el diseño): la presión de aspiración sobre el eje pesa más que los discos (Gülich cap. 9.2.2)",
