@@ -67,9 +67,11 @@ $$\frac{\eta_h}{\eta_{h,max}} = 1 - 0{,}6\,(q^* - 0{,}9)^2 - 0{,}25\,(q^* - 0{,}
 El máximo cae en $q^* = 0{,}9$. $\eta_{h,max}$ se ajusta para que en el punto de diseño
 $\eta_h$ sea el del diseño. La altura es $H = \eta_h\,H_{th}$ (ec. T3.3.7).
 
-**Fugas:** las juntas dejan pasar un caudal que crece con la raíz de la presión que
-soportan (ley de orificio), así que se escala con $\sqrt{H/H_{opt}}$. El valor en el punto
-de diseño sale de $\eta_v$. Esta ley es una elección propia.
+**Fugas:** por defecto salen del análisis de pérdidas (sección 9): el caudal por los
+anillos se calcula a cada altura. Con los rendimientos de la estadística
+(`--set losses=statistics`), las juntas dejan pasar un caudal que crece con la raíz de la
+presión que soportan (ley de orificio): se escala con $\sqrt{H/H_{opt}}$ desde el valor
+de diseño que da $\eta_v$. Esta ley es una elección propia.
 
 ### Potencia y rendimiento
 
@@ -78,8 +80,9 @@ La potencia es la de Euler más las pérdidas secundarias:
 $$P = \rho\,g\,H_{th}\,Q_{La} + P_{sec}$$
 
 $P_{sec}$ reúne el rozamiento de discos y las pérdidas mecánicas, y apenas depende del
-caudal (cap. 4.1.2, ec. T3.5.1). Se toma como lo que la potencia de diseño tiene de más
-sobre la potencia de Euler. El rendimiento es $\eta = \rho g H Q / P$.
+caudal (cap. 4.1.2, ec. T3.5.1). Por defecto sale del análisis de pérdidas (sección 9).
+Con la estadística, es lo que la potencia de diseño tiene de más sobre la potencia de
+Euler. El rendimiento es $\eta = \rho g H Q / P$.
 
 Con álabes curvados hacia atrás, la potencia de Euler es una parábola en el caudal. Su
 máximo cae a la mitad del caudal de altura teórica nula (ecs. 4.4 y 4.5). En la bomba de
@@ -120,6 +123,9 @@ potencia a válvula cerrada más allá de una figura.
 la ec. 4.14, o hasta que la altura se anula.
 
 ### Bomba de referencia
+
+Con los rendimientos de la estadística; el análisis de pérdidas de la sección 9 sube el
+rendimiento del diseño a 0,854.
 
 | Punto | Q | H | P | η |
 |---|---|---|---|---|
@@ -361,7 +367,7 @@ $\lambda = 4{,}23$ frente a 4,18 y $K = 0{,}053$ frente a 0,054.
 | Pérdida en el diseño | 1,28 m, el 39 % de las pérdidas hidráulicas |
 | Espiral / tobera | 0,14 m ($K$ = 0,019) / 1,14 m |
 | Menor pérdida | al 99 % del caudal de diseño |
-| Altura en el diseño | 31,97 m (la voluta está ajustada al 99 %) |
+| Altura en el diseño | 31,97 m con la estadística (la voluta está ajustada al 99 %); 32,23 m con el análisis de pérdidas, que deja menos fuga |
 | Máximo rendimiento | 93 % del caudal, η = 0,817 |
 
 ## 6. Empuje radial
@@ -477,16 +483,16 @@ $(0{,}7\ \text{a}\ 0{,}9)\,\rho\,g\,H\,\frac{\pi}{4}(d_{sp}^2 - d_D^2)$.
 
 | Parte | Diseño |
 |---|---|
-| $\Delta p_{La}$ | 234 kPa (0,75 $\rho g H$) |
+| $\Delta p_{La}$ | 235 kPa (0,74 $\rho g H$) |
 | $\bar k$ delante / detrás | 0,61 / 0,50 |
-| Discos $F_{Hy}$ | 1107 N |
+| Discos $F_{Hy}$ | 1115 N |
 | Cantidad de movimiento $F_I$ | 180 N |
 | Eje $F_w$ | 6 N |
-| **Total** | **933 N hacia la aspiración** |
-| A válvula cerrada | 1105 N |
-| Estimación rápida (ec. T9.2.12) | 1152 a 1481 N |
+| **Total** | **941 N hacia la aspiración** |
+| A válvula cerrada | 1101 N |
+| Estimación rápida (ec. T9.2.12) | 1162 a 1493 N |
 
-Con agujeros de equilibrado el total baja a unos −8 N.
+Con agujeros de equilibrado el total baja a unos −9 N.
 
 **Avisos:** si sin agujeros la fuerza apunta hacia la impulsión, el programa avisa. Pasa
 con presiones de aspiración altas, como en las bombas de circulación de calderas (cap.
@@ -546,13 +552,13 @@ $$H_A = H_{est} + R\,Q^2, \qquad R = \frac{H_{A,r} - H_{est}}{Q_r^2}$$
 
 | Caso | Punto de trabajo | Rango continuo |
 |---|---|---|
-| Por defecto (sistema por el punto de diseño) | 99,97 m³/h, 31,98 m, η 81,4 % | 41,7 a 143,3 m³/h |
-| $H_{est}$ = 15 m, por 28 m a 100 m³/h | 107,5 m³/h, 30,0 m | — |
-| Lo mismo con $d_2'$ = 165 mm | 98,4 m³/h, 27,6 m, η 79,6 % | 38,5 a 132,8 m³/h |
-| 2600 rpm | 89,6 m³/h, 25,7 m | 37,4 a 129,9 m³/h |
+| Por defecto (sistema por el punto de diseño) | 100,3 m³/h, 32,17 m, η 85,3 % | 38,0 a 143,3 m³/h |
+| $H_{est}$ = 15 m, por 28 m a 100 m³/h | 107,9 m³/h, 30,1 m | — |
+| Lo mismo con $d_2'$ = 165 mm | 98,9 m³/h, 27,7 m, η 83,3 % | 35,1 a 132,2 m³/h |
+| 2600 rpm | 89,9 m³/h, 25,9 m | 34,1 a 129,4 m³/h |
 
-Para que la instalación de 15 m pase por 28 m a 100 m³/h hace falta $d_2'/d_2$ = 0,965,
-o 0,954 de la velocidad con el diámetro completo. Con $d_2'$ = 130 mm (0,755) salta el
+Para que la instalación de 15 m pase por 28 m a 100 m³/h hace falta $d_2'/d_2$ = 0,963,
+o 0,952 de la velocidad con el diámetro completo. Con $d_2'$ = 130 mm (0,755) salta el
 aviso de la ec. 4.23.
 
 **Avisos:**
@@ -561,6 +567,82 @@ aviso de la ec. 4.23.
 - curvas que no se cortan;
 - un punto de trabajo fuera del rango continuo;
 - un NPSH₃ en el punto de trabajo mayor que el disponible.
+
+## 9. Rendimiento por suma de pérdidas
+
+El rendimiento de la curva sale por defecto de un balance de potencias (Gülich ecs.
+T3.5.1 y T3.5.3):
+
+$$P = \frac{\rho\,g\,H\,Q}{\eta_h\,\eta_v} + \sum P_{RR} + P_m$$
+
+- **Rendimiento hidráulico $\eta_h$:** sigue siendo el de la estadística (tabla 3.9),
+  con la ec. 4.14 fuera del diseño y las pérdidas de la voluta de la sección 5.
+- **Fugas, rozamiento de disco y pérdidas mecánicas:** se calculan con la geometría del
+  rodete (cap. 3.6).
+
+**Fuga por el anillo de entrada** (tabla 3.7 (1)):
+
+- **Geometría:**
+  - holgura radial $s = \Delta d/2$ con $\Delta d/d_{sp} = 0{,}004\,(100\ \text{mm}/d_{sp})^{0{,}53}$
+    (ec. 3.12), doble con `clearances=wide`;
+  - largo $L_{sp} = 0{,}12\,d_{sp}$ (0,10 a 0,14 según el cap. 3.6.2);
+  - rugosidad de 4 µm, la de un mecanizado N7 del ejemplo del libro.
+  - $d_{sp}$ es el del empuje axial.
+- **Altura en el anillo:** la subida estática del rodete menos la caída en la cámara
+  lateral que gira, $\Delta H_{sp} = H_p - k^2\,u_2^2/2g\,(1 - d_{sp}^2/d_2^2)$ (ec.
+  T3.7.3).
+  - $H_p = H\,(1 - g H_{th}/2u_2^2)$ es la misma subida que en el empuje axial, y da el
+    $R_G \approx 0{,}75$ que el libro propone para $n_q$ < 40.
+  - $k = 0{,}9\,y_{sp}^{0{,}087}$ (ec. T3.7.2).
+- **Caudal:**
+  - velocidad axial $c_{ax} = \sqrt{2g\,\Delta H/(\zeta_{EA} + \lambda L_{sp}/2s)}$ con
+    $\zeta_{EA}$ = 1,1 (ec. T3.7.6);
+  - $\lambda$ de las ecs. T3.7.9 a T3.7.14 según el régimen, con el efecto del giro del
+    eje, resuelto por iteración;
+  - $Q_{sp} = \pi\,d_{sp}\,s\,c_{ax}$.
+- Fuera del diseño la fuga se recalcula con la altura de cada punto. Un rodete de doble
+  aspiración tiene dos anillos; los agujeros de equilibrado añaden la fuga del anillo
+  trasero.
+
+**Rozamiento de disco** (tabla 3.6):
+
+- $P_{RR} = k_{RR}\,\rho\,\omega^3 R^5\{1 - (R_n/R)^5\}$ por cada cara (ec. T3.6.2).
+- $k_{RR}$ de la ec. T3.6.3 para discos hidráulicamente lisos, con una holgura axial
+  $s_{ax} = 0{,}05\,r_2$ (elección propia; Gülich ve su efecto pequeño).
+- La fuga hacia dentro lo reduce con $f_L = e^{-350\,\varphi_{sp}(r_2/r_{sp} - 1)}$ (ec.
+  T3.6.7).
+- El disco delantero va desde el anillo y el trasero desde el sello del eje.
+
+**Pérdidas mecánicas:** $P_m/P = 0{,}0045\,(Q_{Ref}/Q)^{0{,}4}(n_{Ref}/n)^{0{,}3}$ con
+$Q_{Ref}$ = 1 m³/s y $n_{Ref}$ = 1500 rpm (ec. T3.5.6a), constantes con el caudal.
+
+**Viscosidad:** la del líquido del proyecto, que ahora pasa al punto de diseño. Con un
+aceite el anillo pasa a régimen laminar y fuga menos, y los discos rozan más.
+
+**Validación:** en el ejemplo del cap. 7.5 de Japikse (r₂ = 8,82 in a 1000 rpm), el
+rozamiento de disco es de 1,46 hp. Nuestra fórmula, con las dos caras, da lo mismo dentro
+de un 10 %, y una prueba lo comprueba.
+
+**Bomba de referencia:**
+
+| Magnitud | Análisis de pérdidas | Estadística |
+|---|---|---|
+| Anillo | $d_{sp}$ 84,1 mm, $s$ 0,184 mm, $L$ 10,1 mm | — |
+| $\Delta H_{sp}$, $k$, $\lambda$ | 15,2 m, 0,57, 0,063 | — |
+| Fuga | 1,80 m³/h, $\eta_v$ = 0,982 | $\eta_v$ = 0,970 |
+| Rozamiento de disco | 107 W delante + 148 W detrás | — |
+| Pérdidas mecánicas | 165 W | — |
+| Secundarias (disco y mecánicas) | 3,9 % de la potencia | 7,4 % ($\eta_m$ = 0,926) |
+| Rendimiento en el diseño | **0,854** | 0,814 ± 0,037 |
+| Altura en el diseño | 32,23 m | 31,97 m |
+
+La estadística del libro supone más pérdidas secundarias que las calculadas para esta
+bomba pequeña. El programa muestra los dos rendimientos, y con `losses=statistics` (o la
+casilla *Efficiencies from statistics*) vuelve al anterior. Los anillos dejan menos
+fuga que la estadística: el rodete pasa menos caudal y da un poco más de altura.
+
+**Claves:** `--set losses=`, `seal_clearance=`, `seal_length=`, `seal_roughness=` y
+`axial_gap=`.
 
 ## Dónde se usa
 
@@ -611,6 +693,12 @@ aviso de la ec. 4.23.
   - en bombas multietapa la cifra es la de un rodete; faltan los tambores y discos de
     equilibrado (cap. 9.2.3);
   - faltan los rodetes semiaxiales y axiales (ecs. T9.2.16 a T9.2.18).
+- **Pérdidas:**
+  - el rendimiento hidráulico sigue en la estadística; las pérdidas por rozamiento y
+    mezcla del rodete de la tabla 3.8 no se calculan;
+  - discos lisos, anillos lisos sin ranuras ni cámaras, y sin el anillo entre etapas ni
+    el disco de equilibrado de las multietapa;
+  - el dimensionado del rodete sigue usando la $\eta_v$ de la estadística.
 - **Punto de trabajo:**
   - la velocidad no cambia el rendimiento (sin efecto de Reynolds);
   - el recorte aplica la misma caída de rendimiento a toda la curva y deja el NPSH₃ como

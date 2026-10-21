@@ -104,9 +104,10 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
   - curvas: altura, rendimiento, potencia y NPSH₃ previstos frente al caudal, con la
     zona de recirculación estimada a trazos, el NPSH disponible y la pérdida en la
     voluta, que entra en la curva de altura; también los empujes radial y axial sobre
-    el rodete, con o sin agujeros de equilibrado, y el punto de trabajo en la
-    instalación, con otra velocidad o el rodete recortado y el rango de funcionamiento
-    continuo;
+    el rodete, con o sin agujeros de equilibrado, el rendimiento por suma de pérdidas
+    (fugas por los anillos, rozamiento de disco y pérdidas mecánicas) y el punto de
+    trabajo en la instalación, con otra velocidad o el rodete recortado y el rango de
+    funcionamiento continuo;
   - informe con las mismas cifras que la línea de comandos.
 
   La vista meridional muestra también, si se pide, el flujo potencial y la velocidad
