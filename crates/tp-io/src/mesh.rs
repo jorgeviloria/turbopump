@@ -162,10 +162,17 @@ fn cap(out: &mut Vec<Triangle>, ring: &[DVec3]) {
 /// each channel and one for the diffuser.
 pub fn volute_triangles(g: &VoluteGeometry) -> Vec<Triangle> {
     let mut out = Vec::new();
-    for rings in g.channels() {
+    let channels = g.channels();
+    let count = channels.len();
+    for (i, rings) in channels.into_iter().enumerate() {
         loft_rings(&mut out, &rings);
-        if let (Some(first), Some(last)) = (rings.first(), rings.last()) {
+        // The other channels end inside the diffuser: only the outlet is closed.
+        if let Some(first) = rings.first() {
             cap(&mut out, first);
+        }
+        if i + 1 == count
+            && let Some(last) = rings.last()
+        {
             cap(&mut out, last);
         }
     }
