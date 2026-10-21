@@ -162,6 +162,21 @@ fn cap(out: &mut Vec<Triangle>, ring: &[DVec3]) {
 /// each channel and one for the diffuser.
 pub fn volute_triangles(g: &VoluteGeometry) -> Vec<Triangle> {
     let mut out = Vec::new();
+    // The walls of the bend and neck of an internal volute, all round.
+    if let Some(bend) = &g.bend {
+        let rz = g.design.stagnation_radius;
+        let zm = g.basis.midplane;
+        for wall in [&bend.outer, &bend.inner] {
+            let mut curve: Vec<DVec2> = wall
+                .iter()
+                .flatten()
+                .map(|p| DVec2::new(zm + p.x, rz + p.y))
+                .collect();
+            // The pieces share their ends.
+            curve.dedup_by(|a, b| a.distance(*b) < 1e-12);
+            revolve(&mut out, &curve);
+        }
+    }
     let channels = g.channels();
     let count = channels.len();
     for (i, rings) in channels.into_iter().enumerate() {
@@ -270,7 +285,7 @@ pub(crate) mod tests {
     #[test]
     fn volute_mesh_is_closed_and_encloses_the_channel() {
         use tp_design::outlet::ImpellerOutlet;
-        use tp_design::volute::VoluteInput;
+        use tp_design::volute::{CrossSectionInput, InternalRound, SectionShape, VoluteInput};
         let basis = ImpellerOutlet {
             flow: 100.0 / 3600.0,
             impeller_diameter: 0.172,
@@ -300,6 +315,23 @@ pub(crate) mod tests {
             .sum();
         assert!(volume.abs() > spiral, "{volume} vs spiral {spiral}");
         assert!(volume.abs() < 1.6 * spiral);
+        // An internal volute adds the walls of its bend, all round.
+        let internal = VoluteInput {
+            cross_section: CrossSectionInput::single(SectionShape::RoundInternal(
+                InternalRound::default(),
+            )),
+            ..VoluteInput::default()
+        };
+        let g = VoluteGeometry::build(&basis, &internal).unwrap();
+        let channel = {
+            let mut bare = g.clone();
+            bare.bend = None;
+            volute_triangles(&bare).len()
+        };
+        assert!(volute_triangles(&g).len() > channel + 2 * WALL_SEGMENTS);
+        let text = crate::points::volute_txt(&g);
+        assert!(text.contains("[bend outer wall"), "{text}");
+        assert!(text.contains("[bend inner wall"));
     }
 
     #[test]

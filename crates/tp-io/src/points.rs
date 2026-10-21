@@ -147,6 +147,22 @@ pub fn volute_txt(g: &VoluteGeometry) -> String {
             let _ = writeln!(out, "{} {} {}", number(p.x), number(p.y), number(p.z));
         }
     }
+    // The bend and neck of an internal volute, the same all round: their walls in the
+    // meridional plane, from the inlet to the face of the spiral.
+    if let Some(bend) = &g.bend {
+        let (rz, zm) = (d.stagnation_radius, g.basis.midplane);
+        for (label, wall) in [("outer", &bend.outer), ("inner", &bend.inner)] {
+            let _ = writeln!(
+                out,
+                "[bend {label} wall, revolved about the pump axis: r z]"
+            );
+            let mut points: Vec<_> = wall.iter().flatten().copied().collect();
+            points.dedup_by(|a, b| a.distance(*b) < 1e-12);
+            for p in points {
+                let _ = writeln!(out, "{} {}", number(rz + p.y), number(zm + p.x));
+            }
+        }
+    }
     // A double volute's diffuser starts from both channels: its first outline is new.
     let first = if g.design.rib.is_some() { 0 } else { 1 };
     for (i, n) in g.nozzle.iter().enumerate().skip(first) {
