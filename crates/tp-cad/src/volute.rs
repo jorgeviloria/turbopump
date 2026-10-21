@@ -51,22 +51,27 @@ fn section_wire(ring: &[DVec3], breaks: &[usize]) -> Result<Shape, CadError> {
     occ::wire(&edges)
 }
 
+/// Gaps in millimetres the boolean operations try in turn, until the flow domain comes
+/// out as one valid solid: first the exact algorithm, then fuzzy ones. Where the spiral
+/// leaves the throat, the diffuser and the start of the spiral share their side walls
+/// for a stretch, and lofted walls run nearly coincident with each other or with the
+/// inlet ring.
+const FUZZY_GAPS: [f64; 4] = [0.0, 1e-3, 1e-4, 1e-2];
+
 /// Builds the volute channel and its flow domain from the geometry.
 pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
     let breaks = g.ring_breaks();
-    let mut channel: Option<Shape> = None;
-    for rings in g.lofts() {
-        let wires = rings
-            .iter()
-            .map(|ring| section_wire(ring, &breaks))
-            .collect::<Result<Vec<_>, _>>()?;
-        let piece = occ::loft(&wires)?;
-        channel = Some(match channel {
-            None => piece,
-            Some(c) => c.fuse(&piece)?,
-        });
-    }
-    let channel = channel.expect("a volute has at least one channel");
+    let lofts = g
+        .lofts()
+        .iter()
+        .map(|rings| {
+            let wires = rings
+                .iter()
+                .map(|ring| section_wire(ring, &breaks))
+                .collect::<Result<Vec<_>, _>>()?;
+            occ::loft(&wires)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
 
     // Ring between the impeller outlet and the cutwater circle, as wide as the volute
     // inlet. It reaches slightly into the channel so the two solids overlap.
@@ -76,7 +81,10 @@ pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
     let overlap = 0.02 * b3;
     let corner = |r: f64, z: f64| DVec3::new(r * MM, 0.0, z * MM);
     let (r0, r1) = (inner, outer + overlap);
-    let (z0, z1) = (zm - b3 / 2.0, zm + b3 / 2.0);
+    // A hair narrower than b₃, so that its sides do not run on the flat side walls of
+    // rectangular sections.
+    let half = 0.995 * b3 / 2.0;
+    let (z0, z1) = (zm - half, zm + half);
     let edges = [
         occ::line_edge(corner(r0, z0), corner(r1, z0))?,
         occ::line_edge(corner(r1, z0), corner(r1, z1))?,
@@ -84,8 +92,7 @@ pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
         occ::line_edge(corner(r0, z1), corner(r0, z0))?,
     ];
     let ring = occ::revolve_z(&occ::planar_face(&occ::wire(&edges)?)?)?;
-    let mut fluid = ring.fuse(&channel)?;
-    let mut channel = channel;
+
     // The rounded nose of the cutwater and the rib of a double volute are carved out of
     // the flow domain across the whole height of the volute.
     let zs = g.rings().into_iter().flatten().map(|p| p.z);
@@ -100,32 +107,59 @@ pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
             (z_hi - z_lo + 2.0 * margin) * MM,
         )
     };
+    let mut tools = Vec::new();
     let nose = g.cutwater.nose_outline();
     if !nose.is_empty() {
         let arc: Vec<DVec3> = nose[..nose.len() - 1].iter().map(at).collect();
         let tip = at(&nose[nose.len() - 1]);
-        let tongue = extrude(&[
+        tools.push(extrude(&[
             occ::spline_edge(&arc, false)?,
             occ::line_edge(arc[arc.len() - 1], tip)?,
             occ::line_edge(tip, arc[0])?,
-        ])?;
-        fluid = fluid.cut(&tongue)?;
-        channel = channel.cut(&tongue)?;
+        ])?);
     }
     if let Some(rib) = &g.rib {
         let spline = |points: &mut dyn Iterator<Item = &DVec3>| {
             occ::spline_edge(&points.map(at).collect::<Vec<_>>(), false)
         };
-        let solid = extrude(&[
+        tools.push(extrude(&[
             spline(&mut rib.nose.iter())?,
             spline(&mut rib.inner_face.iter())?,
             spline(&mut rib.tail.iter())?,
             spline(&mut rib.outer_face.iter().rev())?,
-        ])?;
-        fluid = fluid.cut(&solid)?;
-        channel = channel.cut(&solid)?;
+        ])?);
     }
-    Ok(VoluteCad { channel, fluid })
+
+    let assemble = |fuzzy: f64| -> Result<VoluteCad, CadError> {
+        // A turn by zero copies the first piece for this attempt.
+        let mut channel = lofts[0].rotated_z(0.0)?;
+        for piece in &lofts[1..] {
+            channel = channel.fuse_fuzzy(piece, fuzzy)?;
+        }
+        let mut fluid = ring.fuse_fuzzy(&channel, fuzzy)?;
+        for tool in &tools {
+            fluid = fluid.cut_fuzzy(tool, fuzzy)?;
+            channel = channel.cut_fuzzy(tool, fuzzy)?;
+        }
+        Ok(VoluteCad { channel, fluid })
+    };
+    // The flow domain is what gets exported.
+    let sound = |cad: &VoluteCad| cad.fluid.is_valid() && cad.fluid.solid_count() == 1;
+    // The first sound attempt, else the first that built at all.
+    let mut fallback = None;
+    let mut error = None;
+    for fuzzy in FUZZY_GAPS {
+        match assemble(fuzzy) {
+            Ok(cad) if sound(&cad) => return Ok(cad),
+            Ok(cad) => {
+                fallback.get_or_insert(cad);
+            }
+            Err(e) => {
+                error.get_or_insert(e);
+            }
+        }
+    }
+    fallback.map_or_else(|| Err(error.expect("at least one attempt")), Ok)
 }
 
 #[cfg(test)]
@@ -242,6 +276,33 @@ mod tests {
         ];
         for edit in edits {
             double(edit);
+        }
+    }
+
+    #[test]
+    fn common_volute_options_give_one_valid_flow_domain() {
+        use tp_design::volute::{CutwaterShape, DischargeShape, StraightWall};
+        for shape in [SectionShape::default(), SectionShape::Rectangular] {
+            for discharge in [
+                DischargeShape::default(),
+                DischargeShape::Tangential {
+                    straight_wall: StraightWall::Inner,
+                },
+                DischargeShape::Radial { axis_angle: 0.0 },
+            ] {
+                for cutwater in [CutwaterShape::default(), CutwaterShape::Tangent] {
+                    let mut input = VoluteInput::default();
+                    input.cross_section.shape = shape;
+                    input.diffuser.shape = discharge;
+                    input.cutwater.shape = cutwater;
+                    let g = VoluteGeometry::build(&basis(), &input).unwrap();
+                    let cad = build_volute(&g).unwrap();
+                    assert!(
+                        cad.fluid.is_valid() && cad.fluid.solid_count() == 1,
+                        "{shape:?} {discharge:?} {cutwater:?}"
+                    );
+                }
+            }
         }
     }
 

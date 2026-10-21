@@ -96,17 +96,28 @@ impl Shape {
 
     /// Boolean difference `self − tool`.
     pub fn cut(&self, tool: &Shape) -> Result<Shape, CadError> {
-        op("boolean cut", ffi::boolean_op(&self.0, &tool.0, 0))
+        self.cut_fuzzy(tool, 0.0)
     }
 
     /// Boolean union.
     pub fn fuse(&self, other: &Shape) -> Result<Shape, CadError> {
-        op("boolean fuse", ffi::boolean_op(&self.0, &other.0, 1))
+        self.fuse_fuzzy(other, 0.0)
     }
 
     /// Boolean intersection.
     pub fn common(&self, other: &Shape) -> Result<Shape, CadError> {
-        op("boolean common", ffi::boolean_op(&self.0, &other.0, 2))
+        op("boolean common", ffi::boolean_op(&self.0, &other.0, 2, 0.0))
+    }
+
+    /// Boolean difference treating gaps below `fuzzy` (model units) as contact, for
+    /// faces that run nearly coincident.
+    pub fn cut_fuzzy(&self, tool: &Shape, fuzzy: f64) -> Result<Shape, CadError> {
+        op("boolean cut", ffi::boolean_op(&self.0, &tool.0, 0, fuzzy))
+    }
+
+    /// Boolean union treating gaps below `fuzzy` (model units) as contact.
+    pub fn fuse_fuzzy(&self, other: &Shape, fuzzy: f64) -> Result<Shape, CadError> {
+        op("boolean fuse", ffi::boolean_op(&self.0, &other.0, 1, fuzzy))
     }
 }
 

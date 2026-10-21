@@ -43,6 +43,7 @@
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
+#include <TopTools_ListOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Compound.hxx>
 #include <TopoDS_Shell.hxx>
@@ -273,9 +274,21 @@ std::unique_ptr<Shape> rotate_z(const Shape &shape, double angle) {
   });
 }
 
-std::unique_ptr<Shape> boolean_op(const Shape &a, const Shape &b, std::uint8_t op) {
+// `fuzzy` is the gap in model units below which faces and edges count as touching
+// (0: the exact algorithm).
+std::unique_ptr<Shape> boolean_op(const Shape &a, const Shape &b, std::uint8_t op,
+                                  double fuzzy) {
   return guard("boolean", [&] {
-    auto run = [](BRepAlgoAPI_BooleanOperation &algo, const char *what) {
+    auto run = [&](BRepAlgoAPI_BooleanOperation &algo, const char *what) {
+      TopTools_ListOfShape arguments, tools;
+      arguments.Append(a.shape);
+      tools.Append(b.shape);
+      algo.SetArguments(arguments);
+      algo.SetTools(tools);
+      if (fuzzy > 0.0) {
+        algo.SetFuzzyValue(fuzzy);
+      }
+      algo.Build();
       if (!algo.IsDone() || algo.HasErrors()) {
         fail(what, "failed");
       }
@@ -283,15 +296,15 @@ std::unique_ptr<Shape> boolean_op(const Shape &a, const Shape &b, std::uint8_t o
     };
     switch (op) {
     case 0: {
-      BRepAlgoAPI_Cut cut(a.shape, b.shape);
+      BRepAlgoAPI_Cut cut;
       return run(cut, "boolean cut");
     }
     case 1: {
-      BRepAlgoAPI_Fuse fuse(a.shape, b.shape);
+      BRepAlgoAPI_Fuse fuse;
       return run(fuse, "boolean fuse");
     }
     case 2: {
-      BRepAlgoAPI_Common common(a.shape, b.shape);
+      BRepAlgoAPI_Common common;
       return run(common, "boolean common");
     }
     default:

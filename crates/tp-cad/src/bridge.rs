@@ -34,7 +34,7 @@ pub(crate) mod ffi {
         fn prism_z(face: &Shape, height: f64) -> Result<UniquePtr<Shape>>;
         fn rotate_z(shape: &Shape, angle: f64) -> Result<UniquePtr<Shape>>;
         /// `op`: 0 cut, 1 fuse, 2 common.
-        fn boolean_op(a: &Shape, b: &Shape, op: u8) -> Result<UniquePtr<Shape>>;
+        fn boolean_op(a: &Shape, b: &Shape, op: u8, fuzzy: f64) -> Result<UniquePtr<Shape>>;
         fn make_compound(shapes: &ShapeList) -> Result<UniquePtr<Shape>>;
 
         /// Volume; `eps` > 0 integrates adaptively to that relative error.
