@@ -321,6 +321,9 @@ mod cad {
             }
         }
         let mut problems: Vec<String> = cad.warnings.clone();
+        if let Some((_, casing, _)) = &volute {
+            problems.extend(casing.warnings.iter().cloned());
+        }
         let invalid = [
             ("blade", Some(&cad.blade)),
             ("flow domain", Some(&cad.fluid)),

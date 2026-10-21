@@ -963,6 +963,22 @@ pub(crate) fn show(
                 );
                 value_row(ui, tr("Outlet velocity"), s(Velocity, dif.outlet_velocity));
                 value_row(ui, tr("Wall thickness"), s(Length, d.wall_thickness));
+                if let Some(f) = &d.flange {
+                    value_row(
+                        ui,
+                        tr("Outlet flange"),
+                        tf(
+                            "{} × {}, {} bolt holes of {} on {} (our proportions, not a standard)",
+                            &[
+                                &s(Length, f.outer_diameter),
+                                &s(Length, f.thickness),
+                                &f.bolts,
+                                &s(Length, f.bolt_hole),
+                                &s(Length, f.bolt_circle),
+                            ],
+                        ),
+                    );
+                }
             });
         warnings(ui, &v.warnings);
     });

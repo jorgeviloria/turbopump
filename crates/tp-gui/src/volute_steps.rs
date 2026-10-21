@@ -553,6 +553,19 @@ fn diffuser(
         );
         param_f64(
             ui,
+            tr("Outlet face height H"),
+            tr(
+                "Distance from the pump axis to the outlet face; when set, it fixes the \
+                length of the diffuser",
+            ),
+            &mut input.diffuser.flange_height,
+            Length,
+            g.map(|g| g.outlet_height),
+            &units,
+            0.005..=10.0,
+        );
+        param_f64(
+            ui,
             tr("Outlet diameter"),
             tr("Automatic: 85 % of the allowable opening angle; no deceleration above nq = 80"),
             &mut input.diffuser.outlet_diameter,
@@ -561,6 +574,11 @@ fn diffuser(
             &units,
             0.005..=10.0,
         );
+        ui.label(tr("Nominal size DN")).on_hover_text(tr(
+            "Round the automatic outlet diameter to the nearest nominal size",
+        ));
+        ui.checkbox(&mut input.diffuser.nominal_size, "");
+        ui.end_row();
         param_f64(
             ui,
             tr("Volute rotation"),
@@ -766,5 +784,63 @@ fn wall(
             0.0005..=0.2,
         );
     });
+    section(ui, tr("Outlet flange"));
+    ui.checkbox(&mut input.wall.flange.enabled, tr("Flange on the casing"))
+        .on_hover_text(tr(
+            "Automatic sizes from proportions of our own, not a standard: set them to the \
+            standard in use",
+        ));
+    if input.wall.flange.enabled {
+        let f = g.and_then(|g| g.design.flange);
+        let flange = &mut input.wall.flange;
+        grid("volute_flange").show(ui, |ui| {
+            let rows: [(&str, &str, &mut Param<f64>, Option<f64>); 4] = [
+                (
+                    tr("Outer diameter"),
+                    tr("Automatic: the bolt circle plus three holes"),
+                    &mut flange.outer_diameter,
+                    f.map(|f| f.outer_diameter),
+                ),
+                (
+                    tr("Thickness"),
+                    tr("Automatic: twice the wall, at least 0.15·d + 6 mm"),
+                    &mut flange.thickness,
+                    f.map(|f| f.thickness),
+                ),
+                (
+                    tr("Bolt circle"),
+                    tr("Automatic: the bore plus twice the wall and three holes"),
+                    &mut flange.bolt_circle,
+                    f.map(|f| f.bolt_circle),
+                ),
+                (
+                    tr("Bolt hole"),
+                    tr("Automatic: 12 % of the bore, at least 14 mm"),
+                    &mut flange.bolt_hole,
+                    f.map(|f| f.bolt_hole),
+                ),
+            ];
+            for (label, hint, param, value) in rows {
+                param_f64(
+                    ui,
+                    label,
+                    hint,
+                    param,
+                    QuantityKind::Length,
+                    value,
+                    &units,
+                    0.001..=5.0,
+                );
+            }
+            param_u32(
+                ui,
+                tr("Bolts"),
+                tr("Automatic: in fours, about six holes apart"),
+                &mut flange.bolts,
+                f.map(|f| f.bolts),
+                3..=64,
+            );
+        });
+    }
     "edit volute wall"
 }

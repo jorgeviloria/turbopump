@@ -7,6 +7,50 @@
 /// English text → Spanish text.
 pub(super) static TEXTS: &[(&str, &str)] = &[
     (
+        "{} × {}, {} bolt holes of {} on {} (our proportions, not a standard)",
+        "{} × {}, {} taladros de {} en {} (proporciones propias, no de una norma)",
+    ),
+    ("Outer diameter", "Diámetro exterior"),
+    ("Outlet face height H", "Altura H de la cara de salida"),
+    (
+        "Distance from the pump axis to the outlet face; when set, it fixes the length of the diffuser",
+        "Distancia del eje de la bomba a la cara de salida; si se fija, da el largo del difusor",
+    ),
+    ("Nominal size DN", "Diámetro nominal DN"),
+    (
+        "Round the automatic outlet diameter to the nearest nominal size",
+        "Redondea el diámetro de salida automático al diámetro nominal más próximo",
+    ),
+    ("Outlet flange", "Brida de salida"),
+    ("Flange on the casing", "Brida en la carcasa"),
+    (
+        "Automatic sizes from proportions of our own, not a standard: set them to the standard in use",
+        "Medidas automáticas con proporciones propias, no de una norma: ajústalas a la norma que uses",
+    ),
+    (
+        "Automatic: the bolt circle plus three holes",
+        "Automático: el círculo de pernos más tres taladros",
+    ),
+    (
+        "Automatic: twice the wall, at least 0.15·d + 6 mm",
+        "Automático: dos veces la pared, al menos 0,15·d + 6 mm",
+    ),
+    ("Bolt circle", "Círculo de pernos"),
+    (
+        "Automatic: the bore plus twice the wall and three holes",
+        "Automático: el diámetro interior más dos paredes y tres taladros",
+    ),
+    ("Bolt hole", "Taladro de perno"),
+    (
+        "Automatic: 12 % of the bore, at least 14 mm",
+        "Automático: 12 % del diámetro interior, al menos 14 mm",
+    ),
+    ("Bolts", "Pernos"),
+    (
+        "Automatic: in fours, about six holes apart",
+        "Automático: de cuatro en cuatro, a unos seis taladros de distancia",
+    ),
+    (
         "{} × {} inside the rear seal d_s2 {} (Gülich Chap. 9.2.2)",
         "{} × {} dentro del anillo trasero d_s2 {} (Gülich, cap. 9.2.2)",
     ),
