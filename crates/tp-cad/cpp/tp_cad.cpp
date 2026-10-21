@@ -288,6 +288,10 @@ std::unique_ptr<Shape> boolean_op(const Shape &a, const Shape &b, std::uint8_t o
       if (fuzzy > 0.0) {
         algo.SetFuzzyValue(fuzzy);
       }
+      // Oriented bounding boxes skip far pairs of faces sooner; the intersections run
+      // on every core.
+      algo.SetUseOBB(Standard_True);
+      algo.SetRunParallel(Standard_True);
       algo.Build();
       if (!algo.IsDone() || algo.HasErrors()) {
         fail(what, "failed");
