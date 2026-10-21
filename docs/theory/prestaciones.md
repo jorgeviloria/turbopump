@@ -11,7 +11,7 @@ Implementación:
 - [`crates/tp-design/src/radial_thrust.rs`](../../crates/tp-design/src/radial_thrust.rs) (empuje radial);
 - [`crates/tp-design/src/axial_thrust.rs`](../../crates/tp-design/src/axial_thrust.rs) (empuje axial);
 - [`crates/tp-design/src/operation.rs`](../../crates/tp-design/src/operation.rs) (punto de trabajo);
-- [`crates/tp-design/src/losses.rs`](../../crates/tp-design/src/losses.rs) (pérdidas secundarias);
+- [`crates/tp-design/src/losses.rs`](../../crates/tp-design/src/losses.rs) (pérdidas secundarias y del rodete);
 - [`crates/tp-design/src/viscous.rs`](../../crates/tp-design/src/viscous.rs) (líquidos viscosos).
 
 Este documento recoge diez análisis de un rodete ya diseñado:
@@ -331,7 +331,29 @@ giro llega a ella como vórtice libre desde $r_2$, también a través de un difu
 
 **Tobera.** Pierde $(c_{p,id} - c_p)\,c_7^2/2g$, con $c_{p,id} = 1 - 1/A_R^2$
 (Gülich ec. 1.40) y una recuperación real limitada por la mejor que alcanza un difusor
-de esa longitud, $c_{p,opt} = 0{,}36\,(L/R_1)^{0,26}$ (Gülich ec. 7.31).
+de esa longitud, $c_{p,opt} = 0{,}36\,(L/R_1)^{0,26}$ (Gülich ec. 7.31). Es la misma
+forma que la ec. T3.8.22 de Gülich.
+
+**Rozamiento en las paredes de la espiral.** El modelo de Japikse no lo incluye. Se
+calcula aparte con la ec. T3.8.21 de Gülich,
+$Z = \sum (c_f + 0{,}0015)\,c^3\,\Delta A/(2g\,Q)$:
+
+- Como pide Gülich (cap. 3.8), dentro de cada sección $c_u\,r = K$ es constante, y $K$
+  cambia a lo largo de la espiral: $K = q\,Q/\int (b/r)\,dr$, con $q$ la fracción del
+  caudal recogida hasta el ángulo $\varphi$ (caudal repartido por igual a lo largo de
+  la espiral). Un elemento de pared $\Delta A = r\,d\varphi\,d\ell$ da entonces
+  $\sum c^3 \Delta A = Q^3 \int (q/\int (b/r)\,dr)^3 \oint r^{-2}\,d\ell\,d\varphi$,
+  con la integral de contorno por las paredes mojadas (sin la abertura hacia el
+  rodete) y 360 pasos en $\varphi$.
+- $c_f$ es el de una placa plana (ec. T3.8.3) tan larga como la espiral, a la velocidad
+  de la garganta en el diseño, con agua fría y 16 µm de rugosidad (elección propia, la
+  de los canales del rodete).
+- En una voluta doble se suman las dos volutas parciales, como indica el libro, y el
+  canal exterior, cerrado por todos los lados, justo por fuera del nervio y con su
+  velocidad media (estimación propia).
+
+Solo entra en el análisis de pérdidas del punto de diseño (sección 9); la curva de la
+voluta frente al caudal sigue siendo la de Japikse.
 
 **Cómo entra en la curva (reparto propio).** La estadística de la ec. 4.14 describe
 bombas con volutas bien dimensionadas. Por eso:
@@ -371,7 +393,8 @@ $\lambda = 4{,}23$ frente a 4,18 y $K = 0{,}053$ frente a 0,054.
 | Pérdida en el diseño | 1,28 m, el 39 % de las pérdidas hidráulicas |
 | Espiral / tobera | 0,14 m ($K$ = 0,019) / 1,14 m |
 | Menor pérdida | al 99 % del caudal de diseño |
-| Altura en el diseño | 31,97 m con la estadística (la voluta está ajustada al 99 %); 32,23 m con el análisis de pérdidas, que deja menos fuga |
+| Rozamiento en las paredes | 0,81 m |
+| Altura en el diseño | 31,97 m con la estadística (la voluta está ajustada al 99 %); 32,32 m con el análisis de pérdidas, que deja menos fuga |
 | Máximo rendimiento | 93 % del caudal, η = 0,817 |
 
 ## 6. Empuje radial
@@ -579,8 +602,10 @@ T3.5.1 y T3.5.3):
 
 $$P = \frac{\rho\,g\,H\,Q}{\eta_h\,\eta_v} + \sum P_{RR} + P_m$$
 
-- **Rendimiento hidráulico $\eta_h$:** sigue siendo el de la estadística (tabla 3.9),
-  con la ec. 4.14 fuera del diseño y las pérdidas de la voluta de la sección 5.
+- **Rendimiento hidráulico $\eta_h$:** con una voluta detrás del rodete, sale de sumar
+  las pérdidas hidráulicas del punto de diseño (tabla 3.8, más abajo). Sin voluta sigue
+  siendo el de la estadística (tabla 3.9). Fuera del diseño manda la forma de la ec.
+  4.14, con las pérdidas de la voluta de la sección 5.
 - **Fugas, rozamiento de disco y pérdidas mecánicas:** se calculan con la geometría del
   rodete (cap. 3.6).
 
@@ -637,13 +662,55 @@ de un 10 %, y una prueba lo comprueba.
 | Rozamiento de disco | 107 W delante + 148 W detrás | — |
 | Pérdidas mecánicas | 165 W | — |
 | Secundarias (disco y mecánicas) | 3,9 % de la potencia | 7,4 % ($\eta_m$ = 0,926) |
-| Rendimiento en el diseño | **0,854** | 0,814 ± 0,037 |
-| Altura en el diseño | 32,23 m | 31,97 m |
+| Rendimiento en el diseño | **0,856** | 0,814 ± 0,037 |
+| Altura en el diseño | 32,32 m | 31,97 m |
 
 La estadística del libro supone más pérdidas secundarias que las calculadas para esta
 bomba pequeña. El programa muestra los dos rendimientos, y con `losses=statistics` (o la
 casilla *Efficiencies from statistics*) vuelve al anterior. Los anillos dejan menos
 fuga que la estadística: el rodete pasa menos caudal y da un poco más de altura.
+
+**Pérdidas hidráulicas** (tabla 3.8, con agua fría). Cada una se pasa a altura con
+$Z = \zeta\,u_2^2/2g$:
+
+- **Canales del rodete** (tabla 3.8 (1)):
+  - gargantas de cada canal: a la entrada $a_1 = \pi d_{1m} \sin\beta_{1B}/z - e$ por
+    $b_1 = (d_1 - d_n)/2$, la misma que usa el NPSH₃; a la salida
+    $a_2 = \pi d_2 \sin\beta_{2B}/z - e$ por $b_2$;
+  - largo del canal $L_{sch} = (r_2 - r_{1m})/\sin\beta_m$, con $\beta_m$ la media de
+    los ángulos de entrada y salida, como una espiral logarítmica (elección propia);
+  - velocidad media $w_{av}$ (ec. T3.8.2), $c_f$ de placa plana con 16 µm de rugosidad
+    (ec. T3.8.3), diámetro hidráulico (ec. T3.8.4), coeficiente de disipación
+    $c_d = (c_f + 0{,}0015)(1{,}1 + 4 b_2^*)$ (ec. T3.8.5) y
+    $\zeta_{La,R} = 4 c_d\,(L_{sch}/D_h)(w_{av}/u_2)^2$ (ec. T3.8.6);
+  - choque en la garganta de entrada, $\zeta_{La,C} = 0{,}3\,((w_{1m} - w_{1q})/u_2)^2$
+    (ecs. T3.8.7 a T3.8.9), con entrada sin giro. Cuando la garganta acelera el flujo
+    ($w_{1q} > w_{1m}$) no se cuenta (elección propia).
+- **Choque a la salida del rodete:** $\zeta_{LS} = \varphi_2^2\,(\tau_2 - b_2/b_3)^2$
+  (ec. T3.8.24), el ensanchamiento de $b_2$ al ancho de entrada de la voluta.
+- **Voluta:** el rozamiento en sus paredes (ec. T3.8.21) y la mezcla en la espiral y la
+  tobera del modelo de la sección 5.
+
+Entonces $\eta_h = 1 - \sum Z/H_{th}$ en el diseño. Gülich advierte (cap. 3.8) que
+estas estimaciones solo valen cerca del punto óptimo y que no evalúan bien las pérdidas
+de mezcla. Por eso solo fijan el nivel en el diseño: fuera de él, el resto de las
+pérdidas sigue la forma de la ec. 4.14 y la voluta su propio modelo.
+
+**Bomba de referencia** ($H_{th}$ = 35,58 m en el diseño):
+
+| Pérdida | Altura |
+|---|---|
+| Rozamiento en el rodete ($c_f$ = 0,0057) | 1,05 m |
+| Choque a la entrada ($w_{1q}/w_{1m}$ = 0,92) | 0,01 m |
+| Choque a la salida | 0,11 m |
+| Paredes de la voluta | 0,81 m |
+| Espiral y tobera de la voluta | 1,28 m |
+| **$\eta_h$** | **0,909** (estadística 0,907) |
+
+La suma queda a 0,2 puntos de la estadística en esta bomba. Una garganta de voluta un
+40 % más pequeña baja $\eta_h$, y una prueba lo comprueba. Con voluta doble las paredes
+pierden 1,34 m y la espiral 1,54 m, y $\eta_h$ baja a 0,886: Gülich advierte de las
+pérdidas añadidas del canal exterior (cap. 7.8.1).
 
 **Claves:** `--set losses=`, `seal_clearance=`, `seal_length=`, `seal_roughness=` y
 `axial_gap=`.
@@ -694,14 +761,14 @@ como agua, sin corrección.
 $f_{NPSH} = 1 + \zeta_E\,(c_{f,v}/c_{f,w})\,c_{1m}^2/(2g\,NPSH_3)$, con
 $\zeta_E = \lambda_c - 1$.
 
-**Bomba de referencia** (el punto de diseño del agua, 100 m³/h a 32,2 m, pasa a):
+**Bomba de referencia** (el punto de diseño del agua, 100 m³/h a 32,32 m, pasa a):
 
 | $\nu$ | Punto | η | $f_H$ / $f_\eta$ por pérdidas | Correlación | NPSH₃ × |
 |---|---|---|---|---|---|
-| 10 mm²/s | 98,9 m³/h, 31,9 m | 0,829 | 0,989 / 0,972 | 0,989 / 0,958 | 1,008 |
-| 50 mm²/s | 96,4 m³/h, 31,0 m | 0,785 | 0,964 / 0,920 | 0,964 / 0,871 | 1,027 |
-| 200 mm²/s | 92,0 m³/h, 29,5 m | 0,700 | 0,920 / 0,820 | 0,913 / 0,715 | 1,058 |
-| 1000 mm²/s | 73,5 m³/h, 23,1 m | 0,409 | 0,735 / 0,479 | 0,780 / 0,419 | 1,170 |
+| 10 mm²/s | 98,91 m³/h, 31,95 m | 0,832 | 0,989 / 0,972 | 0,989 / 0,958 | 1,008 |
+| 50 mm²/s | 96,46 m³/h, 31,10 m | 0,788 | 0,965 / 0,921 | 0,964 / 0,871 | 1,027 |
+| 200 mm²/s | 92,20 m³/h, 29,63 m | 0,704 | 0,922 / 0,823 | 0,913 / 0,715 | 1,058 |
+| 1000 mm²/s | 74,31 m³/h, 23,45 m | 0,416 | 0,743 / 0,486 | 0,780 / 0,419 | 1,171 |
 
 Los dos métodos dan casi la misma altura. En el rendimiento el análisis de pérdidas es
 algo más optimista, dentro de la dispersión del libro.
@@ -744,6 +811,14 @@ tabla 13.1.
   - la potencia a válvula cerrada es una extrapolación.
 - **NPSH₃:** la garganta de entrada de los álabes es una estimación. Con recirculación a
   la entrada el NPSH₃ real deja de bajar o sube, y eso no está modelado.
+- **Pérdidas hidráulicas:**
+  - la suma de la tabla 3.8 solo se hace con voluta; con difusor sigue la estadística;
+  - no se cuentan las pérdidas de la entrada ($\zeta_{EA}$), que el libro considera
+    despreciables en bombas de aspiración axial, ni las de mezcla por un perfil de
+    velocidades no uniforme, que el libro tampoco evalúa;
+  - en la voluta doble, el canal exterior solo pierde por rozamiento (el libro lo
+    calcularía además como un codo, tabla 1.4), y el caudal se reparte entre las dos
+    volutas según sus ángulos, no según sus resistencias.
 - **Voluta:** solo se modela una voluta detrás del rodete, directamente o tras un difusor
   sin álabes. La pérdida de la tobera es una estimación por la longitud. Tras un difusor
   con álabes, su garganta fija el codo del NPSH₃, pero sus pérdidas siguen en la
