@@ -24,13 +24,15 @@ pub(crate) struct VoluteArgs {
     /// Fix an input as KEY=VALUE, or KEY=auto. Keys: flow-factor (Q_Le/Q), dz
     /// (cutwater diameter), b3 (inlet width), e3 (cutwater thickness), shape
     /// (rectangle, circle or trapezoid:DEGREES), law (auto, momentum or velocity),
-    /// sections, correction (on or off), length and outlet (discharge diffuser),
-    /// incidence (cutwater), wall, type (single or double), rib_wrap (wrap of the inner
-    /// volute of a double volute), rib (rib thickness), rib_nose (length over thickness
-    /// of the elliptic nose and tail of the rib, 1 for a semicircle), channel_ratio
-    /// (outlet area of the outer channel over the first throat), discharge (tangential, tangential:inner,
-    /// tangential:centered, tangential:outer, radial or radial:DEGREES from the line
-    /// through the pump axis), bend (bend radius of a radial discharge), cutwater
+    /// sections, correction (on or off), length (along the diffuser centerline) and
+    /// outlet (discharge diffuser), incidence (cutwater), wall, type (single or double),
+    /// rib_wrap (wrap of the inner volute of a double volute), rib (rib thickness),
+    /// rib_nose (length over thickness of the elliptic nose and tail of the rib, 1 for a
+    /// semicircle), channel_ratio (outlet area of the outer channel over the first
+    /// throat), discharge (tangential, opening to both sides; tangential:inner or
+    /// tangential:outer with that wall straight; radial or radial:DEGREES from the line
+    /// through the pump axis), bend (bend radius of a radial discharge), rotation (angle
+    /// of the cutwater from the x axis; auto turns the discharge vertically up), cutwater
     /// (tangent, sharp or rounded), nose (radius of a rounded cutwater).
     #[arg(long = "set", value_name = "KEY=VALUE")]
     settings: Vec<String>,
@@ -131,8 +133,8 @@ fn parse_shape(value: &str) -> Result<SectionShape, String> {
 fn parse_discharge(value: &str) -> Result<DischargeShape, String> {
     let wall = |w| DischargeShape::Tangential { straight_wall: w };
     match value {
-        "tangential" | "tangential:inner" => Ok(wall(StraightWall::Inner)),
-        "tangential:centered" => Ok(wall(StraightWall::Centered)),
+        "tangential:inner" => Ok(wall(StraightWall::Inner)),
+        "tangential" | "tangential:centered" => Ok(wall(StraightWall::Centered)),
         "tangential:outer" => Ok(wall(StraightWall::Outer)),
         "radial" => Ok(DischargeShape::Radial { axis_angle: 0.0 }),
         _ => value
@@ -219,6 +221,7 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
         "channel_ratio" => input.setup.channel_area_ratio = quantity(Dimensionless)?,
         "discharge" => input.diffuser.shape = parse_discharge(value)?,
         "bend" => input.diffuser.bend_radius = quantity(Length)?,
+        "rotation" => input.diffuser.rotation = quantity(Angle)?,
         "cutwater" => {
             input.cutwater.shape = match value {
                 "tangent" => CutwaterShape::Tangent,
@@ -245,7 +248,7 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
             return Err(format!(
                 "unknown key {key:?}; valid keys: flow-factor, dz, b3, e3, shape, law, \
                  sections, correction, length, outlet, incidence, wall, type, rib_wrap, rib, \
-                 rib_nose, channel_ratio, discharge, bend, cutwater, nose"
+                 rib_nose, channel_ratio, discharge, bend, rotation, cutwater, nose"
             ));
         }
     }
@@ -370,6 +373,11 @@ fn print_report(name: &str, id: ComponentId, g: &VoluteGeometry, units: &Display
         ),
     };
     println!("Diffuser   {discharge}");
+    println!(
+        "           outlet face {} from the pump axis   cutwater at {} from the x axis",
+        s(Length, g.outlet_height),
+        s(Angle, g.rotation)
+    );
     println!(
         "           length {} (centerline {})   outlet {}   area ratio {:.2}   c_d {}",
         s(Length, dif.length),
