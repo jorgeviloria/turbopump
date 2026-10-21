@@ -260,6 +260,20 @@ fn print_report(
                 s(Power, l.rear_friction),
                 s(Power, l.mechanical)
             );
+            if let Some(h) = &c.hydraulic {
+                println!(
+                    "           η_h {:.3} (statistics {:.3}): of H_th {}, impeller friction {} (c_f {:.4}), inlet shock {}, outlet shock {}, volute walls {}, volute {}; Gülich Table 3.8",
+                    h.efficiency,
+                    h.statistical_efficiency,
+                    s(Head, h.theoretical_head),
+                    s(Head, h.impeller.friction),
+                    h.impeller.friction_coefficient,
+                    s(Head, h.impeller.inlet_shock),
+                    s(Head, h.outlet_shock),
+                    s(Head, h.volute_friction),
+                    s(Head, h.volute)
+                );
+            }
         }
         None => println!(
             "Losses     from the statistics of the design: η {:.3} (Gülich Table 3.9)",
