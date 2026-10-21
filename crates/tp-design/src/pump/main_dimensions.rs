@@ -58,6 +58,8 @@ pub struct PumpDuty {
     pub vapor_pressure: f64,
     /// Total pressure at the pump inlet, Pa.
     pub inlet_total_pressure: f64,
+    /// Kinematic viscosity of the liquid, m²/s.
+    pub kinematic_viscosity: f64,
 }
 
 /// User inputs of the main-dimensions step. Every value is automatic by default.
@@ -624,6 +626,7 @@ mod tests {
             density: 998.2,
             vapor_pressure: 2339.0,
             inlet_total_pressure: 101_325.0,
+            kinematic_viscosity: 1.0e-6,
         }
     }
 

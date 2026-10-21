@@ -109,6 +109,7 @@ impl Project {
             density: liquid.density,
             vapor_pressure: liquid.vapor_pressure,
             inlet_total_pressure: setup.inlet.total_pressure,
+            kinematic_viscosity: liquid.kinematic_viscosity(),
         })
     }
 
@@ -702,8 +703,10 @@ mod tests {
         let volute_curve = p
             .compute_performance(impeller, &p.performance_input(impeller).unwrap())
             .unwrap();
-        // The automatic volute is nearly the matched one of the loss split.
-        assert_relative_eq!(volute_curve.design.head, 32.0, max_relative = 5e-3);
+        // The automatic volute is nearly the matched one of the loss split; the seals
+        // of the loss analysis leak less than the statistics, so the head is a little
+        // higher.
+        assert_relative_eq!(volute_curve.design.head, 32.0, max_relative = 0.015);
         let data = p.collector_data_after(impeller).unwrap();
         assert_eq!(data.throat.unwrap().count, 1);
         assert!(data.volute.is_some() && volute_curve.volute.is_some());

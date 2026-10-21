@@ -7,6 +7,7 @@ pub mod axial_thrust;
 pub mod diffuser;
 mod error;
 pub mod impeller;
+pub mod losses;
 pub mod npsh;
 pub mod operation;
 pub mod outlet;

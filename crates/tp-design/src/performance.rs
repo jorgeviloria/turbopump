@@ -28,6 +28,7 @@ use serde::{Deserialize, Serialize};
 use tp_units::STANDARD_GRAVITY as G;
 
 use crate::axial_thrust::{AxialForces, AxialThrust, AxialThrustInput};
+use crate::losses::{LossInput, SecondaryLosses};
 use crate::npsh::{CollectorThroat, NpshCurve, NpshSettings};
 use crate::operation::{Operation, OperationInput};
 use crate::pump::{CentrifugalPumpDesign, PumpDuty};
@@ -74,6 +75,8 @@ pub struct PerformanceInput {
     pub axial: AxialThrustInput,
     /// System curve, speed and trimmed diameter of operation.
     pub operation: OperationInput,
+    /// Seals and gaps of the loss analysis.
+    pub losses: LossInput,
 }
 
 /// What the prediction knows about the collector after the impeller, beyond its kind.
@@ -102,6 +105,7 @@ impl Default for PerformanceInput {
             wide_seal_clearances: false,
             axial: AxialThrustInput::default(),
             operation: OperationInput::default(),
+            losses: LossInput::default(),
         }
     }
 }
@@ -202,6 +206,13 @@ pub struct PumpPerformance {
     pub axial: AxialSummary,
     /// The pump in its system.
     pub operation: Operation,
+    /// Leakage, disk friction and mechanical losses of the loss analysis; `None` when
+    /// the statistics of the design stand for them.
+    pub losses: Option<SecondaryLosses>,
+    /// Overall efficiency of the design statistics (Gülich Table 3.9) and its expected
+    /// scatter, for comparison.
+    pub statistical_efficiency: f64,
+    pub efficiency_tolerance: f64,
     pub warnings: Vec<String>,
 }
 
@@ -250,6 +261,8 @@ struct Model {
     secondary_power: f64,
     impeller_radius: f64,
     volute: Option<VoluteSplit>,
+    /// The seals of the loss analysis, which give the leakage at each head.
+    losses: Option<SecondaryLosses>,
 }
 
 /// The hydraulic losses split between the volute and the rest of the stage.
@@ -296,7 +309,10 @@ impl Model {
                 }
                 _ => hydraulic * theoretical,
             };
-            leakage = self.leakage * (head.max(0.0) / self.head).sqrt();
+            leakage = match &self.losses {
+                Some(l) => l.leakage_at(head, theoretical),
+                None => self.leakage * (head.max(0.0) / self.head).sqrt(),
+            };
         }
         let power = self.density * G * theoretical * (flow + leakage) + self.secondary_power;
         PerformancePoint {
@@ -349,7 +365,27 @@ pub fn predict(
             .max(0.0),
         impeller_radius: design.outlet_diameter / 2.0,
         volute: None,
+        losses: None,
     };
+    // The loss analysis replaces the leakage and secondary power of the statistics.
+    let axial = AxialThrust::new(duty, design, &input.axial, input.wide_seal_clearances)?;
+    let losses = (!input.losses.statistics)
+        .then(|| {
+            SecondaryLosses::new(
+                duty,
+                design,
+                &axial,
+                &input.losses,
+                input.wide_seal_clearances,
+                design.theoretical_head,
+            )
+        })
+        .transpose()?;
+    if let Some(l) = &losses {
+        model.leakage = l.leakage;
+        model.secondary_power = l.secondary_power();
+        model.losses = Some(*l);
+    }
     if let Some(geometry) = collector.volute {
         let theoretical = model.theoretical_head(design.impeller_flow);
         let design_losses = (1.0 - eta.hydraulic) * theoretical;
@@ -536,7 +572,6 @@ pub fn predict(
             b2tot,
         )
     });
-    let axial = AxialThrust::new(duty, design, &input.axial, input.wide_seal_clearances)?;
     // In the recirculation range the Euler head comes from the model without it.
     let axial_forces = |p: &PerformancePoint| {
         let theoretical = if p.theoretical_head.is_finite() {
@@ -706,6 +741,9 @@ pub fn predict(
         radial,
         axial,
         operation,
+        losses,
+        statistical_efficiency: design.efficiencies.overall,
+        efficiency_tolerance: design.efficiency_tolerance,
         warnings,
     })
 }
@@ -733,9 +771,17 @@ pub const PERFORMANCE_CORRELATIONS: &[crate::pump::correlations::CorrelationInfo
     crate::pump::correlations::CorrelationInfo {
         id: "performance.secondary_losses",
         description: "disk friction and mechanical losses constant with flow; seal leakage \
-                      proportional to √H",
+                      from the annular seal at each head (or ∝ √H with the statistics)",
         reference: "Gülich 2nd ed., Chap. 4.1.2; the leakage law is the orifice law",
         verification: crate::pump::correlations::Verification::EngineeringDefault,
+    },
+    crate::pump::correlations::CorrelationInfo {
+        id: "performance.loss_analysis",
+        description: "seal leakage of Table 3.7 (1) with s from eq. 3.12; disk friction \
+                      k_RR of eq. T3.6.3 with f_L; P_m/P = 0.0045·(Q_Ref/Q)^0.4·(n_Ref/n)^0.3",
+        reference: "Gülich 2nd ed., Chap. 3.6, eqs. 3.12, T3.5.6a, T3.6.2 to T3.6.7, \
+                    T3.7.1 to T3.7.14",
+        verification: crate::pump::correlations::Verification::Verified,
     },
     crate::pump::correlations::CorrelationInfo {
         id: "performance.axial_force",
@@ -762,6 +808,7 @@ pub const PERFORMANCE_CORRELATIONS: &[crate::pump::correlations::CorrelationInfo
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::losses::LossInput;
     use crate::operation::OperationInput;
     use crate::pump::{CentrifugalPumpInput, design};
     use approx::assert_relative_eq;
@@ -776,6 +823,7 @@ mod tests {
             density: 998.2,
             vapor_pressure: 2339.0,
             inlet_total_pressure: 101_325.0,
+            kinematic_viscosity: 1.0e-6,
         }
     }
 
@@ -830,10 +878,11 @@ mod tests {
         };
         // Balance holes leave 15 % of the force on the shrouds (eq. T9.2.14).
         let holes = force(&|i| i.axial.balance_holes = true);
+        // The rear seal leaks too, so the head shifts a little.
         assert_relative_eq!(
             holes.axial.design.hydraulic,
             0.15 * plain.hydraulic,
-            max_relative = 1e-9
+            max_relative = 0.02
         );
         assert!(!holes.warnings.iter().any(|w| w.contains("pressure side")));
         // A larger rear seal pushes toward the pressure side (eq. T9.2.13).
@@ -1091,7 +1140,16 @@ mod tests {
 
     #[test]
     fn the_curve_passes_through_the_design_point() {
-        let (d, p) = performance(&PerformanceInput::default());
+        // With the efficiencies of the design statistics the curve meets the design
+        // point exactly.
+        let statistics = PerformanceInput {
+            losses: LossInput {
+                statistics: true,
+                ..LossInput::default()
+            },
+            ..PerformanceInput::default()
+        };
+        let (d, p) = performance(&statistics);
         let q = duty().flow;
         assert_relative_eq!(p.design.flow, q, max_relative = 1e-12);
         assert_relative_eq!(p.design.head, 32.0, max_relative = 1e-9);
@@ -1146,6 +1204,7 @@ mod tests {
             wide_seal_clearances: false,
             axial: AxialThrustInput::default(),
             operation: OperationInput::default(),
+            losses: LossInput::default(),
         };
         let (d, p) = performance(&input);
         assert_relative_eq!(p.npsh.inlet_coefficient, 1.3);
@@ -1204,12 +1263,54 @@ mod tests {
     }
 
     #[test]
+    fn the_loss_analysis_sums_leakage_disk_friction_and_mechanical_losses() {
+        let (d, p) = performance(&PerformanceInput::default());
+        let l = p.losses.unwrap();
+        // Close to the design head: the impeller passes less leakage than the
+        // statistics assume.
+        assert_relative_eq!(p.design.head, 32.0, max_relative = 0.015);
+        assert!(l.volumetric_efficiency > 0.95 && l.volumetric_efficiency < 0.995);
+        // The power balance of eq. T3.5.1 at the design point.
+        let leakage = l.leakage_at(p.design.head, p.design.theoretical_head);
+        let balance =
+            998.2 * G * p.design.theoretical_head * (duty().flow + leakage) + l.secondary_power();
+        assert_relative_eq!(p.design.power, balance, max_relative = 1e-9);
+        // Both estimates of the efficiency within a few points.
+        assert!((p.design.efficiency - d.efficiencies.overall).abs() < 0.06);
+        assert_relative_eq!(p.statistical_efficiency, d.efficiencies.overall);
+        // Wider clearances leak much more; a viscous liquid rubs more on the disks.
+        let wide = performance(&PerformanceInput {
+            wide_seal_clearances: true,
+            ..PerformanceInput::default()
+        })
+        .1
+        .losses
+        .unwrap();
+        assert!(wide.leakage > 2.0 * l.leakage);
+        let mut oil = duty();
+        oil.kinematic_viscosity = 5e-5;
+        let p_oil = predict(
+            &oil,
+            &d,
+            &PerformanceInput::default(),
+            &CollectorData::default(),
+        )
+        .unwrap();
+        let lo = p_oil.losses.unwrap();
+        assert!(lo.front_friction + lo.rear_friction > l.front_friction + l.rear_friction);
+        assert!(lo.leakage < l.leakage);
+        // The leakage falls toward shut-off as the head across the seal changes little
+        // and grows with it.
+        assert!(l.leakage_at(1.2 * p.design.head, p.design.theoretical_head) > l.leakage);
+    }
+
+    #[test]
     fn a_matched_volute_takes_a_share_of_the_losses_at_the_design_head() {
         let (_, plain) = performance(&PerformanceInput::default());
         let d = design(&duty(), &CentrifugalPumpInput::default()).unwrap();
         let p = with_collector(&volute_collector(&d, 1.0));
         // Sized by angular momentum, the volute is nearly the matched one of the split.
-        assert_relative_eq!(p.design.head, 32.0, max_relative = 5e-3);
+        assert_relative_eq!(p.design.head, 32.0, max_relative = 0.015);
         let v = p.volute.unwrap();
         assert!((0.1..0.9).contains(&v.share), "{}", v.share);
         assert_relative_eq!(p.design.volute_loss, v.design.total(), max_relative = 1e-9);

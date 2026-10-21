@@ -15,6 +15,7 @@ fn main() {
         density: 998.2,
         vapor_pressure: 2339.0,
         inlet_total_pressure: 101_325.0,
+        kinematic_viscosity: 1.0e-6,
     };
     let input = CentrifugalPumpInput::default();
     let main = design(&duty, &input).expect("feasible main dimensions");
