@@ -218,8 +218,8 @@ fn double_volute() {
     save(&mut harness, "double-volute-3d");
 }
 
-/// A radial (centerline) discharge chosen in the diffuser step, with the rounded
-/// cutwater of the default design.
+/// A tangential discharge chosen in the diffuser step, then back to the default
+/// centerline one, with the rounded cutwater of the default design.
 #[test]
 #[ignore = "needs a GPU; run with --ignored"]
 fn radial_discharge() {
@@ -234,20 +234,32 @@ fn radial_discharge() {
         harness.get_by_label_contains("Accept step").click();
         harness.run();
     }
+    let front = |harness: &mut Harness<'_, TurbopumpApp>, name: &str| {
+        harness.state_mut().focus_view(View::FrontView);
+        harness.key_press(egui::Key::Escape);
+        for _ in 0..10 {
+            harness.run();
+        }
+        harness.remove_cursor();
+        harness.run();
+        save(harness, name);
+    };
+    harness.get_by_value("radial").click();
+    harness.run();
+    harness
+        .get_by_label("tangential, opening to both sides")
+        .click();
+    harness.run();
+    front(&mut harness, "tangential-discharge-front");
+    harness.get_by_label_contains("Properties").click();
+    harness.run();
     harness
         .get_by_value("tangential, opening to both sides")
         .click();
     harness.run();
     harness.get_by_label("radial").click();
     harness.run();
-    harness.state_mut().focus_view(View::FrontView);
-    harness.key_press(egui::Key::Escape);
-    for _ in 0..10 {
-        harness.run();
-    }
-    harness.remove_cursor();
-    harness.run();
-    save(&mut harness, "radial-discharge-front");
+    front(&mut harness, "radial-discharge-front");
     harness.state_mut().focus_view(View::View3d);
     harness.run();
     save(&mut harness, "radial-discharge-3d");

@@ -492,6 +492,7 @@ fn diffuser(
             .selected_text(text(&current))
             .show_ui(ui, |ui| {
                 for option in [
+                    DischargeShape::Radial { axis_angle: 0.0 },
                     DischargeShape::Tangential {
                         straight_wall: StraightWall::Centered,
                     },
@@ -501,7 +502,6 @@ fn diffuser(
                     DischargeShape::Tangential {
                         straight_wall: StraightWall::Outer,
                     },
-                    DischargeShape::Radial { axis_angle: 0.0 },
                 ] {
                     let same = std::mem::discriminant(&option) == std::mem::discriminant(&current)
                         && (matches!(option, DischargeShape::Radial { .. }) || option == current);
