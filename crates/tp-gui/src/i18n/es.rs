@@ -1306,6 +1306,15 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Las secciones planas con B/H = 2 a 3 pierden menos (Gülich p. 414)",
     ),
     ("Corners", "Esquinas"),
+    ("Wrap angle φ", "Ángulo de envolvimiento φ"),
+    (
+        "Where round the spiral this shape applies, from the start of the spiral",
+        "Dónde de la espiral se aplica esta forma, desde el inicio de la espiral",
+    ),
+    (
+        "Symmetric: the same shape as the −z side, mirrored",
+        "Simétrico: la misma forma que el lado −z, reflejada",
+    ),
     (
         "CAD solid of the volute flow domain, built with Open CASCADE. CFD setup and \
                  model finishing arrive in phases 8 and 9.",

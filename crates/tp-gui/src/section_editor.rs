@@ -4,7 +4,7 @@
 
 use std::f64::consts::TAU;
 
-use eframe::egui::{self, Button, ComboBox, DragValue, Grid, Id, Ui};
+use eframe::egui::{self, Button, ComboBox, DragValue, Grid, Id, Ui, vec2};
 use tp_design::outlet::Reach;
 use tp_design::volute::section::default_segments;
 use tp_design::volute::{
@@ -210,7 +210,6 @@ fn kind_combo(
     // Tall enough to list every kind without scrolling.
     ComboBox::from_id_salt(salt)
         .selected_text(text)
-        .width(150.0)
         .height(400.0)
         .show_ui(ui, |ui| {
             if let Some(none) = none
@@ -229,6 +228,22 @@ fn kind_combo(
             }
         });
     picked
+}
+
+/// The kinds of the sides of a definition, short, for the list of definitions.
+fn kinds(shape: &SectionShape) -> String {
+    match shape {
+        SectionShape::Sides { left, right: None } => Kind::of_side(left).label().to_owned(),
+        SectionShape::Sides {
+            left,
+            right: Some(right),
+        } => format!(
+            "{} / {}",
+            Kind::of_side(left).label(),
+            Kind::of_side(right).label()
+        ),
+        other => Kind::of_section(other).label().to_owned(),
+    }
 }
 
 /// The shape of a definition in words, for reports.
@@ -303,65 +318,35 @@ pub(crate) fn step(
     let count = sections.len();
     let mut current = selected(ui.ctx(), id, count);
 
+    // The definitions, one row each: active, angle and shape; click a row to edit it.
     section(ui, tr("Sections"));
     let mut remove = None;
-    Grid::new("volute_sections_table")
-        .num_columns(6)
-        .spacing([6.0, 4.0])
-        .show(ui, |ui| {
-            ui.label("");
-            ui.weak("φ");
-            ui.weak(tr("−z side"));
-            ui.weak(tr("+z side"));
-            ui.label("");
-            ui.label("");
-            ui.end_row();
-            for (i, d) in sections.iter_mut().enumerate() {
-                ui.checkbox(&mut d.active, "")
-                    .on_hover_text(tr("Active: only active definitions shape the spiral"));
-                quantity(ui, &mut d.angle, Angle, &units, 1f64.to_radians()..=TAU);
-                let left = Kind::of_section(&d.shape);
-                if let Some(Some(kind)) =
-                    kind_combo(ui, ("section_left", i), Some(left), &Kind::SECTION, None)
-                {
-                    d.shape = kind.apply(&d.shape);
-                    current = i;
-                }
-                match &mut d.shape {
-                    SectionShape::Sides { right, .. } => {
-                        let now = right.as_ref().map(Kind::of_side);
-                        if let Some(picked) = kind_combo(
-                            ui,
-                            ("section_right", i),
-                            now,
-                            &Kind::SIDE,
-                            Some(tr("symmetric")),
-                        ) {
-                            *right = picked.map(|k| k.side(right.as_ref()));
-                            current = i;
-                        }
-                    }
-                    SectionShape::RoundExternal(_) | SectionShape::RoundInternal(_) => {
-                        ui.weak(tr("(the whole section)"));
-                    }
-                }
-                if ui
-                    .radio(current == i, "")
-                    .on_hover_text(tr("Edit this definition"))
-                    .clicked()
-                {
-                    current = i;
-                }
-                if ui
-                    .add_enabled(count > 1, Button::new(icon::TRASH).small())
-                    .on_hover_text(tr("Delete this definition"))
-                    .clicked()
-                {
-                    remove = Some(i);
-                }
-                ui.end_row();
+    for (i, d) in sections.iter_mut().enumerate() {
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut d.active, "")
+                .on_hover_text(tr("Active: only active definitions shape the spiral"));
+            let trash = 26.0;
+            let width = ui.available_width() - trash - ui.spacing().item_spacing.x;
+            let text = format!("{}    {}", units.show(Angle, d.angle), kinds(&d.shape));
+            let row = Button::selectable(current == i, text)
+                .right_text("")
+                .min_size(vec2(width, 24.0));
+            if ui
+                .add(row)
+                .on_hover_text(tr("Edit this definition"))
+                .clicked()
+            {
+                current = i;
+            }
+            if ui
+                .add_enabled(count > 1, Button::new(icon::TRASH).frame(false))
+                .on_hover_text(tr("Delete this definition"))
+                .clicked()
+            {
+                remove = Some(i);
             }
         });
+    }
     if let Some(i) = remove {
         sections.remove(i);
         current = current.min(sections.len() - 1);
@@ -393,10 +378,64 @@ pub(crate) fn step(
              view; right-click there to add or remove a corner.",
         ),
     );
+    props(ui, ("section_definition", current), |ui| {
+        label(
+            ui,
+            tr("Wrap angle φ"),
+            tr("Where round the spiral this shape applies, from the start of the spiral"),
+        );
+        quantity(
+            ui,
+            &mut definition.angle,
+            Angle,
+            &units,
+            1f64.to_radians()..=TAU,
+        );
+        ui.end_row();
+        let asymmetric = matches!(definition.shape, SectionShape::Sides { right: Some(_), .. });
+        label(
+            ui,
+            if asymmetric {
+                tr("−z side")
+            } else {
+                tr("Shape")
+            },
+            "",
+        );
+        let now = Kind::of_section(&definition.shape);
+        if let Some(Some(kind)) = kind_combo(
+            ui,
+            ("section_left", current),
+            Some(now),
+            &Kind::SECTION,
+            None,
+        ) {
+            definition.shape = kind.apply(&definition.shape);
+        }
+        ui.end_row();
+        if let SectionShape::Sides { right, .. } = &mut definition.shape {
+            label(
+                ui,
+                tr("+z side"),
+                tr("Symmetric: the same shape as the −z side, mirrored"),
+            );
+            let now = right.as_ref().map(Kind::of_side);
+            if let Some(picked) = kind_combo(
+                ui,
+                ("section_right", current),
+                now,
+                &Kind::SIDE,
+                Some(tr("symmetric")),
+            ) {
+                *right = picked.map(|k| k.side(right.as_ref()));
+            }
+            ui.end_row();
+        }
+    });
     match &mut definition.shape {
         SectionShape::Sides { left, right } => {
-            let asymmetric = right.is_some();
-            if asymmetric {
+            if right.is_some() {
+                ui.add_space(4.0);
                 ui.label(bold(tr("−z side")));
             }
             side_editor(ui, ("left", current), left, b3, &units);
