@@ -181,10 +181,12 @@ cargo run -p tp-cli -- geometry bomba.tpj --export salida
 |---|---|
 | ![meridional](docs/img/rodete-referencia-meridional.svg) | ![frontal](docs/img/rodete-referencia-frontal.svg) |
 
-Sólidos CAD del rodete y del dominio fluido (Open CASCADE):
+Sólidos CAD del rodete y del dominio fluido (Open CASCADE). El rodete lleva el cubo
+hueco con su agujero del eje y redondeos donde los álabes tocan el cubo y la tapa;
+`--balance-holes` taladra además los agujeros de equilibrado del empuje axial:
 
 ```bash
-cargo run -p tp-cli -- cad bomba.tpj --format step,iges,stl
+cargo run -p tp-cli -- cad bomba.tpj --format step,iges,stl --balance-holes
 ```
 
 | Rodete | Dominio fluido |

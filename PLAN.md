@@ -76,9 +76,10 @@ la que sale.
    - barrido (sweep) y apilado.
 8. **Preparación para CFD:** extensiones de geometría virtual y conexiones de interfaz rotor-estator (RSI).
 9. **Acabado del modelo:**
-   - redondeos entre álabe y cubo o carcasa;
+   - redondeos entre álabe y cubo o carcasa (hecho para bombas, 2026-10-21);
    - recorte del rodete;
-   - agujeros de equilibrado;
+   - agujeros de equilibrado (hecho para bombas, 2026-10-21), y cubo hueco con agujero
+     del eje y manguito;
    - álabe extendido;
    - sólidos del dominio fluido y del dominio de material.
 
@@ -249,7 +250,7 @@ resto de máquinas.
 | **6. Resto de máquinas** | Ventiladores (incl. axiales con perfiles, BEM y Lieblein), compresores centrífugos y axiales, turbinas radiales y axiales, Francis y Kaplan; editor de correlaciones | v0.3–0.5 | 3–4 meses |
 | **7. Análisis** ✅ | Predicción de prestaciones (Euler y Casey/Robinson), flujo meridional potencial 2D, álabe a álabe 1D/2D, velocidades sobre el álabe, informe | **v0.6.** Hecha para bombas: curva característica (Euler con deslizamiento, rendimiento hidráulico de Gülich y zona de recirculación estimada hasta válvula cerrada), flujo potencial meridional por elementos finitos, velocidades en las caras del álabe por la circulación, vista de curvas, informe y CSV. Después se añadieron la curva NPSH₃(Q) (Gülich cap. 6.3.3) y las pérdidas de la voluta frente al caudal (Japikse cap. 4.3), validadas con el ejemplo del cap. 7.5 de Japikse, el empuje axial sobre el rodete (Gülich tablas 9.1 y 9.2), con agujeros de equilibrado y doble aspiración, el punto de trabajo en la instalación con las leyes de velocidad y recorte (Gülich caps. 3.4, 4.5 y 11), el rendimiento por suma de pérdidas con las fugas de los anillos, el rozamiento de disco y las pérdidas mecánicas (Gülich cap. 3.6) y las pérdidas hidráulicas del rodete y la voluta (Gülich tabla 3.8), y la corrección para líquidos viscosos (Gülich cap. 13.1, tablas 3.10 y 13.1). Quedan para más adelante Casey/Robinson y los límites de bombeo y bloqueo (con los compresores de la Fase 6), el análisis álabe a álabe en 2D, el flujo potencial como base del diseño de álabes y el informe en HTML | Hecha |
 | **8. Malla y CFD** | netgen + escritores, geometría virtual, RSI, caso OpenFOAM, CFD-Pre XML y curvas de TurboGrid | v0.7 | 4–6 sem |
-| **9. Producción** | Acabado (redondeos, recorte, agujeros de equilibrado), modo por lotes, Python, ingeniería inversa desde STEP, instaladores firmados, manual | **v1.0** | 2–3 meses |
+| **9. Producción** | Acabado (redondeos y agujeros de equilibrado ya hechos para bombas; falta el recorte en el CAD), modo por lotes, Python, ingeniería inversa desde STEP, instaladores firmados, manual | **v1.0** | 2–3 meses |
 
 **Totales aproximados:** un MVP útil (rodete y voluta de bomba con exportación a
 STEP) en unos **5–6 meses**, y todas las funciones del plan en unos **18–24 meses**.

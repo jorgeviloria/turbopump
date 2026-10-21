@@ -50,12 +50,36 @@ escritores STEP e IGES.
      cose, se convierte en sólido, se repara (`ShapeFix_Solid`) y se valida
      (`BRepCheck_Analyzer`).
 3. **Dominio fluido** = canal − álabes (z copias giradas).
-4. **Rodete** = disco del cubo ∪ carcasa ∪ (álabes ∩ canal).
-   - **Disco del cubo:** macizo desde el contorno del cubo hasta el diámetro del eje, con
-     una cara trasera a un espesor de pared detrás de la salida.
-   - **Carcasa:** el contorno de la carcasa con espesor hacia fuera.
+4. **Rodete** = (perfil de revolución − canal) ∪ (álabes ∩ canal), menos los agujeros
+   de equilibrado.
+   - **Perfil de revolución:** en un solo contorno, el disco del cubo, el canal y la
+     tapa. Restarle el canal deja las dos paredes con las mismas caras que el canal, y
+     los álabes recortados las comparten; así la unión no trabaja con caras casi
+     coincidentes.
+   - **Disco del cubo (hueco):** una pared del espesor de pared detrás del contorno del
+     cubo, desde d₂ hasta un manguito alrededor del agujero del eje; entre la pared y
+     el manguito, la parte trasera queda vacía. El manguito llega hasta la cara trasera
+     y su diámetro exterior es, por defecto, el agujero más una pared de un cuarto de
+     él, no más fina que la pared (elección propia; 28,9 mm con un eje de 19,3 mm).
+     El agujero del eje es por defecto el diámetro del cubo en el ojo.
+   - **Tapa:** el contorno de la tapa con espesor hacia fuera.
    - **Espesor de pared por defecto:** max(3 mm; 0,02·d₂). Es un valor por defecto de
      ingeniería.
+5. **Redondeos** donde los álabes tocan el cubo y la tapa, con radio por defecto de
+   medio espesor de álabe (elección propia):
+   - las aristas se eligen por su forma: corren sobre el contorno meridional del cubo o
+     de la tapa (a menos de 0,05 mm) y cambian a la vez de radio y de ángulo, al
+     contrario que los círculos y costuras de las propias paredes;
+   - se redondean con `BRepFilletAPI_MakeFillet` en el rodete (aristas cóncavas) y, con
+     el mismo radio, en el dominio fluido (aristas convexas). Una booleana entre los dos
+     sólidos redondeados encuentra sus caras comunes y falla, así que no se usa;
+   - si el redondeo falla, el modelo sale con aristas vivas y un aviso.
+6. **Agujeros de equilibrado** (con `--balance-holes` o la casilla de la interfaz): uno
+   por canal, del diámetro del empuje axial (Gülich cap. 9.2.2, ver
+   [`prestaciones.md`](prestaciones.md)). Son taladros paralelos al eje en un círculo
+   a medio camino entre el manguito y el anillo trasero $d_{s2}$, cada uno a mitad de
+   paso entre dos álabes, desde detrás del disco hasta pasada la superficie del cubo
+   (disposición propia).
 
 ## Comprobaciones
 
@@ -69,15 +93,21 @@ Las pruebas automáticas de `tp-cad` comprueban sobre el rodete de referencia:
 | Validez | `BRepCheck_Analyzer` de álabe, canal, fluido y rodete |
 | Volumen de cada álabe frente a longitud × ancho × espesor | dentro del ±30 % |
 | STEP | se escribe y se vuelve a leer con el mismo volumen; contiene `B_SPLINE_SURFACE` |
+| Redondeos frente a $(1 - \pi/4)\,r^2$ a cada lado de cada raíz | entre 0,7 y 2 veces; el rodete gana lo que pierde el fluido |
+| Agujeros frente a un taladro a través de la pared | entre 1 y 3 veces por agujero |
 
 **Volúmenes.** Se integran de forma adaptativa (tolerancia 10⁻³, error real cercano a
-10⁻⁵). La regla de Gauss simple es instantánea, pero se equivoca un 2 % en sólidos con
-muchas caras B-spline. El volumen sobre la malla depende de la triangulación de cada
-copia y lo descartamos.
+10⁻⁵). La regla de Gauss simple es instantánea, pero se equivoca: un 2 % en sólidos con
+muchas caras B-spline y hasta un 11 % en el rodete terminado (199 cm³ en lugar de
+225 cm³). Con ella los redondeos parecían quitar 74 cm³ al fluido; quitan 1,6 cm³. El
+volumen sobre la malla depende de la triangulación de cada copia y lo descartamos.
 
 ## Exportación
 
-`turbopump cad proyecto.tpj --format step,iges,stl` escribe `impeller.*` y `fluid.*`:
+`turbopump cad proyecto.tpj --format step,iges,stl` escribe `impeller.*` y `fluid.*`.
+Las opciones `--wall`, `--bore`, `--boss`, `--fillet` y `--balance-holes` fijan el
+espesor de pared, el agujero del eje, el manguito, el radio de redondeo y los agujeros
+de equilibrado:
 
 | Formato | Contenido |
 |---|---|
@@ -85,14 +115,27 @@ copia y lo descartamos.
 | IGES | B-rep (modo 1) en mm |
 | STL | malla con flecha d₂/2000 |
 
-El informe incluye el volumen del rodete, su masa (densidad por defecto 7850 kg/m³) y el
-volumen del dominio fluido.
+El informe incluye el volumen del rodete, su masa (densidad por defecto 7850 kg/m³), el
+volumen del dominio fluido, el agujero y el manguito, el radio de los redondeos y los
+agujeros de equilibrado.
+
+**Rodete de referencia:**
+
+| Modelo | Rodete | Masa (acero) | Fluido |
+|---|---|---|---|
+| Aristas vivas | 224,8 cm³ | 1,76 kg | 438,4 cm³ |
+| Redondeos de 1,5 mm | 226,4 cm³ | 1,78 kg | 436,8 cm³ |
+| Redondeos y 7 agujeros de 8,5 mm | 224,4 cm³ | 1,76 kg | 436,8 cm³ |
+
+Con el disco macizo de antes el rodete pesaba 2,7 kg.
 
 ## Limitaciones
 
-- El disco del cubo es macizo hasta el eje: no hay alas, buje ni alivios. Por eso la
-  masa sale alta (2,7 kg en la referencia). El acabado (redondeos, recorte, agujeros de
-  equilibrado) es de la Fase 9.
+- El manguito acaba en la cara trasera del disco: no hay chavetero, ni buje que
+  sobresalga, ni anillo trasero dibujado. El radio de los redondeos es constante, igual
+  en el cubo y en la tapa. Los agujeros de equilibrado son rectos y paralelos al eje.
+- El recorte del rodete (d₂ menor) está en las prestaciones, no en el CAD.
 - El dominio fluido no tiene prolongaciones de entrada ni de salida (geometría virtual
   de la Fase 8).
-- Construir el modelo con las booleanas y los volúmenes tarda unos 30 s.
+- Construir el modelo con las booleanas tarda unos 15 s, y los volúmenes exactos unos
+  segundos más.

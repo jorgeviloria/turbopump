@@ -491,6 +491,11 @@ $d_{sp}$):
   tomamos 0,15.
 - Se suma la fuerza de la ec. T9.2.13 cuando $d_{s2} \ne d_{sp}$. Un anillo trasero
   mayor empuja hacia la impulsión.
+- **Tamaño de los agujeros** (cap. 9.2.2): uno por canal, y entre todos al menos cuatro
+  veces el área de paso del anillo trasero desgastado al doble de su holgura,
+  $\tfrac14 z\,d^2 \ge 4\,d_{s2}\,s$ con $s = 2 s_0$ y $s_0$ de la ec. 3.12. El
+  diámetro se redondea hacia arriba a 0,5 mm (elección propia). Los mismos agujeros se
+  taladran en el CAD del rodete (`turbopump cad --balance-holes`).
 
 **Rodete de doble aspiración:** se equilibra solo, salvo un resto de signo desconocido,
 $F_{ax} = f_{ax}\,\frac{\rho}{2}\,u_2^2\,(d_2^2 - d_{sp}^2)$ (ec. T9.2.15). Tomamos
@@ -519,7 +524,8 @@ $(0{,}7\ \text{a}\ 0{,}9)\,\rho\,g\,H\,\frac{\pi}{4}(d_{sp}^2 - d_D^2)$.
 | A válvula cerrada | 1101 N |
 | Estimación rápida (ec. T9.2.12) | 1162 a 1493 N |
 
-Con agujeros de equilibrado el total baja a unos −9 N.
+Con agujeros de equilibrado el total baja a unos −9 N, con 7 agujeros de 8,5 mm (8,4 mm
+sin redondear) dentro de un anillo trasero de 84,1 mm con 0,184 mm de holgura.
 
 **Avisos:** si sin agujeros la fuerza apunta hacia la impulsión, el programa avisa. Pasa
 con presiones de aspiración altas, como en las bombas de circulación de calderas (cap.
