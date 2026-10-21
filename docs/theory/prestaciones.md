@@ -7,15 +7,17 @@ Implementación:
 - [`crates/tp-design/src/impeller/loading.rs`](../../crates/tp-design/src/impeller/loading.rs) (velocidades en las caras del álabe);
 - [`crates/tp-math/src/sparse.rs`](../../crates/tp-math/src/sparse.rs) (sistemas dispersos);
 - [`crates/tp-design/src/npsh.rs`](../../crates/tp-design/src/npsh.rs) (NPSH₃ frente al caudal);
-- [`crates/tp-design/src/volute/loss.rs`](../../crates/tp-design/src/volute/loss.rs) (pérdidas de la voluta).
+- [`crates/tp-design/src/volute/loss.rs`](../../crates/tp-design/src/volute/loss.rs) (pérdidas de la voluta);
+- [`crates/tp-design/src/radial_thrust.rs`](../../crates/tp-design/src/radial_thrust.rs) (empuje radial).
 
-Este documento recoge cinco análisis de un rodete ya diseñado:
+Este documento recoge seis análisis de un rodete ya diseñado:
 
 - la **curva característica** prevista: altura, potencia y rendimiento frente al caudal;
 - el **flujo potencial** en la sección meridional;
 - las **velocidades relativas en las dos caras** de cada sección del álabe;
 - el **NPSH₃ necesario** frente al caudal;
-- las **pérdidas de la voluta** frente al caudal, que entran en la curva.
+- las **pérdidas de la voluta** frente al caudal, que entran en la curva;
+- el **empuje radial** sobre el rodete frente al caudal.
 
 Las referencias principales son de Gülich, *Centrifugal Pumps*, 2.ª edición: capítulos 3
 a 6. El modelo de la voluta es el de D. Japikse, W. D. Marscher y R. B. Furst,
@@ -357,6 +359,54 @@ $\lambda = 4{,}23$ frente a 4,18 y $K = 0{,}053$ frente a 0,054.
 | Altura en el diseño | 31,97 m (la voluta está ajustada al 99 %) |
 | Máximo rendimiento | 93 % del caudal, η = 0,817 |
 
+## 6. Empuje radial
+
+Fuera del punto de diseño, la presión alrededor del rodete deja de ser uniforme en la
+voluta y aparece una fuerza radial que cargan el eje y los cojinetes. Turbopump sigue la
+tabla 9.4 de Gülich (cap. 9.3):
+
+$$F_R = k_R\,\rho\,g\,H\,d_2\,b_{2,tot} \qquad \text{(ec. 9.6)}$$
+
+$b_{2,tot}$ es el ancho de salida con las dos tapas del rodete. Su espesor por defecto es
+el del modelo CAD, $\max(3\ \text{mm};\ 0{,}02\,d_2)$. $q^*$ se refiere al punto de
+diseño del colector.
+
+**Voluta simple:**
+
+- $k_{R0}$ a válvula cerrada, del ajuste de la figura 9.27 frente a
+  $n_{q,tot} = n_q\sqrt{f_q}$. La curva 1 es para holguras normales (ec. 3.12) y la
+  curva 2 para holguras dobles (`--set clearances=wide`).
+- $k_{R,opt}$ en $q^* = 1$, del ajuste de la figura 9.28.
+- Entre los dos, $k_R = (k_{R0} - k_{R,opt})(1 - q^{*2}) + k_{R,opt}$.
+- Por encima de $q^* = 1$, $k_R = k_{R,opt}\,q^{*2}$, la alternativa que da la tabla al
+  factor 0,09.
+
+**Voluta doble:**
+
+- $k_R = F_{Dsp}\,k_{R0}$ con $F_{Dsp} = 1{,}75 - 0{,}0083\,\varepsilon_{sp}$
+  (fig. 9.29), casi constante hasta $q^* \approx 1{,}1$.
+- Con nervios de menos de 180°, la fórmula de interpolación de la tabla acerca los
+  valores en $q^* = 0{,}5$ y 1 a los de la voluta simple.
+- Por encima de 1,1 el libro dice que la fuerza puede subir mucho; seguimos con $q^{*2}$
+  (elección propia).
+
+**Difusor con álabes:** la tabla da rangos ($k_{R0}$ = 0,02 a 0,09 y $k_{R,opt}$ = 0,01
+a 0,06). Usamos el centro de cada uno con la ley de la voluta simple (elección propia).
+
+**Para el diseño mecánico** se suma la parte variable $k_{R,dyn}$ (centro de los rangos
+de la tabla) y se toma $k_{R,tot} \ge 0{,}15$ (notas 12 y 13 de la tabla).
+
+Un difusor sin álabes toma el empuje de la voluta que lo sigue. Sin voluta detrás no hay
+datos.
+
+**Bomba de referencia** (voluta simple, $n_q$ = 35,9):
+
+| Punto | $k_R$ | $F_R$ |
+|---|---|---|
+| Diseño | 0,023 | 30 N |
+| Válvula cerrada | 0,304 | 487 N |
+| Para el diseño mecánico | — | 640 N |
+
 ## Dónde se usa
 
 - **Interfaz:**
@@ -369,7 +419,8 @@ $\lambda = 4{,}23$ frente a 4,18 y $K = 0{,}053$ frente a 0,054.
 - **Línea de comandos:** `turbopump performance`, que escribe la curva también en CSV
   (con el NPSH₃ y la pérdida en la voluta), y `turbopump analysis`, con el flujo
   potencial y las caras del álabe, también en CSV. Los coeficientes del NPSH₃ se fijan
-  con `--set npsh_inlet=`, `npsh_blade=` y `npsh_exponent=`.
+  con `--set npsh_inlet=`, `npsh_blade=` y `npsh_exponent=`, y las holguras del empuje
+  radial con `--set clearances=wide`.
 
 ## Limitaciones
 
