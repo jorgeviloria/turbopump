@@ -29,9 +29,9 @@ pub(crate) struct VoluteArgs {
     /// rib_wrap (wrap of the inner volute of a double volute), rib (rib thickness),
     /// rib_nose (length over thickness of the elliptic nose and tail of the rib, 1 for a
     /// semicircle), channel_ratio (outlet area of the outer channel over the first
-    /// throat), discharge (tangential, opening to both sides; tangential:inner or
-    /// tangential:outer with that wall straight; radial or radial:DEGREES from the line
-    /// through the pump axis), bend (bend radius of a radial discharge), rotation (angle
+    /// throat), discharge (radial, the default, with the outlet on the pump centerline,
+    /// or radial:DEGREES from the line through the pump axis; tangential, opening to both
+    /// sides; tangential:inner or tangential:outer with that wall straight), bend (bend radius of a radial discharge), rotation (angle
     /// of the cutwater from the x axis; auto turns the discharge vertically up), cutwater
     /// (tangent, sharp or rounded), nose (radius of a rounded cutwater).
     #[arg(long = "set", value_name = "KEY=VALUE")]
