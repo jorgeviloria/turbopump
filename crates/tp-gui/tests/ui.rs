@@ -381,3 +381,49 @@ fn cross_sections_are_defined_round_the_spiral() {
     let project = harness.state().document().project();
     assert!(project.compute_volute(project.components()[1].id()).is_ok());
 }
+
+#[test]
+fn internal_sections_share_their_bend() {
+    use tp_design::volute::{BendWall, SectionShape};
+    let mut harness = harness();
+    for _ in 0..6 {
+        accept(&mut harness);
+    }
+    harness.get_by_label("Volute setup").click();
+    harness.run();
+    accept(&mut harness);
+    let input = |harness: &Harness<'_, TurbopumpApp>| {
+        let project = harness.state().document().project();
+        project.volute_input(project.components()[1].id()).unwrap()
+    };
+    harness.get_by_value("Trapezoid").click();
+    harness.run();
+    harness.get_by_label("Round, asymmetric, internal").click();
+    harness.run();
+    // A second internal definition, then a sharp inner wall on the selected one: both
+    // share the bend.
+    harness.get_by_label_contains("Add section").click();
+    harness.run();
+    harness
+        .get_all_by_value("quarter ellipse")
+        .next()
+        .unwrap()
+        .click();
+    harness.run();
+    harness.get_by_label("sharp corner").click();
+    harness.run();
+    let sections = input(&harness).cross_section.sections;
+    assert_eq!(sections.len(), 2);
+    for d in &sections {
+        let SectionShape::RoundInternal(round) = &d.shape else {
+            panic!("{d:?}");
+        };
+        assert_eq!(round.inner_bend, BendWall::Sharp);
+    }
+    // The design builds, with its bend.
+    let project = harness.state().document().project();
+    let g = project
+        .compute_volute(project.components()[1].id())
+        .unwrap();
+    assert!(g.bend.is_some());
+}

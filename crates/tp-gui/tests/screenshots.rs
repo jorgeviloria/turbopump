@@ -146,6 +146,37 @@ fn cross_sections() {
     save(&mut harness, "cross-section-segments");
 }
 
+/// An internal volute: its bend and neck in the cross-section view, the meridional view
+/// and 3D.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn internal_volute() {
+    let mut harness = harness(egui::Theme::Light);
+    for _ in 0..6 {
+        harness.get_by_label_contains("Accept step").click();
+        harness.run();
+    }
+    harness.get_by_label_contains("Volute setup").click();
+    harness.run();
+    harness.get_by_label_contains("Accept step").click();
+    harness.run();
+    harness.get_by_value("Trapezoid").click();
+    harness.run();
+    harness.get_by_label("Round, asymmetric, internal").click();
+    harness.state_mut().focus_view(View::CrossSection);
+    harness.remove_cursor();
+    harness.run();
+    save(&mut harness, "internal-section");
+    harness.get_by_label_contains("Properties").click();
+    harness.state_mut().focus_view(View::Meridional);
+    harness.remove_cursor();
+    harness.run();
+    save(&mut harness, "internal-meridional");
+    harness.state_mut().focus_view(View::View3d);
+    harness.run();
+    save(&mut harness, "internal-3d");
+}
+
 /// A stage with a vaned diffuser between impeller and volute.
 #[test]
 #[ignore = "needs a GPU; run with --ignored"]

@@ -7,8 +7,9 @@ use std::f64::consts::TAU;
 use eframe::egui::{self, Button, ComboBox, DragValue, Grid, Id, Ui};
 use tp_design::volute::section::default_segments;
 use tp_design::volute::{
-    BezierBase, BezierSide, DEFAULT_CONE_ANGLE_DEG, ExternalRound, InnerPosition, RadiusSide,
-    SectionDefinition, SectionShape, SegmentPoint, SideShape, VoluteInput,
+    BendWall, BezierBase, BezierSide, DEFAULT_CONE_ANGLE_DEG, ExternalRound, InnerPosition,
+    InternalRound, RadiusSide, SectionDefinition, SectionShape, SegmentPoint, SideShape,
+    VoluteInput,
 };
 use tp_project::ComponentId;
 use tp_units::{DisplayUnits, QuantityKind};
@@ -42,6 +43,7 @@ pub(crate) enum Kind {
     Trapezoidal,
     Round,
     External,
+    Internal,
     BezierRectangle,
     BezierTrapezoid,
     LineSegments,
@@ -50,11 +52,23 @@ pub(crate) enum Kind {
 
 impl Kind {
     /// Every kind a whole section can be.
-    const SECTION: [Kind; 8] = [
+    const SECTION: [Kind; 9] = [
         Kind::Rectangular,
         Kind::Trapezoidal,
         Kind::Round,
         Kind::External,
+        Kind::Internal,
+        Kind::BezierRectangle,
+        Kind::BezierTrapezoid,
+        Kind::LineSegments,
+        Kind::RadiusBased,
+    ];
+
+    /// Every kind one side can be.
+    const SIDE: [Kind; 7] = [
+        Kind::Rectangular,
+        Kind::Trapezoidal,
+        Kind::Round,
         Kind::BezierRectangle,
         Kind::BezierTrapezoid,
         Kind::LineSegments,
@@ -67,6 +81,7 @@ impl Kind {
             Kind::Trapezoidal => "Trapezoid",
             Kind::Round => "Round",
             Kind::External => "Round, asymmetric",
+            Kind::Internal => "Round, asymmetric, internal",
             Kind::BezierRectangle => "Bézier, rectangle type",
             Kind::BezierTrapezoid => "Bézier, trapezoid type",
             Kind::LineSegments => "Line segments",
@@ -85,6 +100,10 @@ impl Kind {
                  secondary flow; it cannot be cast"
             }
             Kind::Round => "Elliptic arc through the inlet point: good for stresses",
+            Kind::Internal => {
+                "Round section beside the impeller, inside the inlet radius, reached through \
+                 a bend and a neck: for volutes that must stay small in diameter"
+            }
             Kind::External => {
                 "Round section growing toward one side: a more favourable secondary flow, \
                  often after mixed-flow impellers"
@@ -112,6 +131,7 @@ impl Kind {
         match shape {
             SectionShape::Sides { left, .. } => Kind::of_side(left),
             SectionShape::RoundExternal(_) => Kind::External,
+            SectionShape::RoundInternal(_) => Kind::Internal,
         }
     }
 
@@ -133,7 +153,7 @@ impl Kind {
             Kind::Rectangular => SideShape::Rectangular {
                 tangent_angle: tangent,
             },
-            Kind::Trapezoidal | Kind::External => SideShape::Trapezoidal {
+            Kind::Trapezoidal | Kind::External | Kind::Internal => SideShape::Trapezoidal {
                 cone_angle: cone,
                 tangent_angle: tangent,
             },
@@ -163,11 +183,15 @@ impl Kind {
         match (self, shape) {
             (Kind::External, SectionShape::RoundExternal(_)) => shape.clone(),
             (Kind::External, _) => SectionShape::RoundExternal(ExternalRound::default()),
+            (Kind::Internal, SectionShape::RoundInternal(_)) => shape.clone(),
+            (Kind::Internal, _) => SectionShape::RoundInternal(InternalRound::default()),
             (kind, SectionShape::Sides { left, right }) => SectionShape::Sides {
                 left: kind.side(Some(left)),
                 right: right.clone(),
             },
-            (kind, SectionShape::RoundExternal(_)) => SectionShape::symmetric(kind.side(None)),
+            (kind, SectionShape::RoundExternal(_) | SectionShape::RoundInternal(_)) => {
+                SectionShape::symmetric(kind.side(None))
+            }
         }
     }
 }
@@ -232,6 +256,13 @@ pub(crate) fn describe(shape: &SectionShape, units: &DisplayUnits) -> String {
             "{}, growing toward {}",
             &[
                 &Kind::External.label(),
+                &if r.open_to_right { "+z" } else { "−z" },
+            ],
+        ),
+        SectionShape::RoundInternal(r) => tf(
+            "{}, growing toward {}",
+            &[
+                &Kind::Internal.label(),
                 &if r.open_to_right { "+z" } else { "−z" },
             ],
         ),
@@ -307,18 +338,14 @@ pub(crate) fn step(
                             ui,
                             ("section_right", i),
                             now,
-                            &Kind::SECTION[..3]
-                                .iter()
-                                .chain(&Kind::SECTION[4..])
-                                .copied()
-                                .collect::<Vec<_>>(),
+                            &Kind::SIDE,
                             Some(tr("symmetric")),
                         ) {
                             *right = picked.map(|k| k.side(right.as_ref()));
                             current = i;
                         }
                     }
-                    SectionShape::RoundExternal(_) => {
+                    SectionShape::RoundExternal(_) | SectionShape::RoundInternal(_) => {
                         ui.weak(tr("(the whole section)"));
                     }
                 }
@@ -380,6 +407,19 @@ pub(crate) fn step(
             }
         }
         SectionShape::RoundExternal(round) => external_editor(ui, round),
+        SectionShape::RoundInternal(round) => {
+            internal_editor(ui, round, b3, &units);
+            // Every internal definition shares the bend and the neck.
+            let shared = *round;
+            for d in sections.iter_mut() {
+                if let SectionShape::RoundInternal(other) = &mut d.shape {
+                    *other = InternalRound {
+                        ellipse_ratio: other.ellipse_ratio,
+                        ..shared
+                    };
+                }
+            }
+        }
     }
     ui.add_space(4.0);
     ui.weak(tr(
@@ -713,6 +753,86 @@ fn segments_editor(ui: &mut Ui, id: &str, points: &mut Vec<SegmentPoint>) {
             radius: 0.0,
         });
     }
+}
+
+fn bend_combo(ui: &mut Ui, salt: &str, wall: &mut BendWall) {
+    let text = |w: BendWall| {
+        tr(match w {
+            BendWall::Sharp => "sharp corner",
+            BendWall::Straight => "straight chamfer",
+            BendWall::Round => "quarter ellipse",
+        })
+    };
+    ComboBox::from_id_salt(salt)
+        .selected_text(text(*wall))
+        .show_ui(ui, |ui| {
+            for w in [BendWall::Sharp, BendWall::Straight, BendWall::Round] {
+                ui.selectable_value(wall, w, text(w));
+            }
+        });
+}
+
+fn internal_editor(ui: &mut Ui, round: &mut InternalRound, b3: Option<f64>, units: &DisplayUnits) {
+    let neck = b3.map(|b3| round.neck_width.resolve(|| 0.5 * b3));
+    grid("section_internal").show(ui, |ui| {
+        number_row(
+            ui,
+            tr("Ellipse ratio"),
+            tr("Axial over radial semi-axis, kept as the section grows: 1 for a circle"),
+            &mut round.ellipse_ratio,
+            0.2..=5.0,
+        );
+        ui.label(tr("Open to +z")).on_hover_text(tr(
+            "Toward +z, behind the impeller where its hub disk is; otherwise toward −z, the \
+             suction side",
+        ));
+        ui.checkbox(&mut round.open_to_right, "");
+        ui.label("");
+        ui.end_row();
+        param_f64(
+            ui,
+            tr("Neck width"),
+            tr("Length of the straight neck from the bend to the spiral; automatic: 0.5·b₃"),
+            &mut round.neck_width,
+            QuantityKind::Length,
+            neck,
+            units,
+            0.0..=1.0,
+        );
+        for (label, hint, wall, salt) in [
+            (
+                tr("Inner bend wall"),
+                tr("The wall on the inside of the turn, from the inlet point the flow turns to"),
+                &mut round.inner_bend,
+                "bend_inner",
+            ),
+            (
+                tr("Outer bend wall"),
+                tr("The wall on the outside of the turn, up to the top of the neck"),
+                &mut round.outer_bend,
+                "bend_outer",
+            ),
+        ] {
+            ui.label(label).on_hover_text(hint);
+            bend_combo(ui, salt, wall);
+            ui.label("");
+            ui.end_row();
+        }
+        number_row(
+            ui,
+            tr("Bend ratio"),
+            tr("Radial over axial semi-axis of the inner wall of the bend, which spans half the inlet width"),
+            &mut round.bend_ratio,
+            0.2..=5.0,
+        );
+        number_row(
+            ui,
+            tr("Bend area ratio"),
+            tr("Height of the neck over the inlet width b₃: the outlet of the bend over its inlet"),
+            &mut round.area_ratio,
+            0.3..=3.0,
+        );
+    });
 }
 
 fn external_editor(ui: &mut Ui, round: &mut ExternalRound) {

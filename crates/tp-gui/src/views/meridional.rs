@@ -391,6 +391,21 @@ impl MeridionalView {
                             .width(1.5),
                         );
                     }
+                    // The bend and neck of an internal volute.
+                    if let Some(bend) = &v.bend {
+                        let rz = v.design.stagnation_radius;
+                        for wall in [&bend.outer, &bend.inner] {
+                            let points = wall
+                                .iter()
+                                .flatten()
+                                .map(|p| DVec2::new(zm + p.x, rz + p.y));
+                            plot.line(
+                                Line::new("volute", line(points, scale))
+                                    .color(palette.volute)
+                                    .width(1.5),
+                            );
+                        }
+                    }
                     let n = v.sections.len();
                     for index in [n / 4, n / 2, 3 * n / 4, n - 1] {
                         let s = &v.sections[index];

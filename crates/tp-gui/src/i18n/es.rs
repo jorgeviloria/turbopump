@@ -6,6 +6,49 @@
 
 /// English text → Spanish text.
 pub(super) static TEXTS: &[(&str, &str)] = &[
+    // Internal cross sections of the volute.
+    (
+        "Round, asymmetric, internal",
+        "Redonda, asimétrica, interna",
+    ),
+    (
+        "Round section beside the impeller, inside the inlet radius, reached through a bend and a neck: for volutes that must stay small in diameter",
+        "Sección redonda junto al rodete, por dentro del radio de entrada, a la que se llega por un codo y un cuello: para volutas que deben quedar pequeñas de diámetro",
+    ),
+    ("sharp corner", "esquina viva"),
+    ("straight chamfer", "chaflán recto"),
+    ("quarter ellipse", "cuarto de elipse"),
+    (
+        "Toward +z, behind the impeller where its hub disk is; otherwise toward −z, the suction side",
+        "Hacia +z, detrás del rodete, donde está el disco del cubo; si no, hacia −z, el lado de aspiración",
+    ),
+    ("Neck width", "Largo del cuello"),
+    (
+        "Length of the straight neck from the bend to the spiral; automatic: 0.5·b₃",
+        "Largo del cuello recto entre el codo y la espiral; automático: 0,5·b₃",
+    ),
+    ("Inner bend wall", "Pared interior del codo"),
+    (
+        "The wall on the inside of the turn, from the inlet point the flow turns to",
+        "La pared del interior del giro, desde el punto de entrada hacia el que gira el flujo",
+    ),
+    ("Outer bend wall", "Pared exterior del codo"),
+    (
+        "The wall on the outside of the turn, up to the top of the neck",
+        "La pared del exterior del giro, hasta el techo del cuello",
+    ),
+    ("Bend ratio", "Relación del codo"),
+    (
+        "Radial over axial semi-axis of the inner wall of the bend, which spans half the inlet width",
+        "Semieje radial entre semieje axial de la pared interior del codo, que abarca media anchura de entrada",
+    ),
+    ("Bend area ratio", "Relación de áreas del codo"),
+    (
+        "Height of the neck over the inlet width b₃: the outlet of the bend over its inlet",
+        "Altura del cuello entre la anchura de entrada b₃: la salida del codo entre su entrada",
+    ),
+    ("bend and neck", "codo y cuello"),
+    ("limits of the spiral", "límites de la espiral"),
     // Cross sections of the volute.
     ("Rectangular", "Rectangular"),
     ("Trapezoid", "Trapecio"),
@@ -1826,6 +1869,31 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
 
 /// Messages of the design code, most specific first.
 pub(super) static MESSAGES: &[(&str, &str)] = &[
+    // Internal cross sections of the volute.
+    (
+        "internal cross sections cannot be mixed with other shapes: their bend and neck run all round the spiral",
+        "las secciones internas no se pueden mezclar con otras formas: su codo y su cuello recorren toda la espiral",
+    ),
+    (
+        "every internal cross section must share one bend and neck: only the ellipse ratio may change",
+        "todas las secciones internas deben compartir el mismo codo y cuello: solo puede cambiar la relación de la elipse",
+    ),
+    (
+        "the bend ratio must lie between 0.2 and 5, got {}",
+        "la relación del codo debe estar entre 0,2 y 5; se dio {}",
+    ),
+    (
+        "the area ratio of the bend must lie between 0.3 and 3, got {}",
+        "la relación de áreas del codo debe estar entre 0,3 y 3; se dio {}",
+    ),
+    (
+        "the neck width cannot be negative",
+        "el largo del cuello no puede ser negativo",
+    ),
+    (
+        "an internal volute has no cutwater of its own: it is where the spiral and the discharge diffuser cut each other",
+        "una voluta interna no tiene lengüeta propia: es donde se cortan la espiral y el difusor de descarga",
+    ),
     // Cross sections of the volute.
     (
         "a double volute needs straight walls at one cone angle: the cross sections were made trapezoidal at {}°",

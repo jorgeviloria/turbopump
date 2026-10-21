@@ -54,7 +54,7 @@ fn sides(shape: &SectionShape) -> Vec<(bool, &SideShape)> {
             }
             out
         }
-        SectionShape::RoundExternal(_) => Vec::new(),
+        SectionShape::RoundExternal(_) | SectionShape::RoundInternal(_) => Vec::new(),
     }
 }
 
@@ -96,12 +96,20 @@ fn side_mut(shape: &mut SectionShape, right: bool) -> Option<&mut SideShape> {
                 Some(left)
             }
         }
-        SectionShape::RoundExternal(_) => None,
+        SectionShape::RoundExternal(_) | SectionShape::RoundInternal(_) => None,
     }
 }
 
 impl CrossSectionView {
-    pub(crate) fn show(&mut self, ui: &mut Ui, cx: &mut EditCtx<'_>, volute: Option<ComponentId>) {
+    /// Shows the sections of `volute`, the plot kept clear of the `cover` px the
+    /// properties panel hides on the right.
+    pub(crate) fn show(
+        &mut self,
+        ui: &mut Ui,
+        cx: &mut EditCtx<'_>,
+        volute: Option<ComponentId>,
+        cover: f32,
+    ) {
         let Some(id) = volute else {
             ui.centered_and_justified(|ui| {
                 ui.weak(tr("Add a volute to see its cross sections."));
@@ -181,12 +189,13 @@ impl CrossSectionView {
         };
 
         let response = Plot::new(("cross_section", id.0))
+            .width((ui.available_width() - cover).max(200.0))
             .data_aspect(1.0)
             .allow_drag(active.is_none())
             .sense(Sense::click_and_drag())
             .x_axis_label(format!("B [{unit}]"))
             .y_axis_label(format!("H [{unit}]"))
-            .legend(Legend::default().position(Corner::RightBottom))
+            .legend(Legend::default().position(Corner::LeftBottom))
             .show(ui, |plot| {
                 if let Some(bounds) = frozen {
                     plot.set_plot_bounds(bounds);
@@ -215,6 +224,36 @@ impl CrossSectionView {
                         .anchor(Align2::CENTER_BOTTOM)
                         .color(palette.guide),
                     );
+                }
+                // The bend and neck of an internal section, with the limits the spiral
+                // keeps within: the top of the neck and its face.
+                if let SectionShape::RoundInternal(round) = &definition.shape {
+                    let bend = round.bend(b3);
+                    for wall in [&bend.outer, &bend.inner] {
+                        let points: PlotPoints = wall.iter().flatten().map(|p| at(*p)).collect();
+                        plot.line(
+                            Line::new(tr("bend and neck"), points)
+                                .color(palette.stator)
+                                .width(2.0),
+                        );
+                    }
+                    let away = bend.face.signum();
+                    let reach = 1.2 * (height_at(TAU).max(h) + b3);
+                    let far = bend.face + away * reach;
+                    for (a, b) in [
+                        (DVec2::new(bend.face, bend.top), DVec2::new(far, bend.top)),
+                        (
+                            DVec2::new(bend.face, bend.top),
+                            DVec2::new(bend.face, bend.top - reach),
+                        ),
+                    ] {
+                        plot.line(
+                            Line::new(tr("limits of the spiral"), vec![at(a), at(b)])
+                                .color(palette.guide)
+                                .style(LineStyle::dashed_loose())
+                                .width(1.0),
+                        );
+                    }
                 }
                 // Inlet and centre line.
                 plot.line(
