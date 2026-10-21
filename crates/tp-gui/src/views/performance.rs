@@ -1,8 +1,11 @@
-//! Predicted characteristic of the active impeller: head, efficiency and power against
-//! flow, with the estimated recirculation range dashed.
+//! Predicted characteristic of the active impeller: head, efficiency, power and the
+//! required NPSH against flow, with the estimated recirculation range dashed and the
+//! losses of the volute after the impeller.
 
 use eframe::egui::{Color32, DragValue, RichText, Ui};
-use egui_plot::{Corner, Legend, Line, LineStyle, MarkerShape, Plot, PlotPoints, Points, VLine};
+use egui_plot::{
+    Corner, HLine, Legend, Line, LineStyle, MarkerShape, Plot, PlotPoints, Points, VLine,
+};
 use tp_design::Param;
 use tp_design::performance::{Collector, PerformanceInput, PerformancePoint, PumpPerformance};
 use tp_project::{ComponentId, Project};
@@ -171,7 +174,30 @@ impl PerformanceView {
                     &[&s(Head, curve.shutoff_head), &s(Power, curve.shutoff_power)],
                 ),
             );
-            line(ui, "NPSH3", s(Head, curve.npsh_required));
+            line(
+                ui,
+                tr("NPSH₃"),
+                tf(
+                    "{} at design · available {}",
+                    &[
+                        &s(Head, curve.npsh_required),
+                        &s(Head, curve.npsh_available),
+                    ],
+                ),
+            );
+            if let Some(v) = &curve.volute {
+                line(
+                    ui,
+                    tr("Volute"),
+                    tf(
+                        "{} lost at design ({} % of the hydraulic losses)",
+                        &[
+                            &s(Head, v.design.total()),
+                            &format!("{:.0}", 100.0 * v.share),
+                        ],
+                    ),
+                );
+            }
         });
         for w in &curve.warnings {
             messages::card(ui, Severity::Warning, w);
@@ -184,22 +210,25 @@ impl PerformanceView {
     fn plots(&self, ui: &mut Ui, curve: &PumpPerformance, id: ComponentId, units: &DisplayUnits) {
         let palette = Palette::of(ui);
         let dark = ui.visuals().dark_mode;
+        let error = ui.visuals().error_fg_color;
         let flow = |p: &PerformancePoint| units.to_display(QuantityKind::VolumeFlow, p.flow);
         let symbol = |kind| units.get(kind).symbol;
         let onset = units.to_display(QuantityKind::VolumeFlow, curve.recirculation_flow);
         let spacing = ui.spacing().item_spacing.y;
-        let height = ((ui.available_height() - 2.0 * spacing) / 3.0).max(110.0);
+        let height = ((ui.available_height() - 3.0 * spacing) / 4.0).max(100.0);
         let colors = if dark {
             [
                 Color32::from_rgb(120, 170, 235),
                 Color32::from_rgb(110, 200, 120),
                 Color32::from_rgb(235, 150, 90),
+                Color32::from_rgb(190, 140, 230),
             ]
         } else {
             [
                 Color32::from_rgb(30, 80, 160),
                 Color32::from_rgb(28, 135, 64),
                 Color32::from_rgb(196, 100, 30),
+                Color32::from_rgb(120, 60, 170),
             ]
         };
 
@@ -208,7 +237,9 @@ impl PerformanceView {
         let head: Value = &|p| units.to_display(QuantityKind::Head, p.head);
         let efficiency: Value = &|p| 100.0 * p.efficiency;
         let power: Value = &|p| units.to_display(QuantityKind::Power, p.power);
-        let plots: [(&str, String, &str, Value, Color32); 3] = [
+        let npsh: Value = &|p| units.to_display(QuantityKind::Head, p.npsh_required);
+        let head_unit = symbol(QuantityKind::Head);
+        let plots: [(&str, String, &str, Value, Color32); 4] = [
             (
                 "curve_head",
                 format!("H [{}]", symbol(QuantityKind::Head)),
@@ -230,7 +261,15 @@ impl PerformanceView {
                 power,
                 colors[2],
             ),
+            (
+                "curve_npsh",
+                format!("NPSH₃ [{head_unit}]"),
+                tr("NPSH₃"),
+                npsh,
+                colors[3],
+            ),
         ];
+        let last = plots.len() - 1;
         for (index, (name, label, legend, value, color)) in plots.into_iter().enumerate() {
             let mut plot = Plot::new((name, id.0))
                 .height(height)
@@ -242,10 +281,11 @@ impl PerformanceView {
                 .y_grid_spacer(egui_plot::uniform_grid_spacer(super::nice_grid))
                 .include_y(0.0)
                 .allow_scroll(false);
-            // Head: every item; efficiency: its two curves; power: none.
+            // Head: every item; efficiency: its two curves; power: none; NPSH: its own.
             match index {
                 0 => plot = plot.legend(Legend::default().position(Corner::LeftBottom)),
                 1 => plot = plot.legend(Legend::default().position(Corner::RightBottom)),
+                3 => plot = plot.legend(Legend::default().position(Corner::LeftTop)),
                 _ => {}
             }
             // Items with an empty name stay out of the legend.
@@ -256,7 +296,7 @@ impl PerformanceView {
                     String::new()
                 }
             };
-            if index == 2 {
+            if index == last {
                 plot = plot.x_axis_label(format!("Q [{}]", symbol(QuantityKind::VolumeFlow)));
             }
             let response = plot.show(ui, |plot| {
@@ -309,6 +349,41 @@ impl PerformanceView {
                             .width(1.0)
                             .style(LineStyle::dashed_dense()),
                     );
+                }
+                if index == 3 {
+                    plot.hline(
+                        HLine::new(
+                            tr("NPSH available"),
+                            units.to_display(QuantityKind::Head, curve.npsh_available),
+                        )
+                        .color(palette.guide)
+                        .style(LineStyle::dashed_dense()),
+                    );
+                    if curve.volute.is_some() {
+                        let loss: PlotPoints = curve
+                            .points
+                            .iter()
+                            // The loss model says nothing in the recirculation range.
+                            .filter(|p| !p.estimated && p.volute_loss.is_finite())
+                            .map(|p| [flow(p), units.to_display(QuantityKind::Head, p.volute_loss)])
+                            .collect();
+                        plot.line(
+                            Line::new(tr("volute loss"), loss)
+                                .color(palette.volute)
+                                .width(1.5)
+                                .style(LineStyle::dotted_dense()),
+                        );
+                    }
+                    if let Some(q) = curve.cavitation_flow {
+                        let x = units.to_display(QuantityKind::VolumeFlow, q);
+                        let y = units.to_display(QuantityKind::Head, curve.npsh_available);
+                        plot.points(
+                            Points::new(tr("NPSH₃ reaches the available"), vec![[x, y]])
+                                .shape(MarkerShape::Cross)
+                                .radius(6.0)
+                                .color(error),
+                        );
+                    }
                 }
                 if index == 1 {
                     let hydraulic: PlotPoints = curve

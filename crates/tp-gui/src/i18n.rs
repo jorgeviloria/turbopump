@@ -233,6 +233,18 @@ mod tests {
             let m = message("the predicted best efficiency is at 90 % of the design flow");
             assert!(m.starts_with("el máximo rendimiento previsto"), "{m}");
             assert!(m.contains("90"));
+            let m = message(
+                "NPSH₃ exceeds the NPSH available of 10.11 m above 143 % of the design flow",
+            );
+            assert_eq!(
+                m,
+                "el NPSH₃ supera el NPSH disponible de 10.11 m por encima del 143 % del caudal de diseño"
+            );
+            let m = message("the NPSH₃ exponent must lie between 1 and 6, got 0.2");
+            assert_eq!(
+                m,
+                "el exponente del NPSH₃ debe estar entre 1 y 6; se recibió 0.2"
+            );
         });
     }
 

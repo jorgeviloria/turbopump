@@ -426,6 +426,82 @@ pub(crate) fn show(
                                 ],
                             ),
                         );
+                        let n = &c.npsh;
+                        let percent = |flow: f64| format!("{:.0} %", 100.0 * flow / q);
+                        value_row(
+                            ui,
+                            tr("NPSH₃ at design"),
+                            tf(
+                                "{} (Gülich eq. 6.10, λ_c {}, λ_w {}{}) · available {}",
+                                &[
+                                    &s(Head, c.npsh_required),
+                                    &format!("{:.2}", n.inlet_coefficient),
+                                    &format!("{:.3}", n.blade_coefficient),
+                                    &if n.extrapolated {
+                                        tr(", extrapolated").to_owned()
+                                    } else {
+                                        String::new()
+                                    },
+                                    &s(Head, c.npsh_available),
+                                ],
+                            ),
+                        );
+                        value_row(
+                            ui,
+                            tr("NPSH₃ rises steeply above"),
+                            tf(
+                                "{} ({}): shockless entry {}, w₁ = w₁q at {}, collector {}",
+                                &[
+                                    &s(VolumeFlow, n.knee_flow),
+                                    &percent(n.knee_flow),
+                                    &percent(n.shockless_flow),
+                                    &n.throat_flow.map_or("—".into(), percent),
+                                    &n.collector_flow.map_or("—".into(), percent),
+                                ],
+                            ),
+                        );
+                        if let Some(flow) = c.cavitation_flow {
+                            value_row(
+                                ui,
+                                tr("NPSH₃ reaches the available"),
+                                format!("{} ({})", s(VolumeFlow, flow), percent(flow)),
+                            );
+                        }
+                        if let Some(v) = &c.volute {
+                            let d = &v.design;
+                            value_row(
+                                ui,
+                                tr("Volute loss at design"),
+                                tf(
+                                    "{} ({} % of the hydraulic losses): spiral {}, cone {}",
+                                    &[
+                                        &s(Head, d.total()),
+                                        &format!("{:.0}", 100.0 * v.share),
+                                        &s(Head, d.spiral_loss),
+                                        &s(Head, d.cone_loss),
+                                    ],
+                                ),
+                            );
+                            value_row(
+                                ui,
+                                tr("Volute spiral"),
+                                tf(
+                                    "λ {} · AR {} · λ₆·AR {} · K {} · C_p {} (Japikse eqs. 4.6–4.8)",
+                                    &[
+                                        &format!("{:.2}", d.swirl),
+                                        &format!("{:.3}", d.area_ratio),
+                                        &format!("{:.2}", d.matching),
+                                        &format!("{:.3}", d.loss_coefficient),
+                                        &format!("{:.3}", d.recovery),
+                                    ],
+                                ),
+                            );
+                            value_row(
+                                ui,
+                                tr("Volute least loss at"),
+                                v.matched_flow.map_or("—".into(), percent),
+                            );
+                        }
                     });
                 warnings(ui, &c.warnings);
             }

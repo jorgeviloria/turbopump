@@ -1146,10 +1146,72 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Drag the round handles to shape the contour. Drag the background to pan, scroll to zoom, double-click to fit.",
         "Arrastra los puntos redondos para dar forma al contorno. Arrastra el fondo para desplazar, usa la rueda para acercar y haz doble clic para encuadrar.",
     ),
+    ("NPSH₃", "NPSH₃"),
+    ("volute loss", "pérdida en la voluta"),
+    (
+        "NPSH₃ reaches the available",
+        "El NPSH₃ alcanza el disponible",
+    ),
+    (
+        "{} at design · available {}",
+        "{} en el diseño · disponible {}",
+    ),
+    (
+        "{} lost at design ({} % of the hydraulic losses)",
+        "{} perdidos en el diseño ({} % de las pérdidas hidráulicas)",
+    ),
+    ("NPSH₃ at design", "NPSH₃ en el diseño"),
+    (", extrapolated", ", extrapolado"),
+    (
+        "NPSH₃ rises steeply above",
+        "El NPSH₃ sube rápido por encima de",
+    ),
+    ("Volute loss at design", "Pérdida en la voluta en el diseño"),
+    ("Volute spiral", "Espiral de la voluta"),
+    ("Volute least loss at", "Menor pérdida de la voluta al"),
+    (
+        "{} (Gülich eq. 6.10, λ_c {}, λ_w {}{}) · available {}",
+        "{} (Gülich ec. 6.10, λ_c {}, λ_w {}{}) · disponible {}",
+    ),
+    (
+        "{} ({}): shockless entry {}, w₁ = w₁q at {}, collector {}",
+        "{} ({}): entrada sin choque {}, w₁ = w₁q al {}, colector {}",
+    ),
+    (
+        "{} ({} % of the hydraulic losses): spiral {}, cone {}",
+        "{} ({} % de las pérdidas hidráulicas): espiral {}, cono {}",
+    ),
+    (
+        "λ {} · AR {} · λ₆·AR {} · K {} · C_p {} (Japikse eqs. 4.6–4.8)",
+        "λ {} · AR {} · λ₆·AR {} · K {} · C_p {} (Japikse ecs. 4.6–4.8)",
+    ),
+    ("λ_c of the NPSH₃", "λ_c del NPSH₃"),
+    ("λ_w of the NPSH₃", "λ_w del NPSH₃"),
+    ("NPSH₃ exponent", "exponente del NPSH₃"),
 ];
 
 /// Messages of the design code, most specific first.
 pub(super) static MESSAGES: &[(&str, &str)] = &[
+    (
+        "the volute loses {} m at the design point, more than the {} m of all the hydraulic losses: check the volute",
+        "la voluta pierde {} m en el punto de diseño, más que los {} m de todas las pérdidas hidráulicas: revisa la voluta",
+    ),
+    (
+        "the volute has its least loss at {} % of the design flow",
+        "la voluta tiene su menor pérdida al {} % del caudal de diseño",
+    ),
+    (
+        "NPSH₃ exceeds the NPSH available of {} m above {} % of the design flow",
+        "el NPSH₃ supera el NPSH disponible de {} m por encima del {} % del caudal de diseño",
+    ),
+    (
+        "the collector after the impeller is left out of the prediction: {}",
+        "el colector tras el rodete queda fuera de la predicción: {}",
+    ),
+    (
+        "the {} must lie between {} and {}, got {}",
+        "el {} debe estar entre {} y {}; se recibió {}",
+    ),
     ("invalid input: {}", "dato no válido: {}"),
     ("no feasible design: {}", "no hay diseño posible: {}"),
     (
