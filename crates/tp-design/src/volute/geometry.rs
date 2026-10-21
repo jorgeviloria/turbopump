@@ -11,20 +11,12 @@ use tp_math::{DVec2, DVec3};
 
 use super::stress::WallStress;
 use super::{
-    CutwaterShape, DischargeShape, SectionShape, SectionSize, StraightWall, VoluteDesign,
+    CrossSections, CutwaterShape, DischargeShape, SectionSize, StraightWall, VoluteDesign,
     VoluteInput,
 };
 use crate::outlet::ImpellerOutlet;
 use crate::{DesignError, Param};
 
-/// Points on each straight edge of a rectangular or trapezoidal outline.
-const EDGE_POINTS: usize = 10;
-/// Points on each rounded outer corner.
-const CORNER_POINTS: usize = 8;
-/// Points of every outline.
-pub const OUTLINE_POINTS: usize = 4 * EDGE_POINTS + 2 * CORNER_POINTS;
-/// Corner radius as a fraction of the smaller side of the section.
-const CORNER_FRACTION: f64 = 0.2;
 /// Sections of the discharge diffuser after the throat.
 const NOZZLE_SECTIONS: usize = 10;
 const DEFAULT_SECTIONS: u32 = 36;
@@ -278,17 +270,16 @@ impl VoluteGeometry {
         self.channels().into_iter().flatten().collect()
     }
 
-    /// Indices where the pieces of every outline start: flanks, rounded corners, outer
-    /// wall and inlet for rectangles and trapezoids; a single smooth loop for circles.
-    /// The outline is smooth inside a piece and may have a corner between pieces.
+    /// Indices where the pieces of every outline start: the inlet points, the top and
+    /// the corners the cross sections share ([`CrossSections::loft_breaks`]). The
+    /// outline is smooth inside a piece and may have a corner between pieces.
     pub fn ring_breaks(&self) -> Vec<usize> {
-        match self.design.shape {
-            SectionShape::Circular => vec![0],
-            _ => {
-                let (e, c) = (EDGE_POINTS, CORNER_POINTS);
-                vec![0, e, e + c, 2 * e + c, 2 * e + 2 * c, 3 * e + 2 * c]
-            }
-        }
+        self.design.cross_sections.loft_breaks()
+    }
+
+    /// Points of every outline of the spiral.
+    pub fn outline_points(&self) -> usize {
+        self.design.cross_sections.loft_points()
     }
 
     /// Inner and outer radius of the vaneless ring between impeller and volute.
@@ -349,104 +340,27 @@ pub fn offset_ring(ring: &[DVec3], distance: f64) -> Vec<DVec3> {
         .collect()
 }
 
-/// Points from `a` (included) to `b` (excluded).
-fn segment(out: &mut Vec<DVec2>, a: DVec2, b: DVec2, count: usize) {
-    out.extend((0..count).map(|i| a.lerp(b, i as f64 / count as f64)));
-}
-
-/// Arc of `count` points from `from` (included) toward `to` (excluded) about `center`.
-fn arc(out: &mut Vec<DVec2>, center: DVec2, from: DVec2, to: DVec2, count: usize) {
-    let (a0, a1) = (from - center, to - center);
-    let start = a0.y.atan2(a0.x);
-    let mut sweep = a1.y.atan2(a1.x) - start;
-    // The fillet turns by less than π.
-    while sweep > std::f64::consts::PI {
-        sweep -= TAU;
-    }
-    while sweep < -std::f64::consts::PI {
-        sweep += TAU;
-    }
-    let radius = a0.length();
-    out.extend((0..count).map(|i| {
-        let t = start + sweep * i as f64 / count as f64;
-        center + radius * DVec2::new(t.cos(), t.sin())
-    }));
-}
-
-/// Tangent points and centre of a fillet of radius `r` at corner `v` between the edges
-/// from `prev` and to `next`.
-fn fillet(prev: DVec2, v: DVec2, next: DVec2, r: f64) -> (DVec2, DVec2, DVec2) {
-    let d1 = (prev - v).normalize();
-    let d2 = (next - v).normalize();
-    let half = 0.5 * d1.dot(d2).clamp(-1.0, 1.0).acos();
-    let along = r / half.tan();
-    let bisector = (d1 + d2).normalize();
-    (
-        v + d1 * along,
-        v + d2 * along,
-        v + bisector * (r / half.sin()),
-    )
-}
-
-/// Outline of a section of height `a` (or diameter, for circles), starting at the
-/// inner corner nearest the hub side and turning counter-clockwise in (r, z).
-pub(crate) fn outline(shape: SectionShape, b3: f64, rz: f64, a: f64, midplane: f64) -> Vec<DVec2> {
-    let mut out = Vec::with_capacity(OUTLINE_POINTS);
-    if let SectionShape::Circular = shape {
-        let centre = DVec2::new(rz + a / 2.0, midplane);
-        let radius = (a / 2.0).max(1e-9);
-        out.extend((0..OUTLINE_POINTS).map(|i| {
-            let t = std::f64::consts::PI + TAU * i as f64 / OUTLINE_POINTS as f64;
-            centre + radius * DVec2::new(t.cos(), t.sin())
-        }));
-        return out;
-    }
-    let t = match shape {
-        SectionShape::Trapezoidal { flank_angle } => flank_angle.tan(),
-        _ => 0.0,
-    };
-    let a = a.max(1e-9);
-    let half = b3 / 2.0;
-    let inner_low = DVec2::new(rz, midplane - half);
-    let outer_low = DVec2::new(rz + a, midplane - half - a * t);
-    let outer_high = DVec2::new(rz + a, midplane + half + a * t);
-    let inner_high = DVec2::new(rz, midplane + half);
-    let width = outer_high.y - outer_low.y;
-    let flank = inner_low.distance(outer_low);
-    let radius = (CORNER_FRACTION * a.min(width)).min(0.45 * flank.min(width));
-    let (p1, p2, c1) = fillet(inner_low, outer_low, outer_high, radius);
-    let (p3, p4, c2) = fillet(outer_low, outer_high, inner_high, radius);
-    segment(&mut out, inner_low, p1, EDGE_POINTS);
-    arc(&mut out, c1, p1, p2, CORNER_POINTS);
-    segment(&mut out, p2, p3, EDGE_POINTS);
-    arc(&mut out, c2, p3, p4, CORNER_POINTS);
-    segment(&mut out, p4, inner_high, EDGE_POINTS);
-    segment(&mut out, inner_high, inner_low, EDGE_POINTS);
-    out
-}
-
-/// Outline whose enclosed area equals `area`: rounding the corners and sampling the arcs
-/// remove a little area, which a slightly larger height gives back.
+/// The lofted outline (r, z) of the section of `size` at `angle`, scaled a little so
+/// that it encloses the area of the design section: sampling curved walls for the loft
+/// removes some area, which a slightly larger height gives back.
 fn fitted_outline(
-    shape: SectionShape,
-    b3: f64,
-    rz: f64,
-    height: f64,
+    sections: &CrossSections,
+    angle: f64,
+    size: &SectionSize,
     midplane: f64,
-    area: f64,
 ) -> Vec<DVec2> {
-    let mut h = height;
-    let mut points = outline(shape, b3, rz, h, midplane);
+    let mut h = size.height;
+    let mut outline = sections.loft_outline(angle, h);
     for _ in 0..40 {
-        let ratio = area / polygon_area(&points);
-        if !ratio.is_finite() || (ratio - 1.0).abs() < 1e-7 {
+        let ratio = size.area / outline.signed_area();
+        if !ratio.is_finite() || (ratio - 1.0).abs() < 1e-10 {
             break;
         }
         // The area grows with a power of the height between 1 and 2.
         h *= ratio.powf(0.75);
-        points = outline(shape, b3, rz, h, midplane);
+        outline = sections.loft_outline(angle, h);
     }
-    points
+    outline.meridional(sections.stagnation_radius, midplane)
 }
 
 /// Signed area of a closed polygon (positive counter-clockwise).
@@ -504,20 +418,12 @@ impl VoluteGeometry {
         }
         let sign = basis.rotation_sign;
         let zm = basis.midplane;
-        let shape = design.shape;
         let make = |angle: f64| -> Result<VoluteSection, DesignError> {
             let size = design.section(angle)?;
             Ok(VoluteSection {
                 angle,
                 size,
-                outline: fitted_outline(
-                    shape,
-                    design.inlet_width,
-                    design.stagnation_radius,
-                    size.height,
-                    zm,
-                    size.area,
-                ),
+                outline: fitted_outline(&design.cross_sections, angle, &size, zm),
                 rotation: 0.0,
             })
         };
@@ -532,19 +438,16 @@ impl VoluteGeometry {
 
         // Double volute: the outer channel outside the rib, and the section where both
         // channels meet the discharge diffuser.
-        let base_width = |height: f64| match shape {
-            SectionShape::Trapezoidal { flank_angle } => {
-                design.inlet_width + 2.0 * height * flank_angle.tan()
-            }
-            _ => design.inlet_width,
-        };
+        let straight = design.shape();
+        let base_width = |height: f64| design.inlet_width + 2.0 * height * straight.slope();
         let inner_height = |angle: f64| -> Result<f64, DesignError> {
             match &design.rib {
                 Some(rib) if angle > rib.start => Ok(design.section(angle)?.height),
                 _ => Ok(0.0),
             }
         };
-        // The outer channel: the part of the whole section beyond the rib.
+        // The outer channel: the part of the whole section beyond the rib, the same
+        // straight walls on a wider base.
         let channel = |angle: f64| -> Result<VoluteSection, DesignError> {
             let rib = design.rib.as_ref().expect("a double volute");
             let a = inner_height(angle)?;
@@ -552,15 +455,16 @@ impl VoluteGeometry {
             let rz = design.stagnation_radius + a + rib.thickness;
             let area = rib.channel_area(angle);
             let part = super::Shape {
-                kind: shape,
                 b3: base,
                 rz,
+                ..straight
             };
-            let height = part.height_for_area(area);
+            let size = part.size(part.height_for_area(area));
+            let sections = design.cross_sections.with_inlet(base, rz);
             Ok(VoluteSection {
                 angle,
-                size: part.size(height),
-                outline: fitted_outline(shape, base, rz, height, zm, area),
+                size,
+                outline: fitted_outline(&sections, angle, &size, zm),
                 rotation: 0.0,
             })
         };
@@ -568,20 +472,13 @@ impl VoluteGeometry {
         // channel. At the rib nose it is the throat of the first partial volute.
         let whole = |angle: f64| -> Result<VoluteSection, DesignError> {
             let rib = design.rib.as_ref().expect("a double volute");
-            let whole = design.shape();
-            let area = whole.area(inner_height(angle)? + rib.thickness) + rib.channel_area(angle);
-            let size = whole.size(whole.height_for_area(area));
+            let area =
+                straight.area(inner_height(angle)? + rib.thickness) + rib.channel_area(angle);
+            let size = straight.size(straight.height_for_area(area));
             Ok(VoluteSection {
                 angle,
                 size,
-                outline: fitted_outline(
-                    shape,
-                    design.inlet_width,
-                    design.stagnation_radius,
-                    size.height,
-                    zm,
-                    area,
-                ),
+                outline: fitted_outline(&design.cross_sections, angle, &size, zm),
                 rotation: 0.0,
             })
         };
@@ -1154,7 +1051,7 @@ fn nozzle(
 mod tests {
     use super::super::tests::reference_basis;
     use super::*;
-    use crate::volute::AreaLaw;
+    use crate::volute::{AreaLaw, CrossSectionInput, SectionShape, SideShape};
 
     #[test]
     fn outlines_offset_outward_in_their_plane() {
@@ -1222,21 +1119,23 @@ mod tests {
 
     fn geometry(shape: SectionShape) -> VoluteGeometry {
         let mut input = unturned();
-        input.cross_section.shape = shape;
+        input.cross_section = CrossSectionInput::single(shape);
         VoluteGeometry::build(&reference_basis(), &input).unwrap()
     }
 
     #[test]
     fn outlines_have_a_fixed_point_count() {
         for shape in [
-            SectionShape::Rectangular,
-            SectionShape::Circular,
+            SectionShape::rectangular(),
+            SectionShape::round(),
             SectionShape::default(),
+            SectionShape::symmetric(SideShape::RadiusBased(Default::default())),
+            SectionShape::RoundExternal(Default::default()),
         ] {
             let g = geometry(shape);
             assert_eq!(g.sections.len(), 37);
             for ring in g.rings() {
-                assert_eq!(ring.len(), OUTLINE_POINTS);
+                assert_eq!(ring.len(), g.outline_points());
             }
             assert_eq!(g.nozzle.len(), NOZZLE_SECTIONS + 1);
         }
@@ -1250,7 +1149,7 @@ mod tests {
             assert!(polygon > 0.0, "outlines turn counter-clockwise");
             assert_relative_eq!(polygon, s.size.area, max_relative = 1e-6);
         }
-        let circles = geometry(SectionShape::Circular);
+        let circles = geometry(SectionShape::round());
         let throat = circles.sections.last().unwrap();
         assert_relative_eq!(
             polygon_area(&throat.outline),
@@ -1473,7 +1372,7 @@ mod tests {
         let channels = g.channels();
         assert_eq!(channels.len(), 3);
         for ring in channels.iter().flatten() {
-            assert_eq!(ring.len(), OUTLINE_POINTS);
+            assert_eq!(ring.len(), g.outline_points());
         }
         // The diffuser starts from both channels and the rib between them.
         let first = &g.nozzle[0];
@@ -1552,10 +1451,10 @@ mod tests {
 
     #[test]
     fn rectangles_and_trapezoids_build_as_a_double_volute() {
-        for shape in [SectionShape::Rectangular, SectionShape::default()] {
+        for shape in [SectionShape::rectangular(), SectionShape::default()] {
             let mut input = unturned();
             input.setup.kind = crate::volute::VoluteKind::Double;
-            input.cross_section.shape = shape;
+            input.cross_section = CrossSectionInput::single(shape);
             let g = VoluteGeometry::build(&reference_basis(), &input).unwrap();
             assert!(!g.inner_sections.is_empty() && !g.outer_channel.is_empty());
             assert_eq!(g.envelope.len(), g.outer_channel.len());
