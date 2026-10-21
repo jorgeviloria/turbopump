@@ -1,5 +1,6 @@
 //! CAD solid of the volute flow domain: the vaneless ring after the impeller, the
-//! spiral channel and the discharge diffuser.
+//! spiral channel and the discharge diffuser. A double volute lofts its two channels
+//! and the diffuser apart and joins them.
 
 use tp_design::volute::VoluteGeometry;
 use tp_math::DVec3;
@@ -53,12 +54,19 @@ fn section_wire(ring: &[DVec3], breaks: &[usize]) -> Result<Shape, CadError> {
 /// Builds the volute channel and its flow domain from the geometry.
 pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
     let breaks = g.ring_breaks();
-    let wires = g
-        .rings()
-        .iter()
-        .map(|ring| section_wire(ring, &breaks))
-        .collect::<Result<Vec<_>, _>>()?;
-    let channel = occ::loft(&wires)?;
+    let mut channel: Option<Shape> = None;
+    for rings in g.channels() {
+        let wires = rings
+            .iter()
+            .map(|ring| section_wire(ring, &breaks))
+            .collect::<Result<Vec<_>, _>>()?;
+        let piece = occ::loft(&wires)?;
+        channel = Some(match channel {
+            None => piece,
+            Some(c) => c.fuse(&piece)?,
+        });
+    }
+    let channel = channel.expect("a volute has at least one channel");
 
     // Ring between the impeller outlet and the cutwater circle, as wide as the volute
     // inlet. It reaches slightly into the channel so the two solids overlap.
@@ -104,17 +112,19 @@ mod tests {
     }
 
     /// Volume of the channel by Pappus: spiral sections swept about the axis, plus the
-    /// straight diffuser.
+    /// straight diffuser. A double volute adds its inner volute and outer channel.
     fn expected_channel_volume(g: &VoluteGeometry) -> f64 {
-        let spiral: f64 = g
-            .sections
-            .windows(2)
-            .map(|w| {
-                let a = 0.5 * (w[0].size.area + w[1].size.area);
-                let r = 0.5 * (w[0].size.centroid_radius + w[1].size.centroid_radius);
-                a * r * (w[1].angle - w[0].angle)
-            })
-            .sum();
+        let swept = |sections: &[tp_design::volute::VoluteSection]| -> f64 {
+            sections
+                .windows(2)
+                .map(|w| {
+                    let a = 0.5 * (w[0].size.area + w[1].size.area);
+                    let r = 0.5 * (w[0].size.centroid_radius + w[1].size.centroid_radius);
+                    a * r * (w[1].angle - w[0].angle)
+                })
+                .sum()
+        };
+        let spiral = swept(&g.sections) + swept(&g.inner_sections) + swept(&g.outer_channel);
         let nozzle: f64 = g
             .nozzle
             .windows(2)
@@ -146,5 +156,23 @@ mod tests {
             let fluid = cad.fluid.volume_with_tolerance(1e-3) / MM.powi(3);
             assert!(fluid > channel + 0.8 * ring && fluid < channel + 1.3 * ring);
         }
+    }
+
+    #[test]
+    fn a_double_volute_is_one_valid_solid() {
+        let mut input = VoluteInput::default();
+        input.setup.kind = tp_design::volute::VoluteKind::Double;
+        let g = VoluteGeometry::build(&basis(), &input).unwrap();
+        let cad = build_volute(&g).unwrap();
+        for s in [&cad.channel, &cad.fluid] {
+            assert!(s.is_valid());
+            assert_eq!(s.solid_count(), 1);
+        }
+        let channel = cad.channel.volume_with_tolerance(1e-3) / MM.powi(3);
+        let expected = expected_channel_volume(&g);
+        assert!(
+            (channel / expected - 1.0).abs() < 0.05,
+            "{channel} vs {expected}"
+        );
     }
 }
