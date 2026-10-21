@@ -1251,10 +1251,104 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ),
     ("single", "simple"),
     ("double", "doble"),
+    ("cutwater", "lengüeta"),
+    ("tangent", "tangente"),
+    (
+        "Effective cutwater diameter",
+        "Diámetro efectivo de la lengüeta",
+    ),
+    ("tangential", "tangencial"),
+    (
+        "sharp, tip at {} with a wedge of {}",
+        "afilada, punta a {} con una cuña de {}",
+    ),
+    (
+        "rounded with ρ {}, tip at {} with a wedge of {}",
+        "redondeada con ρ {}, punta a {} con una cuña de {}",
+    ),
+    (
+        "radial, bend R_N {} turning {}, axis at {}",
+        "radial, codo R_N {} que gira {}, eje a {}",
+    ),
+    (
+        "{}; {} long, outlet {}, area ratio {}",
+        "{}; {} de largo, salida {}, relación de áreas {}",
+    ),
+    (
+        "Conical diffuser from the throat to the discharge nozzle, straight or with a bend, checked against the allowable opening angle (Gülich eqs. 1.44, 1.45).",
+        "Difusor cónico de la garganta a la brida de descarga, recto o con codo, comprobado contra el ángulo de apertura admisible (Gülich ecs. 1.44 y 1.45).",
+    ),
+    (
+        "Tangential: straight along the flow at the throat. Radial: a bend turning the flow away from the pump axis (Gülich Fig. 7.42)",
+        "Tangencial: recto, en la dirección del flujo en la garganta. Radial: un codo que aleja el flujo del eje de la bomba (Gülich Fig. 7.42)",
+    ),
+    ("Axis angle", "Ángulo del eje"),
+    (
+        "Between the straight part and the line from the pump axis; 0: the discharge points straight away from the pump axis",
+        "Entre el tramo recto y la línea desde el eje de la bomba; 0: la descarga sale en línea con el eje de la bomba",
+    ),
+    ("Bend radius R_N", "Radio del codo R_N"),
+    (
+        "Mean radius of the bend; automatic: 1.5·√(4·A₃q/π) (Gülich eq. 7.29)",
+        "Radio medio del codo; automático: 1,5·√(4·A₃q/π) (Gülich ec. 7.29)",
+    ),
+    ("Bend turns", "Giro del codo"),
+    ("Centerline length", "Longitud de la línea media"),
+    (
+        "Tangent: the spiral starts where it clears the diffuser. Sharp: the spiral cuts the diffuser wall. Rounded: a nose of radius ρ on the cutwater circle (Gülich Fig. 7.41b)",
+        "Tangente: la espiral empieza donde deja libre el difusor. Afilada: la espiral corta la pared del difusor. Redondeada: una nariz de radio ρ sobre el círculo de la lengüeta (Gülich Fig. 7.41b)",
+    ),
+    ("Nose radius ρ", "Radio de la nariz ρ"),
+    (
+        "Automatic: e₃/2, a nose as thick as the cutwater; its innermost point stays on the cutwater circle d_z",
+        "Automático: e₃/2, una nariz tan gruesa como la lengüeta; su punto más interior queda sobre el círculo d_z",
+    ),
+    ("Tip of the wedge", "Punta de la cuña"),
+    ("Wedge angle", "Ángulo de la cuña"),
+    (
+        "{} from the cutwater, {} from the axis",
+        "{} desde la lengüeta, {} desde el eje",
+    ),
+    (
+        "tangential, cutwater wall straight",
+        "tangencial, pared de la lengüeta recta",
+    ),
+    ("tangential, centred", "tangencial, centrada"),
+    (
+        "tangential, outer wall straight",
+        "tangencial, pared exterior recta",
+    ),
+    ("radial", "radial"),
+    ("sharp", "afilada"),
+    ("rounded", "redondeada"),
+    (
+        "the cutwater radius cannot be negative",
+        "el radio de la lengüeta no puede ser negativo",
+    ),
+    (
+        "the radial discharge cannot turn to the requested axis angle",
+        "la descarga radial no puede girar hasta el ángulo de eje pedido",
+    ),
+    (
+        "the spiral does not meet the inner wall of the discharge diffuser: use a tangent cutwater",
+        "la espiral no llega a la pared interior del difusor de descarga: usa una lengüeta tangente",
+    ),
 ];
 
 /// Messages of the design code, most specific first.
 pub(super) static MESSAGES: &[(&str, &str)] = &[
+    (
+        "the axis of a radial discharge must lie between 0° and 80° from the line through the pump axis, got {}°",
+        "el eje de una descarga radial debe estar entre 0° y 80° de la línea que pasa por el eje de la bomba; se recibió {}°",
+    ),
+    (
+        "the bend radius {} mm must exceed the throat radius {} mm",
+        "el radio del codo, {} mm, debe superar el radio de la garganta, {} mm",
+    ),
+    (
+        "a cutwater radius of {} mm puts the nose beyond the tip of the wedge: at most {} mm here",
+        "un radio de lengüeta de {} mm saca la nariz más allá de la punta de la cuña: aquí como mucho {} mm",
+    ),
     (
         "the inner volute of a double volute must wrap more than 90° and at most 240°, got {}°",
         "la voluta interior de una voluta doble debe abarcar más de 90° y como mucho 240°; se recibió {}°",

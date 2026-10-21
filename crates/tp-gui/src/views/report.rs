@@ -6,7 +6,7 @@ use tp_design::impeller::BladeLoading;
 use tp_design::impeller::loading::blade_velocities;
 use tp_design::pump::{InletSection, correlations as corr};
 use tp_design::radial_thrust::RadialCollector;
-use tp_design::volute::{AreaLaw, SectionShape};
+use tp_design::volute::{AreaLaw, CutwaterShape, DischargeShape, SectionShape};
 use tp_project::{ComponentId, Project};
 use tp_units::{DisplayUnits, QuantityKind};
 
@@ -659,14 +659,44 @@ pub(crate) fn show(
                         ],
                     ),
                 );
+                let c = &v.cutwater;
+                let cutwater = match d.cutwater_shape {
+                    CutwaterShape::Tangent => tr("tangent").to_owned(),
+                    CutwaterShape::Sharp => tf(
+                        "sharp, tip at {} with a wedge of {}",
+                        &[&s(Angle, c.angle), &s(Angle, c.wedge)],
+                    ),
+                    CutwaterShape::Rounded { .. } => tf(
+                        "rounded with ρ {}, tip at {} with a wedge of {}",
+                        &[&s(Length, c.radius), &s(Angle, c.angle), &s(Angle, c.wedge)],
+                    ),
+                };
+                value_row(ui, tr("Cutwater"), cutwater);
+                value_row(
+                    ui,
+                    tr("Effective cutwater diameter"),
+                    s(Length, 2.0 * c.nose_distance),
+                );
                 let dif = &d.diffuser;
+                let shape = match dif.shape {
+                    DischargeShape::Tangential { .. } => tr("tangential").to_owned(),
+                    DischargeShape::Radial { axis_angle } => tf(
+                        "radial, bend R_N {} turning {}, axis at {}",
+                        &[
+                            &s(Length, dif.bend_radius),
+                            &s(Angle, v.nozzle_bend),
+                            &s(Angle, axis_angle),
+                        ],
+                    ),
+                };
                 value_row(
                     ui,
                     tr("Discharge diffuser"),
                     tf(
-                        "{} long, outlet {}, area ratio {}",
+                        "{}; {} long, outlet {}, area ratio {}",
                         &[
-                            &s(Length, dif.length),
+                            &shape,
+                            &s(Length, v.nozzle_length),
                             &s(Length, dif.outlet_diameter),
                             &format!("{:.2}", dif.area_ratio),
                         ],

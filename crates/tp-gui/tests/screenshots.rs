@@ -212,3 +212,38 @@ fn double_volute() {
     harness.run();
     save(&mut harness, "double-volute-3d");
 }
+
+/// A radial (centerline) discharge chosen in the diffuser step, with the rounded
+/// cutwater of the default design.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn radial_discharge() {
+    let mut harness = harness(egui::Theme::Light);
+    for _ in 0..6 {
+        harness.get_by_label_contains("Accept step").click();
+        harness.run();
+    }
+    harness.get_by_label_contains("Volute setup").click();
+    harness.run();
+    for _ in 0..3 {
+        harness.get_by_label_contains("Accept step").click();
+        harness.run();
+    }
+    harness
+        .get_by_value("tangential, cutwater wall straight")
+        .click();
+    harness.run();
+    harness.get_by_label("radial").click();
+    harness.run();
+    harness.state_mut().focus_view(View::FrontView);
+    harness.key_press(egui::Key::Escape);
+    for _ in 0..10 {
+        harness.run();
+    }
+    harness.remove_cursor();
+    harness.run();
+    save(&mut harness, "radial-discharge-front");
+    harness.state_mut().focus_view(View::View3d);
+    harness.run();
+    save(&mut harness, "radial-discharge-3d");
+}

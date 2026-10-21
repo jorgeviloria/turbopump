@@ -4,7 +4,7 @@
 use std::f64::consts::PI;
 
 use eframe::egui::Ui;
-use egui_plot::{Corner, Legend, Line, LineStyle, Plot, PlotPoints};
+use egui_plot::{Corner, Legend, Line, LineStyle, Plot, PlotPoints, Points};
 use tp_math::DVec3;
 use tp_project::ComponentId;
 use tp_units::{DisplayUnits, QuantityKind};
@@ -166,11 +166,10 @@ pub(crate) fn show(
                     .style(LineStyle::dashed_loose())
                     .width(1.0),
                 );
-                // Side walls of the discharge diffuser.
-                let axis = v.nozzle_axis;
-                let across = DVec3::new(-axis.y, axis.x, 0.0);
+                // Side walls of the discharge diffuser, across its centerline.
                 let mut walls = (Vec::new(), Vec::new());
                 for n in &v.nozzle {
+                    let across = DVec3::new(-n.tangent.y, n.tangent.x, 0.0);
                     let along = |p: &DVec3| (*p - n.center).dot(across);
                     let low = n.points.iter().min_by(|a, b| along(a).total_cmp(&along(b)));
                     let high = n.points.iter().max_by(|a, b| along(a).total_cmp(&along(b)));
@@ -196,6 +195,25 @@ pub(crate) fn show(
                         .color(palette.volute)
                         .width(2.0),
                 );
+                // The designed cutwater: its rounded nose, or the tip of the wedge.
+                let nose = v.cutwater.nose_outline();
+                if !nose.is_empty() {
+                    let mut points: Vec<[f64; 2]> =
+                        nose.iter().map(|p| view(p.x, p.y, scale)).collect();
+                    points.push(points[0]);
+                    plot.line(
+                        Line::new(tr("cutwater"), PlotPoints::from(points))
+                            .color(palette.volute)
+                            .width(2.0),
+                    );
+                } else if v.cutwater.angle > 0.0 {
+                    let tip = v.cutwater.tip;
+                    plot.points(
+                        Points::new(tr("cutwater"), vec![view(tip.x, tip.y, scale)])
+                            .color(palette.volute)
+                            .radius(3.0),
+                    );
+                }
             }
             for i in 0..blade.count {
                 let angle = 2.0 * PI * f64::from(i) / f64::from(blade.count);

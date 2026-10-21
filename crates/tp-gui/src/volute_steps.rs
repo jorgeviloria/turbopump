@@ -3,7 +3,11 @@
 
 use eframe::egui::{ComboBox, DragValue, Grid, Ui};
 use egui_plot::{Line, Plot, PlotPoints};
-use tp_design::volute::{AreaLaw, DEFAULT_FLANK_ANGLE_DEG, SectionShape, VoluteInput, VoluteKind};
+use tp_design::Param;
+use tp_design::volute::{
+    AreaLaw, CutwaterShape, DEFAULT_FLANK_ANGLE_DEG, DischargeShape, SectionShape, StraightWall,
+    VoluteInput, VoluteKind,
+};
 use tp_project::{ComponentId, DesignStep, Project};
 use tp_units::QuantityKind;
 
@@ -435,9 +439,78 @@ fn diffuser(
     let units = cx.units();
     let g = cx.derived.volute(id);
     let dif = g.map(|g| &g.design.diffuser);
-    ui.weak(tr("Straight conical diffuser from the throat to the discharge nozzle, checked against the allowable opening angle (Gülich eqs. 1.44, 1.45)."));
+    ui.weak(tr("Conical diffuser from the throat to the discharge nozzle, straight or with a bend, checked against the allowable opening angle (Gülich eqs. 1.44, 1.45)."));
     section(ui, tr("Discharge diffuser"));
     grid("volute_diffuser").show(ui, |ui| {
+        ui.label(tr("Shape")).on_hover_text(tr(
+            "Tangential: straight along the flow at the throat. Radial: a bend turning the \
+             flow away from the pump axis (Gülich Fig. 7.42)",
+        ));
+        let text = |shape: &DischargeShape| {
+            tr(match shape {
+                DischargeShape::Tangential {
+                    straight_wall: StraightWall::Inner,
+                } => "tangential, cutwater wall straight",
+                DischargeShape::Tangential {
+                    straight_wall: StraightWall::Centered,
+                } => "tangential, centred",
+                DischargeShape::Tangential {
+                    straight_wall: StraightWall::Outer,
+                } => "tangential, outer wall straight",
+                DischargeShape::Radial { .. } => "radial",
+            })
+        };
+        let current = input.diffuser.shape;
+        ComboBox::from_id_salt("volute_discharge")
+            .selected_text(text(&current))
+            .show_ui(ui, |ui| {
+                for option in [
+                    DischargeShape::Tangential {
+                        straight_wall: StraightWall::Inner,
+                    },
+                    DischargeShape::Tangential {
+                        straight_wall: StraightWall::Centered,
+                    },
+                    DischargeShape::Tangential {
+                        straight_wall: StraightWall::Outer,
+                    },
+                    DischargeShape::Radial { axis_angle: 0.0 },
+                ] {
+                    let same = std::mem::discriminant(&option) == std::mem::discriminant(&current)
+                        && (matches!(option, DischargeShape::Radial { .. }) || option == current);
+                    if ui.selectable_label(same, text(&option)).clicked() && !same {
+                        input.diffuser.shape = option;
+                    }
+                }
+            });
+        ui.end_row();
+        if let DischargeShape::Radial { axis_angle } = &mut input.diffuser.shape {
+            let mut angle = Param::Manual(*axis_angle);
+            param_f64(
+                ui,
+                tr("Axis angle"),
+                tr(
+                    "Between the straight part and the line from the pump axis; 0: the \
+                    discharge points straight away from the pump axis",
+                ),
+                &mut angle,
+                Angle,
+                Some(*axis_angle),
+                &units,
+                0.0..=80f64.to_radians(),
+            );
+            *axis_angle = angle.resolve(|| 0.0);
+            param_f64(
+                ui,
+                tr("Bend radius R_N"),
+                tr("Mean radius of the bend; automatic: 1.5·√(4·A₃q/π) (Gülich eq. 7.29)"),
+                &mut input.diffuser.bend_radius,
+                Length,
+                dif.map(|d| d.bend_radius),
+                &units,
+                0.001..=10.0,
+            );
+        }
         param_f64(
             ui,
             tr("Length"),
@@ -465,6 +538,16 @@ fn diffuser(
             .num_columns(2)
             .show(ui, |ui| {
                 value_row(ui, tr("Area ratio A_R"), format!("{:.2}", d.area_ratio));
+                if let Some(g) = g
+                    && g.nozzle_bend > 0.0
+                {
+                    value_row(ui, tr("Bend turns"), units.show(Angle, g.nozzle_bend));
+                    value_row(
+                        ui,
+                        tr("Centerline length"),
+                        units.show(Length, g.nozzle_length),
+                    );
+                }
                 value_row(
                     ui,
                     tr("Opening angle ϑ_eq"),
@@ -503,6 +586,51 @@ fn cutwater(
     ui.weak(tr("The cutwater meets the flow leaving the impeller; its camber angle follows the flow angle plus a small incidence (Gülich eqs. T7.7.3 to T7.7.6)."));
     section(ui, tr("Cutwater"));
     grid("volute_cutwater").show(ui, |ui| {
+        ui.label(tr("Shape")).on_hover_text(tr(
+            "Tangent: the spiral starts where it clears the diffuser. Sharp: the spiral \
+             cuts the diffuser wall. Rounded: a nose of radius ρ on the cutwater circle \
+             (Gülich Fig. 7.41b)",
+        ));
+        let text = |shape: &CutwaterShape| {
+            tr(match shape {
+                CutwaterShape::Tangent => "tangent",
+                CutwaterShape::Sharp => "sharp",
+                CutwaterShape::Rounded { .. } => "rounded",
+            })
+        };
+        let current = input.cutwater.shape;
+        ComboBox::from_id_salt("volute_cutwater_shape")
+            .selected_text(text(&current))
+            .show_ui(ui, |ui| {
+                for option in [
+                    CutwaterShape::Tangent,
+                    CutwaterShape::Sharp,
+                    CutwaterShape::Rounded {
+                        radius: Param::Auto,
+                    },
+                ] {
+                    let same = std::mem::discriminant(&option) == std::mem::discriminant(&current);
+                    if ui.selectable_label(same, text(&option)).clicked() && !same {
+                        input.cutwater.shape = option;
+                    }
+                }
+            });
+        ui.end_row();
+        if let CutwaterShape::Rounded { radius } = &mut input.cutwater.shape {
+            param_f64(
+                ui,
+                tr("Nose radius ρ"),
+                tr(
+                    "Automatic: e₃/2, a nose as thick as the cutwater; its innermost point \
+                    stays on the cutwater circle d_z",
+                ),
+                radius,
+                Length,
+                g.map(|g| g.cutwater.radius),
+                &units,
+                0.0001..=0.1,
+            );
+        }
         let incidence = input.cutwater.incidence.resolve(|| 0.0);
         param_f64(
             ui,
@@ -540,6 +668,26 @@ fn cutwater(
                     ui,
                     tr("Diameter d_z"),
                     units.show(Length, d.cutwater_diameter),
+                );
+                let c = &g.cutwater;
+                if !matches!(d.cutwater_shape, CutwaterShape::Tangent) {
+                    value_row(
+                        ui,
+                        tr("Tip of the wedge"),
+                        tf(
+                            "{} from the cutwater, {} from the axis",
+                            &[
+                                &units.show(Angle, c.angle),
+                                &units.show(Length, c.tip.truncate().length()),
+                            ],
+                        ),
+                    );
+                    value_row(ui, tr("Wedge angle"), units.show(Angle, c.wedge));
+                }
+                value_row(
+                    ui,
+                    tr("Effective cutwater diameter"),
+                    units.show(Length, 2.0 * c.nose_distance),
                 );
             });
     }
