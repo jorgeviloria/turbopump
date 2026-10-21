@@ -23,6 +23,7 @@
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepOffsetAPI_MakeFilling.hxx>
 #include <BRepOffsetAPI_ThruSections.hxx>
+#include <BRepPrimAPI_MakePrism.hxx>
 #include <BRepPrimAPI_MakeRevol.hxx>
 #include <BRep_Builder.hxx>
 #include <GProp_GProps.hxx>
@@ -247,6 +248,16 @@ std::unique_ptr<Shape> loft_solid(const ShapeList &wires) {
       fail("loft", "the closed blade solid is not valid");
     }
     return wrap(solid, "loft");
+  });
+}
+
+std::unique_ptr<Shape> prism_z(const Shape &face, double height) {
+  return guard("extrusion", [&] {
+    BRepPrimAPI_MakePrism prism(face.shape, gp_Vec(0.0, 0.0, height));
+    if (!prism.IsDone()) {
+      fail("extrusion", "failed");
+    }
+    return wrap(prism.Shape(), "extrusion");
   });
 }
 

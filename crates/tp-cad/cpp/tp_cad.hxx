@@ -35,6 +35,7 @@ std::unique_ptr<Shape> make_wire(const ShapeList &edges);
 std::unique_ptr<Shape> planar_face(const Shape &wire);
 std::unique_ptr<Shape> revolve_z(const Shape &face);
 std::unique_ptr<Shape> loft_solid(const ShapeList &wires);
+std::unique_ptr<Shape> prism_z(const Shape &face, double height);
 std::unique_ptr<Shape> rotate_z(const Shape &shape, double angle);
 std::unique_ptr<Shape> boolean_op(const Shape &a, const Shape &b, std::uint8_t op);
 std::unique_ptr<Shape> make_compound(const ShapeList &shapes);

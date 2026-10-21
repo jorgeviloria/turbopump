@@ -30,6 +30,8 @@ pub(crate) mod ffi {
         fn planar_face(wire: &Shape) -> Result<UniquePtr<Shape>>;
         fn revolve_z(face: &Shape) -> Result<UniquePtr<Shape>>;
         fn loft_solid(wires: &ShapeList) -> Result<UniquePtr<Shape>>;
+        /// Extrusion of a planar face along +z by `height`.
+        fn prism_z(face: &Shape, height: f64) -> Result<UniquePtr<Shape>>;
         fn rotate_z(shape: &Shape, angle: f64) -> Result<UniquePtr<Shape>>;
         /// `op`: 0 cut, 1 fuse, 2 common.
         fn boolean_op(a: &Shape, b: &Shape, op: u8) -> Result<UniquePtr<Shape>>;

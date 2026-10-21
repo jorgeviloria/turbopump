@@ -84,7 +84,30 @@ pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
         occ::line_edge(corner(r0, z1), corner(r0, z0))?,
     ];
     let ring = occ::revolve_z(&occ::planar_face(&occ::wire(&edges)?)?)?;
-    let fluid = ring.fuse(&channel)?;
+    let mut fluid = ring.fuse(&channel)?;
+    let mut channel = channel;
+    // A rounded cutwater: its nose is carved out of the flow domain across the whole
+    // height of the volute.
+    let nose = g.cutwater.nose_outline();
+    if !nose.is_empty() {
+        let rings = g.rings();
+        let zs = rings.iter().flatten().map(|p| p.z);
+        let (z_lo, z_hi) = zs.fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), z| {
+            (lo.min(z), hi.max(z))
+        });
+        let margin = 0.1 * (z_hi - z_lo);
+        let at = |p: DVec3| DVec3::new(p.x * MM, p.y * MM, (z_lo - margin) * MM);
+        let arc: Vec<DVec3> = nose[..nose.len() - 1].iter().map(|p| at(*p)).collect();
+        let tip = at(nose[nose.len() - 1]);
+        let wire = occ::wire(&[
+            occ::spline_edge(&arc, false)?,
+            occ::line_edge(arc[arc.len() - 1], tip)?,
+            occ::line_edge(tip, arc[0])?,
+        ])?;
+        let tongue = occ::prism_z(&occ::planar_face(&wire)?, (z_hi - z_lo + 2.0 * margin) * MM)?;
+        fluid = fluid.cut(&tongue)?;
+        channel = channel.cut(&tongue)?;
+    }
     Ok(VoluteCad { channel, fluid })
 }
 
@@ -173,6 +196,46 @@ mod tests {
         assert!(
             (channel / expected - 1.0).abs() < 0.05,
             "{channel} vs {expected}"
+        );
+    }
+
+    #[test]
+    fn cutwater_and_discharge_shapes_give_valid_solids() {
+        use tp_design::Param;
+        use tp_design::volute::{CutwaterShape, DischargeShape, StraightWall};
+        let fluid = |cutwater: CutwaterShape, discharge: DischargeShape| -> f64 {
+            let mut input = VoluteInput::default();
+            input.cutwater.shape = cutwater;
+            input.diffuser.shape = discharge;
+            let g = VoluteGeometry::build(&basis(), &input).unwrap();
+            let cad = build_volute(&g).unwrap();
+            assert!(cad.fluid.is_valid(), "{cutwater:?} {discharge:?}");
+            assert_eq!(cad.fluid.solid_count(), 1, "{cutwater:?} {discharge:?}");
+            cad.fluid_volume()
+        };
+        let straight = DischargeShape::default();
+        let sharp = fluid(CutwaterShape::Sharp, straight);
+        let rounded = fluid(
+            CutwaterShape::Rounded {
+                radius: Param::Auto,
+            },
+            straight,
+        );
+        // The nose takes a little of the flow domain.
+        assert!(
+            rounded < sharp && rounded > 0.98 * sharp,
+            "{rounded} vs {sharp}"
+        );
+        fluid(CutwaterShape::Tangent, straight);
+        fluid(
+            CutwaterShape::default(),
+            DischargeShape::Radial { axis_angle: 0.0 },
+        );
+        fluid(
+            CutwaterShape::default(),
+            DischargeShape::Tangential {
+                straight_wall: StraightWall::Centered,
+            },
         );
     }
 }

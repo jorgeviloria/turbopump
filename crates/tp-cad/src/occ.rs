@@ -151,6 +151,11 @@ pub fn planar_face(wire: &Shape) -> Result<Shape, CadError> {
     op("planar face", ffi::planar_face(&wire.0))
 }
 
+/// Solid swept by a planar face moved along +z by `height`.
+pub fn prism_z(face: &Shape, height: f64) -> Result<Shape, CadError> {
+    op("extrusion", ffi::prism_z(&face.0, height))
+}
+
 /// Solid of revolution of a planar face through 360° about the z axis.
 pub fn revolve_z(face: &Shape) -> Result<Shape, CadError> {
     op("revolution", ffi::revolve_z(&face.0))
