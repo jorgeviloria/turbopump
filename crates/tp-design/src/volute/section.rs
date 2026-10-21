@@ -634,6 +634,23 @@ impl From<RawCrossSectionInput> for CrossSectionInput {
     }
 }
 
+/// What a rule of the spiral development fixes of a section.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Measure {
+    /// ∬ (r_ref/r)^x dA, m²: the flow per unit c_u,ref under the swirl
+    /// c_u = c_u,ref·(r_ref/r)^x ([`Outline::swirl_area`]).
+    Swirl {
+        exponent: f64,
+        reference_radius: f64,
+    },
+    /// m²
+    Area,
+    /// Area over the radius of its centroid A/r_c, m.
+    AreaOverRadius,
+    /// Outermost radius, m.
+    OuterRadius,
+}
+
 /// Geometric properties of a section placed at r'_z.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SectionProperties {
@@ -651,6 +668,8 @@ pub struct SectionProperties {
     pub inner_radius: f64,
     /// Axial extent, m.
     pub width: f64,
+    /// Axial coordinate of the side nearest −z, from the midplane of the inlet, m.
+    pub axial_min: f64,
     /// Length of the walls: the whole outline but the inlet, m.
     pub wetted_perimeter: f64,
     /// ∮ r⁻² dℓ along the walls, 1/m.
@@ -723,9 +742,77 @@ impl Outline {
             outer_radius: rz + h_hi,
             inner_radius: rz + h_lo,
             width: s_hi - s_lo,
+            axial_min: s_lo,
             wetted_perimeter: perimeter,
             wall_inverse_square: inverse,
         })
+    }
+
+    /// ∬ (r_ref/r)^x dA of the outline placed with its inlet on radius `rz`, m²: the flow
+    /// per unit c_u,ref that crosses the section when the swirl is
+    /// c_u = c_u,ref·(r_ref/r)^x. By Green's theorem it is ∮ W(r) dz round the outline
+    /// with W' = (r_ref/r)^x, exact on the polygon for x = 1 (W = r_ref·ln r) and x = 0
+    /// (the area), and by three-point Gauss–Legendre along each edge otherwise.
+    pub fn swirl_area(&self, rz: f64, reference: f64, exponent: f64) -> Result<f64, DesignError> {
+        let n = self.points.len();
+        let k = 1.0 - exponent;
+        // W(r) = r_ref·((r/r_ref)^(1−x) − 1)/(1 − x), written to stay smooth at x = 1.
+        let w = |r: f64| {
+            let l = (r / reference).ln();
+            let z = k * l;
+            let rel = if z.abs() < 1e-12 { 1.0 } else { z.exp_m1() / z };
+            reference * l * rel
+        };
+        let node = (0.6f64).sqrt();
+        let mut sum = 0.0;
+        for i in 0..n {
+            let (p, q) = (self.points[i], self.points[(i + 1) % n]);
+            let (ra, rb) = (rz + p.y, rz + q.y);
+            if ra <= 0.0 {
+                return Err(DesignError::Infeasible(
+                    "the volute cross section reaches the pump axis".into(),
+                ));
+            }
+            let dz = q.x - p.x;
+            #[allow(clippy::float_cmp)] // Exact forms only at exactly these exponents.
+            let mean = if exponent == 1.0 {
+                reference * mean_ln(ra, rb)
+            } else if exponent == 0.0 {
+                0.5 * (ra + rb)
+            } else {
+                let (m, d) = (0.5 * (ra + rb), 0.5 * (rb - ra));
+                (5.0 * w(m - node * d) + 8.0 * w(m) + 5.0 * w(m + node * d)) / 18.0
+            };
+            sum += dz * mean;
+        }
+        Ok(sum)
+    }
+
+    /// The outline raised by `lift` above its inlet, which stays where it was: a strip as
+    /// wide as the inlet joins the two. The first and last wall runs take the sides of
+    /// the strip, so the runs and their breaks stay the same.
+    fn lifted(self, lift: f64) -> Outline {
+        if lift <= 0.0 {
+            return self;
+        }
+        let end = self.inlet_end;
+        let raised = |p: &DVec2| DVec2::new(p.x, p.y + lift);
+        let mut points = Vec::with_capacity(self.points.len() + 2);
+        points.push(self.points[0]);
+        points.extend(self.points[..=end].iter().map(raised));
+        points.push(self.points[end]);
+        points.extend_from_slice(&self.points[end + 1..]);
+        let shift = |b: usize| match b {
+            0 => 0,
+            b if b == end => end + 2,
+            b => b + 1,
+        };
+        Outline {
+            points,
+            top: shift(self.top),
+            inlet_end: end + 2,
+            breaks: self.breaks.iter().map(|&b| shift(b)).collect(),
+        }
     }
 
     /// The outline with every point moved by `f`. A map that `flips` the orientation, a
@@ -1731,7 +1818,18 @@ impl CrossSections {
     /// The outline at `angle` and `height` resampled for lofting: the same number of
     /// points and runs for every section of the volute ([`Self::loft_breaks`]).
     pub fn loft_outline(&self, angle: f64, height: f64) -> Outline {
-        let o = self.outline(angle, height);
+        self.loft_outline_lifted(angle, height, 0.0)
+    }
+
+    /// The outline at `angle` scaled to `height` and raised by `lift` above the inlet,
+    /// joined to it by a strip as wide as the inlet (the cutwater compensation).
+    pub fn lifted_outline(&self, angle: f64, height: f64, lift: f64) -> Outline {
+        self.outline(angle, height).lifted(lift)
+    }
+
+    /// [`Self::lifted_outline`] resampled for lofting like [`Self::loft_outline`].
+    pub fn loft_outline_lifted(&self, angle: f64, height: f64, lift: f64) -> Outline {
+        let o = self.lifted_outline(angle, height, lift);
         o.resample(&self.breaks_of(&o), &self.counts(1))
     }
 
@@ -1754,6 +1852,17 @@ impl CrossSections {
     }
 
     pub fn properties(&self, angle: f64, height: f64) -> Result<SectionProperties, DesignError> {
+        self.section_properties(angle, height, 0.0)
+    }
+
+    /// Properties of the whole section at `angle` of `height`, raised by `lift` above the
+    /// inlet on r'_z ([`Self::lifted_outline`]).
+    pub fn section_properties(
+        &self,
+        angle: f64,
+        height: f64,
+        lift: f64,
+    ) -> Result<SectionProperties, DesignError> {
         if height <= 0.0 {
             let rz = self.stagnation_radius;
             return Ok(SectionProperties {
@@ -1764,28 +1873,76 @@ impl CrossSections {
                 outer_radius: rz,
                 inner_radius: rz,
                 width: self.inlet_width,
+                axial_min: -0.5 * self.inlet_width,
                 wetted_perimeter: 0.0,
                 wall_inverse_square: 0.0,
             });
         }
-        self.outline(angle, height)
+        self.lifted_outline(angle, height, lift)
             .properties(self.stagnation_radius, height)
     }
 
-    /// The height at `angle` whose `measure` reaches `target`; the measure grows with the
-    /// height.
-    fn solve(
+    /// The `measure` of the section at `angle` of `height` placed `lift` above r'_z,
+    /// without the strip below it.
+    pub fn measure(
         &self,
         angle: f64,
+        height: f64,
+        lift: f64,
+        measure: Measure,
+    ) -> Result<f64, DesignError> {
+        let rz = self.stagnation_radius + lift;
+        if height <= 0.0 {
+            return Ok(match measure {
+                Measure::OuterRadius => rz,
+                _ => 0.0,
+            });
+        }
+        let outline = self.outline(angle, height);
+        Ok(match measure {
+            Measure::Swirl {
+                exponent,
+                reference_radius,
+            } => outline.swirl_area(rz, reference_radius, exponent)?,
+            Measure::Area => outline.properties(rz, height)?.area,
+            Measure::AreaOverRadius => {
+                let p = outline.properties(rz, height)?;
+                p.area / p.centroid_radius
+            }
+            Measure::OuterRadius => outline.properties(rz, height)?.outer_radius,
+        })
+    }
+
+    /// The height at `angle`, placed `lift` above r'_z, whose `measure` is `target`.
+    pub fn height_for(
+        &self,
+        angle: f64,
+        lift: f64,
+        measure: Measure,
         target: f64,
-        measure: impl Fn(&SectionProperties) -> f64,
+    ) -> Result<f64, DesignError> {
+        // The outer radius starts from the inlet, every other measure from zero.
+        let base = match measure {
+            Measure::OuterRadius => self.stagnation_radius + lift,
+            _ => 0.0,
+        };
+        self.solve(target - base, |h| {
+            Ok(self.measure(angle, h, lift, measure)? - base)
+        })
+    }
+
+    /// The height whose `measure` reaches `target`; the measure grows with the height.
+    fn solve(
+        &self,
+        target: f64,
+        measure: impl Fn(f64) -> Result<f64, DesignError>,
     ) -> Result<f64, DesignError> {
         if target <= 0.0 {
             return Ok(0.0);
         }
         let failure = std::cell::RefCell::new(None);
-        let f = |h: f64| match self.properties(angle, h) {
-            Ok(p) => measure(&p) - target,
+        let f = |h: f64| match measure(h) {
+            Ok(m) => m - target,
             Err(e) => {
                 failure.borrow_mut().get_or_insert(e);
                 f64::NAN
@@ -1818,12 +1975,12 @@ impl CrossSections {
 
     /// Height at `angle` whose ∫ b/r dr is `k` (Gülich eq. 7.24).
     pub fn height_for_momentum(&self, angle: f64, k: f64) -> Result<f64, DesignError> {
-        self.solve(angle, k, |p| p.momentum)
+        self.solve(k, |h| Ok(self.properties(angle, h)?.momentum))
     }
 
     /// Height at `angle` of the section of area `area`.
     pub fn height_for_area(&self, angle: f64, area: f64) -> Result<f64, DesignError> {
-        self.solve(angle, area, |p| p.area)
+        self.height_for(angle, 0.0, Measure::Area, area)
     }
 }
 

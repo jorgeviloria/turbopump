@@ -1,5 +1,6 @@
 //! `turbopump volute`: volute casings of a pump project, after the impeller.
 
+use std::f64::consts::{PI, TAU};
 use std::path::{Path, PathBuf};
 
 use clap::Args;
@@ -8,8 +9,9 @@ use tp_design::outlet::Reach;
 use tp_design::volute::stress::StressPlace;
 use tp_design::volute::{
     AreaLaw, BendWall, BezierBase, BezierSide, CutwaterShape, DEFAULT_CONE_ANGLE_DEG,
-    DischargeShape, ExternalRound, InnerPosition, InternalRound, RadiusSide, SectionDefinition,
-    SectionShape, SegmentPoint, SideShape, StraightWall, VoluteGeometry, VoluteInput, VoluteKind,
+    DischargeShape, ExternalRound, InnerPosition, InternalRound, Progression, RadiusSide,
+    SectionDefinition, SectionShape, SegmentPoint, SideShape, StraightWall, VoluteGeometry,
+    VoluteInput, VoluteKind,
 };
 use tp_project::{ComponentId, ComponentKind, Project, VOLUTE_STEPS};
 use tp_units::{DisplayUnits, QuantityKind, parse_quantity_or};
@@ -35,8 +37,17 @@ pub(crate) struct VoluteArgs {
     /// enough to keep the side gap to the impeller); shape@DEGREES=… defines
     /// it at one wrap angle, blending between angles, and remove, off or on drop or
     /// toggle that definition; shape.right=… or shape@DEGREES.right=… gives the +z side
-    /// its own shape, symmetric undoes it), law (auto, momentum or velocity),
-    /// sections, correction (on or off), length (along the diffuser centerline) and
+    /// its own shape, symmetric undoes it), law (auto; the velocity rules momentum
+    /// (Pfleiderer, c_u·r^x constant), velocity (constant, throat by angular momentum) or
+    /// stepanoff (c3 = K3·√(2gH)); the geometric rules height, area or area_radius
+    /// (A/r_c)), wrap (wrap angle of the spiral, 300° to 360°), x (swirl exponent of
+    /// momentum), k3 (Stepanoff's factor), cu4 (reference velocity: c_u at r4 = r'z, or
+    /// c3 for stepanoff), qi (reference flow), q0 (blind flow at the start), end_height,
+    /// end_area and end_area_radius (end values of the geometric rules), progression
+    /// (linear or bezier:X1,Y1,X2,Y2), compensation (on or off: the inner radius rises
+    /// by comp_e from comp_start to the throat), comp_e, comp_start, arcs (off or the
+    /// number of circular arcs of the outer contour), sections, correction (on or off),
+    /// length (along the diffuser centerline) and
     /// outlet (discharge diffuser), incidence (cutwater), wall, type (single or double),
     /// rib_wrap (wrap of the inner volute of a double volute), rib (rib thickness),
     /// rib_nose (length over thickness of the elliptic nose and tail of the rib, 1 for a
@@ -547,6 +558,23 @@ fn parse_discharge(value: &str) -> Result<DischargeShape, String> {
     }
 }
 
+/// A progression of a geometric rule: linear, or bezier:X1,Y1,X2,Y2 with the two inner
+/// control points as fractions of the wrap and of the end value.
+fn parse_progression(value: &str) -> Result<Progression, String> {
+    if value == "linear" {
+        return Ok(Progression::Linear);
+    }
+    let numbers: Option<Vec<f64>> = value
+        .strip_prefix("bezier:")
+        .map(|v| v.split(',').map(|n| n.trim().parse().ok()).collect())
+        .and_then(|n: Option<Vec<f64>>| n.filter(|n| n.len() == 4));
+    numbers
+        .map(|n| Progression::Bezier {
+            points: [[n[0], n[1]], [n[2], n[3]]],
+        })
+        .ok_or_else(|| format!("progression must be linear or bezier:X1,Y1,X2,Y2, got {value:?}"))
+}
+
 /// Applies one `KEY=VALUE` override to the volute inputs.
 fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result<(), String> {
     let (key, value) = setting
@@ -562,7 +590,7 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
             .map(Param::Manual)
             .map_err(|e| format!("{key}: {e}"))
     };
-    use QuantityKind::{Angle, Dimensionless, Length, Pressure};
+    use QuantityKind::{Angle, Area, Dimensionless, Length, Pressure, Velocity, VolumeFlow};
     match key {
         "flow-factor" => input.setup.flow_factor = quantity(Dimensionless)?,
         "dz" => input.setup.cutwater_diameter = quantity(Length)?,
@@ -572,13 +600,42 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
         "law" => {
             input.spiral.law = match value {
                 "auto" => AreaLaw::Auto,
-                "momentum" => AreaLaw::AngularMomentum,
+                "momentum" | "pfleiderer" => AreaLaw::AngularMomentum,
                 "velocity" => AreaLaw::ConstantVelocity,
+                "stepanoff" => AreaLaw::Stepanoff,
+                "height" => AreaLaw::Height,
+                "area" => AreaLaw::Area,
+                "area_radius" => AreaLaw::AreaRadius,
                 _ => {
                     return Err(format!(
-                        "law must be auto, momentum or velocity, got {value:?}"
+                        "law must be auto, momentum, velocity, stepanoff, height, area or \
+                         area_radius, got {value:?}"
                     ));
                 }
+            }
+        }
+        "wrap" => input.spiral.wrap = quantity(Angle)?,
+        "x" => input.spiral.exponent = quantity(Dimensionless)?,
+        "k3" => input.spiral.velocity_factor = quantity(Dimensionless)?,
+        "cu4" => input.spiral.reference_velocity = quantity(Velocity)?,
+        "qi" => input.spiral.reference_flow = quantity(VolumeFlow)?,
+        "q0" => input.spiral.blind_flow = quantity(VolumeFlow)?,
+        "end_height" => input.spiral.end_height = quantity(Length)?,
+        "end_area" => input.spiral.end_area = quantity(Area)?,
+        "end_area_radius" => input.spiral.end_area_radius = quantity(Length)?,
+        "progression" => input.spiral.progression = parse_progression(value)?,
+        "compensation" => input.spiral.compensation.enabled = on_off(value)?,
+        "comp_e" => input.spiral.compensation.thickness = quantity(Length)?,
+        "comp_start" => input.spiral.compensation.start = quantity(Angle)?,
+        "arcs" => {
+            let arcs = &mut input.spiral.arcs;
+            if value == "off" {
+                arcs.enabled = false;
+            } else {
+                arcs.segments = value
+                    .parse()
+                    .map_err(|_| format!("arcs must be off or a number of arcs, got {value:?}"))?;
+                arcs.enabled = true;
             }
         }
         "sections" => {
@@ -662,6 +719,8 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
         _ => {
             return Err(format!(
                 "unknown key {key:?}; valid keys: flow-factor, dz, b3, e3, shape, law, \
+                 wrap, x, k3, cu4, qi, q0, end_height, end_area, end_area_radius, \
+                 progression, compensation, comp_e, comp_start, arcs, \
                  sections, correction, length, outlet, incidence, wall, type, rib_wrap, rib, \
                  rib_nose, channel_ratio, discharge, bend, rotation, cutwater, nose, height, \
                  dn, flange, flange_d, flange_t, bolt_circle, bolt_hole, bolts, pressure, \
@@ -695,9 +754,37 @@ fn print_report(name: &str, id: ComponentId, g: &VoluteGeometry, units: &Display
             .collect::<Vec<_>>()
             .join(", blending to ")
     };
+    let dev = &d.development;
+    let progression = match dev.progression {
+        Progression::Linear => "linearly",
+        Progression::Bezier { .. } => "along a Bézier curve",
+    };
     let law = match d.law {
-        AreaLaw::ConstantVelocity => "constant velocity (Gülich eqs. 7.26–7.27)",
-        _ => "conservation of angular momentum (Gülich eqs. 7.24–7.25)",
+        AreaLaw::ConstantVelocity => format!(
+            "constant velocity {} (Gülich eqs. 7.26–7.27)",
+            s(Velocity, dev.velocity)
+        ),
+        AreaLaw::Stepanoff => match dev.velocity_factor {
+            Some(k) => format!(
+                "Stepanoff, c3 = K3·√(2gH) = {} with K3 = {k:.3} (eq. 7.1, Fig. 7.5)",
+                s(Velocity, dev.velocity)
+            ),
+            None => format!("Stepanoff, c3 = {}", s(Velocity, dev.velocity)),
+        },
+        AreaLaw::Height => format!(
+            "height growing {progression} to {}",
+            s(Length, dev.end_value)
+        ),
+        AreaLaw::Area => format!("area growing {progression} to {}", s(Area, dev.end_value)),
+        AreaLaw::AreaRadius => format!(
+            "A/r_c growing {progression} to {}",
+            s(Length, dev.end_value)
+        ),
+        #[allow(clippy::float_cmp)]
+        _ if dev.exponent == 1.0 => {
+            "conservation of angular momentum (Gülich eqs. 7.24–7.25)".to_owned()
+        }
+        _ => format!("Pfleiderer, c_u·r^x constant with x = {:.2}", dev.exponent),
     };
     println!(
         "Inlet      Q_Le {}   c2u {}   d2 {}",
@@ -719,6 +806,11 @@ fn print_report(name: &str, id: ComponentId, g: &VoluteGeometry, units: &Display
     );
     let c = &g.cutwater;
     match d.cutwater_shape {
+        _ if d.development.start > 0.0 => println!(
+            "           blunt cutwater: the casing on r'z from the throat to the start of the \
+             spiral at {}",
+            s(Angle, g.start_angle)
+        ),
         CutwaterShape::Tangent => {
             println!("           tangent cutwater: the spiral starts where it clears the diffuser")
         }
@@ -764,12 +856,62 @@ fn print_report(name: &str, id: ComponentId, g: &VoluteGeometry, units: &Display
         );
     }
     println!(
+        "Spiral     wrap {} from {}   Q_i {}   Q0 {}   c_u4 {} at r4 {}",
+        s(Angle, dev.wrap),
+        s(Angle, dev.start),
+        s(VolumeFlow, dev.reference_flow),
+        s(VolumeFlow, dev.blind_flow),
+        s(Velocity, dev.reference_velocity),
+        s(Length, dev.reference_radius)
+    );
+    if let Some(c) = dev.compensation {
+        println!(
+            "           cutwater compensation: the inner radius rises {} from {} to the throat",
+            s(Length, c.thickness),
+            s(Angle, c.start)
+        );
+    }
+    if let Some(arcs) = &dev.arcs {
+        println!(
+            "           {} circular arcs, at most {} from the spiral:",
+            arcs.arcs.len(),
+            s(Length, arcs.max_deviation)
+        );
+        for (k, arc) in arcs.arcs.iter().enumerate() {
+            let (from, to) = arc.angles();
+            println!(
+                "             {}: radius {}, center {} from the axis at {}, {} to {}",
+                k + 1,
+                s(Length, arc.radius),
+                s(Length, arc.center.length()),
+                s(Angle, arc.center.y.atan2(arc.center.x).rem_euclid(TAU)),
+                s(Angle, from),
+                s(Angle, to)
+            );
+        }
+    }
+    println!(
         "Throat     area {}   height {}   outer radius {}   correction Δa3 {}",
         s(Area, d.throat.area),
         s(Length, d.throat.height),
         s(Length, d.throat.outer_radius),
         s(Length, d.throat_correction)
     );
+    if let Ok(p) = d.end_section() {
+        let height = p.outer_radius - p.inner_radius;
+        println!(
+            "End        r' {}   r {}   z min {}   H {}   B {}   H/B {:.3}   D {}   A {}   A/r_c {}",
+            s(Length, p.inner_radius),
+            s(Length, p.outer_radius),
+            s(Length, p.axial_min),
+            s(Length, height),
+            s(Length, p.width),
+            height / p.width,
+            s(Length, (4.0 * p.area / PI).sqrt()),
+            s(Area, p.area),
+            s(Length, p.area / p.centroid_radius)
+        );
+    }
     if let Some(rib) = &d.rib {
         println!(
             "Double     inner volute wraps {} from the rib nose at {}   rib {}",

@@ -1,15 +1,18 @@
 //! Step editors of the volute: setup, cross section, spiral, discharge diffuser,
 //! cutwater and wall thickness.
 
-use eframe::egui::{ComboBox, Grid, Ui};
+use std::f64::consts::{PI, TAU};
+
+use eframe::egui::{self, ComboBox, DragValue, Grid, Ui};
 use egui_plot::{Line, Plot, PlotPoints};
 use tp_design::Param;
 use tp_design::volute::stress::StressPlace;
 use tp_design::volute::{
-    AreaLaw, CutwaterShape, DischargeShape, StraightWall, VoluteInput, VoluteKind,
+    AreaLaw, CutwaterShape, DischargeShape, MAX_ARCS, MIN_ARCS, MIN_WRAP_DEG, Progression,
+    StraightWall, VoluteGeometry, VoluteInput, VoluteKind,
 };
 use tp_project::{ComponentId, DesignStep, Project};
-use tp_units::QuantityKind;
+use tp_units::{DisplayUnits, QuantityKind};
 
 use crate::app::EditCtx;
 use crate::i18n::{tf, tr};
@@ -262,53 +265,313 @@ fn spiral(
     use QuantityKind::*;
     let units = cx.units();
     let g = cx.derived.volute(id);
-    ui.weak(tr("Below nq = 30 the sections grow linearly (constant velocity), above it they keep c_u·r constant."));
-    section(ui, tr("Area law"));
-    Grid::new("volute_law")
-        .num_columns(2)
-        .spacing([10.0, 4.0])
-        .show(ui, |ui| {
-            ui.label(tr("Law"));
-            let resolved = g.map(|g| g.design.law);
-            let text = |law: AreaLaw| {
-                tr(match law {
-                    AreaLaw::Auto => "automatic",
-                    AreaLaw::AngularMomentum => "angular momentum",
-                    AreaLaw::ConstantVelocity => "constant velocity",
-                })
-            };
-            let selected = match (input.spiral.law, resolved) {
-                (AreaLaw::Auto, Some(law)) => tf("automatic: {}", &[&text(law)]),
-                (law, _) => text(law).to_owned(),
-            };
-            ComboBox::from_id_salt("volute_law")
-                .selected_text(selected)
-                .show_ui(ui, |ui| {
-                    for law in [
-                        AreaLaw::Auto,
-                        AreaLaw::AngularMomentum,
-                        AreaLaw::ConstantVelocity,
-                    ] {
-                        ui.selectable_value(&mut input.spiral.law, law, text(law));
-                    }
-                });
-            ui.end_row();
-            ui.label(tr("Cutwater correction")).on_hover_text(tr(
-                "Enlarge the throat for the blockage of the cutwater (eq. 7.28)",
-            ));
-            ui.checkbox(&mut input.spiral.cutwater_correction, "");
-            ui.end_row();
-        });
-    grid("volute_sections").show(ui, |ui| {
+    let dev = g.map(|g| &g.design.development);
+    ui.weak(tr("Each section carries the flow the impeller delivers up to its angle. The velocity rules size it for a velocity in the spiral, the geometric rules prescribe its size directly."));
+    section(ui, tr("Design rule"));
+    let spiral = &mut input.spiral;
+    let law = g.map_or(
+        match spiral.law {
+            AreaLaw::Auto => AreaLaw::AngularMomentum,
+            law => law,
+        },
+        |g| g.design.law,
+    );
+    grid("volute_rule").show(ui, |ui| {
+        param_f64(
+            ui,
+            tr("Wrap angle φ_wrap"),
+            tr("From the start of the spiral to the throat. A shorter spiral starts past the cutwater, which becomes the casing between the throat and that start. Automatic: 360°"),
+            &mut spiral.wrap,
+            Angle,
+            dev.map(|d| d.wrap),
+            &units,
+            MIN_WRAP_DEG.to_radians()..=TAU,
+        );
+        ui.label(tr("Law"));
+        let selected = match (spiral.law, g.map(|g| g.design.law)) {
+            (AreaLaw::Auto, Some(law)) => tf("automatic: {}", &[&law_name(law)]),
+            (law, _) => law_name(law).to_owned(),
+        };
+        ComboBox::from_id_salt("volute_law")
+            .selected_text(selected)
+            .height(400.0)
+            .show_ui(ui, |ui| {
+                ui.weak(tr("Velocity-based"));
+                for law in [
+                    AreaLaw::Auto,
+                    AreaLaw::AngularMomentum,
+                    AreaLaw::ConstantVelocity,
+                    AreaLaw::Stepanoff,
+                ] {
+                    ui.selectable_value(&mut spiral.law, law, law_name(law));
+                }
+                ui.separator();
+                ui.weak(tr("Geometry-based"));
+                for law in [AreaLaw::Height, AreaLaw::Area, AreaLaw::AreaRadius] {
+                    ui.selectable_value(&mut spiral.law, law, law_name(law));
+                }
+            });
+        ui.end_row();
         param_u32(
             ui,
             tr("Sections"),
             tr("Cross sections from the start of the spiral to the throat"),
-            &mut input.spiral.sections,
+            &mut spiral.sections,
             g.map(|g| g.sections.len() as u32 - 1),
             4..=180,
         );
     });
+
+    if law.velocity_based() {
+        section(ui, tr("Velocity and flow"));
+        grid("volute_velocity").show(ui, |ui| {
+            if law == AreaLaw::AngularMomentum {
+                param_f64(
+                    ui,
+                    tr("Swirl exponent x"),
+                    tr("c_u·r^x stays constant over every section: 1 conserves the angular momentum (Gülich eq. 7.24), 0 keeps the velocity of the volute inlet. Automatic: 1"),
+                    &mut spiral.exponent,
+                    Dimensionless,
+                    dev.map(|d| d.exponent),
+                    &units,
+                    0.0..=2.0,
+                );
+            }
+            if law == AreaLaw::Stepanoff && spiral.reference_velocity.is_auto() {
+                param_f64(
+                    ui,
+                    tr("Velocity factor K₃"),
+                    tr("c₃/√(2gH); automatic: from the specific speed (Stepanoff Fig. 7.5)"),
+                    &mut spiral.velocity_factor,
+                    Dimensionless,
+                    dev.and_then(|d| d.velocity_factor),
+                    &units,
+                    0.05..=1.0,
+                );
+            }
+            let (label, hint) = if law == AreaLaw::Stepanoff {
+                (
+                    tr("Velocity c₃"),
+                    tr("Mean velocity in every section; automatic: K₃·√(2gH)"),
+                )
+            } else {
+                (
+                    tr("Reference velocity c_u,4"),
+                    tr("Circumferential velocity at the volute inlet r₄ = r'_z; automatic: c₂u·r₂/r₄ from the impeller"),
+                )
+            };
+            param_f64(
+                ui,
+                label,
+                hint,
+                &mut spiral.reference_velocity,
+                Velocity,
+                dev.map(|d| d.reference_velocity),
+                &units,
+                0.1..=500.0,
+            );
+            param_f64(
+                ui,
+                tr("Reference flow Q_i"),
+                tr("Flow the impeller delivers round the spiral; automatic: Q_Le"),
+                &mut spiral.reference_flow,
+                VolumeFlow,
+                dev.map(|d| d.reference_flow),
+                &units,
+                1e-6..=100.0,
+            );
+            param_f64(
+                ui,
+                tr("Blind flow Q₀"),
+                tr("Flow already in the spiral at its start; automatic: what the impeller delivers ahead of a spiral shorter than 360°"),
+                &mut spiral.blind_flow,
+                VolumeFlow,
+                dev.map(|d| d.blind_flow),
+                &units,
+                0.0..=100.0,
+            );
+            ui.label(tr("Cutwater correction")).on_hover_text(tr(
+                "Enlarge the throat for the blockage of the cutwater (eq. 7.28)",
+            ));
+            ui.checkbox(&mut spiral.cutwater_correction, "");
+            ui.end_row();
+        });
+    } else {
+        section(ui, tr("End section and progression"));
+        grid("volute_geometry_rule").show(ui, |ui| {
+            let hint = tr("At the throat; automatic: that of the throat by angular momentum");
+            let end = dev.map(|d| d.end_value);
+            match law {
+                AreaLaw::Height => param_f64(
+                    ui,
+                    tr("End height H"),
+                    hint,
+                    &mut spiral.end_height,
+                    Length,
+                    end,
+                    &units,
+                    1e-4..=10.0,
+                ),
+                AreaLaw::Area => param_f64(
+                    ui,
+                    tr("End area A"),
+                    hint,
+                    &mut spiral.end_area,
+                    Area,
+                    end,
+                    &units,
+                    1e-8..=10.0,
+                ),
+                _ => param_f64(
+                    ui,
+                    tr("End A/r_c"),
+                    hint,
+                    &mut spiral.end_area_radius,
+                    Length,
+                    end,
+                    &units,
+                    1e-6..=10.0,
+                ),
+            };
+            ui.label(tr("Progression")).on_hover_text(tr(
+                "How the value grows from the start of the spiral to its end value at the throat",
+            ));
+            let bezier = matches!(spiral.progression, Progression::Bezier { .. });
+            ComboBox::from_id_salt("volute_progression")
+                .selected_text(if bezier {
+                    tr("Bézier curve")
+                } else {
+                    tr("linear")
+                })
+                .show_ui(ui, |ui| {
+                    if ui.selectable_label(!bezier, tr("linear")).clicked() {
+                        spiral.progression = Progression::Linear;
+                    }
+                    if ui.selectable_label(bezier, tr("Bézier curve")).clicked() && !bezier {
+                        spiral.progression = Progression::bezier();
+                    }
+                });
+            ui.end_row();
+        });
+        if let Progression::Bezier { points } = &mut spiral.progression {
+            grid("volute_progression_points").show(ui, |ui| {
+                for (k, p) in points.iter_mut().enumerate() {
+                    ui.label(tf("Point {}", &[&(k + 1).to_string()]));
+                    ui.add(
+                        DragValue::new(&mut p[0])
+                            .speed(0.005)
+                            .range(0.0..=1.0)
+                            .prefix("φ/φ_wrap "),
+                    );
+                    ui.add(
+                        DragValue::new(&mut p[1])
+                            .speed(0.005)
+                            .range(0.0..=2.0)
+                            .prefix(tr("of the end ")),
+                    );
+                    ui.end_row();
+                }
+            });
+            let progression = spiral.progression;
+            let curve: PlotPoints = (0..=50)
+                .map(|i| {
+                    let x = f64::from(i) / 50.0;
+                    [x, progression.value(x)]
+                })
+                .collect();
+            Plot::new(("volute_progression_plot", id.0))
+                .height(120.0)
+                .data_aspect(1.0)
+                .allow_scroll(false)
+                .x_axis_label("φ/φ_wrap")
+                .show(ui, |plot| {
+                    plot.line(Line::new(tr("progression"), curve).width(2.0));
+                });
+        }
+    }
+
+    section(ui, tr("Cutwater compensation"));
+    ui.weak(tr("Past φ_C the inner radius of the sections rises linearly to r'_z + e at the throat: the end section gains a strip as thick as the cutwater. An alternative to the correction of eq. 7.28, for single external volutes."));
+    grid("volute_compensation").show(ui, |ui| {
+        ui.label(tr("Compensate the cutwater"));
+        ui.checkbox(&mut spiral.compensation.enabled, "");
+        ui.end_row();
+        if spiral.compensation.enabled {
+            let resolved = dev.and_then(|d| d.compensation);
+            param_f64(
+                ui,
+                tr("Thickness e"),
+                tr("Rise of the inner radius at the throat; automatic: the cutwater thickness e₃"),
+                &mut spiral.compensation.thickness,
+                Length,
+                resolved.map(|c| c.thickness),
+                &units,
+                1e-4..=1.0,
+            );
+            param_f64(
+                ui,
+                tr("Start φ_C"),
+                tr("Wrap angle from the start of the spiral where the inner radius starts to rise; automatic: 270°"),
+                &mut spiral.compensation.start,
+                Angle,
+                resolved.map(|c| c.start),
+                &units,
+                0.0..=359f64.to_radians(),
+            );
+        }
+    });
+
+    section(ui, tr("Circular arcs"));
+    grid("volute_arcs").show(ui, |ui| {
+        ui.label(tr("Approximate by circular arcs")).on_hover_text(tr(
+            "For rectangular and trapezoidal sections: tangent circular arcs take the place of the outer contour, as volutes are laid out on the drawing board. They start at the start of the spiral and end at the throat.",
+        ));
+        ui.checkbox(&mut spiral.arcs.enabled, "");
+        ui.end_row();
+        if spiral.arcs.enabled {
+            ui.label(tr("Number of arcs"));
+            ui.add(DragValue::new(&mut spiral.arcs.segments).range(MIN_ARCS..=MAX_ARCS));
+            ui.end_row();
+            if let Some(arcs) = dev.and_then(|d| d.arcs.as_ref()) {
+                value_row(
+                    ui,
+                    tr("Largest deviation"),
+                    units.show(Length, arcs.max_deviation),
+                );
+            }
+        }
+    });
+    if let Some(arcs) = dev.and_then(|d| d.arcs.as_ref()) {
+        Grid::new("volute_arc_list")
+            .num_columns(4)
+            .striped(true)
+            .show(ui, |ui| {
+                ui.strong(tr("Arc"));
+                ui.strong(tr("Radius"));
+                ui.strong(tr("Center"));
+                ui.strong(tr("From – to"));
+                ui.end_row();
+                for (k, arc) in arcs.arcs.iter().enumerate() {
+                    let (from, to) = arc.angles();
+                    ui.label((k + 1).to_string());
+                    ui.label(units.show(Length, arc.radius));
+                    ui.label(tf(
+                        "{} at {}",
+                        &[
+                            &units.show(Length, arc.center.length()),
+                            &units.show(Angle, arc.center.y.atan2(arc.center.x).rem_euclid(TAU)),
+                        ],
+                    ));
+                    ui.label(format!(
+                        "{} – {}",
+                        units.show(Angle, from),
+                        units.show(Angle, to)
+                    ));
+                    ui.end_row();
+                }
+            });
+    }
+
     if let Some(g) = g {
         let d = &g.design;
         section(ui, tr("Throat"));
@@ -321,11 +584,13 @@ fn spiral(
                     tr("Outer radius r_a"),
                     units.show(Length, d.throat.outer_radius),
                 );
-                value_row(
-                    ui,
-                    tr("Cutwater correction Δa₃"),
-                    units.show(Length, d.throat_correction),
-                );
+                if d.development.law.velocity_based() {
+                    value_row(
+                        ui,
+                        tr("Cutwater correction Δa₃"),
+                        units.show(Length, d.throat_correction),
+                    );
+                }
                 value_row(
                     ui,
                     tr("Velocity c₃q"),
@@ -341,23 +606,171 @@ fn spiral(
                 );
                 value_row(ui, tr("Spiral starts at"), units.show(Angle, g.start_angle));
             });
-        section(ui, tr("Area along the spiral"));
-        let area_scale = units.to_display(Area, 1.0);
-        let points: PlotPoints = g
-            .sections
-            .iter()
-            .map(|s| [units.to_display(Angle, s.angle), s.size.area * area_scale])
-            .collect();
-        Plot::new(("volute_area", id.0))
-            .height(160.0)
-            .x_axis_label(format!("ε [{}]", units.get(Angle).symbol))
-            .y_axis_label(format!("A [{}]", units.get(Area).symbol))
-            .allow_scroll(false)
-            .show(ui, |plot| {
-                plot.line(Line::new(tr("area"), points).width(2.0));
-            });
+        if let Ok(p) = d.end_section() {
+            section(ui, tr("End section"));
+            Grid::new("volute_end_section")
+                .num_columns(2)
+                .show(ui, |ui| {
+                    let height = p.outer_radius - p.inner_radius;
+                    value_row(
+                        ui,
+                        tr("Inner radius r'"),
+                        units.show(Length, p.inner_radius),
+                    );
+                    value_row(ui, tr("Outer radius r"), units.show(Length, p.outer_radius));
+                    value_row(
+                        ui,
+                        tr("Lowest axial coordinate z"),
+                        units.show(Length, p.axial_min),
+                    );
+                    value_row(ui, tr("Height H"), units.show(Length, height));
+                    value_row(ui, tr("Width B"), units.show(Length, p.width));
+                    value_row(ui, tr("Side ratio H/B"), format!("{:.3}", height / p.width));
+                    value_row(
+                        ui,
+                        tr("Equivalent diameter D"),
+                        units.show(Length, (4.0 * p.area / PI).sqrt()),
+                    );
+                    value_row(ui, tr("Area A"), units.show(Area, p.area));
+                    value_row(
+                        ui,
+                        tr("Area over centroid radius A/r_c"),
+                        units.show(Length, p.area / p.centroid_radius),
+                    );
+                });
+        }
+        progressions(ui, id, g, &units);
     }
     "edit volute spiral"
+}
+
+/// Name of an area law in the interface.
+fn law_name(law: AreaLaw) -> &'static str {
+    tr(match law {
+        AreaLaw::Auto => "automatic",
+        AreaLaw::AngularMomentum => "Pfleiderer: c_u·r^x constant",
+        AreaLaw::ConstantVelocity => "constant velocity, throat by angular momentum (Gülich)",
+        AreaLaw::Stepanoff => "Stepanoff: c₃ = K₃·√(2gH)",
+        AreaLaw::Height => "height H",
+        AreaLaw::Area => "area A",
+        AreaLaw::AreaRadius => "area over centroid radius A/r_c",
+    })
+}
+
+/// The quantities along the spiral that [`progressions`] can plot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Progress {
+    Area,
+    Radius,
+    AreaRadius,
+    ContourAngle,
+    Velocity,
+}
+
+/// Diagrams of the spiral against the wrap angle: area, outer radius, A/r_c and the
+/// angle of the outer contour to the circumferential direction; and the
+/// circumferential velocity against the radius for the velocity rules.
+fn progressions(ui: &mut Ui, id: ComponentId, g: &VoluteGeometry, units: &DisplayUnits) {
+    use QuantityKind::*;
+    section(ui, tr("Along the spiral"));
+    let key = egui::Id::new(("volute_progress", id.0));
+    let mut shown = ui.data(|d| d.get_temp(key)).unwrap_or(Progress::Area);
+    let dev = &g.design.development;
+    let velocity = dev.law.velocity_based();
+    ui.horizontal_wrapped(|ui| {
+        let options = [
+            (Progress::Area, tr("area")),
+            (Progress::Radius, tr("outer radius")),
+            (Progress::AreaRadius, "A/r_c"),
+            (Progress::ContourAngle, tr("contour angle")),
+            (Progress::Velocity, tr("circumferential velocity")),
+        ];
+        for (option, label) in options {
+            if option == Progress::Velocity && !velocity {
+                continue;
+            }
+            ui.selectable_value(&mut shown, option, label);
+        }
+    });
+    if shown == Progress::Velocity && !velocity {
+        shown = Progress::Area;
+    }
+    ui.data_mut(|d| d.insert_temp(key, shown));
+
+    let angle = |a: f64| units.to_display(Angle, a);
+    // The outer wall is sampled evenly from the start of the spiral to the throat.
+    let radii: Vec<f64> = g.outer_wall.iter().map(|p| p.truncate().length()).collect();
+    let step = (TAU - g.start_angle) / (radii.len().max(2) - 1) as f64;
+    let wall_angle = |i: usize| g.start_angle + step * i as f64;
+    let (points, x_label, y_label): (PlotPoints, String, String) = match shown {
+        Progress::Area => (
+            g.sections
+                .iter()
+                .map(|s| [angle(s.angle), units.to_display(Area, s.size.area)])
+                .collect(),
+            format!("ε [{}]", units.get(Angle).symbol),
+            format!("A [{}]", units.get(Area).symbol),
+        ),
+        Progress::AreaRadius => (
+            g.sections
+                .iter()
+                .map(|s| {
+                    let ratio = s.size.area / s.size.centroid_radius;
+                    [angle(s.angle), units.to_display(Length, ratio)]
+                })
+                .collect(),
+            format!("ε [{}]", units.get(Angle).symbol),
+            format!("A/r_c [{}]", units.get(Length).symbol),
+        ),
+        Progress::Radius => (
+            radii
+                .iter()
+                .enumerate()
+                .map(|(i, &r)| [angle(wall_angle(i)), units.to_display(Length, r)])
+                .collect(),
+            format!("ε [{}]", units.get(Angle).symbol),
+            format!("r_a [{}]", units.get(Length).symbol),
+        ),
+        Progress::ContourAngle => (
+            (1..radii.len().saturating_sub(1))
+                .map(|i| {
+                    // tan α = (dr/dε)/r between the circumferential direction and the wall.
+                    let slope = (radii[i + 1] - radii[i - 1]) / (2.0 * step);
+                    [angle(wall_angle(i)), angle((slope / radii[i]).atan())]
+                })
+                .collect(),
+            format!("ε [{}]", units.get(Angle).symbol),
+            format!("α [{}]", units.get(Angle).symbol),
+        ),
+        Progress::Velocity => {
+            let r4 = dev.reference_radius;
+            let outer = g.design.throat.outer_radius;
+            (
+                (0..=40)
+                    .map(|i| {
+                        let r = r4 + (outer - r4) * f64::from(i) / 40.0;
+                        let cu = match dev.law {
+                            AreaLaw::AngularMomentum => {
+                                dev.reference_velocity * (r4 / r).powf(dev.exponent)
+                            }
+                            _ => dev.velocity,
+                        };
+                        [units.to_display(Length, r), units.to_display(Velocity, cu)]
+                    })
+                    .collect(),
+                format!("r [{}]", units.get(Length).symbol),
+                format!("c_u [{}]", units.get(Velocity).symbol),
+            )
+        }
+    };
+    Plot::new(("volute_progress_plot", id.0))
+        .height(160.0)
+        .x_axis_label(x_label)
+        .y_axis_label(y_label)
+        .allow_scroll(false)
+        .show(ui, |plot| {
+            plot.line(Line::new(tr("spiral"), points).width(2.0));
+        });
 }
 
 fn diffuser(

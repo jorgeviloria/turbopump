@@ -436,6 +436,54 @@ fn volute_designs_and_exports() {
         external.contains("round asymmetric toward +z, ellipse ratio 1.2, square top"),
         "{external}"
     );
+    // The spiral development: Stepanoff's velocity, tangent circular arcs and the cutwater
+    // compensation; a shorter wrap leaves a blunt cutwater.
+    let stepanoff = stdout(&turbopump(&[
+        "volute",
+        file_arg,
+        "--set",
+        "law=stepanoff",
+        "--set",
+        "shape=trapezoid:20",
+        "--set",
+        "arcs=3",
+        "--set",
+        "compensation=on",
+        "--set",
+        "correction=off",
+        "--dry-run",
+    ]));
+    assert!(stepanoff.contains("with K3 = 0.359"), "{stepanoff}");
+    assert!(
+        stepanoff.contains("3 circular arcs, at most"),
+        "{stepanoff}"
+    );
+    assert!(
+        stepanoff.contains("the inner radius rises 3.445 mm from 270.0 °"),
+        "{stepanoff}"
+    );
+    let short = stdout(&turbopump(&[
+        "volute",
+        file_arg,
+        "--set",
+        "wrap=330",
+        "--dry-run",
+    ]));
+    assert!(short.contains("wrap 330.0 ° from 30.00 °"), "{short}");
+    assert!(short.contains("blunt cutwater"), "{short}");
+    let geometric = stdout(&turbopump(&[
+        "volute",
+        file_arg,
+        "--set",
+        "law=area",
+        "--set",
+        "progression=bezier:0.3,0.1,0.7,0.8",
+        "--dry-run",
+    ]));
+    assert!(
+        geometric.contains("area growing along a Bézier curve to 3123 mm²"),
+        "{geometric}"
+    );
     // A double volute turns round sections into its straight walls, and says so.
     let double = stdout(&turbopump(&[
         "volute",

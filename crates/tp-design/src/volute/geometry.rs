@@ -187,6 +187,9 @@ pub struct VoluteGeometry {
     /// Outer wall of the spiral in the midplane, finely sampled from the start of the
     /// spiral to the throat.
     pub outer_wall: Vec<DVec3>,
+    /// Inner wall of a spiral with the cutwater compensation, where it rises off r'_z,
+    /// in the midplane; empty without it.
+    pub inner_wall: Vec<DVec3>,
     /// Membrane stresses in the casing wall.
     pub wall_stress: WallStress,
     pub cutwater: CutwaterGeometry,
@@ -286,6 +289,15 @@ impl VoluteGeometry {
     /// Points of every outline of the spiral.
     pub fn outline_points(&self) -> usize {
         self.design.cross_sections.loft_points()
+    }
+
+    /// A point (x, y) of the plane of the design, x toward the cutwater and wrap angles
+    /// counter-clockwise, in the midplane of the turned volute: the circular arcs of the
+    /// spiral are given in that plane.
+    pub fn plane_point(&self, p: DVec2) -> DVec3 {
+        let q = DVec2::new(p.x, self.basis.rotation_sign * p.y);
+        let (s, c) = self.rotation.sin_cos();
+        DVec3::new(c * q.x - s * q.y, s * q.x + c * q.y, self.basis.midplane)
     }
 
     /// Inner and outer radius of the vaneless ring between impeller and volute.
@@ -472,7 +484,7 @@ fn fitted_outline(
     midplane: f64,
 ) -> Vec<DVec2> {
     let mut h = size.height;
-    let mut outline = sections.loft_outline(angle, h);
+    let mut outline = sections.loft_outline_lifted(angle, h, size.lift);
     for _ in 0..40 {
         let ratio = size.area / outline.signed_area();
         if !ratio.is_finite() || (ratio - 1.0).abs() < 1e-10 {
@@ -480,7 +492,7 @@ fn fitted_outline(
         }
         // The area grows with a power of the height between 1 and 2.
         h *= ratio.powf(0.75);
-        outline = sections.loft_outline(angle, h);
+        outline = sections.loft_outline_lifted(angle, h, size.lift);
     }
     outline.meridional(sections.stagnation_radius, midplane)
 }
@@ -623,10 +635,12 @@ impl VoluteGeometry {
             Ok(s.points(sign).iter().all(|p| side(*p) * inside >= 0.0))
         };
         let bend = design.cross_sections.bend();
-        let mut start = 2f64.to_radians();
+        // A spiral that wraps less than 360° starts that much past the cutwater.
+        let first = design.development.start;
+        let mut start = first + 2f64.to_radians();
         while bend.is_none() && (!clear(start)? || !clear(start + 0.05)?) {
             start += 1f64.to_radians();
-            if start > 90f64.to_radians() {
+            if start > first + 90f64.to_radians() {
                 return Err(DesignError::Infeasible(
                     "the start of the spiral collides with the discharge diffuser".into(),
                 ));
@@ -655,6 +669,22 @@ impl VoluteGeometry {
                         radius: 0.0,
                         nose_center: tip,
                         nose_distance: r,
+                    },
+                )
+            }
+            // A shorter spiral leaves the casing between the throat and its start as the
+            // cutwater, its face on r'_z.
+            _ if first > 0.0 => {
+                let tip = DVec3::new(design.stagnation_radius, 0.0, zm);
+                (
+                    start,
+                    CutwaterGeometry {
+                        tip,
+                        angle: 0.0,
+                        wedge: 0.0,
+                        radius: 0.0,
+                        nose_center: tip,
+                        nose_distance: design.stagnation_radius,
                     },
                 )
             }
@@ -739,6 +769,22 @@ impl VoluteGeometry {
                 Ok(DVec3::new(r * theta.cos(), r * theta.sin(), zm))
             })
             .collect::<Result<Vec<_>, DesignError>>()?;
+        let inner_wall = match design.development.compensation {
+            None => Vec::new(),
+            Some(c) => {
+                let from = first + c.start;
+                let steps = (((TAU - from) / 1f64.to_radians()).ceil() as usize).max(2);
+                (0..=steps)
+                    .map(|i| {
+                        let angle = from + (TAU - from) * i as f64 / steps as f64;
+                        let dev = &design.development;
+                        let r = design.stagnation_radius + dev.lift_at(dev.phi(angle));
+                        let theta = sign * angle;
+                        DVec3::new(r * theta.cos(), r * theta.sin(), zm)
+                    })
+                    .collect()
+            }
+        };
         let outlet_height = nozzle
             .last()
             .map_or(0.0, |n| n.center.truncate().dot(n.tangent.truncate()));
@@ -788,6 +834,7 @@ impl VoluteGeometry {
             ..r
         });
         let outer_wall: Vec<DVec3> = outer_wall.into_iter().map(turn).collect();
+        let inner_wall: Vec<DVec3> = inner_wall.into_iter().map(turn).collect();
 
         let mut warnings = design.warnings.clone();
         if nozzle_length > design.diffuser.length * (1.0 + 1e-9) {
@@ -814,6 +861,7 @@ impl VoluteGeometry {
             outlet_height,
             rotation,
             outer_wall,
+            inner_wall,
             wall_stress: WallStress::default(),
             cutwater,
             bend,

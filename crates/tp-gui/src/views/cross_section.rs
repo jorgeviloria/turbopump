@@ -201,14 +201,15 @@ impl CrossSectionView {
                     plot.set_plot_bounds(bounds);
                 }
                 // The spiral every 45°, shaped by the active definitions.
-                let sections = &g.design.cross_sections;
                 for k in 1..=8 {
                     let angle = TAU * f64::from(k) / 8.0;
-                    let size = height_at(angle);
-                    if size <= 0.0 {
+                    let Ok(size) = g.design.section(angle) else {
+                        continue;
+                    };
+                    if size.height <= 0.0 {
                         continue;
                     }
-                    let outline = sections.outline(angle, size);
+                    let outline = g.design.section_outline(angle, &size);
                     plot.line(
                         Line::new(tr("sections round the spiral"), closed(&outline.points))
                             .color(palette.guide)

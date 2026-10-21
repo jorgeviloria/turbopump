@@ -712,6 +712,38 @@ mod tests {
     }
 
     #[test]
+    fn spiral_development_options_give_one_valid_flow_domain() {
+        use tp_design::Param;
+        use tp_design::volute::AreaLaw;
+        type Setting = fn(&mut VoluteInput);
+        let cases: [(&str, Setting); 4] = [
+            ("compensation", |v| v.spiral.compensation.enabled = true),
+            ("rectangle with compensation", |v| {
+                v.cross_section = CrossSectionInput::single(SectionShape::rectangular());
+                v.spiral.compensation.enabled = true;
+            }),
+            ("330° wrap", |v| {
+                v.spiral.wrap = Param::Manual(330f64.to_radians())
+            }),
+            ("Stepanoff with arcs", |v| {
+                v.spiral.law = AreaLaw::Stepanoff;
+                v.spiral.arcs.enabled = true;
+            }),
+        ];
+        for (name, set) in cases {
+            let mut input = VoluteInput::default();
+            set(&mut input);
+            let g = VoluteGeometry::build(&basis(), &input).unwrap();
+            let cad = build_volute(&g).unwrap();
+            assert!(
+                cad.fluid.is_valid() && cad.fluid.solid_count() == 1,
+                "{name}"
+            );
+            assert!(cad.fluid_volume() > 0.0, "{name}");
+        }
+    }
+
+    #[test]
     fn cutwater_and_discharge_shapes_give_valid_solids() {
         use tp_design::Param;
         use tp_design::volute::{CutwaterShape, DischargeShape, StraightWall};

@@ -6,7 +6,7 @@ use tp_design::impeller::BladeLoading;
 use tp_design::impeller::loading::blade_velocities;
 use tp_design::pump::{InletSection, correlations as corr};
 use tp_design::radial_thrust::RadialCollector;
-use tp_design::volute::{AreaLaw, CutwaterShape, DischargeShape};
+use tp_design::volute::{AreaLaw, CutwaterShape, DischargeShape, Progression};
 use tp_project::{ComponentId, Project};
 use tp_units::{DisplayUnits, QuantityKind};
 
@@ -814,10 +814,42 @@ pub(crate) fn show(
                 .collect::<Vec<_>>()
                 .join(tr(", blending to ")),
         };
-        let law = tr(match d.law {
-            AreaLaw::ConstantVelocity => "constant velocity (eqs. 7.26–7.27)",
-            _ => "angular momentum (eqs. 7.24–7.25)",
-        });
+        let dev = &d.development;
+        let progression = match dev.progression {
+            Progression::Linear => tr("linearly"),
+            Progression::Bezier { .. } => tr("along a Bézier curve"),
+        };
+        let law = match d.law {
+            AreaLaw::ConstantVelocity => tf(
+                "constant velocity {} (eqs. 7.26–7.27)",
+                &[&s(Velocity, dev.velocity)],
+            ),
+            AreaLaw::Stepanoff => match dev.velocity_factor {
+                Some(k) => tf(
+                    "Stepanoff, c₃ = K₃·√(2gH) = {} with K₃ = {}",
+                    &[&s(Velocity, dev.velocity), &format!("{k:.3}")],
+                ),
+                None => tf("Stepanoff, c₃ = {}", &[&s(Velocity, dev.velocity)]),
+            },
+            AreaLaw::Height => tf(
+                "height growing {} to {}",
+                &[&progression, &s(Length, dev.end_value)],
+            ),
+            AreaLaw::Area => tf(
+                "area growing {} to {}",
+                &[&progression, &s(Area, dev.end_value)],
+            ),
+            AreaLaw::AreaRadius => tf(
+                "A/r_c growing {} to {}",
+                &[&progression, &s(Length, dev.end_value)],
+            ),
+            #[allow(clippy::float_cmp)]
+            _ if dev.exponent == 1.0 => tr("angular momentum (eqs. 7.24–7.25)").to_owned(),
+            _ => tf(
+                "Pfleiderer, c_u·r^x constant with x = {}",
+                &[&format!("{:.2}", dev.exponent)],
+            ),
+        };
         Grid::new("report_volute")
             .num_columns(2)
             .striped(true)
@@ -842,6 +874,40 @@ pub(crate) fn show(
                 );
                 value_row(ui, tr("Cross sections"), shape);
                 value_row(ui, tr("Area law"), law);
+                if dev.start > 0.0 {
+                    value_row(
+                        ui,
+                        tr("Spiral wrap"),
+                        tf(
+                            "{}, starting {} past the cutwater with a blind flow of {}",
+                            &[
+                                &s(Angle, dev.wrap),
+                                &s(Angle, dev.start),
+                                &s(VolumeFlow, dev.blind_flow),
+                            ],
+                        ),
+                    );
+                }
+                if let Some(c) = dev.compensation {
+                    value_row(
+                        ui,
+                        tr("Cutwater compensation"),
+                        tf(
+                            "the inner radius rises {} from {} to the throat",
+                            &[&s(Length, c.thickness), &s(Angle, c.start)],
+                        ),
+                    );
+                }
+                if let Some(arcs) = &dev.arcs {
+                    value_row(
+                        ui,
+                        tr("Circular arcs"),
+                        tf(
+                            "{} arcs, at most {} from the spiral",
+                            &[&arcs.arcs.len().to_string(), &s(Length, arcs.max_deviation)],
+                        ),
+                    );
+                }
                 if let Some(rib) = &d.rib {
                     value_row(
                         ui,
@@ -922,6 +988,10 @@ pub(crate) fn show(
                 );
                 let c = &v.cutwater;
                 let cutwater = match d.cutwater_shape {
+                    _ if dev.start > 0.0 => tf(
+                        "blunt: the casing on r'_z from the throat to the start of the spiral at {}",
+                        &[&s(Angle, v.start_angle)],
+                    ),
                     CutwaterShape::Tangent => tr("tangent").to_owned(),
                     CutwaterShape::Sharp => tf(
                         "sharp, tip at {} with a wedge of {}",

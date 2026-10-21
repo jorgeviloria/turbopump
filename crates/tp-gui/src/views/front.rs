@@ -129,6 +129,39 @@ pub(crate) fn show(
                         .color(palette.volute)
                         .width(2.0),
                 );
+                // The inner wall where the cutwater compensation raises it off r'_z.
+                if !v.inner_wall.is_empty() {
+                    let inner: Vec<[f64; 2]> =
+                        v.inner_wall.iter().map(|p| view(p.x, p.y, scale)).collect();
+                    plot.line(
+                        Line::new(tr("cutwater compensation"), PlotPoints::from(inner))
+                            .color(palette.volute)
+                            .width(1.5),
+                    );
+                }
+                // Circular arcs of the outer wall: each center joined to the ends of its
+                // arc, so tangent arcs share the line through their meeting point.
+                if let Some(arcs) = &v.design.development.arcs {
+                    for arc in &arcs.arcs {
+                        let at = |p| {
+                            let q = v.plane_point(p);
+                            view(q.x, q.y, scale)
+                        };
+                        plot.line(
+                            Line::new(
+                                tr("circular arcs"),
+                                vec![at(arc.start), at(arc.center), at(arc.end)],
+                            )
+                            .color(palette.guide)
+                            .width(1.0),
+                        );
+                        plot.points(
+                            Points::new(tr("circular arcs"), vec![at(arc.center)])
+                                .color(palette.guide)
+                                .radius(2.5),
+                        );
+                    }
+                }
                 // The rib of a double volute, with its nose and tail.
                 if let Some(rib) = &v.rib {
                     let mut outline = rib.outline();

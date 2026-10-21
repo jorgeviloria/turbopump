@@ -332,3 +332,47 @@ fn radial_discharge() {
     harness.run();
     save(&mut harness, "radial-discharge-3d");
 }
+
+/// The spiral step with tangent circular arcs and the cutwater compensation, and the
+/// front view that draws them, from a project saved with those inputs.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn spiral_development() {
+    let mut harness = harness(egui::Theme::Light);
+    for _ in 0..6 {
+        harness.get_by_label_contains("Accept step").click();
+        harness.run();
+    }
+    let mut project = harness.state().document().project().clone();
+    let volute = project
+        .components()
+        .iter()
+        .find(|c| c.kind() == tp_project::ComponentKind::Volute)
+        .map(|c| c.id())
+        .unwrap();
+    let mut input = project.volute_input(volute).unwrap();
+    input.spiral.law = tp_design::volute::AreaLaw::Stepanoff;
+    input.spiral.arcs.enabled = true;
+    input.spiral.compensation.enabled = true;
+    input.spiral.cutwater_correction = false;
+    project.set_volute(volute, input).unwrap();
+    let path = output("spiral-development").with_extension("tpj");
+    tp_project::Document::new(project).save_as(&path).unwrap();
+    // Tall enough to show the whole step.
+    let mut harness = Harness::builder()
+        .with_size([1440.0, 2100.0])
+        .with_pixels_per_point(1.0)
+        .with_theme(egui::Theme::Light)
+        .wgpu()
+        .build_eframe(|cc| TurbopumpApp::new(cc, Some(&path)));
+    harness.run();
+    harness.get_by_label_contains("Spiral development").click();
+    harness.remove_cursor();
+    harness.run();
+    save(&mut harness, "spiral-development");
+    harness.state_mut().focus_view(View::FrontView);
+    harness.get_by_label_contains("Properties").click();
+    harness.remove_cursor();
+    harness.run();
+    save(&mut harness, "spiral-development-front");
+}

@@ -25,36 +25,155 @@
 mod geometry;
 pub mod loss;
 pub mod section;
+mod spiral;
 pub mod stress;
 
 use std::f64::consts::{PI, TAU};
 
 use serde::{Deserialize, Serialize};
-use tp_math::roots;
+use tp_math::{Bezier, DVec2, roots};
 
 use crate::outlet::{ImpellerOutlet, Reach};
 use crate::pump::correlations::{CorrelationInfo, Verification};
 use crate::{DesignError, Param};
+use tp_units::STANDARD_GRAVITY;
 
 pub use geometry::{NozzleSection, VoluteGeometry, VoluteSection};
 pub use section::{
     BendWall, BezierBase, BezierSide, CrossSectionInput, CrossSections, DEFAULT_CONE_ANGLE_DEG,
-    ExternalRound, InnerPosition, InternalRound, RadiusSide, SectionDefinition, SectionShape,
-    SegmentPoint, SideShape,
+    ExternalRound, InnerPosition, InternalRound, Measure, RadiusSide, SectionDefinition,
+    SectionProperties, SectionShape, SegmentPoint, SideShape,
+};
+pub use spiral::{
+    Arc, Compensation, MAX_ARCS, MIN_ARCS, SpiralArcs, SpiralDevelopment, US_SPECIFIC_SPEED,
+    stepanoff_velocity_factor,
 };
 
-/// How the cross sections grow with the wrap angle.
+/// How the cross sections grow with the wrap angle: a rule on the velocity in the
+/// spiral, which the flow collected at each angle then sizes, or on the geometry.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AreaLaw {
     /// Constant velocity below nq = 30, angular momentum above (Gülich p. 418).
     #[default]
     Auto,
-    /// c_u·r = c₂u·r₂ in every section (eqs. 7.24 and 7.25).
+    /// The swirl c_u·r^x stays constant over every section (Pfleiderer). With x = 1, the
+    /// default, it conserves the angular momentum c_u·r = c₂u·r₂ (Gülich eqs. 7.24 and
+    /// 7.25); with x = 0 the velocity c_u stays that at the volute inlet.
+    #[serde(alias = "pfleiderer")]
     AngularMomentum,
-    /// Areas proportional to the wrap angle, with the throat from angular momentum
-    /// (eqs. 7.26 and 7.27).
+    /// Areas proportional to the flow they collect, with the throat from angular
+    /// momentum (Gülich eqs. 7.26 and 7.27, after Stepanoff).
     ConstantVelocity,
+    /// One mean velocity c₃ = K₃·√(2gH) in every section, K₃ from the specific speed
+    /// (Stepanoff eq. 7.1, Fig. 7.5).
+    Stepanoff,
+    /// The height H of the sections grows to its end value along the progression.
+    Height,
+    /// The area A grows to its end value along the progression.
+    Area,
+    /// A/r_c, the area over the radius of its centroid, grows to its end value along
+    /// the progression.
+    AreaRadius,
+}
+
+impl AreaLaw {
+    /// Whether the law sizes the sections from the flow and a velocity.
+    pub fn velocity_based(self) -> bool {
+        !self.geometric()
+    }
+
+    /// Whether the law prescribes a dimension of the sections directly.
+    pub fn geometric(self) -> bool {
+        matches!(self, AreaLaw::Height | AreaLaw::Area | AreaLaw::AreaRadius)
+    }
+}
+
+/// How a geometric rule reaches its end value: a fraction of it against the fraction of
+/// the wrap angle, from (0, 0) to (1, 1).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Progression {
+    #[default]
+    Linear,
+    /// A cubic Bézier curve from (0, 0) to (1, 1) through these two inner control
+    /// points, each (fraction of the wrap, fraction of the end value).
+    Bezier { points: [[f64; 2]; 2] },
+}
+
+impl Progression {
+    /// The Bézier progression that starts out as the straight line.
+    pub fn bezier() -> Self {
+        Progression::Bezier {
+            points: [[1.0 / 3.0, 1.0 / 3.0], [2.0 / 3.0, 2.0 / 3.0]],
+        }
+    }
+
+    /// Fraction of the end value at the fraction `x` of the wrap.
+    pub fn value(&self, x: f64) -> f64 {
+        let x = x.clamp(0.0, 1.0);
+        match self {
+            Progression::Linear => x,
+            Progression::Bezier { points } => {
+                let curve = Bezier::new(vec![
+                    DVec2::ZERO,
+                    DVec2::from(points[0]),
+                    DVec2::from(points[1]),
+                    DVec2::ONE,
+                ])
+                .expect("four control points");
+                curve.y_at_x(x).unwrap_or(x)
+            }
+        }
+    }
+
+    fn validate(&self) -> Result<(), DesignError> {
+        let Progression::Bezier { points: [a, b] } = self else {
+            return Ok(());
+        };
+        require(
+            (0.0..=1.0).contains(&a[0]) && (0.0..=1.0).contains(&b[0]) && a[0] <= b[0],
+            || {
+                "the inner points of the progression must lie between 0 and 1 along the wrap,                  the first before the second"
+                    .into()
+            },
+        )?;
+        require(a[1] >= 0.0 && b[1] >= 0.0, || {
+            "the progression cannot fall below zero".into()
+        })
+    }
+}
+
+/// The cutwater compensation: past the angle φ_C the inner radius of the sections rises
+/// linearly to r'_z + e at the end of the spiral, so the end section gains a strip as
+/// thick as the cutwater (our construction, an alternative to Gülich eq. 7.28).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CompensationInput {
+    pub enabled: bool,
+    /// Thickness e the inner radius rises by, m; automatic: the cutwater thickness e₃.
+    pub thickness: Param<f64>,
+    /// Wrap angle φ_C from the start of the spiral where the rise starts, rad;
+    /// automatic: 270°.
+    pub start: Param<f64>,
+}
+
+/// Circular arcs in place of the outer contour of a spiral of straight-walled sections.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ArcInput {
+    pub enabled: bool,
+    /// Number of arcs.
+    pub segments: u32,
+}
+
+impl Default for ArcInput {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            segments: 3,
+        }
+    }
 }
 
 /// Single or double volute (Gülich Fig. 7.39).
@@ -97,18 +216,54 @@ pub struct VoluteSetupInput {
 #[serde(default)]
 pub struct SpiralInput {
     pub law: AreaLaw,
+    /// Wrap angle φ_wrap of the spiral from its start to the throat, rad; automatic:
+    /// 360°. A shorter spiral starts that much past the cutwater.
+    pub wrap: Param<f64>,
+    /// Exponent x of the swirl c_u·r^x = const of Pfleiderer's rule; automatic: 1.
+    pub exponent: Param<f64>,
+    /// Stepanoff's K₃ = c₃/√(2gH); automatic: from the specific speed (Fig. 7.5).
+    pub velocity_factor: Param<f64>,
+    /// Reference velocity: c_u,4 at the volute inlet r₄ = r'_z for the angular momentum
+    /// rules, the constant c₃ for Stepanoff's, m/s. Automatic: from the impeller,
+    /// c₂u·r₂/r₄, or K₃·√(2gH).
+    pub reference_velocity: Param<f64>,
+    /// Reference flow Q_i spread over the wrap, m³/s; automatic: Q_Le.
+    pub reference_flow: Param<f64>,
+    /// Blind flow Q₀ already in the spiral at its start, m³/s; automatic: what the
+    /// impeller delivers ahead of the start, Q_i·(1 − φ_wrap/360°).
+    pub blind_flow: Param<f64>,
+    /// End values of the geometric rules at the throat; automatic: those of the throat
+    /// by angular momentum. m, m² and m.
+    pub end_height: Param<f64>,
+    pub end_area: Param<f64>,
+    pub end_area_radius: Param<f64>,
+    pub progression: Progression,
     /// Number of cross sections from the start of the spiral to the throat.
     pub sections: Param<u32>,
     /// Enlarge the throat for the blockage of the cutwater (eq. 7.28).
     pub cutwater_correction: bool,
+    pub compensation: CompensationInput,
+    pub arcs: ArcInput,
 }
 
 impl Default for SpiralInput {
     fn default() -> Self {
         Self {
             law: AreaLaw::Auto,
+            wrap: Param::Auto,
+            exponent: Param::Auto,
+            velocity_factor: Param::Auto,
+            reference_velocity: Param::Auto,
+            reference_flow: Param::Auto,
+            blind_flow: Param::Auto,
+            end_height: Param::Auto,
+            end_area: Param::Auto,
+            end_area_radius: Param::Auto,
+            progression: Progression::Linear,
             sections: Param::Auto,
             cutwater_correction: true,
+            compensation: CompensationInput::default(),
+            arcs: ArcInput::default(),
         }
     }
 }
@@ -349,6 +504,9 @@ pub struct SectionSize {
     pub area: f64,
     /// Radius of the area centroid, m.
     pub centroid_radius: f64,
+    /// Rise of the section above r'_z for the cutwater compensation, m: a strip as wide
+    /// as the inlet joins it to r'_z.
+    pub lift: f64,
 }
 
 /// Conical diffuser from the volute throat to the discharge nozzle, straight or with a
@@ -427,6 +585,9 @@ pub struct VoluteDesign {
     pub stagnation_radius: f64,
     /// The law actually used (never `Auto`).
     pub law: AreaLaw,
+    /// The rule that sizes the sections of a single volute, and the reference values
+    /// of a double one.
+    pub development: SpiralDevelopment,
     /// The shapes of the cross sections round the spiral; for a double volute, the
     /// straight-walled shape it needs.
     pub cross_sections: CrossSections,
@@ -466,8 +627,6 @@ pub struct VoluteDesign {
     throat_corrected: bool,
     /// The straight walls of a double volute, in closed form.
     straight: Option<Shape>,
-    /// Height and area of the throat of a single volute before the cutwater correction.
-    base_throat: (f64, f64),
 }
 
 /// The axial gap between the spiral of an internal volute and the impeller beside it.
@@ -488,6 +647,10 @@ pub struct SideGap {
 pub const SIDE_GAP_RATIO: f64 = 0.065;
 /// Specific speed separating the constant-velocity and angular-momentum laws.
 pub const AREA_LAW_NQ: f64 = 30.0;
+/// Shortest wrap of a spiral, degrees.
+pub const MIN_WRAP_DEG: f64 = 300.0;
+/// Automatic start of the cutwater compensation, degrees from the start of the spiral.
+pub const COMPENSATION_START_DEG: f64 = 270.0;
 /// Above this specific speed the discharge nozzle should not decelerate further.
 pub const NO_DIFFUSION_NQ: f64 = 80.0;
 /// Fraction of the allowable opening angle used by the automatic diffuser.
@@ -563,7 +726,58 @@ impl Shape {
             outer_radius: self.rz + a,
             area: self.area(a),
             centroid_radius: self.centroid_radius(a),
+            lift: 0.0,
         }
+    }
+
+    /// ∫ b·(r_ref/r)^x dr over the section of height `a` (see
+    /// [`section::Outline::swirl_area`]).
+    fn swirl_area(&self, a: f64, reference: f64, exponent: f64) -> f64 {
+        #[allow(clippy::float_cmp)] // Closed forms only at exactly these exponents.
+        if exponent == 1.0 {
+            return reference * self.momentum_integral(a);
+        } else if exponent == 0.0 {
+            return self.area(a);
+        }
+        let (rz, t) = (self.rz, self.slope);
+        tp_math::quad::gauss_legendre(
+            |r| (self.b3 + 2.0 * t * (r - rz)) * (reference / r).powf(exponent),
+            rz,
+            rz + a,
+            24,
+        )
+    }
+
+    /// Height whose [`Self::swirl_area`] is `target`.
+    fn height_for_swirl(
+        &self,
+        target: f64,
+        reference: f64,
+        exponent: f64,
+    ) -> Result<f64, DesignError> {
+        #[allow(clippy::float_cmp)]
+        if exponent == 1.0 {
+            return self.height_for_integral(target / reference);
+        }
+        if target <= 0.0 {
+            return Ok(0.0);
+        }
+        let mut hi = self.rz.max(self.b3);
+        while self.swirl_area(hi, reference, exponent) < target {
+            hi *= 2.0;
+            if hi > 1e3 * self.rz {
+                return Err(DesignError::Infeasible(
+                    "the volute cross section does not converge".into(),
+                ));
+            }
+        }
+        roots::brent(
+            |a| self.swirl_area(a, reference, exponent) - target,
+            0.0,
+            hi,
+            1e-12 * hi,
+        )
+        .map_err(|e| DesignError::Infeasible(e.to_string()))
     }
 
     /// Height whose momentum integral is `k` (eq. 7.24).
@@ -602,6 +816,20 @@ impl Shape {
     }
 }
 
+/// Height of the section of a partial volute of a double volute that collects the flow
+/// of the wrap `angle`, before the cutwater correction: by angular momentum, Pfleiderer's
+/// swirl or Stepanoff's velocity.
+fn partial_height(rule: &SpiralDevelopment, shape: &Shape, angle: f64) -> Result<f64, DesignError> {
+    let target = rule.reference_flow * angle / TAU / rule.reference_velocity;
+    match rule.law {
+        AreaLaw::Stepanoff => Ok(shape.height_for_area(target)),
+        AreaLaw::AngularMomentum => {
+            shape.height_for_swirl(target, rule.reference_radius, rule.exponent)
+        }
+        _ => shape.height_for_swirl(target, rule.reference_radius, 1.0),
+    }
+}
+
 /// The size of a section from its properties.
 fn size_of(p: &section::SectionProperties) -> SectionSize {
     SectionSize {
@@ -609,6 +837,7 @@ fn size_of(p: &section::SectionProperties) -> SectionSize {
         outer_radius: p.outer_radius,
         area: p.area,
         centroid_radius: p.centroid_radius,
+        lift: 0.0,
     }
 }
 
@@ -726,36 +955,242 @@ impl VoluteDesign {
             }
         };
 
-        // Throat of a partial volute of wrap `wrap` from angular momentum, for both
-        // laws, then the correction Δa₃/a₃ = 0.2·(e/a₃)² for a cutwater or rib nose of
-        // thickness e (eq. 7.28). A single volute takes the shape defined at its throat.
+        // The rule of the spiral development and its reference values.
+        let spiral_input = &input.spiral;
+        let single = rib_wrap.is_none();
+        let external = cross_sections.internal().is_none();
+        let wrap = spiral_input.wrap.resolve(|| TAU);
+        require(
+            (MIN_WRAP_DEG.to_radians() - 1e-9..=TAU + 1e-9).contains(&wrap),
+            || {
+                format!(
+                    "the spiral must wrap between {MIN_WRAP_DEG:.0}° and 360°, got {:.1}°",
+                    wrap.to_degrees()
+                )
+            },
+        )?;
+        let wrap = wrap.min(TAU);
+        require(wrap > TAU - 1e-9 || (single && external), || {
+            "only a single external volute can wrap less than 360°".into()
+        })?;
+        let start = TAU - wrap;
+        let reference_radius = stagnation_radius;
+        let reference_flow = spiral_input.reference_flow.resolve(|| flow);
+        require(reference_flow > 0.0, || {
+            "the reference flow Q_i must be positive".into()
+        })?;
+        let blind_flow = spiral_input
+            .blind_flow
+            .resolve(|| reference_flow * start / TAU);
+        require(blind_flow >= 0.0 && (single || blind_flow == 0.0), || {
+            "the blind flow Q₀ cannot be negative, and only a single volute takes one".into()
+        })?;
+        let exponent = spiral_input.exponent.resolve(|| 1.0);
+        require((0.0..=2.0).contains(&exponent), || {
+            format!("the swirl exponent x must lie between 0 and 2, got {exponent}")
+        })?;
+        require(single || law.velocity_based(), || {
+            "a double volute needs a velocity rule: the geometric rules size a single spiral".into()
+        })?;
+        let velocity_factor =
+            (law == AreaLaw::Stepanoff && spiral_input.reference_velocity.is_auto()).then(|| {
+                spiral_input
+                    .velocity_factor
+                    .resolve(|| stepanoff_velocity_factor(basis.nq))
+            });
+        require(velocity_factor.is_none_or(|k| k > 0.0), || {
+            "Stepanoff's K₃ must be positive".into()
+        })?;
+        let reference_velocity =
+            spiral_input
+                .reference_velocity
+                .resolve(|| match velocity_factor {
+                    Some(k) => k * (2.0 * STANDARD_GRAVITY * basis.stage_head).sqrt(),
+                    None => basis.cu * r2 / reference_radius,
+                });
+        require(reference_velocity > 0.0, || {
+            "the reference velocity must be positive".into()
+        })?;
+        let compensation = if spiral_input.compensation.enabled {
+            require(single && external, || {
+                "the cutwater compensation needs a single external volute: an internal one has \
+                 no cutwater of its own"
+                    .into()
+            })?;
+            let c = &spiral_input.compensation;
+            let thickness = c.thickness.resolve(|| cutwater_thickness);
+            let at = c.start.resolve(|| COMPENSATION_START_DEG.to_radians());
+            require(thickness > 0.0, || {
+                "the thickness of the compensation must be positive".into()
+            })?;
+            require(at >= 0.0 && at < wrap - 1f64.to_radians(), || {
+                format!(
+                    "the compensation must start between 0° and the wrap of the spiral, \
+                     {:.0}°, got {:.1}°",
+                    wrap.to_degrees(),
+                    at.to_degrees()
+                )
+            })?;
+            Some(Compensation {
+                thickness,
+                start: at,
+            })
+        } else {
+            None
+        };
+        spiral_input.progression.validate()?;
+        let mut development = SpiralDevelopment {
+            law,
+            wrap,
+            start,
+            reference_radius,
+            reference_velocity,
+            velocity: if law == AreaLaw::Stepanoff {
+                reference_velocity
+            } else {
+                0.0
+            },
+            velocity_factor,
+            reference_flow,
+            blind_flow,
+            exponent,
+            end_value: 0.0,
+            progression: spiral_input.progression,
+            correction: 0.0,
+            compensation,
+            arcs: None,
+        };
+
+        if compensation.is_some() && spiral_input.cutwater_correction && law.velocity_based() {
+            warnings.push(
+                "the cutwater compensation and the throat correction of eq. 7.28 both make \
+                 room for the cutwater: one of them is usually enough"
+                    .into(),
+            );
+        }
+        let us_specific_speed = US_SPECIFIC_SPEED * basis.nq;
+        if spiral_input.velocity_factor.is_auto()
+            && velocity_factor.is_some()
+            && !(600.0..=15_000.0).contains(&us_specific_speed)
+        {
+            warnings.push(format!(
+                "nq = {:.1} lies outside Stepanoff's Fig. 7.5 (nq 11.6 to 290): K₃ is taken \
+                 at the end of the chart",
+                basis.nq
+            ));
+        }
+        if start > 0.0 && cross_sections.definitions()[0].angle < start {
+            warnings.push(format!(
+                "cross sections defined before the start of the spiral at {:.0}° shape it \
+                 only from there",
+                start.to_degrees()
+            ));
+        }
+
+        // Throat of a partial volute of wrap `wrap` by its rule, then the correction
+        // Δa₃/a₃ = 0.2·(e/a₃)² for a cutwater or rib nose of thickness e (eq. 7.28).
         let correction_for = |blockage: f64, a: f64| {
-            if input.spiral.cutwater_correction {
+            if spiral_input.cutwater_correction {
                 0.2 * blockage * blockage / a
             } else {
                 0.0
             }
         };
+        let rule = development.clone();
         let partial_throat =
             |wrap: f64, blockage: f64| -> Result<(SectionSize, f64), DesignError> {
-                let a = section.height_for_integral(momentum_constant * wrap)?;
+                let a = partial_height(&rule, &section, wrap)?;
                 let correction = correction_for(blockage, a);
                 Ok((section.size(a + correction), correction))
             };
         let inner_wrap = rib_wrap.unwrap_or(TAU);
-        let (throat, throat_correction, throat_aspect, base_throat) = if rib_wrap.is_some() {
+        let (throat, throat_correction, throat_aspect) = if rib_wrap.is_some() {
             let (throat, correction) = partial_throat(inner_wrap, cutwater_thickness)?;
             let aspect = (inlet_width + 2.0 * section.slope() * throat.height) / throat.height;
-            (throat, correction, aspect, (0.0, 0.0))
+            (throat, correction, aspect)
         } else {
-            let a = cross_sections.height_for_momentum(TAU, momentum_constant * TAU)?;
-            let base_area = cross_sections.properties(TAU, a)?.area;
-            let correction = correction_for(cutwater_thickness, a);
-            let p = cross_sections.properties(TAU, a + correction)?;
+            // A single volute takes the shape defined at its throat, raised by the
+            // compensation.
+            let end_flow = development.flow_at(wrap);
+            let lift = development.lift_at(wrap);
+            let swirl = |exponent: f64| Measure::Swirl {
+                exponent,
+                reference_radius,
+            };
+            let momentum =
+                || cross_sections.height_for(TAU, lift, swirl(1.0), end_flow / reference_velocity);
+            match law {
+                AreaLaw::AngularMomentum | AreaLaw::Auto => {
+                    let target = end_flow / reference_velocity;
+                    let a = cross_sections.height_for(TAU, lift, swirl(exponent), target)?;
+                    development.correction = correction_for(cutwater_thickness, a);
+                }
+                AreaLaw::ConstantVelocity => {
+                    let a = momentum()?;
+                    let area = cross_sections.measure(TAU, a, lift, Measure::Area)?;
+                    development.velocity = end_flow / area;
+                    development.correction = correction_for(cutwater_thickness, a);
+                }
+                AreaLaw::Stepanoff => {
+                    let area = end_flow / reference_velocity;
+                    let a = cross_sections.height_for(TAU, lift, Measure::Area, area)?;
+                    development.correction = correction_for(cutwater_thickness, a);
+                }
+                AreaLaw::Height | AreaLaw::Area | AreaLaw::AreaRadius => {
+                    // Automatic end values: those of the throat by angular momentum.
+                    let a = momentum()?;
+                    let h = a + correction_for(cutwater_thickness, a);
+                    let end = match law {
+                        AreaLaw::Height => spiral_input.end_height.resolve(|| h),
+                        AreaLaw::Area => {
+                            let auto = cross_sections.measure(TAU, h, lift, Measure::Area)?;
+                            spiral_input.end_area.resolve(|| auto)
+                        }
+                        _ => {
+                            let auto =
+                                cross_sections.measure(TAU, h, lift, Measure::AreaOverRadius)?;
+                            spiral_input.end_area_radius.resolve(|| auto)
+                        }
+                    };
+                    require(end > 0.0, || {
+                        "the end value of the spiral must be positive".into()
+                    })?;
+                    development.end_value = end;
+                }
+            }
+            if spiral_input.arcs.enabled {
+                require(
+                    external
+                        && cross_sections
+                            .definitions()
+                            .iter()
+                            .all(|d| d.shape.straight_cone_angle().is_some()),
+                    || {
+                        "circular arcs need rectangular or trapezoidal sections all round the \
+                         spiral"
+                            .into()
+                    },
+                )?;
+                let count = spiral_input.arcs.segments;
+                require((MIN_ARCS..=MAX_ARCS).contains(&count), || {
+                    format!("the spiral takes {MIN_ARCS} to {MAX_ARCS} circular arcs, got {count}")
+                })?;
+                development.arcs = Some(spiral::fit_arcs(&development, &cross_sections, count)?);
+            }
+            let p = development.properties(&cross_sections, TAU)?;
             let aspect = p.width / (p.outer_radius - p.inner_radius);
-            (size_of(&p), correction, aspect, (a, base_area))
+            (
+                development.size(&cross_sections, TAU)?,
+                development.correction,
+                aspect,
+            )
         };
-        let throat_velocity = flow * inner_wrap / TAU / throat.area;
+        let throat_flow = if single {
+            development.flow_at(wrap)
+        } else {
+            reference_flow * inner_wrap / TAU
+        };
+        let throat_velocity = throat_flow / throat.area;
         let c2 = basis.cu.hypot(basis.cm);
         let deceleration = throat_velocity / c2;
 
@@ -958,7 +1393,7 @@ impl VoluteDesign {
             momentum_constant,
             throat_corrected: input.spiral.cutwater_correction,
             straight: rib_wrap.map(|_| section),
-            base_throat,
+            development,
         })
     }
 
@@ -1060,30 +1495,28 @@ impl VoluteDesign {
     }
 
     /// Section of a single volute at `angle`, shaped by the definitions there and sized
-    /// like [`Self::partial_section`].
+    /// by the rule of its development.
     fn spiral_section(&self, angle: f64) -> Result<SectionSize, DesignError> {
-        let sections = &self.cross_sections;
-        let (end, end_area) = self.base_throat;
-        let correction = if self.throat_corrected {
-            0.2 * self.cutwater_thickness.powi(2) / end
-        } else {
-            0.0
-        };
-        let fraction = (angle / TAU).clamp(0.0, 1.0);
-        let height = match self.law {
-            AreaLaw::ConstantVelocity => sections.height_for_area(angle, end_area * fraction)?,
-            _ => sections
-                .height_for_momentum(angle, self.momentum_constant * angle.clamp(0.0, TAU))?,
-        };
-        Ok(size_of(
-            &sections.properties(angle, height + correction * fraction)?,
-        ))
+        self.development.size(&self.cross_sections, angle)
     }
 
     /// The outline at `angle` of the section of height `height`, resampled for lofting
     /// (s, h).
     pub fn loft_outline(&self, angle: f64, height: f64) -> section::Outline {
         self.cross_sections.loft_outline(angle, height)
+    }
+
+    /// The outline (s, h) of the section `size` at `angle`, with the strip of the
+    /// cutwater compensation below it.
+    pub fn section_outline(&self, angle: f64, size: &SectionSize) -> section::Outline {
+        self.cross_sections
+            .lifted_outline(angle, size.height, size.lift)
+    }
+
+    /// Properties of the end section of a single volute, at the throat.
+    pub fn end_section(&self) -> Result<SectionProperties, DesignError> {
+        self.cross_sections
+            .section_properties(TAU, self.throat.height, self.throat.lift)
     }
 
     /// Section at `angle` of a partial volute of wrap `wrap`, whose throat is sized by
@@ -1096,7 +1529,7 @@ impl VoluteDesign {
         blockage: f64,
     ) -> Result<SectionSize, DesignError> {
         let shape = self.shape();
-        let end = shape.height_for_integral(self.momentum_constant * wrap)?;
+        let end = partial_height(&self.development, &shape, wrap)?;
         let correction = if self.throat_corrected {
             0.2 * blockage * blockage / end
         } else {
@@ -1106,7 +1539,7 @@ impl VoluteDesign {
         let height = match self.law {
             // Eq. 7.27 on the uncorrected throat, then the correction ramps up.
             AreaLaw::ConstantVelocity => shape.height_for_area(shape.area(end) * fraction),
-            _ => shape.height_for_integral(self.momentum_constant * angle.clamp(0.0, wrap))?,
+            _ => partial_height(&self.development, &shape, angle.clamp(0.0, wrap))?,
         };
         Ok(shape.size(height + correction * fraction))
     }
@@ -1128,9 +1561,12 @@ impl VoluteDesign {
             let Ok(section) = self.section(angle) else {
                 continue;
             };
+            let development = &self.development;
             let collected = match &self.rib {
                 Some(rib) if angle > rib.start => (angle - rib.start) / TAU,
-                _ => angle / TAU,
+                Some(_) => angle / TAU,
+                None if angle < development.start => continue,
+                None => development.flow_at(development.phi(angle)) / self.flow,
             };
             let (momentum, walls) = match &self.rib {
                 Some(_) => (
@@ -1196,10 +1632,32 @@ pub const VOLUTE_CORRELATIONS: &[CorrelationInfo] = &[
         verification: Verification::Verified,
     },
     CorrelationInfo {
+        id: "volute.swirl_exponent",
+        description: "Q(φ) = c_u,4·∬(r₄/r)^x dA with Q(φ) = Q₀ + Q_i·φ/2π (Pfleiderer's \
+                      c_u·r^x = const)",
+        reference: "x = 1 is Gülich 2nd ed., eqs. 7.24 and 7.25, and x = 0 a constant \
+                    velocity; the general exponent, attributed to Pfleiderer, is not checked",
+        verification: Verification::Pending,
+    },
+    CorrelationInfo {
+        id: "volute.stepanoff",
+        description: "c₃ = K₃·√(2gH), K₃ = 4.144·n_s^−0.325 for n_s = 600 to 15 000 (US \
+                      units), A(φ) = Q(φ)/c₃",
+        reference: "Stepanoff 2nd ed. 1957, eq. 7.1 and Fig. 7.5 (the straight line read \
+                    off the chart is our fit)",
+        verification: Verification::Verified,
+    },
+    CorrelationInfo {
         id: "volute.cutwater_correction",
         description: "Δa₃/a₃ = 0.2·(e₃/a₃)²",
         reference: "Gülich 2nd ed., eq. 7.28",
         verification: Verification::Verified,
+    },
+    CorrelationInfo {
+        id: "volute.cutwater_compensation",
+        description: "inner radius rising linearly by e₃ from φ_C = 270° to the throat",
+        reference: "our construction, an alternative to Gülich eq. 7.28",
+        verification: Verification::EngineeringDefault,
     },
     CorrelationInfo {
         id: "volute.cutwater_thickness",

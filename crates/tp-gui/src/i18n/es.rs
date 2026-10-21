@@ -1420,14 +1420,8 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "edit volute cross section",
         "editar sección transversal de la voluta",
     ),
-    (
-        "Below nq = 30 the sections grow linearly (constant velocity), above it they keep c_u·r constant.",
-        "Por debajo de nq = 30 las secciones crecen linealmente (velocidad constante); por encima conservan c_u·r.",
-    ),
     ("Law", "Ley"),
     ("automatic", "automática"),
-    ("angular momentum", "momento angular"),
-    ("constant velocity", "velocidad constante"),
     ("automatic: {}", "automática: {}"),
     ("Cutwater correction", "Corrección del corte de agua"),
     (
@@ -1448,6 +1442,168 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Area along the spiral", "Área a lo largo de la espiral"),
     ("area", "área"),
     ("edit volute spiral", "editar espiral de la voluta"),
+    // Spiral development of the volute.
+    (
+        "Each section carries the flow the impeller delivers up to its angle. The velocity rules size it for a velocity in the spiral, the geometric rules prescribe its size directly.",
+        "Cada sección lleva el caudal que el rodete entrega hasta su ángulo. Las reglas de velocidad la dimensionan para una velocidad en la espiral; las geométricas fijan su tamaño directamente.",
+    ),
+    ("Design rule", "Regla de diseño"),
+    ("Wrap angle φ_wrap", "Ángulo de envolvimiento φ_wrap"),
+    (
+        "From the start of the spiral to the throat. A shorter spiral starts past the cutwater, which becomes the casing between the throat and that start. Automatic: 360°",
+        "Del inicio de la espiral a la garganta. Una espiral más corta empieza después del corte de agua, que pasa a ser la carcasa entre la garganta y ese inicio. Automático: 360°",
+    ),
+    ("Velocity-based", "Por velocidad"),
+    ("Geometry-based", "Geométricas"),
+    (
+        "Pfleiderer: c_u·r^x constant",
+        "Pfleiderer: c_u·r^x constante",
+    ),
+    (
+        "constant velocity, throat by angular momentum (Gülich)",
+        "velocidad constante, garganta por momento angular (Gülich)",
+    ),
+    ("Stepanoff: c₃ = K₃·√(2gH)", "Stepanoff: c₃ = K₃·√(2gH)"),
+    ("height H", "altura H"),
+    ("area A", "área A"),
+    (
+        "area over centroid radius A/r_c",
+        "área sobre radio del centroide A/r_c",
+    ),
+    ("Velocity and flow", "Velocidad y caudal"),
+    ("Swirl exponent x", "Exponente del giro x"),
+    (
+        "c_u·r^x stays constant over every section: 1 conserves the angular momentum (Gülich eq. 7.24), 0 keeps the velocity of the volute inlet. Automatic: 1",
+        "c_u·r^x se mantiene constante en cada sección: 1 conserva el momento angular (Gülich ec. 7.24), 0 mantiene la velocidad de la entrada de la voluta. Automático: 1",
+    ),
+    ("Velocity factor K₃", "Factor de velocidad K₃"),
+    (
+        "c₃/√(2gH); automatic: from the specific speed (Stepanoff Fig. 7.5)",
+        "c₃/√(2gH); automático: según la velocidad específica (Stepanoff fig. 7.5)",
+    ),
+    ("Velocity c₃", "Velocidad c₃"),
+    (
+        "Mean velocity in every section; automatic: K₃·√(2gH)",
+        "Velocidad media en todas las secciones; automática: K₃·√(2gH)",
+    ),
+    ("Reference velocity c_u,4", "Velocidad de referencia c_u,4"),
+    (
+        "Circumferential velocity at the volute inlet r₄ = r'_z; automatic: c₂u·r₂/r₄ from the impeller",
+        "Velocidad circunferencial a la entrada de la voluta r₄ = r'_z; automática: c₂u·r₂/r₄ desde el rodete",
+    ),
+    ("Reference flow Q_i", "Caudal de referencia Q_i"),
+    (
+        "Flow the impeller delivers round the spiral; automatic: Q_Le",
+        "Caudal que el rodete entrega a lo largo de la espiral; automático: Q_Le",
+    ),
+    ("Blind flow Q₀", "Caudal ciego Q₀"),
+    (
+        "Flow already in the spiral at its start; automatic: what the impeller delivers ahead of a spiral shorter than 360°",
+        "Caudal que ya lleva la espiral en su inicio; automático: lo que el rodete entrega antes de una espiral de menos de 360°",
+    ),
+    ("End section and progression", "Sección final y progresión"),
+    (
+        "At the throat; automatic: that of the throat by angular momentum",
+        "En la garganta; automático: el de la garganta por momento angular",
+    ),
+    ("End height H", "Altura final H"),
+    ("End area A", "Área final A"),
+    ("End A/r_c", "A/r_c final"),
+    ("Progression", "Progresión"),
+    (
+        "How the value grows from the start of the spiral to its end value at the throat",
+        "Cómo crece el valor desde el inicio de la espiral hasta su valor final en la garganta",
+    ),
+    ("Bézier curve", "curva de Bézier"),
+    ("Point {}", "Punto {}"),
+    ("of the end ", "del final "),
+    ("progression", "progresión"),
+    ("Cutwater compensation", "Compensación del corte de agua"),
+    (
+        "Past φ_C the inner radius of the sections rises linearly to r'_z + e at the throat: the end section gains a strip as thick as the cutwater. An alternative to the correction of eq. 7.28, for single external volutes.",
+        "A partir de φ_C el radio interior de las secciones sube linealmente hasta r'_z + e en la garganta: la sección final gana una franja tan gruesa como el corte de agua. Es una alternativa a la corrección de la ec. 7.28, para volutas simples externas.",
+    ),
+    ("Compensate the cutwater", "Compensar el corte de agua"),
+    ("Thickness e", "Espesor e"),
+    (
+        "Rise of the inner radius at the throat; automatic: the cutwater thickness e₃",
+        "Subida del radio interior en la garganta; automática: el espesor del corte de agua e₃",
+    ),
+    ("Start φ_C", "Inicio φ_C"),
+    (
+        "Wrap angle from the start of the spiral where the inner radius starts to rise; automatic: 270°",
+        "Ángulo desde el inicio de la espiral donde el radio interior empieza a subir; automático: 270°",
+    ),
+    ("Circular arcs", "Arcos de circunferencia"),
+    (
+        "Approximate by circular arcs",
+        "Aproximar con arcos de circunferencia",
+    ),
+    (
+        "For rectangular and trapezoidal sections: tangent circular arcs take the place of the outer contour, as volutes are laid out on the drawing board. They start at the start of the spiral and end at the throat.",
+        "Para secciones rectangulares y trapezoidales: arcos de circunferencia tangentes sustituyen al contorno exterior, como se trazan las volutas en el tablero de dibujo. Empiezan en el inicio de la espiral y terminan en la garganta.",
+    ),
+    ("Number of arcs", "Número de arcos"),
+    ("Largest deviation", "Desviación máxima"),
+    ("Arc", "Arco"),
+    ("Radius", "Radio"),
+    ("Center", "Centro"),
+    ("From – to", "Desde – hasta"),
+    ("End section", "Sección final"),
+    ("Inner radius r'", "Radio interior r'"),
+    ("Outer radius r", "Radio exterior r"),
+    ("Lowest axial coordinate z", "Coordenada axial mínima z"),
+    ("Height H", "Altura H"),
+    ("Width B", "Ancho B"),
+    ("Side ratio H/B", "Relación de lados H/B"),
+    ("Equivalent diameter D", "Diámetro equivalente D"),
+    ("Area A", "Área A"),
+    (
+        "Area over centroid radius A/r_c",
+        "Área sobre radio del centroide A/r_c",
+    ),
+    ("Along the spiral", "A lo largo de la espiral"),
+    ("outer radius", "radio exterior"),
+    ("contour angle", "ángulo del contorno"),
+    ("circumferential velocity", "velocidad circunferencial"),
+    ("spiral", "espiral"),
+    ("circular arcs", "arcos de circunferencia"),
+    ("cutwater compensation", "compensación del corte de agua"),
+    ("linearly", "linealmente"),
+    ("along a Bézier curve", "según una curva de Bézier"),
+    (
+        "constant velocity {} (eqs. 7.26–7.27)",
+        "velocidad constante {} (ecs. 7.26–7.27)",
+    ),
+    (
+        "Stepanoff, c₃ = K₃·√(2gH) = {} with K₃ = {}",
+        "Stepanoff, c₃ = K₃·√(2gH) = {} con K₃ = {}",
+    ),
+    ("Stepanoff, c₃ = {}", "Stepanoff, c₃ = {}"),
+    ("height growing {} to {}", "altura creciendo {} hasta {}"),
+    ("area growing {} to {}", "área creciendo {} hasta {}"),
+    ("A/r_c growing {} to {}", "A/r_c creciendo {} hasta {}"),
+    (
+        "Pfleiderer, c_u·r^x constant with x = {}",
+        "Pfleiderer, c_u·r^x constante con x = {}",
+    ),
+    ("Spiral wrap", "Envolvimiento de la espiral"),
+    (
+        "{}, starting {} past the cutwater with a blind flow of {}",
+        "{}, empieza {} después del corte de agua con un caudal ciego de {}",
+    ),
+    (
+        "the inner radius rises {} from {} to the throat",
+        "el radio interior sube {} desde {} hasta la garganta",
+    ),
+    (
+        "{} arcs, at most {} from the spiral",
+        "{} arcos, a lo sumo a {} de la espiral",
+    ),
+    (
+        "blunt: the casing on r'_z from the throat to the start of the spiral at {}",
+        "romo: la carcasa sobre r'_z desde la garganta hasta el inicio de la espiral en {}",
+    ),
     (
         "Straight conical diffuser from the throat to the discharge nozzle, checked against the allowable opening angle (Gülich eqs. 1.44, 1.45).",
         "Difusor cónico recto de la garganta a la boca de descarga, comprobado con el ángulo de apertura admisible (Gülich, ecs. 1.44 y 1.45).",
@@ -1903,6 +2059,87 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
 
 /// Messages of the design code, most specific first.
 pub(super) static MESSAGES: &[(&str, &str)] = &[
+    // Spiral development of the volute.
+    (
+        "the spiral must wrap between 300° and 360°, got {}°",
+        "la espiral debe envolver entre 300° y 360°; se dio {}°",
+    ),
+    (
+        "only a single external volute can wrap less than 360°",
+        "solo una voluta simple externa puede envolver menos de 360°",
+    ),
+    (
+        "the reference flow Q_i must be positive",
+        "el caudal de referencia Q_i debe ser positivo",
+    ),
+    (
+        "the blind flow Q₀ cannot be negative, and only a single volute takes one",
+        "el caudal ciego Q₀ no puede ser negativo, y solo lo admite una voluta simple",
+    ),
+    (
+        "the swirl exponent x must lie between 0 and 2, got {}",
+        "el exponente del giro x debe estar entre 0 y 2; se dio {}",
+    ),
+    (
+        "a double volute needs a velocity rule: the geometric rules size a single spiral",
+        "una voluta doble necesita una regla de velocidad: las reglas geométricas dimensionan una sola espiral",
+    ),
+    (
+        "Stepanoff's K₃ must be positive",
+        "el K₃ de Stepanoff debe ser positivo",
+    ),
+    (
+        "the reference velocity must be positive",
+        "la velocidad de referencia debe ser positiva",
+    ),
+    (
+        "the cutwater compensation needs a single external volute: an internal one has no cutwater of its own",
+        "la compensación del corte de agua necesita una voluta simple externa: una interna no tiene corte de agua propio",
+    ),
+    (
+        "the thickness of the compensation must be positive",
+        "el espesor de la compensación debe ser positivo",
+    ),
+    (
+        "the compensation must start between 0° and the wrap of the spiral, {}°, got {}°",
+        "la compensación debe empezar entre 0° y el envolvimiento de la espiral, {}°; se dio {}°",
+    ),
+    (
+        "the end value of the spiral must be positive",
+        "el valor final de la espiral debe ser positivo",
+    ),
+    (
+        "circular arcs need rectangular or trapezoidal sections all round the spiral",
+        "los arcos de circunferencia necesitan secciones rectangulares o trapezoidales en toda la espiral",
+    ),
+    (
+        "the spiral takes 2 to 8 circular arcs, got {}",
+        "la espiral admite de 2 a 8 arcos de circunferencia; se dio {}",
+    ),
+    (
+        "the inner points of the progression must lie between 0 and 1 along the wrap, the first before the second",
+        "los puntos interiores de la progresión deben estar entre 0 y 1 a lo largo del envolvimiento, el primero antes que el segundo",
+    ),
+    (
+        "the progression cannot fall below zero",
+        "la progresión no puede bajar de cero",
+    ),
+    (
+        "no chain of circular arcs follows this spiral",
+        "ninguna cadena de arcos de circunferencia sigue esta espiral",
+    ),
+    (
+        "the cutwater compensation and the throat correction of eq. 7.28 both make room for the cutwater: one of them is usually enough",
+        "la compensación del corte de agua y la corrección de la garganta de la ec. 7.28 hacen sitio ambas al corte de agua: suele bastar con una",
+    ),
+    (
+        "nq = {} lies outside Stepanoff's Fig. 7.5 (nq 11.6 to 290): K₃ is taken at the end of the chart",
+        "nq = {} queda fuera de la fig. 7.5 de Stepanoff (nq de 11,6 a 290): K₃ se toma en el extremo del diagrama",
+    ),
+    (
+        "cross sections defined before the start of the spiral at {}° shape it only from there",
+        "las secciones definidas antes del inicio de la espiral en {}° solo le dan forma desde ahí",
+    ),
     // Side gap of internal volutes.
     (
         "the internal spiral reaches into the suction eye of the impeller: turn it toward +z or make it smaller",
