@@ -26,7 +26,10 @@ pub(crate) struct PerformanceArgs {
     /// vaneless), onset (Q/Q_opt where recirculation starts), psi0 (shut-off pressure
     /// coefficient), p0 (shut-off power), max (largest Q/Q_opt), points, npsh_inlet
     /// (λ_c of the NPSH₃), npsh_blade (λ_w at the design point), npsh_exponent (steep
-    /// rise of NPSH₃), clearances (normal or wide: seal clearances for the radial force).
+    /// rise of NPSH₃), clearances (normal or wide: seal clearances for the radial and
+    /// axial forces), seal (annular seal diameter d_sp), shaft_seal (shaft seal
+    /// diameter d_D), balance (on or off: balance holes with a rear seal), rear_seal
+    /// (its diameter d_s2), k0 (rotation factor of the liquid in the sidewall gaps).
     #[arg(long = "set", value_name = "KEY=VALUE")]
     settings: Vec<String>,
     /// Write the curve as CSV in SI units to this file (one impeller only).
@@ -117,6 +120,17 @@ fn apply(input: &mut PerformanceInput, units: &DisplayUnits, setting: &str) -> R
                 _ => return Err(format!("clearances must be normal or wide, got {value:?}")),
             }
         }
+        "seal" => input.axial.seal_diameter = number(QuantityKind::Length)?,
+        "shaft_seal" => input.axial.shaft_seal_diameter = number(QuantityKind::Length)?,
+        "rear_seal" => input.axial.rear_seal_diameter = number(QuantityKind::Length)?,
+        "k0" => input.axial.rotation_factor = number(QuantityKind::Dimensionless)?,
+        "balance" => {
+            input.axial.balance_holes = match value.to_ascii_lowercase().as_str() {
+                "on" | "yes" | "true" => true,
+                "off" | "no" | "false" | "auto" => false,
+                _ => return Err(format!("balance must be on or off, got {value:?}")),
+            }
+        }
         "points" => {
             input.points = value
                 .parse()
@@ -125,7 +139,8 @@ fn apply(input: &mut PerformanceInput, units: &DisplayUnits, setting: &str) -> R
         _ => {
             return Err(format!(
                 "unknown key {key:?}; valid keys: collector, onset, psi0, p0, max, points, \
-                 npsh_inlet, npsh_blade, npsh_exponent, clearances"
+                 npsh_inlet, npsh_blade, npsh_exponent, clearances, seal, shaft_seal, \
+                 balance, rear_seal, k0"
             ));
         }
     }
@@ -253,6 +268,49 @@ fn print_report(
             s(Force, r.design_load)
         );
     }
+    let a = &c.axial;
+    let f = &a.design;
+    let toward = |force: f64| {
+        if force >= 0.0 {
+            "toward the suction side"
+        } else {
+            "toward the pressure side"
+        }
+    };
+    if a.law.eyes > 1.5 {
+        println!(
+            "Axial      about {} of either sign at design; double-entry impeller, Gülich eq. T9.2.15",
+            s(Force, f.total)
+        );
+    } else {
+        println!(
+            "Axial      {} at design {}, {} at shut-off; largest {}",
+            s(Force, f.total.abs()),
+            toward(f.total),
+            s(Force, a.shutoff.total),
+            s(Force, a.largest)
+        );
+        println!(
+            "           shrouds {} (k {:.2} front, {:.2} rear{}), momentum {}, shaft {}; Gülich Table 9.2",
+            s(Force, f.hydraulic),
+            f.front_rotation,
+            f.rear_rotation,
+            if a.law.rear_seal_diameter.is_some() {
+                ", balance holes"
+            } else {
+                ""
+            },
+            s(Force, f.momentum),
+            s(Force, f.shaft)
+        );
+        println!(
+            "           seals d_sp {} and d_D {}; rough estimate {} to {} (eq. T9.2.12)",
+            s(Length, a.law.seal_diameter),
+            s(Length, a.law.shaft_seal_diameter),
+            s(Force, a.estimate.0),
+            s(Force, a.estimate.1)
+        );
+    }
     println!();
     let volute = c.volute.is_some();
     print!(
@@ -300,7 +358,7 @@ fn print_report(
 fn csv(c: &PumpPerformance) -> String {
     let mut out = String::from(
         "flow_m3_s,head_m,theoretical_head_m,power_w,efficiency,hydraulic_efficiency,estimated,\
-         npsh3_m,volute_loss_m,radial_force_n\n",
+         npsh3_m,volute_loss_m,radial_force_n,axial_force_n\n",
     );
     for p in &c.points {
         let opt = |v: f64| {
@@ -312,7 +370,7 @@ fn csv(c: &PumpPerformance) -> String {
         };
         let _ = writeln!(
             out,
-            "{},{},{},{},{},{},{},{},{},{}",
+            "{},{},{},{},{},{},{},{},{},{},{}",
             p.flow,
             p.head,
             opt(p.theoretical_head),
@@ -322,7 +380,8 @@ fn csv(c: &PumpPerformance) -> String {
             p.estimated,
             opt(p.npsh_required),
             opt(p.volute_loss),
-            opt(p.radial_force)
+            opt(p.radial_force),
+            opt(p.axial_force)
         );
     }
     out
@@ -343,6 +402,13 @@ mod tests {
         apply(&mut input, &units, "npsh_exponent=3").unwrap();
         apply(&mut input, &units, "clearances=wide").unwrap();
         assert!(input.wide_seal_clearances);
+        apply(&mut input, &units, "balance=on").unwrap();
+        apply(&mut input, &units, "seal=90 mm").unwrap();
+        apply(&mut input, &units, "k0=0.45").unwrap();
+        assert!(input.axial.balance_holes);
+        assert_eq!(input.axial.seal_diameter, Param::Manual(0.09));
+        assert_eq!(input.axial.rotation_factor, Param::Manual(0.45));
+        assert!(apply(&mut input, &units, "balance=maybe").is_err());
         assert!(apply(&mut input, &units, "clearances=tight").is_err());
         assert_eq!(input.npsh_exponent, Param::Manual(3.0));
         assert_eq!(input.collector, Collector::VanedDiffuser);

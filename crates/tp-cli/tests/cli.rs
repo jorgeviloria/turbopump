@@ -489,6 +489,10 @@ fn performance_predicts_the_characteristic() {
         "{text}"
     );
     assert!(text.contains("Shut-off   H"), "{text}");
+    assert!(
+        text.contains("Axial      ") && text.contains("at design toward the suction side"),
+        "{text}"
+    );
     assert!(text.contains("NPSH3      "), "{text}");
     assert!(text.contains("Volute     loses"), "{text}");
     assert!(text.contains("Radial     "), "{text}");
@@ -516,7 +520,7 @@ fn performance_predicts_the_characteristic() {
         rows.lines()
             .next()
             .unwrap()
-            .ends_with("npsh3_m,volute_loss_m,radial_force_n")
+            .ends_with("npsh3_m,volute_loss_m,radial_force_n,axial_force_n")
     );
     let bad = turbopump(&["performance", file_arg, "--set", "onset=7"]);
     assert_eq!(bad.status.code(), Some(2));
