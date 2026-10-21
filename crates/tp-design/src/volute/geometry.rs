@@ -9,7 +9,10 @@ use std::f64::consts::TAU;
 
 use tp_math::{DVec2, DVec3};
 
-use super::{SectionShape, SectionSize, VoluteDesign, VoluteInput};
+use super::{
+    CutwaterShape, DischargeShape, SectionShape, SectionSize, StraightWall, VoluteDesign,
+    VoluteInput,
+};
 use crate::DesignError;
 use crate::outlet::ImpellerOutlet;
 
@@ -46,15 +49,70 @@ impl VoluteSection {
     }
 }
 
-/// One section of the discharge diffuser, normal to its axis.
+/// One section of the discharge diffuser, normal to its centerline.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NozzleSection {
     pub center: DVec3,
+    /// Unit tangent of the centerline.
+    pub tangent: DVec3,
     /// Closed outline, without repeating the first point.
     pub points: Vec<DVec3>,
     /// m²
     pub area: f64,
 }
+
+/// The cutwater in the midplane.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CutwaterGeometry {
+    /// Sharp edge where the outer wall of the spiral meets the inner wall of the
+    /// diffuser; for a tangent cutwater, the stagnation point, m.
+    pub tip: DVec3,
+    /// Wrap angle of the tip, rad.
+    pub angle: f64,
+    /// Angle between the two walls at the tip, rad.
+    pub wedge: f64,
+    /// Radius of the nose, m; 0 for a sharp or tangent cutwater.
+    pub radius: f64,
+    /// Centre of the rounded nose (the tip when sharp), m.
+    pub nose_center: DVec3,
+    /// Distance from the pump axis to the nearest point of the cutwater: half the
+    /// effective cutwater diameter, m.
+    pub nose_distance: f64,
+}
+
+impl CutwaterGeometry {
+    /// Outline in the midplane of the material a rounded cutwater adds to the sharp
+    /// wedge: the nose circle and the tangents from it to the tip, closed. Empty
+    /// unless rounded.
+    pub fn nose_outline(&self) -> Vec<DVec3> {
+        if self.radius <= 0.0 {
+            return Vec::new();
+        }
+        let c = self.nose_center;
+        let to_tip = self.tip - c;
+        let d = to_tip.truncate().length();
+        let beta = (self.radius / d).clamp(-1.0, 1.0).acos();
+        let base = to_tip.y.atan2(to_tip.x);
+        // The arc runs on the far side from the tip, between the two tangent points.
+        let (from, to) = (base + beta, base - beta + std::f64::consts::TAU);
+        let n = 24;
+        let mut out: Vec<DVec3> = (0..=n)
+            .map(|i| {
+                let a = from + (to - from) * i as f64 / n as f64;
+                c + DVec3::new(a.cos(), a.sin(), 0.0) * self.radius
+            })
+            .collect();
+        out.push(self.tip);
+        out
+    }
+}
+
+/// Spiral start of a sharp or rounded cutwater, rad: the spiral overlaps the diffuser
+/// from there to the cutwater.
+const CUTWATER_START: f64 = 3.0 * std::f64::consts::PI / 180.0;
+/// Smallest angle between the spiral and the diffuser wall for a sharp cutwater; below
+/// it the two only graze and the spiral starts where it clears the wall, rad.
+const MIN_WEDGE: f64 = 3.0 * std::f64::consts::PI / 180.0;
 
 /// Complete volute geometry.
 #[derive(Debug, Clone)]
@@ -73,8 +131,13 @@ pub struct VoluteGeometry {
     pub outer_channel: Vec<VoluteSection>,
     /// Discharge diffuser from the throat (first) to the outlet (last).
     pub nozzle: Vec<NozzleSection>,
-    /// Unit vector of the diffuser axis.
+    /// Unit vector of the diffuser axis at the outlet.
     pub nozzle_axis: DVec3,
+    /// Angle the bend of a radial discharge turns, rad; 0 for a straight one.
+    pub nozzle_bend: f64,
+    /// Length of the diffuser centerline, m.
+    pub nozzle_length: f64,
+    pub cutwater: CutwaterGeometry,
     pub warnings: Vec<String>,
 }
 
@@ -90,7 +153,8 @@ impl VoluteGeometry {
     /// a little into the third.
     pub fn channels(&self) -> Vec<Vec<Vec<DVec3>>> {
         let sign = self.basis.rotation_sign;
-        if self.design.rib.is_none() {
+        let joined = matches!(self.design.cutwater_shape, CutwaterShape::Tangent);
+        if self.design.rib.is_none() && joined {
             return vec![
                 self.sections
                     .iter()
@@ -110,15 +174,16 @@ impl VoluteGeometry {
             }
             rings
         };
+        let nozzle: Vec<Vec<DVec3>> = self.nozzle.iter().map(|n| n.points.clone()).collect();
+        if self.design.rib.is_none() {
+            // A sharp or rounded cutwater: the spiral cuts the diffuser.
+            return vec![extended(&self.sections), nozzle];
+        }
         // The throat of the first partial volute and the start of the outer channel
         // share the angle of the rib nose: the channel takes over there.
         let first = &self.sections[..self.sections.len() - 1];
         let outer: Vec<VoluteSection> = first.iter().chain(&self.outer_channel).cloned().collect();
-        vec![
-            extended(&outer),
-            extended(&self.inner_sections),
-            self.nozzle.iter().map(|n| n.points.clone()).collect(),
-        ]
+        vec![extended(&outer), extended(&self.inner_sections), nozzle]
     }
 
     /// Every outline in 3D, from the start of the spiral to the diffuser outlet.
@@ -383,7 +448,30 @@ impl VoluteGeometry {
                 ));
             }
         }
-        let start = start + 2f64.to_radians();
+        let clear_start = start + 2f64.to_radians();
+        let (nozzle, nozzle_bend, nozzle_length) = nozzle(&design, &throat, sign, axis)?;
+        let nozzle_axis = nozzle.last().map_or(axis, |n| n.tangent);
+        // A sharp or rounded cutwater: the spiral starts at the cutwater and cuts the
+        // inner wall of the diffuser. When the wall turns away instead (a radial
+        // discharge), the spiral starts where it clears the wall and the cutwater sits
+        // there.
+        let (start, cutwater) = match design.cutwater_shape {
+            CutwaterShape::Tangent => (
+                clear_start,
+                cutwater(&design, &nozzle, sign, zm, clear_start)?,
+            ),
+            _ => {
+                let early = cutwater(&design, &nozzle, sign, zm, CUTWATER_START)?;
+                if early.angle > CUTWATER_START && early.wedge > MIN_WEDGE {
+                    (CUTWATER_START, early)
+                } else {
+                    (
+                        clear_start,
+                        cutwater(&design, &nozzle, sign, zm, clear_start)?,
+                    )
+                }
+            }
+        };
 
         // Sections spread over their wrap in proportion to the single spiral.
         let spread = |from: f64, to: f64| -> Vec<f64> {
@@ -412,7 +500,7 @@ impl VoluteGeometry {
                         .into_iter()
                         .map(make)
                         .collect::<Result<Vec<_>, _>>()?,
-                    spread(rib.start + start, TAU)
+                    spread(rib.start + clear_start, TAU)
                         .into_iter()
                         .map(make)
                         .collect::<Result<Vec<_>, _>>()?,
@@ -424,7 +512,6 @@ impl VoluteGeometry {
             }
         };
 
-        let nozzle = nozzle(&design, &throat, sign, axis);
         let warnings = design.warnings.clone();
         Ok(Self {
             basis: *basis,
@@ -434,22 +521,215 @@ impl VoluteGeometry {
             inner_sections,
             outer_channel,
             nozzle,
-            nozzle_axis: axis,
+            nozzle_axis,
+            nozzle_bend,
+            nozzle_length,
+            cutwater,
             warnings,
         })
     }
 }
 
+/// The cutwater in the midplane: where the outer wall of the spiral meets the inner
+/// wall of the diffuser, the angle between them, and the nose of radius ρ that touches
+/// both. The nose of a thin wedge sits where the wedge is 2ρ thick, along its bisector.
+fn cutwater(
+    design: &VoluteDesign,
+    nozzle: &[NozzleSection],
+    sign: f64,
+    zm: f64,
+    start: f64,
+) -> Result<CutwaterGeometry, DesignError> {
+    let stagnation = DVec3::new(design.stagnation_radius, 0.0, zm);
+    if matches!(design.cutwater_shape, CutwaterShape::Tangent) {
+        return Ok(CutwaterGeometry {
+            tip: stagnation,
+            angle: 0.0,
+            wedge: 0.0,
+            radius: 0.0,
+            nose_center: stagnation,
+            nose_distance: design.stagnation_radius,
+        });
+    }
+    // Inner wall of the diffuser near the throat: the innermost points of the first
+    // two sections across the centerline.
+    let inner = |n: &NozzleSection| -> DVec3 {
+        let u = n.tangent.cross(DVec3::Z);
+        let u = if u.dot(n.center) > 0.0 { u } else { -u };
+        let p = n
+            .points
+            .iter()
+            .min_by(|a, b| (**a - n.center).dot(u).total_cmp(&(**b - n.center).dot(u)))
+            .copied()
+            .unwrap_or(n.center);
+        DVec3::new(p.x, p.y, zm)
+    };
+    let w0 = inner(&nozzle[0]);
+    let along = (inner(&nozzle[1]) - w0).normalize();
+    let normal = DVec3::new(along.y, -along.x, 0.0);
+    let normal = if normal.dot(w0) > 0.0 {
+        normal
+    } else {
+        -normal
+    };
+    // Outer wall of the spiral in the midplane.
+    let wall = |angle: f64| -> Result<DVec3, DesignError> {
+        let r = design.section(angle)?.outer_radius;
+        let t = sign * angle;
+        Ok(DVec3::new(r * t.cos(), r * t.sin(), zm))
+    };
+    // Positive where the spiral wall lies inside the diffuser.
+    let inside = |angle: f64| -> Result<f64, DesignError> { Ok((wall(angle)? - w0).dot(normal)) };
+    // When the wall bends away from the spiral at once (a radial discharge), the two
+    // part at the start of the spiral; otherwise the spiral leaves the diffuser where
+    // its outer wall crosses the inner wall.
+    let angle = if inside(start)? <= 0.0 {
+        start
+    } else {
+        let (mut lo, mut hi) = (start, start);
+        let step = 0.25f64.to_radians();
+        while inside(hi)? > 0.0 {
+            lo = hi;
+            hi += step;
+            if hi > std::f64::consts::PI {
+                return Err(DesignError::Infeasible(
+                    "the spiral does not meet the inner wall of the discharge diffuser: use \
+                     a tangent cutwater"
+                        .into(),
+                ));
+            }
+        }
+        for _ in 0..60 {
+            let mid = 0.5 * (lo + hi);
+            if inside(mid)? > 0.0 {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        0.5 * (lo + hi)
+    };
+    let tip = wall(angle)?;
+    let d_wall = along;
+    let d_spiral = (wall(angle + 1e-4)? - wall(angle - 1e-4)?).normalize();
+    let wedge = d_wall.dot(d_spiral).clamp(-1.0, 1.0).acos();
+    // A rounded nose of radius ρ whose innermost point lies on the cutwater circle d_z
+    // (Gülich Fig. 7.41b: the flow stagnates on the nose at r'_z = r_z + e₃/2 when
+    // ρ = e₃/2), joined to the tip by its tangents.
+    let radius = design.nose_radius;
+    let (nose_center, nose_distance) = if radius > 0.0 {
+        let c = DVec3::new(design.cutwater_diameter / 2.0 + radius, 0.0, zm);
+        // The nose stays inside the wedge: its centre no farther out than the tip.
+        let largest = tip.truncate().length() - design.cutwater_diameter / 2.0;
+        if radius > largest {
+            return Err(DesignError::InvalidInput(format!(
+                "a cutwater radius of {:.1} mm puts the nose beyond the tip of the wedge: at \
+                 most {:.1} mm here",
+                radius * 1e3,
+                largest * 1e3
+            )));
+        }
+        (c, design.cutwater_diameter / 2.0)
+    } else {
+        (tip, tip.truncate().length())
+    };
+    Ok(CutwaterGeometry {
+        tip,
+        angle,
+        wedge,
+        radius,
+        nose_center,
+        nose_distance,
+    })
+}
+
+/// A point of the diffuser centerline and its unit tangent.
+type PathPoint = (DVec3, DVec3);
+
+/// Centerline of the discharge diffuser in the midplane: positions and unit tangents
+/// at `count + 1` equal steps of its length, the turning angle of the bend and the
+/// length. A straight diffuser follows the flow at the throat; a radial one first turns
+/// outward along an arc of radius R_N until its axis meets the line from the pump axis
+/// at the requested angle.
+fn centerline(
+    design: &VoluteDesign,
+    start: DVec3,
+    tangent: DVec3,
+    outward: DVec3,
+    count: usize,
+) -> Result<(Vec<PathPoint>, f64, f64), DesignError> {
+    let straight = design.diffuser.length;
+    let (bend, radius) = match design.diffuser.shape {
+        DischargeShape::Tangential { .. } => (0.0, 0.0),
+        DischargeShape::Radial { axis_angle } => {
+            let radius = design.diffuser.bend_radius;
+            let center = start + outward * radius;
+            let at = |phi: f64| {
+                let p = center - outward * (radius * phi.cos()) + tangent * (radius * phi.sin());
+                let t = outward * phi.sin() + tangent * phi.cos();
+                (p, t)
+            };
+            // Angle from the radial direction at the end of the bend to its tangent,
+            // positive toward the direction of the flow.
+            let spin = tangent.truncate().perp_dot(outward.truncate()).signum();
+            let angle = |phi: f64| {
+                let (p, t) = at(phi);
+                -spin
+                    * p.truncate()
+                        .perp_dot(t.truncate())
+                        .atan2(p.truncate().dot(t.truncate()))
+            };
+            let target = axis_angle;
+            if angle(std::f64::consts::PI) > target {
+                return Err(DesignError::Infeasible(
+                    "the radial discharge cannot turn to the requested axis angle".into(),
+                ));
+            }
+            let phi =
+                tp_math::roots::brent(|phi| angle(phi) - target, 1e-6, std::f64::consts::PI, 1e-12)
+                    .map_err(|e| DesignError::Infeasible(e.to_string()))?;
+            (phi, radius)
+        }
+    };
+    let arc = radius * bend;
+    let length = arc + straight;
+    let points = (0..=count)
+        .map(|k| {
+            let s = length * k as f64 / count as f64;
+            if s <= arc && radius > 0.0 {
+                let phi = s / radius;
+                let center = start + outward * radius;
+                (
+                    center - outward * (radius * phi.cos()) + tangent * (radius * phi.sin()),
+                    outward * phi.sin() + tangent * phi.cos(),
+                )
+            } else {
+                let (end, t) = if radius > 0.0 {
+                    let center = start + outward * radius;
+                    (
+                        center - outward * (radius * bend.cos()) + tangent * (radius * bend.sin()),
+                        outward * bend.sin() + tangent * bend.cos(),
+                    )
+                } else {
+                    (start, tangent)
+                };
+                (end + t * (s - arc), t)
+            }
+        })
+        .collect();
+    Ok((points, bend, length))
+}
+
 /// Sections of the discharge diffuser: the throat outline blends into a circle while
-/// the equivalent radius grows linearly to the outlet radius. The wall on the cutwater
-/// side stays straight and the whole widening goes outward, so the diffuser never
-/// closes in on the start of the spiral.
+/// the equivalent radius grows linearly along the centerline to the outlet radius. A
+/// straight diffuser keeps one wall straight or widens to both sides; a radial one
+/// stays centred on its centerline.
 fn nozzle(
     design: &VoluteDesign,
     throat: &VoluteSection,
     sign: f64,
     axis: DVec3,
-) -> Vec<NozzleSection> {
+) -> Result<(Vec<NozzleSection>, f64, f64), DesignError> {
     let theta = sign * TAU;
     let radial = DVec3::new(theta.cos(), theta.sin(), 0.0);
     let local_centroid = centroid(&throat.outline);
@@ -457,17 +737,26 @@ fn nozzle(
     let throat_area = polygon_area(&throat_points).abs();
     let r1 = (throat_area / std::f64::consts::PI).sqrt();
     let r2 = design.diffuser.outlet_diameter / 2.0;
-    let length = design.diffuser.length;
     let start = DVec3::new(
         local_centroid.x * theta.cos(),
         local_centroid.x * theta.sin(),
         local_centroid.y,
     );
-    let u = (radial - axis * radial.dot(axis)).normalize();
-    let v = DVec3::Z;
-    // Offset across the axis of the line from the cutwater along the diffuser axis.
+    // Across the centerline in the midplane, pointing away from the pump axis at the
+    // throat; it turns with the tangent along a bend.
+    let u0 = (radial - axis * radial.dot(axis)).normalize();
+    let side = axis.cross(DVec3::Z).dot(u0).signum();
+    let across = |t: DVec3| t.cross(DVec3::Z) * side;
+    let (path, bend, length) = centerline(design, start, axis, u0, NOZZLE_SECTIONS)?;
+    // Offsets across the axis of the straight walls: the cutwater side passes through
+    // the stagnation point, the outer one through the outermost point of the throat.
     let tip = radial * design.stagnation_radius;
-    let inner = (tip - start).dot(u);
+    let inner = (tip - start).dot(u0);
+    let outer = throat
+        .points(sign)
+        .iter()
+        .map(|p| (*p - start).dot(u0))
+        .fold(f64::NEG_INFINITY, f64::max);
     let circle: Vec<DVec2> = throat_points
         .iter()
         .map(|p| r1 * DVec2::new(p.x, p.y).normalize())
@@ -475,13 +764,15 @@ fn nozzle(
     // The sampled circle encloses a little less than π·r²; scale against it so the
     // outlet points lie exactly on the outlet radius.
     let circle_area = polygon_area(&circle).abs();
-
-    (0..=NOZZLE_SECTIONS)
-        .map(|k| {
+    let sections = path
+        .iter()
+        .enumerate()
+        .map(|(k, &(position, tangent))| {
             let s = k as f64 / NOZZLE_SECTIONS as f64;
             if k == 0 {
                 return NozzleSection {
                     center: start,
+                    tangent,
                     points: throat.points(sign),
                     area: throat_area,
                 };
@@ -495,17 +786,30 @@ fn nozzle(
             let radius = r1 + (r2 - r1) * s;
             let scale = radius / r1 * (circle_area / polygon_area(&blend).abs()).sqrt();
             let lowest = blend.iter().map(|p| p.x).fold(f64::INFINITY, f64::min) * scale;
-            let center = start + axis * (length * s) + u * (inner - lowest);
+            let highest = blend.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max) * scale;
+            let u = across(tangent);
+            let shift = match design.diffuser.shape {
+                DischargeShape::Tangential {
+                    straight_wall: StraightWall::Inner,
+                } => inner - lowest,
+                DischargeShape::Tangential {
+                    straight_wall: StraightWall::Outer,
+                } => outer - highest,
+                _ => 0.0,
+            };
+            let center = position + u * shift;
             NozzleSection {
                 center,
+                tangent,
                 points: blend
                     .iter()
-                    .map(|p| center + u * (p.x * scale) + v * (p.y * scale))
+                    .map(|p| center + u * (p.x * scale) + DVec3::Z * (p.y * scale))
                     .collect(),
                 area: std::f64::consts::PI * radius * radius,
             }
         })
-        .collect()
+        .collect();
+    Ok((sections, bend, length))
 }
 
 #[cfg(test)]
@@ -624,10 +928,11 @@ mod tests {
     }
 
     #[test]
-    fn spiral_start_stays_clear_of_the_diffuser() {
+    fn a_tangent_cutwater_starts_the_spiral_clear_of_the_diffuser() {
         for law in [AreaLaw::AngularMomentum, AreaLaw::ConstantVelocity] {
             let mut input = VoluteInput::default();
             input.spiral.law = law;
+            input.cutwater.shape = CutwaterShape::Tangent;
             let g = VoluteGeometry::build(&reference_basis(), &input).unwrap();
             let tip = DVec3::new(g.design.stagnation_radius, 0.0, 0.0);
             let axis = g.nozzle_axis.truncate();
@@ -705,5 +1010,154 @@ mod tests {
         // A shorter rib moves the nose later.
         let short = double(Some(150f64.to_radians()));
         assert_relative_eq!(short.design.rib.unwrap().start, 210f64.to_radians());
+    }
+
+    fn with_discharge(shape: DischargeShape) -> VoluteGeometry {
+        let mut input = VoluteInput::default();
+        input.diffuser.shape = shape;
+        VoluteGeometry::build(&reference_basis(), &input).unwrap()
+    }
+
+    /// Smallest and largest offset of the outline points across the centerline.
+    fn spread(n: &NozzleSection, sign_across: DVec3) -> (f64, f64) {
+        n.points
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| {
+                let d = (*p - n.center).dot(sign_across);
+                (lo.min(d), hi.max(d))
+            })
+    }
+
+    #[test]
+    fn a_central_radial_discharge_points_away_from_the_pump_axis() {
+        let g = with_discharge(DischargeShape::Radial { axis_angle: 0.0 });
+        let d = &g.design.diffuser;
+        // Eq. 7.29 with the throat area.
+        let expected = 1.5 * (4.0 * g.design.throat.area / std::f64::consts::PI).sqrt();
+        assert_relative_eq!(d.bend_radius, expected, max_relative = 1e-12);
+        assert!(
+            g.nozzle_bend > 0.5 && g.nozzle_bend < 2.5,
+            "{}",
+            g.nozzle_bend
+        );
+        // The straight part lies on a line through the pump axis.
+        let out = g.nozzle.last().unwrap();
+        let cross = out.center.truncate().perp_dot(out.tangent.truncate());
+        assert!(cross.abs() < 1e-6 * out.center.length(), "{cross}");
+        assert!(out.center.truncate().dot(out.tangent.truncate()) > 0.0);
+        // The bend adds its arc to the straight length; sections keep their areas.
+        assert_relative_eq!(
+            g.nozzle_length,
+            d.bend_radius * g.nozzle_bend + d.length,
+            max_relative = 1e-12
+        );
+        let outlet = std::f64::consts::PI * d.outlet_diameter * d.outlet_diameter / 4.0;
+        assert_relative_eq!(out.area, outlet, max_relative = 1e-12);
+        for n in &g.nozzle {
+            assert_relative_eq!(n.tangent.length(), 1.0, epsilon = 1e-12);
+        }
+    }
+
+    #[test]
+    fn a_tilted_radial_discharge_turns_less() {
+        let central = with_discharge(DischargeShape::Radial { axis_angle: 0.0 });
+        let tilted = with_discharge(DischargeShape::Radial {
+            axis_angle: 30f64.to_radians(),
+        });
+        assert!(tilted.nozzle_bend < central.nozzle_bend);
+        let out = tilted.nozzle.last().unwrap();
+        let c = out.center.truncate();
+        let t = out.tangent.truncate();
+        // The angle is measured at the end of the bend; along the straight part the
+        // centre drifts, so check at the first straight section.
+        let first = tilted
+            .nozzle
+            .iter()
+            .find(|n| (n.tangent - out.tangent).length() < 1e-9)
+            .unwrap();
+        let p = first.center.truncate();
+        let angle = p.perp_dot(t).atan2(p.dot(t)).abs();
+        assert!(
+            (angle - 30f64.to_radians()).abs() < 5f64.to_radians(),
+            "{angle}"
+        );
+        assert!(c.length() > p.length());
+    }
+
+    #[test]
+    fn a_straight_discharge_keeps_the_chosen_wall_straight() {
+        for (wall, inner_fixed) in [(StraightWall::Inner, true), (StraightWall::Outer, false)] {
+            let g = with_discharge(DischargeShape::Tangential {
+                straight_wall: wall,
+            });
+            let axis = g.nozzle_axis;
+            let u = axis.cross(DVec3::Z);
+            let u = if u.dot(DVec3::X) > 0.0 { u } else { -u };
+            let edges: Vec<(f64, f64)> = g
+                .nozzle
+                .iter()
+                .map(|n| {
+                    let (lo, hi) = spread(n, u);
+                    let c = n.center.dot(u);
+                    (c + lo, c + hi)
+                })
+                .collect();
+            let fixed: Vec<f64> = edges
+                .iter()
+                .map(|e| if inner_fixed { e.0 } else { e.1 })
+                .collect();
+            for f in &fixed {
+                assert_relative_eq!(*f, fixed[0], epsilon = 1e-9);
+            }
+        }
+        // Centred: both walls open.
+        let g = with_discharge(DischargeShape::Tangential {
+            straight_wall: StraightWall::Centered,
+        });
+        let first = &g.nozzle[1];
+        let last = g.nozzle.last().unwrap();
+        assert_relative_eq!(
+            (last.center - g.nozzle[0].center)
+                .cross(g.nozzle_axis)
+                .length(),
+            0.0,
+            epsilon = 1e-9
+        );
+        assert!(last.area > first.area);
+    }
+
+    #[test]
+    fn a_rounded_cutwater_has_its_nose_on_the_cutwater_circle() {
+        let mut input = VoluteInput::default();
+        input.cutwater.shape = CutwaterShape::Sharp;
+        let sharp = VoluteGeometry::build(&reference_basis(), &input).unwrap();
+        let g = VoluteGeometry::build(&reference_basis(), &VoluteInput::default()).unwrap();
+        let (c, d) = (g.cutwater, &g.design);
+        // Default: rounded with ρ = e₃/2, so the nose is centred on r'_z.
+        assert_relative_eq!(c.radius, d.cutwater_thickness / 2.0);
+        assert_relative_eq!(c.nose_distance, d.cutwater_diameter / 2.0);
+        assert_relative_eq!(c.nose_center.x, d.stagnation_radius, epsilon = 1e-12);
+        // The spiral starts at the cutwater and leaves the diffuser past it, at the
+        // tip of the sharp wedge, a few millimetres outside r'_z.
+        assert!(g.start_angle < 5f64.to_radians());
+        assert_eq!(c.tip, sharp.cutwater.tip);
+        assert!(c.angle > 5f64.to_radians() && c.angle < 20f64.to_radians());
+        let tip = c.tip.truncate().length();
+        assert!(tip > d.stagnation_radius && tip < 1.05 * d.stagnation_radius);
+        assert!(c.wedge > 1f64.to_radians() && c.wedge < 20f64.to_radians());
+        // The nose outline: an arc on the far side from the tip, then the tip.
+        let outline = c.nose_outline();
+        assert_eq!(*outline.last().unwrap(), c.tip);
+        for p in &outline[..outline.len() - 1] {
+            assert_relative_eq!((*p - c.nose_center).length(), c.radius, epsilon = 1e-12);
+        }
+        assert!(sharp.cutwater.nose_outline().is_empty());
+        // Too large a radius reaches the tip.
+        input.cutwater.shape = CutwaterShape::Rounded {
+            radius: crate::Param::Manual(0.02),
+        };
+        assert!(VoluteGeometry::build(&reference_basis(), &input).is_err());
+        // Two pieces now: the spiral reaches into the diffuser.
+        assert_eq!(g.channels().len(), 2);
     }
 }

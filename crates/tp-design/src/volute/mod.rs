@@ -127,20 +127,84 @@ impl Default for SpiralInput {
     }
 }
 
+/// The wall of a straight (tangential) discharge diffuser that stays parallel to its
+/// axis.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StraightWall {
+    /// The cutwater side: the diffuser widens outward only.
+    #[default]
+    Inner,
+    /// Neither: it widens to both sides.
+    Centered,
+    /// The outer side: it widens toward the cutwater.
+    Outer,
+}
+
+/// Shape of the discharge diffuser in the plane of the volute (Gülich Chap. 7.8.1,
+/// item 4 and Fig. 7.42).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum DischargeShape {
+    /// Straight along the flow at the throat.
+    Tangential { straight_wall: StraightWall },
+    /// A bend of radius R_N turning the flow outward, then straight. `axis_angle` is
+    /// the angle between the straight part and the line from the pump axis through the
+    /// end of the bend, rad: 0 points the discharge straight away from the pump axis (a
+    /// centerline discharge).
+    Radial { axis_angle: f64 },
+}
+
+impl Default for DischargeShape {
+    fn default() -> Self {
+        DischargeShape::Tangential {
+            straight_wall: StraightWall::Inner,
+        }
+    }
+}
+
 /// Inputs of the discharge-diffuser step.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DischargeInput {
+    pub shape: DischargeShape,
+    /// Mean radius R_N of the bend of a radial discharge, m (eq. 7.29).
+    pub bend_radius: Param<f64>,
     /// Length of the diffuser along its axis, from the throat, m.
     pub length: Param<f64>,
     /// Outlet (discharge nozzle) diameter, m.
     pub outlet_diameter: Param<f64>,
 }
 
+/// Shape of the cutwater where the spiral meets the discharge diffuser (Gülich Chap.
+/// 7.8.1, item 7, and Fig. 7.41b).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum CutwaterShape {
+    /// The spiral starts where its outer wall clears the inner wall of the diffuser:
+    /// a thin wedge tangent to the base circle, without a designed nose.
+    Tangent,
+    /// The spiral starts at the cutwater and cuts the inner wall of the diffuser: a
+    /// sharp edge along their intersection.
+    Sharp,
+    /// That edge rounded with `radius`, m (automatic: e₃/2, a nose as thick as the
+    /// cutwater).
+    Rounded { radius: Param<f64> },
+}
+
+impl Default for CutwaterShape {
+    fn default() -> Self {
+        CutwaterShape::Rounded {
+            radius: Param::Auto,
+        }
+    }
+}
+
 /// Inputs of the cutwater step.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CutwaterInput {
+    pub shape: CutwaterShape,
     /// Incidence i₃ between the cutwater camber line and the approaching flow, rad
     /// (eq. T7.7.6; ±3°).
     pub incidence: Param<f64>,
@@ -180,10 +244,14 @@ pub struct SectionSize {
     pub centroid_radius: f64,
 }
 
-/// Straight conical diffuser from the volute throat to the discharge nozzle.
+/// Conical diffuser from the volute throat to the discharge nozzle, straight or with a
+/// bend.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DischargeDiffuser {
-    /// m
+    pub shape: DischargeShape,
+    /// Mean radius of the bend of a radial discharge; 0 for a straight one, m.
+    pub bend_radius: f64,
+    /// Length of the straight part, after the bend if any, m.
     pub length: f64,
     /// Throat area A₃q, m².
     pub inlet_area: f64,
@@ -260,6 +328,9 @@ pub struct VoluteDesign {
     pub cutwater_flow_angle: f64,
     /// Camber angle of the cutwater α₃B, rad.
     pub cutwater_angle: f64,
+    pub cutwater_shape: CutwaterShape,
+    /// Rounding radius of the cutwater nose; 0 unless rounded, m.
+    pub nose_radius: f64,
     pub diffuser: DischargeDiffuser,
     pub wall_thickness: f64,
     pub warnings: Vec<String>,
@@ -529,6 +600,14 @@ impl VoluteDesign {
         let cutwater_flow_angle = c3m.atan2(c3u);
         let incidence = input.cutwater.incidence.resolve(|| 0.0);
         let cutwater_angle = cutwater_flow_angle + incidence;
+        let cutwater_shape = input.cutwater.shape;
+        let nose_radius = match cutwater_shape {
+            CutwaterShape::Rounded { radius } => radius.resolve(|| cutwater_thickness / 2.0),
+            _ => 0.0,
+        };
+        require(nose_radius >= 0.0, || {
+            "the cutwater radius cannot be negative".into()
+        })?;
 
         let rib = match rib_wrap {
             None => None,
@@ -629,6 +708,8 @@ impl VoluteDesign {
             throat_aspect,
             cutwater_flow_angle,
             cutwater_angle,
+            cutwater_shape,
+            nose_radius,
             diffuser,
             wall_thickness,
             warnings,
@@ -648,6 +729,30 @@ impl VoluteDesign {
         require(length > 0.0, || {
             "the diffuser length must be positive".into()
         })?;
+        // Eq. 7.29: R_N ≈ 1.5·√(4·A₃q/π).
+        let bend_radius = match input.shape {
+            DischargeShape::Tangential { .. } => 0.0,
+            DischargeShape::Radial { axis_angle } => {
+                require((0.0..=80f64.to_radians()).contains(&axis_angle), || {
+                    format!(
+                        "the axis of a radial discharge must lie between 0° and 80° from the \
+                         line through the pump axis, got {:.1}°",
+                        axis_angle.to_degrees()
+                    )
+                })?;
+                let radius = input
+                    .bend_radius
+                    .resolve(|| 1.5 * (4.0 * throat_area / PI).sqrt());
+                require(radius > r1, || {
+                    format!(
+                        "the bend radius {:.1} mm must exceed the throat radius {:.1} mm",
+                        radius * 1e3,
+                        r1 * 1e3
+                    )
+                })?;
+                radius
+            }
+        };
         // Eq. 1.44: ϑ_al = 16.5°·√(R₁/L).
         let allowable_angle = (16.5 * (r1 / length).sqrt()).to_radians();
         let outlet_diameter = input.outlet_diameter.resolve(|| {
@@ -665,6 +770,8 @@ impl VoluteDesign {
         // Eq. 1.45: tan ϑ_eq = (R₁,eq/L)·(√(A₂/A₁) − 1).
         let opening_angle = (r1 / length * (area_ratio.sqrt() - 1.0)).atan();
         Ok(DischargeDiffuser {
+            shape: input.shape,
+            bend_radius,
             length,
             inlet_area: throat_area,
             outlet_diameter,
