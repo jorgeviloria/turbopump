@@ -500,6 +500,59 @@ pub(crate) fn show(
                                 ),
                             );
                         }
+                        match &c.losses {
+                            Some(l) => {
+                                value_row(
+                                    ui,
+                                    tr("Efficiency by losses"),
+                                    tf(
+                                        "η {} at design (statistics {} ± {}, Gülich Table 3.9), η_v {}",
+                                        &[
+                                            &format!("{:.3}", c.design.efficiency),
+                                            &format!("{:.3}", c.statistical_efficiency),
+                                            &format!("{:.3}", c.efficiency_tolerance),
+                                            &format!("{:.3}", l.volumetric_efficiency),
+                                        ],
+                                    ),
+                                );
+                                value_row(
+                                    ui,
+                                    tr("Seal leakage"),
+                                    tf(
+                                        "{} through d_sp {} with s {} and L {}: ΔH {}, k {}, λ {} (Gülich Table 3.7)",
+                                        &[
+                                            &s(VolumeFlow, l.leakage),
+                                            &s(Length, l.seal.diameter),
+                                            &s(Length, l.seal.clearance),
+                                            &s(Length, l.seal.length),
+                                            &s(Head, l.seal_head),
+                                            &format!("{:.2}", l.seal_rotation),
+                                            &format!("{:.3}", l.seal_flow.friction),
+                                        ],
+                                    ),
+                                );
+                                value_row(
+                                    ui,
+                                    tr("Disk friction and mechanical losses"),
+                                    tf(
+                                        "front {}, rear {}, mechanical {} (Gülich eqs. T3.6.2, T3.6.3, T3.5.6a)",
+                                        &[
+                                            &s(Power, l.front_friction),
+                                            &s(Power, l.rear_friction),
+                                            &s(Power, l.mechanical),
+                                        ],
+                                    ),
+                                );
+                            }
+                            None => value_row(
+                                ui,
+                                tr("Efficiency by losses"),
+                                tf(
+                                    "from the statistics of the design (η {})",
+                                    &[&format!("{:.3}", c.statistical_efficiency)],
+                                ),
+                            ),
+                        }
                         let o = &c.operation;
                         value_row(
                             ui,

@@ -28,6 +28,7 @@ pub(crate) struct PerformanceView {
     shutoff: Param<f64>,
     max_flow: Param<f64>,
     balance_holes: bool,
+    statistics: bool,
     operation: OperationInput,
     cache: Option<(Key, Result<PumpPerformance, String>)>,
 }
@@ -85,6 +86,7 @@ impl PerformanceView {
         input.shutoff_coefficient = self.shutoff;
         input.max_flow_ratio = self.max_flow;
         input.axial.balance_holes = self.balance_holes;
+        input.losses.statistics = self.statistics;
         input.operation = self.operation.clone();
         let key = (derived.revision(), id, input.clone());
         if self.cache.as_ref().is_none_or(|(k, _)| *k != key) {
@@ -139,6 +141,11 @@ impl PerformanceView {
                 &mut self.max_flow,
                 curve.max_flow / q_opt,
             );
+            ui.checkbox(&mut self.statistics, tr("Efficiencies from statistics"))
+                .on_hover_text(tr(
+                    "Leakage, disk friction and mechanical losses from the statistics of the \
+                     design (Gülich Table 3.9) instead of the loss analysis (Chap. 3.6)",
+                ));
             ui.checkbox(&mut self.balance_holes, tr("Balance holes"))
                 .on_hover_text(tr(
                     "Holes in the rear shroud with an annular seal there: most of the axial \
@@ -269,6 +276,27 @@ impl PerformanceView {
                     ),
                 );
             }
+            line(
+                ui,
+                tr("Losses"),
+                match &curve.losses {
+                    Some(l) => tf(
+                        "η {} by losses (statistics {} ± {}) · η_v {} · disk friction {} · mechanical {}",
+                        &[
+                            &format!("{:.3}", curve.design.efficiency),
+                            &format!("{:.3}", curve.statistical_efficiency),
+                            &format!("{:.3}", curve.efficiency_tolerance),
+                            &format!("{:.3}", l.volumetric_efficiency),
+                            &s(Power, l.front_friction + l.rear_friction),
+                            &s(Power, l.mechanical),
+                        ],
+                    ),
+                    None => tf(
+                        "from the statistics of the design (η {})",
+                        &[&format!("{:.3}", curve.statistical_efficiency)],
+                    ),
+                },
+            );
             line(
                 ui,
                 tr("Operating point"),

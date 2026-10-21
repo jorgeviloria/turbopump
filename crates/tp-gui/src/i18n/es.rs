@@ -1203,6 +1203,41 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Operation in the system",
         "Funcionamiento en la instalación",
     ),
+    (
+        "Efficiencies from statistics",
+        "Rendimientos de la estadística",
+    ),
+    (
+        "Leakage, disk friction and mechanical losses from the statistics of the design (Gülich Table 3.9) instead of the loss analysis (Chap. 3.6)",
+        "Fugas, rozamiento de disco y pérdidas mecánicas de la estadística del diseño (Gülich tabla 3.9) en lugar del análisis de pérdidas (cap. 3.6)",
+    ),
+    ("Losses", "Pérdidas"),
+    (
+        "η {} by losses (statistics {} ± {}) · η_v {} · disk friction {} · mechanical {}",
+        "η {} por pérdidas (estadística {} ± {}) · η_v {} · rozamiento de disco {} · mecánicas {}",
+    ),
+    (
+        "from the statistics of the design (η {})",
+        "de la estadística del diseño (η {})",
+    ),
+    ("Efficiency by losses", "Rendimiento por pérdidas"),
+    (
+        "η {} at design (statistics {} ± {}, Gülich Table 3.9), η_v {}",
+        "η {} en el diseño (estadística {} ± {}, Gülich tabla 3.9), η_v {}",
+    ),
+    ("Seal leakage", "Fuga por los anillos"),
+    (
+        "{} through d_sp {} with s {} and L {}: ΔH {}, k {}, λ {} (Gülich Table 3.7)",
+        "{} por d_sp {} con s {} y L {}: ΔH {}, k {}, λ {} (Gülich tabla 3.7)",
+    ),
+    (
+        "Disk friction and mechanical losses",
+        "Rozamiento de disco y pérdidas mecánicas",
+    ),
+    (
+        "front {}, rear {}, mechanical {} (Gülich eqs. T3.6.2, T3.6.3, T3.5.6a)",
+        "delantero {}, trasero {}, mecánicas {} (Gülich ecs. T3.6.2, T3.6.3, T3.5.6a)",
+    ),
     ("System curve", "Curva de la instalación"),
     (
         "H = {} + R·Q² through {} at {} (Gülich eqs. 11.1–11.3)",
@@ -1473,6 +1508,26 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
 
 /// Messages of the design code, most specific first.
 pub(super) static MESSAGES: &[(&str, &str)] = &[
+    (
+        "the seal clearance must be positive",
+        "la holgura del anillo debe ser positiva",
+    ),
+    (
+        "the seal length must be positive",
+        "el largo del anillo debe ser positivo",
+    ),
+    (
+        "the axial gap must be positive",
+        "la holgura axial debe ser positiva",
+    ),
+    (
+        "the seal roughness cannot be negative",
+        "la rugosidad del anillo no puede ser negativa",
+    ),
+    (
+        "the loss analysis needs the viscosity of the liquid",
+        "el análisis de pérdidas necesita la viscosidad del líquido",
+    ),
     (
         "d₂'/d₂ = {} is below the {} advised for this pump (Gülich eq. 4.23): expect noise, vibration and a poor efficiency",
         "d₂'/d₂ = {} queda por debajo del {} aconsejado para esta bomba (Gülich ec. 4.23): cabe esperar ruido, vibraciones y un rendimiento pobre",
