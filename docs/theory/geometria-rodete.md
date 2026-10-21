@@ -179,8 +179,7 @@ $$\xi_{ef} = \frac{2\pi\,\psi_{opt}}{\eta_h\,z\,L^*\,(w_1^* + w_2^*)}, \qquad \x
 ## 7. Salidas
 
 `turbopump geometry proyecto.tpj --export carpeta` escribe los archivos de la tabla.
-Con `--dwg` añade `meridional.dwg` y `front.dwg`, convertidos por el ODA File Converter
-(ver el README).
+`--dwg-version` elige el formato de los DWG (2018 por defecto).
 
 | Archivo | Contenido |
 |---|---|
@@ -189,10 +188,11 @@ Con `--dwg` añade `meridional.dwg` y `front.dwg`, convertidos por el ODA File C
 | `meridional.svg` | Contorno, spans, cuasi-ortogonales y bordes |
 | `front.svg` | Vista desde la entrada con las secciones de cubo y carcasa |
 | `meridional.dxf`, `front.dxf` | Los mismos dibujos en DXF (AutoCAD 2000, mm), con una capa por tipo de línea |
+| `meridional.dwg`, `front.dwg` | Los mismos dibujos en DWG, escritos por Turbopump con acadrust |
 
 Los dos dibujos salen de un modelo de plano común (`tp_io::drawing`). El cubo y la
 carcasa conservan su forma exacta: son las curvas de Bézier del diseño, que en SVG se
-escriben como trazos cúbicos y en DXF como `SPLINE` de grado p con p + 1 polos y los
+escriben como trazos cúbicos y en DXF y DWG como `SPLINE` de grado p con p + 1 polos y los
 nudos 0 y 1 repetidos p + 1 veces (Piegl y Tiller, *The NURBS Book*, 2.ª ed., §2.2).
 Las curvas que el diseño calcula punto a punto (spans, secciones del álabe) son
 polilíneas.

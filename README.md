@@ -21,7 +21,7 @@ compresores y turbinas.
 | [`tp-math`](crates/tp-math) | Curvas Bézier y B-spline (evaluación, derivadas, subdivisión, interpolación), polilíneas, interpolación 1D monótona, raíces, cuadratura y sistemas dispersos con gradiente conjugado |
 | [`tp-fluids`](crates/tp-fluids) | Propiedades de líquidos con CoolProp, cargado al ejecutar, y un modelo propio del agua (IAPWS) para cuando falta |
 | [`tp-design`](crates/tp-design) | Triángulos de velocidad, deslizamiento (Wiesner), correlaciones de bomba, dimensiones principales y geometría del rodete (contorno meridional, flujo meridional, álabes y espesores), voluta y difusores con o sin álabes, curva característica, flujo potencial meridional y velocidades en las caras del álabe |
-| [`tp-io`](crates/tp-io) | Exportación: lista de puntos, malla STL y dibujos SVG |
+| [`tp-io`](crates/tp-io) | Exportación: lista de puntos, malla STL y dibujos SVG, DXF y DWG |
 | [`tp-cad`](crates/tp-cad) | Sólidos del rodete, los difusores, la voluta con su carcasa y sus dominios fluidos con Open CASCADE, y exportación STEP, IGES y STL |
 | [`tp-project`](crates/tp-project) | Modelo de proyecto, parámetros automáticos o manuales, componentes y sus reglas, pasos de diseño, archivo `.tpj` y deshacer/rehacer |
 | [`tp-cli`](crates/tp-cli) | Ejecutable `turbopump` para la línea de comandos |
@@ -174,13 +174,13 @@ cargo run -p tp-cli -- design bomba.tpj --set d2=180 --set z=6
 ```
 
 Construir la geometría del rodete (contorno meridional, flujo meridional, álabes,
-espesores y bordes) y exportar puntos, malla STL y dibujos en SVG y DXF:
+espesores y bordes) y exportar puntos, malla STL y dibujos en SVG, DXF y DWG:
 
 ```bash
 cargo run -p tp-cli -- geometry bomba.tpj --export salida
 ```
 
-Con `--dwg` también se guardan los dibujos en DWG (ver [DWG](#dwg)).
+Los DWG salen en formato 2018; `--dwg-version 2013` elige otro (ver [DWG](#dwg)).
 
 | Vista meridional | Vista frontal |
 |---|---|
@@ -283,17 +283,11 @@ export TURBOPUMP_COOLPROP="$(cargo run -q -p tp-fluids --example coolprop_path)"
 
 ## DWG
 
-Turbopump escribe los dibujos en DXF, el formato de intercambio documentado de AutoCAD,
-y los convierte a DWG con el [ODA File Converter](https://www.opendesign.com/guestfiles/oda_file_converter),
-un programa gratuito de la Open Design Alliance que no viene con Turbopump: hay que
-instalarlo aparte (Windows, macOS o Linux). Turbopump lo busca:
-
-1. en la ruta de la variable `TURBOPUMP_ODAFC`, si está definida;
-2. donde lo dejan sus instaladores, y en el `PATH`.
-
-La versión del DWG se elige con `--dwg 2018` (2000, 2004, 2007, 2010, 2013 o 2018; por
-defecto 2018). En macOS el conversor abre su ventana un momento; en Linux sin pantalla
-necesita una virtual, como la de `xvfb-run`.
+Turbopump escribe los dibujos en DWG él mismo, con [acadrust](https://github.com/hakanaktt/acadrust)
+(Rust puro, MPL-2.0). No hace falta instalar ningún otro programa. Las versiones son
+2000, 2004, 2007, 2010, 2013 y 2018 (por defecto); en la línea de comandos se elige con
+`--dwg-version`. El DXF lleva el mismo dibujo en formato AutoCAD 2000, que lee
+cualquier programa CAD.
 
 ## Licencia
 
@@ -305,6 +299,10 @@ Puedes usar el proyecto bajo cualquiera de estas dos licencias, a tu elección:
 Los binarios con CAD incluyen Open CASCADE enlazado de forma estática (LGPL-2.1 con la
 excepción de Open CASCADE). El código fuente completo está disponible para volver a
 enlazarlo.
+
+La escritura de DWG usa [acadrust](https://github.com/hakanaktt/acadrust), bajo la Mozilla
+Public License 2.0: su código fuente está en ese repositorio y en crates.io, y Turbopump
+lo usa sin modificarlo.
 
 La interfaz gráfica incluye la fuente Noto Sans, bajo la SIL Open Font License 1.1
 ([texto](crates/tp-gui/LICENSE-OFL-NotoSans.txt)), y los iconos

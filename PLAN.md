@@ -19,7 +19,7 @@ retiren, todo se reimplementa a partir de fuentes públicas:
 | Libros y artículos publicados: Gülich, Stepanoff, Pfleiderer, Aungier, Casey/Robinson, Balje, Lieblein, Stanitz/Prian, Wiesner… | Decompilar o desensamblar programas comerciales |
 | Geometrías públicas de referencia (Eckardt, Krain, NASA Rotor 37, bomba ERCOFTAC, Francis-99) | Copiar textos, imágenes, iconos o interfaces de manuales o programas propietarios |
 | Librerías libres de calidad industrial (ver §3) | Formatos o kernels propietarios, como Parasolid |
-| Programas gratuitos que el usuario instala aparte y se llaman como proceso externo, como el ODA File Converter para el DWG | Incluir en Turbopump código o SDK de formatos propietarios (RealDWG, ODA SDK) |
+| Librerías libres que implementan formatos propietarios a partir de especificaciones públicas, como acadrust para el DWG | SDK cerrados de formatos propietarios (RealDWG, ODA SDK) o programas que el usuario tenga que instalar aparte |
 
 Las ecuaciones y los métodos de ingeniería no tienen copyright; el código y los
 textos de otros sí. Cada fórmula del código llevará la referencia bibliográfica de
@@ -115,7 +115,7 @@ la que sale.
 
 ### 2.9 Exportación
 - **Neutros:** STEP, IGES, BREP, STL, DXF y geometría general en TXT o XML.
-- **DWG:** los dibujos, a partir del DXF, con el ODA File Converter si el usuario lo tiene instalado.
+- **DWG:** los dibujos, escritos por Turbopump con acadrust, sin otros programas.
 - **Malla tetraédrica:** Fluent `.msh`, OpenFOAM `polyMesh`, Netgen `.vol` y Abaqus `.inp`.
 - **CFD:**
   - Ansys TurboGrid (curvas de cubo, carcasa y perfil) y ANSYS ICEM;
@@ -169,7 +169,7 @@ Resto del stack en Rust:
 | Unidades | `tp-units` propio: SI interno y conversión en tiempo de ejecución, porque la interfaz deja elegir unidades (descartado `uom`, que fija las unidades al compilar) |
 | Formato de proyecto | `serde` (JSON con versión de esquema) |
 | XML | `quick-xml` |
-| Mallas y CAD ligero | `stl_io`, `dxf` (DXF propio; el DWG lo convierte el ODA File Converter, externo) |
+| Mallas y CAD ligero | `stl_io`, `dxf` (DXF), `acadrust` (DWG, MPL-2.0) |
 | Ajuste y optimización | `argmin` |
 | Pruebas | `proptest` (propiedades) y `insta` (golden files) |
 | Distribución | `cargo-dist` / `cargo-packager`: MSI, DMG firmado y AppImage/Flatpak |
