@@ -374,6 +374,9 @@ fn volute_designs_and_exports() {
     );
     assert!(flanged.contains("outlet 100.0 mm"), "{flanged}");
     assert!(flanged.contains("Flange     196.0 mm"), "{flanged}");
+    // Thin-torus stresses in the casing wall at the shut-off pressure.
+    assert!(flanged.contains("Stress     σ1"), "{flanged}");
+    assert!(flanged.contains("over the suction (shut-off"), "{flanged}");
     // A double volute with an elliptic rib nose, exported with its rib.
     let double_dir = dir.join("double");
     let double = stdout(&turbopump(&[

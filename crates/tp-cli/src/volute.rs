@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use clap::Args;
 use tp_design::Param;
+use tp_design::volute::stress::StressPlace;
 use tp_design::volute::{
     AreaLaw, CutwaterShape, DischargeShape, SectionShape, StraightWall, VoluteGeometry,
     VoluteInput, VoluteKind,
@@ -36,7 +37,8 @@ pub(crate) struct VoluteArgs {
     /// (tangent, sharp or rounded), nose (radius of a rounded cutwater), height (H, the
     /// outlet face from the pump axis, which sets the diffuser length), dn (on: round the
     /// automatic outlet to the nearest nominal size), flange (on or off), flange_d
-    /// (outer diameter), flange_t (thickness), bolt_circle, bolt_hole and bolts.
+    /// (outer diameter), flange_t (thickness), bolt_circle, bolt_hole and bolts, pressure
+    /// (casing design pressure over the suction) and allowable (stress of the casing).
     #[arg(long = "set", value_name = "KEY=VALUE")]
     settings: Vec<String>,
     /// Write volute.txt (points) and volute.stl (mesh) into this folder.
@@ -178,7 +180,7 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
             .map(Param::Manual)
             .map_err(|e| format!("{key}: {e}"))
     };
-    use QuantityKind::{Angle, Dimensionless, Length};
+    use QuantityKind::{Angle, Dimensionless, Length, Pressure};
     match key {
         "flow-factor" => input.setup.flow_factor = quantity(Dimensionless)?,
         "dz" => input.setup.cutwater_diameter = quantity(Length)?,
@@ -237,6 +239,8 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
         "outlet" => input.diffuser.outlet_diameter = quantity(Length)?,
         "incidence" => input.cutwater.incidence = quantity(Angle)?,
         "wall" => input.wall.thickness = quantity(Length)?,
+        "pressure" => input.wall.pressure = quantity(Pressure)?,
+        "allowable" => input.wall.allowable_stress = quantity(Pressure)?,
         "type" => {
             input.setup.kind = match value {
                 "single" => VoluteKind::Single,
@@ -278,7 +282,8 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
                 "unknown key {key:?}; valid keys: flow-factor, dz, b3, e3, shape, law, \
                  sections, correction, length, outlet, incidence, wall, type, rib_wrap, rib, \
                  rib_nose, channel_ratio, discharge, bend, rotation, cutwater, nose, height, \
-                 dn, flange, flange_d, flange_t, bolt_circle, bolt_hole, bolts"
+                 dn, flange, flange_d, flange_t, bolt_circle, bolt_hole, bolts, pressure, \
+                 allowable"
             ));
         }
     }
@@ -436,6 +441,23 @@ fn print_report(name: &str, id: ComponentId, g: &VoluteGeometry, units: &Display
             g.outer_channel.len()
         );
     }
+    let w = &g.wall_stress;
+    let place = match w.place {
+        StressPlace::Spiral { angle } => format!("the section at {}", s(Angle, angle)),
+        StressPlace::Bend => "the bend".to_owned(),
+        StressPlace::Straight => "the straight diffuser".to_owned(),
+    };
+    println!(
+        "Stress     σ1 {} round {place}, σ2 {} along it, at {} over the suction (shut-off, Gülich eqs. 3.26 and 3.28)",
+        s(Pressure, w.hoop),
+        s(Pressure, w.longitudinal),
+        s(Pressure, w.pressure)
+    );
+    println!(
+        "           thin torus of the same area (our estimate); allowable {} needs a wall of {}",
+        s(Pressure, w.allowable),
+        s(Length, w.required_thickness)
+    );
     if let Some(f) = &d.flange {
         println!(
             "Flange     {} × {}   {} bolt holes of {} on {}   (our proportions, not a standard)",
