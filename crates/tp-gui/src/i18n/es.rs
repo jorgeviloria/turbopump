@@ -6,6 +6,9 @@
 
 /// English text → Spanish text.
 pub(super) static TEXTS: &[(&str, &str)] = &[
+    ("volute casing", "carcasa de la voluta"),
+    ("Volute casing", "Carcasa de la voluta"),
+    ("{} cm³, {}, wall {}", "{} cm³, {}, pared {}"),
     ("Hydraulic losses", "Pérdidas hidráulicas"),
     (
         "η_h {} (statistics {}) · impeller {} · outlet shock {} · volute {} + walls {}",
@@ -334,8 +337,8 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "El difusor se queda fuera hasta que se acepten sus pasos.",
     ),
     (
-        "The volute flow domain is exported too.",
-        "También se exporta el dominio fluido de la voluta.",
+        "The volute flow domain and its casing are exported too.",
+        "También se exportan el dominio fluido de la voluta y su carcasa.",
     ),
     (
         "The volute is left out until its steps are accepted.",

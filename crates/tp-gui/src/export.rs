@@ -212,6 +212,8 @@ mod cad {
         impeller_volume: f64,
         fluid_volume: f64,
         volute_volume: Option<f64>,
+        /// Volume and wall thickness of the volute casing.
+        casing: Option<(f64, f64)>,
         diffuser_volume: Option<f64>,
         wall_thickness: f64,
         problems: Vec<String>,
@@ -264,7 +266,11 @@ mod cad {
     ) -> Result<CadReport, String> {
         let cad = tp_cad::build_impeller(g, options).map_err(|e| e.to_string())?;
         let volute = volute
-            .map(tp_cad::build_volute)
+            .map(|g| {
+                let cad = tp_cad::build_volute(g)?;
+                let casing = tp_cad::build_volute_casing(g, &cad)?;
+                Ok::<_, tp_cad::CadError>((cad, casing, g.design.wall_thickness))
+            })
             .transpose()
             .map_err(|e| e.to_string())?;
         let diffuser = stator
@@ -282,11 +288,13 @@ mod cad {
                 files.push(path);
             }
         }
-        if let Some(v) = &volute {
+        if let Some((v, casing, _)) = &volute {
             for format in formats {
-                let path = folder.join(format!("volute.{format}"));
-                write(&v.fluid, &path, format, deflection)?;
-                files.push(path);
+                for (stem, shape) in [("volute", &v.fluid), ("volute-casing", &casing.solid)] {
+                    let path = folder.join(format!("{stem}.{format}"));
+                    write(shape, &path, format, deflection)?;
+                    files.push(path);
+                }
             }
         }
         if let Some(d) = &diffuser {
@@ -306,7 +314,11 @@ mod cad {
             ("blade", Some(&cad.blade)),
             ("flow domain", Some(&cad.fluid)),
             ("impeller", Some(&cad.impeller)),
-            ("volute flow domain", volute.as_ref().map(|v| &v.fluid)),
+            (
+                "volute flow domain",
+                volute.as_ref().map(|(v, _, _)| &v.fluid),
+            ),
+            ("volute casing", volute.as_ref().map(|(_, c, _)| &c.solid)),
             ("diffuser flow domain", diffuser.as_ref().map(|d| &d.fluid)),
         ]
         .into_iter()
@@ -324,7 +336,8 @@ mod cad {
             files,
             impeller_volume: cad.impeller_volume(),
             fluid_volume: cad.fluid_volume(),
-            volute_volume: volute.as_ref().map(|v| v.fluid_volume()),
+            volute_volume: volute.as_ref().map(|(v, _, _)| v.fluid_volume()),
+            casing: volute.as_ref().map(|(_, c, wall)| (c.volume(), *wall)),
             diffuser_volume: diffuser.as_ref().map(|d| d.fluid_volume()),
             wall_thickness: cad.wall_thickness,
             problems,
@@ -478,7 +491,7 @@ mod cad {
             }
             if volute.is_some() {
                 ui.label(tr(if volute_geometry.is_some() {
-                    "The volute flow domain is exported too."
+                    "The volute flow domain and its casing are exported too."
                 } else {
                     "The volute is left out until its steps are accepted."
                 }));
@@ -525,7 +538,14 @@ mod cad {
             match &self.last {
                 Some(Ok(report)) => {
                     ui.separator();
-                    let mass = report.impeller_volume * self.density;
+                    let mass = |volume: f64| {
+                        let kg = volume * self.density;
+                        if kg < 1.0 {
+                            format!("{:.0} g", kg * 1e3)
+                        } else {
+                            format!("{kg:.2} kg")
+                        }
+                    };
                     Grid::new("cad_report").num_columns(2).show(ui, |ui| {
                         value_row(ui, tr("Folder"), report.folder.display().to_string());
                         value_row(
@@ -539,11 +559,7 @@ mod cad {
                             format!(
                                 "{:.1} cm³, {}",
                                 report.impeller_volume * 1e6,
-                                if mass < 1.0 {
-                                    format!("{:.0} g", mass * 1e3)
-                                } else {
-                                    format!("{mass:.2} kg")
-                                }
+                                mass(report.impeller_volume)
                             ),
                         );
                         value_row(
@@ -560,6 +576,20 @@ mod cad {
                         }
                         if let Some(v) = report.volute_volume {
                             value_row(ui, tr("Volute flow domain"), format!("{:.1} cm³", v * 1e6));
+                        }
+                        if let Some((v, wall)) = report.casing {
+                            value_row(
+                                ui,
+                                tr("Volute casing"),
+                                tf(
+                                    "{} cm³, {}, wall {}",
+                                    &[
+                                        &format!("{:.1}", v * 1e6),
+                                        &mass(v),
+                                        &units.show(Length, wall),
+                                    ],
+                                ),
+                            );
                         }
                     });
                     for file in &report.files {
@@ -599,8 +629,9 @@ mod cad {
             let volute = derived.volute(project.components()[1].id());
             assert!(volute.is_some());
             let report = run(g, None, volute, &CadOptions::default(), &folder, &["step"]).unwrap();
-            assert_eq!(report.files.len(), 3);
+            assert_eq!(report.files.len(), 4);
             assert!(report.volute_volume.is_some_and(|v| v > 0.0));
+            assert!(report.casing.is_some_and(|(v, t)| v > 0.0 && t > 0.0));
             for file in &report.files {
                 assert!(std::fs::metadata(file).unwrap().len() > 1000);
             }
