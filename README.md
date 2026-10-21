@@ -97,6 +97,9 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
   - vista meridional, donde los puntos de control de Bézier, el borde de ataque y la
     longitud axial se arrastran con el ratón, con las paredes del difusor y las
     secciones de la voluta;
+  - secciones de la voluta: la definición en edición sobre la familia de secciones a lo
+    largo de la espiral, con los puntos de control de los lados Bézier y de segmentos
+    para arrastrar y esquinas que se añaden o quitan con el botón derecho;
   - gráficas del álabe (β, θ y espesor);
   - vista frontal de la etapa, con los álabes del difusor y la espiral;
   - vista 3D, con aristas de las piezas, secciones de la voluta, cubo de vistas (un clic

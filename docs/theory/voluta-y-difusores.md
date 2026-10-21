@@ -74,15 +74,132 @@ espiral, difusor de descarga, lengüeta y espesor de pared.
 
 ### 2. Sección transversal
 
-La sección empieza en $r'_z$ con anchura $b_3$ y crece hacia fuera. Hay tres formas:
+Implementación: [`crates/tp-design/src/volute/section.rs`](../../crates/tp-design/src/volute/section.rs).
 
-- **rectangular;**
-- **trapezoidal**, con flancos abiertos 30° por defecto;
-- **circular.**
+Cada sección se dibuja en su propio plano radial con dos coordenadas: $s = z - z_m$ a lo
+ancho (la anchura $B$, positiva hacia $+z$) y $h = r - r'_z$ hacia fuera desde el
+círculo de estancamiento (la altura $H$). La entrada de anchura $b_3$ une la sección con
+el anillo sin álabes en $h = 0$, entre los puntos de entrada $(\mp b_3/2,\ 0)$.
 
-Las esquinas de las secciones se redondean al dibujarlas. El contorno se ajusta
-iterando hasta que su área coincide con la de diseño, porque si no el redondeo le
-quitaría un 2 %.
+**Definiciones.** La forma no tiene por qué ser la misma en toda la espiral. Una tabla de
+definiciones da, para varios ángulos $0 < \varphi \le 360°$, la forma de la sección, que
+puede activarse o no. En $\varphi = 0$ la sección siempre es plana, así que allí no se
+define nada. Entre dos definiciones activas la forma cambia con suavidad: los contornos
+de ambas, a la misma altura, se mezclan punto a punto con el peso
+$w = x^2(3 - 2x)$, donde $x$ es la fracción del ángulo entre las dos. Antes de la
+primera definición y después de la última, la forma es la de esa definición. Con una
+sola, vale para toda la espiral. El desarrollo de la espiral (apartado 3) escala cada
+forma a la altura que necesita su caudal: la forma la elige quien diseña y el tamaño
+sale del cálculo.
+
+**Lados.** Casi todas las formas se construyen con dos lados, uno a cada lado de la
+línea central $s = 0$, que van del punto de entrada hasta el techo $(0, H)$. Cada lado
+puede tener su forma; si el de $+z$ no se da, es el reflejo del de $-z$. Los tipos de
+lado son estos (la construcción geométrica es propia):
+
+| Tipo | Construcción | Parámetros |
+|---|---|---|
+| Rectangular | pared radial y techo | ángulo tangente $\lambda$ |
+| Trapecio | flanco a $\delta$ de la dirección radial y techo | $\delta$ (30° por defecto), $\lambda$ |
+| Redonda | arco de elipse por el punto de entrada, con su eje sobre la línea central y horizontal en el techo | relación $k$ de semiejes axial/radial (1: círculo) |
+| Bézier, tipo rectángulo o trapecio | curva de Bézier de grado 4 entre el punto de entrada (0) y el techo (4) | $\delta$, $\lambda$, posición de los puntos 1, 2 y 3 |
+| Segmentos de recta | polilínea de esquinas redondeadas | coordenadas y radio de cada esquina |
+| Basada en radios | base radial, cono y arco principal, unidos por dos radios | $h_B$, $R_B$, $\delta$, $R_C$, $R$ |
+
+El **ángulo tangente** $\lambda$ inclina el techo hacia abajo desde la línea central;
+con $\lambda > 0$ los dos lados se juntan en una arista. En secciones bajas se reduce lo
+justo para que la esquina quede por encima de una décima de la altura.
+
+**Redonda.** La elipse de semiejes $k\,a$ (axial) y $a$ (radial), centrada en
+$(0, H - a)$, pasa por el punto de entrada $(c, 0)$ con $c = b_3/2$ si
+
+$$a = \frac{H^2 + (c/k)^2}{2H}$$
+
+Cuando $H < c/k$ es un casquete plano; cuando $H$ crece, la sección se ensancha por
+encima de la entrada y vuelve a ella por abajo. Con $b_3 \to 0$ tiende al círculo que
+toca $r'_z$ de la ec. T7.7.7. Al pasar por los bordes de la entrada lleva algo más de
+caudal cerca del eje que ese círculo, y para el mismo momento angular sale un poco más
+baja: 59,8 mm frente a 63,0 mm en la bomba de referencia, un 5 %.
+
+**Bézier.** La recta de la pared (radial o a $\delta$) desde el punto 0 y la del techo
+(a $\lambda$) desde el punto 4 se cortan en la esquina $S$. El punto 1 va sobre la
+primera y el 3 sobre la segunda, como fracción del camino desde el extremo hasta $S$
+(relativa) o como distancia a $S$ (absoluta). El punto 2 es libre:
+$P_2 = S - \alpha\,(S - P_0) - \beta\,(S - P_4)$, de modo que crece con la sección; con
+$\alpha = \beta = 0$ coincide con $S$. La curva sale de la entrada a lo largo de la
+pared y llega al techo a lo largo de su recta, y los puntos interiores redondean la
+esquina como un radio de fundición.
+
+**Segmentos de recta.** Cada esquina se guarda respecto al punto de entrada en unidades
+de la altura $H$, así que el lado se escala alrededor de ese punto; el techo queda
+siempre sobre la línea central. Cada esquina tiene su radio (también en unidades de
+$H$); el radio se limita para que el redondeo quepa en sus dos tramos (en un tramo
+compartido con otra esquina redondeada, la mitad para cada una). Con radio 0 la esquina
+es viva.
+
+**Basada en radios.** Una base radial de altura $h_B$, un cono a $\delta$ y el arco
+principal de radio $R$ centrado en la línea central, por el techo. $R_B$ redondea base y
+cono, y $R_C$ cono y arco, ambos limitados por las longitudes que unen. Según la altura
+de la sección, el arco se encuentra con:
+
+1. el cono, si lo corta: redondeo $R_C$ entre ambos;
+2. nada, porque queda por dentro de la recta del cono: el radio se agranda hasta que la
+   toca, $R = \dfrac{c\cos\delta + \sin\delta\,(H - h_B)}{1 + \sin\delta}$;
+3. la base, en secciones más bajas que el cono;
+4. ni eso, en secciones muy bajas: el arco pasa por el punto de entrada, con
+   $R = (H^2 + c^2)/(2H)$.
+
+Los cuatro casos empalman sin saltos de área. Las longitudes son automáticas en
+proporción a $b_3$: $h_B = R_B = 0{,}1\,b_3$, $R_C = 0{,}3\,b_3$ y $R = b_3$.
+
+**Redonda asimétrica.** Es una forma de toda la sección, no de un lado. Mientras la
+elipse no abarca la entrada ($H \le c/k$) es el casquete simétrico. Después es media
+elipse de semiejes $(kH,\ H)$ apoyada en $r'_z$, tangente a la pared del lado cerrado en
+su punto de entrada, que crece hacia el lado abierto ($-z$ por defecto). Opciones:
+
+- **estrictamente externa** (por defecto): el fondo, más ancho que la entrada, es pared
+  en $r'_z$; si no, la sección también crece por debajo de $r'_z$, junto a la entrada y
+  fuera de ella;
+- **abierta hacia $+z$:** la imagen especular;
+- **esquina cuadrada arriba:** el cuarto del lado cerrado se sustituye por una esquina
+  en ángulo recto.
+
+**Propiedades de cualquier forma** (teorema de Green). Las magnitudes que necesita la
+espiral salen del contorno cerrado, recorrido en sentido antihorario en $(r, z)$:
+
+$$A = \tfrac12\oint (r\,dz - z\,dr) \qquad
+\iint \frac{dA}{r} = \oint \ln r\; dz \qquad
+\iint r\,dA = \oint \frac{r^2}{2}\,dz$$
+
+La segunda es la integral $\int b(r)/r\,dr$ de la ec. 7.24 para una forma cualquiera. En
+un tramo recto de $r_1$ a $r_2$, $\ln r$ se integra exacto:
+$\Delta z\,\dfrac{r_2\ln r_2 - r_2 - r_1\ln r_1 + r_1}{r_2 - r_1}$; y $\int d\ell/r^2$
+vale $\ell/(r_1 r_2)$. Las sumas son exactas para polígonos; las paredes curvas se
+muestrean cada 1,5° de arco (96 puntos en una Bézier). Las paredes mojadas son todo el
+contorno salvo la entrada. Para rectángulos y trapecios el resultado coincide con las
+fórmulas cerradas: $b_3\ln(1 + a/r'_z)$ (ec. T7.7.8) y
+$(b_3 - 2r'_z t)\ln(r_a/r'_z) + 2ta$ con $t = \tan\delta$, a $10^{-12}$.
+
+La altura de cada sección se despeja con el método de Brent: la que da el momento
+angular pedido (ec. 7.24) o, con velocidad constante, el área pedida (ec. 7.27). Ambas
+crecen con la altura en todas las formas.
+
+**Voluta doble.** Su nervio va a un mismo radio a lo ancho de cada sección, y el canal
+exterior es la parte de la sección completa más allá del nervio. Eso exige paredes
+rectas con un solo ángulo de cono, iguales a ambos lados. Si las definiciones no lo
+cumplen, se sustituyen por un trapecio con el ángulo de cono de la primera definición
+activa (30° si no tiene) y se avisa.
+
+**Validación.** Al menos una definición activa, ángulos en $(0, 360°]$ y distintos entre
+sí, $\delta \le 60°$, $\lambda \le 45°$, $0{,}2 \le k \le 5$, y un contorno que no se
+corte a sí mismo a ninguna escala: se comprueba de $0{,}05\,b_3$ a $10\,b_3$.
+
+**Contornos para el CAD.** Todas las secciones de un loft necesitan el mismo número de
+puntos y de tramos. Cada contorno se remuestrea por longitud de arco en tramos fijos: la
+entrada, el lado de $-z$ y el de $+z$. Si todas las definiciones activas tienen las
+mismas esquinas (por ejemplo, rectángulos y trapecios), estas también separan tramos y
+quedan vivas; si no, solo se conservan los puntos de entrada y el techo. Al remuestrear,
+las paredes curvas pierden algo de área, que se devuelve agrandando un poco la altura.
 
 ### 3. Desarrollo de la espiral
 
@@ -92,13 +209,10 @@ $\varepsilon$ es la fracción $\varepsilon/2\pi$ del total, y eso fija su altura
 
 $$\int_{r'_z}^{r_a} \frac{b(r)}{r}\,dr = \frac{\varepsilon\,Q_{Le}}{2\pi\,c_{2u}\,r_2}$$
 
-Cada forma de sección se resuelve así:
-
-- **rectangular:** $b_3 \ln(r_a/r'_z)$ igual al segundo miembro, que tiene solución
-  cerrada (ec. T7.7.9);
-- **circular:** el diámetro sale de $d = X + \sqrt{2\,d'_z X}$ (ec. T7.7.7);
-- **trapezoidal:** la integral también es analítica, pero la altura se despeja con el
-  método de Brent.
+Para un rectángulo la ecuación tiene solución cerrada (ec. T7.7.9), y para un círculo
+que toca $r'_z$, $d = X + \sqrt{2\,d'_z X}$ (ec. T7.7.7). En general, la integral sale
+del contorno de la sección en el ángulo $\varepsilon$ (apartado 2) y la altura se despeja
+con el método de Brent. La voluta doble usa las fórmulas cerradas del trapecio.
 
 **Velocidad constante** (ecs. 7.26 y 7.27). El área de la garganta $A_{3q}$ sale del
 momento angular, y el resto de secciones crece en proporción al ángulo:
@@ -335,7 +449,7 @@ el empuje radial (cap. 9.3.4 y tabla 9.4). Se elige en el paso de datos de parti
 | Espesor del nervio | $e_3$, el de la lengüeta (Gülich lo deja al cálculo resistente y a la fundición) | elección propia |
 | Nariz y cola | largo/espesor 1, un semicírculo; de 1 a 5 | elección propia |
 | Nervio más grueso que 2/3 de la primera garganta | error | elección propia |
-| Secciones circulares | error: el nervio va a un radio fijo a lo ancho de la sección | — |
+| Secciones que no son de paredes rectas con un solo ángulo de cono | se convierten en el trapecio de la primera definición, con aviso: el nervio va a un radio fijo a lo ancho de la sección | — |
 
 **El nervio:**
 
@@ -528,14 +642,20 @@ También avisan:
   entrada. Por eso:
   - el anillo es un 0,5 % más estrecho que $b_3$;
   - las operaciones booleanas se repiten con una tolerancia de contacto de 0; 0,001;
-    0,0001 y 0,01 mm hasta que el dominio fluido sale como un único sólido válido.
+    0,0001; 0,01 y 0,1 mm, en dos etapas: primero la unión de las piezas del canal y
+    después la del anillo y los cortes de la lengüeta y el nervio;
+  - una unión fallida puede dar un sólido válido al que le falta una pieza. Por eso
+    cada etapa exige además un volumen: el canal, al menos el 90 % de la suma de sus
+    piezas, y el dominio fluido, el canal más la mitad del anillo. Con secciones de
+    Bézier altas, por ejemplo, la unión exacta pierde la tobera y la buena sale con
+    0,1 mm.
 - En una matriz de 75 combinaciones (forma de sección, voluta simple o doble, cinco
   descargas y tres lengüetas) solo fallan dos, ambas con la pared exterior recta.
 
 Los sólidos se construyen en milímetros con Open CASCADE:
 
-- **Voluta:** cada sección es un contorno cerrado con una arista por tramo suave, para
-  que la spline no suavice los quiebros entre flancos y esquinas. El loft recorre la
+- **Voluta:** cada sección es un contorno cerrado con una arista por tramo (apartado 2),
+  para que la spline no suavice los quiebros entre tramos. El loft recorre la
   espiral y la tobera, y se une al anillo que va de la salida del rodete al círculo de
   la lengüeta. El resultado es el dominio fluido, `volute.<ext>`.
 - **Carcasa de la voluta,** `volute-casing.<ext>` (construcción propia):
@@ -630,8 +750,10 @@ Tras el difusor, la voluta recibe mucho menos momento angular: $c_u r$ baja de 1
   - el reparto de caudal entre los dos canales según sus resistencias (Gülich tabla
     1.5) no se calcula: cada uno lleva la parte de su ángulo.
 - **Multietapa:** no hay canales de retorno.
-- **Secciones:** solo rectangulares, trapezoidales y circulares, simétricas. Faltan las
-  de Bézier, las asimétricas y las externas.
+- **Secciones:** falta la redonda asimétrica interna, la que queda junto al rodete por
+  debajo de $r'_z$ y necesita un codo desde la entrada. La voluta doble solo admite
+  paredes rectas con un ángulo de cono. Si las definiciones mezclan formas de esquinas
+  distintas, las esquinas vivas que no comparten se suavizan en el CAD.
 - **Áreas de la espiral:** faltan las reglas de Pfleiderer y Stepanoff.
 - **Tobera:** tangencial o radial, siempre en el plano medio: no hay codo en z ni
   desplazamiento axial, y la salida es siempre circular, sin brida rectangular. Con la
