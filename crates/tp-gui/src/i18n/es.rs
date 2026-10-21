@@ -6,6 +6,19 @@
 
 /// English text → Spanish text.
 pub(super) static TEXTS: &[(&str, &str)] = &[
+    // Side gap of internal volutes.
+    ("Side gap s_ax", "Holgura lateral s_ax"),
+    (
+        "Axial gap between the casing wall round the spiral and the impeller beside it; the automatic neck grows to keep it. Automatic: 0.065·r₂ (Gülich Chap. 9.1)",
+        "Holgura axial entre la pared de la carcasa alrededor de la espiral y el rodete de al lado; el cuello automático crece para respetarla. Automática: 0,065·r₂ (Gülich cap. 9.1)",
+    ),
+    ("Gap to the impeller", "Holgura al rodete"),
+    ("{} (at least {})", "{} (al menos {})"),
+    ("into the suction eye", "dentro del ojo de aspiración"),
+    (
+        "clear: the spiral stays outside r₂",
+        "libre: la espiral queda fuera de r₂",
+    ),
     // Internal cross sections of the volute.
     (
         "Round, asymmetric, internal",
@@ -1869,6 +1882,19 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
 
 /// Messages of the design code, most specific first.
 pub(super) static MESSAGES: &[(&str, &str)] = &[
+    // Side gap of internal volutes.
+    (
+        "the internal spiral reaches into the suction eye of the impeller: turn it toward +z or make it smaller",
+        "la espiral interna llega al ojo de aspiración del rodete: gírala hacia +z o hazla más pequeña",
+    ),
+    (
+        "the internal spiral leaves {} mm to the impeller beside it, less than the side gap of {} mm: lengthen the neck",
+        "la espiral interna deja {} mm al rodete de al lado, menos que la holgura lateral de {} mm: alarga el cuello",
+    ),
+    (
+        "the side gap cannot be negative",
+        "la holgura lateral no puede ser negativa",
+    ),
     // Internal cross sections of the volute.
     (
         "internal cross sections cannot be mixed with other shapes: their bend and neck run all round the spiral",

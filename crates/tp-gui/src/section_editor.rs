@@ -5,11 +5,12 @@
 use std::f64::consts::TAU;
 
 use eframe::egui::{self, Button, ComboBox, DragValue, Grid, Id, Ui};
+use tp_design::outlet::Reach;
 use tp_design::volute::section::default_segments;
 use tp_design::volute::{
     BendWall, BezierBase, BezierSide, DEFAULT_CONE_ANGLE_DEG, ExternalRound, InnerPosition,
     InternalRound, RadiusSide, SectionDefinition, SectionShape, SegmentPoint, SideShape,
-    VoluteInput,
+    VoluteDesign, VoluteInput,
 };
 use tp_project::ComponentId;
 use tp_units::{DisplayUnits, QuantityKind};
@@ -408,7 +409,7 @@ pub(crate) fn step(
         }
         SectionShape::RoundExternal(round) => external_editor(ui, round),
         SectionShape::RoundInternal(round) => {
-            internal_editor(ui, round, b3, &units);
+            internal_editor(ui, round, g.map(|g| &g.design), &units);
             // Every internal definition shares the bend and the neck.
             let shared = *round;
             for d in sections.iter_mut() {
@@ -440,6 +441,17 @@ pub(crate) fn step(
                     tf("{} (2 to 3)", &[&format!("{:.2}", d.throat_aspect)]),
                 );
                 value_row(ui, tr("Area A₃q"), units.show(Area, d.throat.area));
+                if let Some(side) = d.side_gap {
+                    let text = match (side.reach, side.gap) {
+                        (Reach::Eye, _) => tr("into the suction eye").to_owned(),
+                        (_, Some(gap)) => tf(
+                            "{} (at least {})",
+                            &[&units.show(Length, gap), &units.show(Length, side.required)],
+                        ),
+                        _ => tr("clear: the spiral stays outside r₂").to_owned(),
+                    };
+                    value_row(ui, tr("Gap to the impeller"), text);
+                }
             });
     }
     "edit volute cross section"
@@ -772,8 +784,18 @@ fn bend_combo(ui: &mut Ui, salt: &str, wall: &mut BendWall) {
         });
 }
 
-fn internal_editor(ui: &mut Ui, round: &mut InternalRound, b3: Option<f64>, units: &DisplayUnits) {
-    let neck = b3.map(|b3| round.neck_width.resolve(|| 0.5 * b3));
+fn internal_editor(
+    ui: &mut Ui,
+    round: &mut InternalRound,
+    design: Option<&VoluteDesign>,
+    units: &DisplayUnits,
+) {
+    // The values the design used: the automatic neck may have grown to keep the gap.
+    let neck = design
+        .and_then(|d| d.cross_sections.internal())
+        .and_then(|r| r.neck_width.manual_value())
+        .or_else(|| design.map(|d| 0.5 * d.inlet_width));
+    let gap = design.and_then(|d| d.side_gap).map(|g| g.required);
     grid("section_internal").show(ui, |ui| {
         number_row(
             ui,
@@ -796,6 +818,19 @@ fn internal_editor(ui: &mut Ui, round: &mut InternalRound, b3: Option<f64>, unit
             &mut round.neck_width,
             QuantityKind::Length,
             neck,
+            units,
+            0.0..=1.0,
+        );
+        param_f64(
+            ui,
+            tr("Side gap s_ax"),
+            tr(
+                "Axial gap between the casing wall round the spiral and the impeller beside it; \
+                 the automatic neck grows to keep it. Automatic: 0.065·r₂ (Gülich Chap. 9.1)",
+            ),
+            &mut round.side_gap,
+            QuantityKind::Length,
+            gap,
             units,
             0.0..=1.0,
         );
