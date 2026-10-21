@@ -69,13 +69,19 @@ pub(crate) struct Viewer {
 
 /// Faces of the view cube: outward normal and label.
 const FACES: [(Vec3, &str); 6] = [
-    (Vec3::X, "X"),
+    (Vec3::X, "+X"),
     (Vec3::NEG_X, "−X"),
-    (Vec3::Y, "Y"),
+    (Vec3::Y, "+Y"),
     (Vec3::NEG_Y, "−Y"),
     (Vec3::NEG_Z, "Inlet"),
-    (Vec3::Z, "Back"),
+    (Vec3::Z, "Rear"),
 ];
+
+/// Half the edge of the view cube, in points.
+const CUBE_HALF: f32 = 27.0;
+/// Where the band of a face's edges and corners starts, as a fraction of its half
+/// edge: the middle picks the face, the band its edges and corners.
+const CUBE_BAND: f32 = 0.62;
 
 impl Viewer {
     /// Moves the camera to a standard view.
@@ -282,7 +288,7 @@ impl Viewer {
                         ui.label(RichText::new(icon::QUESTION).size(16.0).color(p.weak))
                             .on_hover_text(tr(
                                 "Drag: rotate\nRight-drag or Shift-drag: pan\nScroll or pinch: \
-                                 zoom\nDouble-click: fit\nView cube: click a face",
+                                 zoom\nDouble-click: fit\nView cube: click a face, edge or corner",
                             ));
                     });
                 });
@@ -417,69 +423,199 @@ fn scale_bar(ui: &Ui, rect: Rect, camera: &Camera, units: &DisplayUnits) {
 }
 
 /// The view cube in the top-right corner. Returns the direction to look from when a
-/// face was clicked.
+/// face, an edge or a corner was clicked.
 fn view_cube(ui: &mut Ui, rect: Rect, camera: &Camera) -> Option<Vec3> {
     let p = Palette::of(ui);
-    let half = 21.0;
-    let center = rect.right_top() + vec2(-48.0, 72.0);
-    let area = Rect::from_center_size(center, Vec2::splat(2.0 * half * 1.8));
+    let dark = ui.visuals().dark_mode;
+    let center = rect.right_top() + vec2(-58.0, 78.0);
+    let area = Rect::from_center_size(center, Vec2::splat(CUBE_HALF * 3.6));
     let response = ui.interact(area, ui.id().with("view_cube"), Sense::click());
     let pointer = response.hover_pos();
-    let corner =
-        |sx: f32, sy: f32, sz: f32| center + on_screen(camera, Vec3::new(sx, sy, sz), half).0;
-    let mut clicked = None;
-    let painter = ui.painter();
-    for (normal, label) in FACES {
-        let (_, depth) = on_screen(camera, normal, 1.0);
-        if depth <= 0.02 {
-            continue;
-        }
-        // The face's corners, in order round it.
-        let (a, b) = if normal.x != 0.0 {
-            (Vec3::Y, Vec3::Z)
-        } else if normal.y != 0.0 {
-            (Vec3::Z, Vec3::X)
-        } else {
-            (Vec3::X, Vec3::Y)
-        };
-        let quad: Vec<Pos2> = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)]
-            .iter()
-            .map(|&(s, t)| {
-                let q = normal + a * s + b * t;
-                corner(q.x, q.y, q.z)
+    let to_screen = |q: Vec3| center + on_screen(camera, q, CUBE_HALF).0;
+
+    // The visible faces, farthest first, with their in-plane axes.
+    let mut faces: Vec<(Vec3, &str, Vec3, Vec3, f32)> = FACES
+        .iter()
+        .filter_map(|&(normal, label)| {
+            let (_, facing) = on_screen(camera, normal, 1.0);
+            (facing > 0.02).then(|| {
+                let (a, b) = face_axes(normal);
+                (normal, label, a, b, facing)
             })
-            .collect();
-        let hovered = pointer.is_some_and(|pt| inside(&quad, pt));
-        let base = if hovered { p.selected } else { p.strip };
-        let shade = 0.82 + 0.18 * depth;
-        let fill = Color32::from_rgb(
-            (f32::from(base.r()) * shade) as u8,
-            (f32::from(base.g()) * shade) as u8,
-            (f32::from(base.b()) * shade) as u8,
+        })
+        .collect();
+    faces.sort_by(|x, y| x.4.total_cmp(&y.4));
+
+    // The face, edge or corner under the pointer, as the direction it looks from.
+    let hovered = pointer.and_then(|pt| {
+        faces.iter().rev().find_map(|&(normal, _, a, b, _)| {
+            CUBE_REGIONS.iter().find_map(|&(i, j)| {
+                let quad = region_quad(normal, a, b, i, j).map(to_screen);
+                inside(&quad, pt).then(|| normal + a * i + b * j)
+            })
+        })
+    });
+
+    let (face_light, face_dark, edge, text) = if dark {
+        (
+            Color32::from_rgb(92, 99, 110),
+            Color32::from_rgb(52, 57, 65),
+            Color32::from_rgb(24, 26, 30),
+            Color32::from_rgb(228, 232, 238),
+        )
+    } else {
+        (
+            Color32::from_rgb(252, 252, 253),
+            Color32::from_rgb(200, 205, 213),
+            Color32::from_rgb(120, 128, 140),
+            Color32::from_rgb(52, 58, 68),
+        )
+    };
+    let painter = ui.painter();
+    // A soft round backdrop sets the cube apart from the model behind it.
+    painter.circle_filled(
+        center,
+        CUBE_HALF * 1.75,
+        if dark {
+            Color32::from_white_alpha(6)
+        } else {
+            Color32::from_black_alpha(6)
+        },
+    );
+    for &(normal, label, a, b, facing) in &faces {
+        let corners = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)]
+            .map(|(s, t)| to_screen(normal + a * s + b * t));
+        // Light from above the viewer and a little to the left, in camera space.
+        let n = camera.view().transform_vector3(normal);
+        let shade = n
+            .dot(Vec3::new(-0.3, 0.75, 0.6).normalize())
+            .clamp(0.0, 1.0);
+        let fill = lerp_color(face_dark, face_light, shade);
+        painter.add(Shape::convex_polygon(corners.to_vec(), fill, Stroke::NONE));
+        // The regions that look from the hovered direction light up, on every face.
+        if let Some(direction) = hovered {
+            for &(i, j) in &CUBE_REGIONS {
+                if (normal + a * i + b * j - direction).length_squared() < 1e-4 {
+                    let quad = region_quad(normal, a, b, i, j).map(to_screen);
+                    painter.add(Shape::convex_polygon(
+                        quad.to_vec(),
+                        p.accent.gamma_multiply(if dark { 0.55 } else { 0.35 }),
+                        Stroke::NONE,
+                    ));
+                }
+            }
+        }
+        if facing > 0.25 {
+            let alpha = ((facing - 0.25) / 0.35).clamp(0.0, 1.0);
+            face_label(ui, tr(label), &corners, text.gamma_multiply(alpha));
+        }
+        painter.add(Shape::closed_line(corners.to_vec(), Stroke::new(1.0, edge)));
+    }
+    if let Some(direction) = hovered {
+        let hint = match direction
+            .abs()
+            .cmpgt(Vec3::splat(0.5))
+            .bitmask()
+            .count_ones()
+        {
+            1 => tr("Click to look at this face"),
+            2 => tr("Click to look along this edge"),
+            _ => tr("Click for the view from this corner"),
+        };
+        let clicked = response.clicked();
+        response.on_hover_text(hint);
+        if clicked {
+            return Some(direction);
+        }
+    }
+    None
+}
+
+/// Regions of a face, by their offsets toward its in-plane axes: the middle, four
+/// edges and four corners.
+const CUBE_REGIONS: [(f32, f32); 9] = [
+    (0.0, 0.0),
+    (1.0, 0.0),
+    (-1.0, 0.0),
+    (0.0, 1.0),
+    (0.0, -1.0),
+    (1.0, 1.0),
+    (1.0, -1.0),
+    (-1.0, 1.0),
+    (-1.0, -1.0),
+];
+
+/// Two axes in the plane of the face with outward `normal`, so that a label drawn
+/// along them reads upright from outside.
+fn face_axes(normal: Vec3) -> (Vec3, Vec3) {
+    // Up on the screen is −Z for the side faces; the end faces take +Y as up.
+    let up = if normal.z == 0.0 {
+        Vec3::NEG_Z
+    } else {
+        Vec3::Y
+    };
+    let right = up.cross(normal);
+    (right, -up)
+}
+
+/// The corners of a region of a face, in model units of the unit cube.
+fn region_quad(normal: Vec3, a: Vec3, b: Vec3, i: f32, j: f32) -> [Vec3; 4] {
+    let span = |k: f32| match k {
+        0.0 => (-CUBE_BAND, CUBE_BAND),
+        k if k > 0.0 => (CUBE_BAND, 1.0),
+        _ => (-1.0, -CUBE_BAND),
+    };
+    let ((s0, s1), (t0, t1)) = (span(i), span(j));
+    [(s0, t0), (s1, t0), (s1, t1), (s0, t1)].map(|(s, t)| normal + a * s + b * t)
+}
+
+/// Draws `text` on a face, mapped onto its plane so it turns with the cube, and
+/// sized to fit inside it. `corners` go round the face from its (−a, −b) corner.
+fn face_label(ui: &Ui, text: &str, corners: &[Pos2; 4], color: Color32) {
+    let galley = ui.painter().layout_no_wrap(
+        text.to_owned(),
+        FontId::new(15.0, crate::theme::bold_family()),
+        color,
+    );
+    let size = galley.size();
+    if size.x <= 0.0 || size.y <= 0.0 {
+        return;
+    }
+    // Face coordinates: the galley's centre at the face's centre, a fraction of the
+    // face wide at most.
+    let scale = (1.3 / size.x).min(0.75 / size.y);
+    let origin = corners[0];
+    let (u, v) = ((corners[1] - origin) / 2.0, (corners[3] - origin) / 2.0);
+    let map = |q: Pos2| {
+        let (s, t) = (
+            (q.x - size.x / 2.0) * scale + 1.0,
+            (q.y - size.y / 2.0) * scale + 1.0,
         );
-        painter.add(Shape::convex_polygon(
-            quad.clone(),
-            fill,
-            Stroke::new(1.0, p.weak.gamma_multiply(0.8)),
-        ));
-        if depth > 0.3 {
-            let mid = quad.iter().fold(Vec2::ZERO, |s, q| s + q.to_vec2()) / 4.0;
-            painter.text(
-                mid.to_pos2(),
-                Align2::CENTER_CENTER,
-                tr(label),
-                FontId::proportional(8.0 + 3.0 * depth),
-                if hovered { p.accent } else { p.text },
-            );
-        }
-        if hovered && response.clicked() {
-            clicked = Some(normal);
-        }
+        origin + u * s + v * t
+    };
+    // Galleys keep their texture coordinates in texels of the font atlas.
+    let [w, h] = ui.ctx().fonts(|f| f.font_image_size());
+    let texel = vec2(1.0 / w as f32, 1.0 / h as f32);
+    let mut mesh = egui::Mesh::default();
+    for placed in &galley.rows {
+        let row = &placed.row.visuals.mesh;
+        let base = mesh.vertices.len() as u32;
+        mesh.vertices
+            .extend(row.vertices.iter().map(|vertex| egui::epaint::Vertex {
+                pos: map(vertex.pos + placed.pos.to_vec2()),
+                uv: (vertex.uv.to_vec2() * texel).to_pos2(),
+                color: vertex.color,
+            }));
+        mesh.indices.extend(row.indices.iter().map(|i| base + i));
+        mesh.texture_id = row.texture_id;
     }
-    if pointer.is_some() {
-        response.on_hover_text(tr("Click a face to look at it"));
-    }
-    clicked
+    ui.painter().add(Shape::mesh(mesh));
+}
+
+/// The colour a fraction `t` of the way from `a` to `b`.
+fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
+    let mix = |x: u8, y: u8| (f32::from(x) + (f32::from(y) - f32::from(x)) * t).round() as u8;
+    Color32::from_rgb(mix(a.r(), b.r()), mix(a.g(), b.g()), mix(a.b(), b.b()))
 }
 
 /// Whether `point` lies inside the convex polygon `quad`.
@@ -514,6 +650,31 @@ mod tests {
         assert_eq!(compact(100.0), "100");
         assert_eq!(compact(2.5), "2.5");
         assert_eq!(compact(0.0), "0");
+    }
+
+    /// Seen from outside, every face label reads left to right and top to bottom, not
+    /// mirrored: on screen (y down) right × down points into the screen.
+    #[test]
+    fn face_labels_are_not_mirrored() {
+        for (normal, _) in FACES {
+            let (a, b) = face_axes(normal);
+            assert_eq!(a.dot(normal), 0.0);
+            assert_eq!(b.dot(normal), 0.0);
+            assert!((a.cross(b) + normal).length() < 1e-6, "{normal}");
+        }
+    }
+
+    #[test]
+    fn cube_regions_tile_each_face() {
+        let (a, b) = face_axes(Vec3::NEG_Z);
+        let area: f32 = CUBE_REGIONS
+            .iter()
+            .map(|&(i, j)| {
+                let q = region_quad(Vec3::NEG_Z, a, b, i, j);
+                (q[1] - q[0]).length() * (q[3] - q[0]).length()
+            })
+            .sum();
+        assert!((area - 4.0).abs() < 1e-5);
     }
 
     #[test]

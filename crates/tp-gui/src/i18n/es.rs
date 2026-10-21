@@ -1253,12 +1253,21 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("All blades, or only one", "Todos los álabes, o solo uno"),
     (
         "Drag: rotate\nRight-drag or Shift-drag: pan\nScroll or pinch: \
-                                 zoom\nDouble-click: fit\nView cube: click a face",
-        "Arrastrar: girar\nArrastrar con el botón derecho o con Mayús: desplazar\nRueda o pellizco: zoom\nDoble clic: encuadrar\nCubo de vistas: clic en una cara",
+                                 zoom\nDouble-click: fit\nView cube: click a face, edge or corner",
+        "Arrastrar: girar\nArrastrar con el botón derecho o con Mayús: desplazar\nRueda o pellizco: zoom\nDoble clic: encuadrar\nCubo de vistas: clic en una cara, arista o esquina",
+    ),
+    ("Rear", "Trasera"),
+    (
+        "Click to look at this face",
+        "Clic para mirar esta cara de frente",
     ),
     (
-        "Click a face to look at it",
-        "Haz clic en una cara para mirar desde ella",
+        "Click to look along this edge",
+        "Clic para mirar desde esta arista",
+    ),
+    (
+        "Click for the view from this corner",
+        "Clic para la vista desde esta esquina",
     ),
     ("span {}", "sección {}"),
     (

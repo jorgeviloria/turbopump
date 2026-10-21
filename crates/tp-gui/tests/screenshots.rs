@@ -407,3 +407,22 @@ fn spiral_development() {
     harness.run();
     save(&mut harness, "spiral-development-front");
 }
+
+/// The view cube with the pointer on its nearest corner and on its top face.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn view_cube() {
+    for (theme, suffix) in [(egui::Theme::Light, "light"), (egui::Theme::Dark, "dark")] {
+        let mut harness = harness(theme);
+        harness.state_mut().focus_view(View::View3d);
+        harness.run();
+        for (pos, name) in [
+            (egui::pos2(954.0, 238.0), "corner"),
+            (egui::pos2(954.0, 216.0), "face"),
+        ] {
+            harness.hover_at(pos);
+            harness.run();
+            save(&mut harness, &format!("cube-{name}-{suffix}"));
+        }
+    }
+}
