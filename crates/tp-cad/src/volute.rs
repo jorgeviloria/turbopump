@@ -1,6 +1,6 @@
 //! CAD solid of the volute flow domain: the vaneless ring after the impeller, the
-//! spiral channel and the discharge diffuser. A double volute lofts its two channels
-//! and the diffuser apart and joins them.
+//! spiral channel and the discharge diffuser. A double volute lofts its whole sections
+//! as one spiral and cuts the rib out of it.
 
 use tp_design::volute::VoluteGeometry;
 use tp_math::DVec3;
@@ -55,7 +55,7 @@ fn section_wire(ring: &[DVec3], breaks: &[usize]) -> Result<Shape, CadError> {
 pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
     let breaks = g.ring_breaks();
     let mut channel: Option<Shape> = None;
-    for rings in g.channels() {
+    for rings in g.lofts() {
         let wires = rings
             .iter()
             .map(|ring| section_wire(ring, &breaks))
@@ -86,27 +86,44 @@ pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
     let ring = occ::revolve_z(&occ::planar_face(&occ::wire(&edges)?)?)?;
     let mut fluid = ring.fuse(&channel)?;
     let mut channel = channel;
-    // A rounded cutwater: its nose is carved out of the flow domain across the whole
-    // height of the volute.
+    // The rounded nose of the cutwater and the rib of a double volute are carved out of
+    // the flow domain across the whole height of the volute.
+    let zs = g.rings().into_iter().flatten().map(|p| p.z);
+    let (z_lo, z_hi) = zs.fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), z| {
+        (lo.min(z), hi.max(z))
+    });
+    let margin = 0.1 * (z_hi - z_lo);
+    let at = |p: &DVec3| DVec3::new(p.x * MM, p.y * MM, (z_lo - margin) * MM);
+    let extrude = |edges: &[Shape]| -> Result<Shape, CadError> {
+        occ::prism_z(
+            &occ::planar_face(&occ::wire(edges)?)?,
+            (z_hi - z_lo + 2.0 * margin) * MM,
+        )
+    };
     let nose = g.cutwater.nose_outline();
     if !nose.is_empty() {
-        let rings = g.rings();
-        let zs = rings.iter().flatten().map(|p| p.z);
-        let (z_lo, z_hi) = zs.fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), z| {
-            (lo.min(z), hi.max(z))
-        });
-        let margin = 0.1 * (z_hi - z_lo);
-        let at = |p: DVec3| DVec3::new(p.x * MM, p.y * MM, (z_lo - margin) * MM);
-        let arc: Vec<DVec3> = nose[..nose.len() - 1].iter().map(|p| at(*p)).collect();
-        let tip = at(nose[nose.len() - 1]);
-        let wire = occ::wire(&[
+        let arc: Vec<DVec3> = nose[..nose.len() - 1].iter().map(at).collect();
+        let tip = at(&nose[nose.len() - 1]);
+        let tongue = extrude(&[
             occ::spline_edge(&arc, false)?,
             occ::line_edge(arc[arc.len() - 1], tip)?,
             occ::line_edge(tip, arc[0])?,
         ])?;
-        let tongue = occ::prism_z(&occ::planar_face(&wire)?, (z_hi - z_lo + 2.0 * margin) * MM)?;
         fluid = fluid.cut(&tongue)?;
         channel = channel.cut(&tongue)?;
+    }
+    if let Some(rib) = &g.rib {
+        let spline = |points: &mut dyn Iterator<Item = &DVec3>| {
+            occ::spline_edge(&points.map(at).collect::<Vec<_>>(), false)
+        };
+        let solid = extrude(&[
+            spline(&mut rib.nose.iter())?,
+            spline(&mut rib.inner_face.iter())?,
+            spline(&mut rib.tail.iter())?,
+            spline(&mut rib.outer_face.iter().rev())?,
+        ])?;
+        fluid = fluid.cut(&solid)?;
+        channel = channel.cut(&solid)?;
     }
     Ok(VoluteCad { channel, fluid })
 }
@@ -136,17 +153,19 @@ mod tests {
 
     /// Volume of the channel by Pappus: spiral sections swept about the axis, plus the
     /// straight diffuser. A double volute adds its inner volute and outer channel.
+    fn swept_volume(sections: &[tp_design::volute::VoluteSection]) -> f64 {
+        sections
+            .windows(2)
+            .map(|w| {
+                let a = 0.5 * (w[0].size.area + w[1].size.area);
+                let r = 0.5 * (w[0].size.centroid_radius + w[1].size.centroid_radius);
+                a * r * (w[1].angle - w[0].angle)
+            })
+            .sum()
+    }
+
     fn expected_channel_volume(g: &VoluteGeometry) -> f64 {
-        let swept = |sections: &[tp_design::volute::VoluteSection]| -> f64 {
-            sections
-                .windows(2)
-                .map(|w| {
-                    let a = 0.5 * (w[0].size.area + w[1].size.area);
-                    let r = 0.5 * (w[0].size.centroid_radius + w[1].size.centroid_radius);
-                    a * r * (w[1].angle - w[0].angle)
-                })
-                .sum()
-        };
+        let swept = swept_volume;
         let spiral = swept(&g.sections) + swept(&g.inner_sections) + swept(&g.outer_channel);
         let nozzle: f64 = g
             .nozzle
@@ -183,20 +202,47 @@ mod tests {
 
     #[test]
     fn a_double_volute_is_one_valid_solid() {
-        let mut input = VoluteInput::default();
-        input.setup.kind = tp_design::volute::VoluteKind::Double;
-        let g = VoluteGeometry::build(&basis(), &input).unwrap();
-        let cad = build_volute(&g).unwrap();
-        for s in [&cad.channel, &cad.fluid] {
-            assert!(s.is_valid());
-            assert_eq!(s.solid_count(), 1);
-        }
-        let channel = cad.channel.volume_with_tolerance(1e-3) / MM.powi(3);
+        let double = |edit: &dyn Fn(&mut VoluteInput)| {
+            let mut input = VoluteInput::default();
+            input.setup.kind = tp_design::volute::VoluteKind::Double;
+            edit(&mut input);
+            let g = VoluteGeometry::build(&basis(), &input).unwrap();
+            let cad = build_volute(&g).unwrap();
+            for s in [&cad.channel, &cad.fluid] {
+                assert!(s.is_valid());
+                assert_eq!(s.solid_count(), 1);
+            }
+            (g, cad.channel.volume_with_tolerance(1e-3) / MM.powi(3))
+        };
+        let (g, channel) = double(&|_| {});
         let expected = expected_channel_volume(&g);
         assert!(
-            (channel / expected - 1.0).abs() < 0.05,
+            (channel / expected - 1.0).abs() < 0.03,
             "{channel} vs {expected}"
         );
+        // The rib is cut out of the whole sections: about its band of b·t swept from
+        // the nose to the throat.
+        let rib = g.design.rib.unwrap();
+        let whole = expected - swept_volume(&g.inner_sections) - swept_volume(&g.outer_channel)
+            + swept_volume(&g.envelope);
+        let band = g.design.inlet_width * rib.thickness * g.design.stagnation_radius * rib.wrap;
+        assert!(
+            channel < whole - 0.5 * band,
+            "{channel} vs {whole} − {band}"
+        );
+        // A long elliptic nose, a thick rib, rectangles and a tangent cutwater.
+        let edits: [&dyn Fn(&mut VoluteInput); 4] = [
+            &|v| v.setup.rib_nose_ratio = tp_design::Param::Manual(3.0),
+            &|v| v.setup.rib_thickness = tp_design::Param::Manual(0.008),
+            &|v| v.cross_section.shape = SectionShape::Rectangular,
+            &|v| {
+                v.cutwater.shape = tp_design::volute::CutwaterShape::Tangent;
+                v.setup.rib_wrap = tp_design::Param::Manual(170f64.to_radians());
+            },
+        ];
+        for edit in edits {
+            double(edit);
+        }
     }
 
     #[test]
