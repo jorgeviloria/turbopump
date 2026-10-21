@@ -3,10 +3,12 @@
 use tp_design::MainDimensionsInput;
 use tp_design::diffuser::{DiffuserDesign, DiffuserInput};
 use tp_design::impeller::{self, ImpellerBasis, ImpellerGeometry, ImpellerGeometryInput};
+use tp_design::npsh::CollectorThroat;
 use tp_design::outlet::ImpellerOutlet;
-use tp_design::performance::{self, Collector, PerformanceInput, PumpPerformance};
+use tp_design::performance::{self, Collector, CollectorData, PerformanceInput, PumpPerformance};
 use tp_design::pump::{self, CentrifugalPumpDesign, CentrifugalPumpInput, PumpDuty, Suction};
-use tp_design::volute::{VoluteGeometry, VoluteInput};
+use tp_design::volute::loss::VoluteLossGeometry;
+use tp_design::volute::{VoluteDesign, VoluteGeometry, VoluteInput};
 use tp_fluids::LiquidProperties;
 use tp_units::STANDARD_GRAVITY;
 
@@ -157,7 +159,48 @@ impl Project {
         })
     }
 
-    /// Predicts the characteristic of impeller `id` from its main dimensions.
+    /// What the performance prediction of impeller `id` needs from the collector after
+    /// it: the throat of the volute or of the vaned diffuser, and the volute for its
+    /// losses when it follows the impeller directly or behind a vaneless diffuser.
+    pub fn collector_data_after(&self, id: ComponentId) -> Result<CollectorData, ProjectError> {
+        let index = self.index_of(id)?;
+        let components = self.components();
+        let volute = |at: usize| -> Result<CollectorData, ProjectError> {
+            let id = components[at].id();
+            let design = VoluteDesign::new(&self.volute_basis(id)?, &self.volute_input(id)?)?;
+            Ok(CollectorData {
+                throat: Some(CollectorThroat {
+                    count: 1,
+                    area: design.throat.area,
+                }),
+                volute: Some(VoluteLossGeometry::from_design(&design)),
+            })
+        };
+        let kind = |at: usize| components.get(at).map(|c| c.kind());
+        Ok(match kind(index + 1) {
+            Some(ComponentKind::Volute) => volute(index + 1)?,
+            Some(ComponentKind::Stator { vaned: true }) => {
+                let diffuser = self.compute_diffuser(components[index + 1].id())?;
+                CollectorData {
+                    throat: diffuser.vanes.as_ref().map(|v| CollectorThroat {
+                        count: v.count,
+                        area: v.throat * diffuser.inlet_width,
+                    }),
+                    volute: None,
+                }
+            }
+            Some(ComponentKind::Stator { vaned: false })
+                if kind(index + 2) == Some(ComponentKind::Volute) =>
+            {
+                volute(index + 2)?
+            }
+            _ => CollectorData::default(),
+        })
+    }
+
+    /// Predicts the characteristic of impeller `id` from its main dimensions and the
+    /// collector after it. A collector that cannot be computed is left out with a
+    /// warning.
     pub fn compute_performance(
         &self,
         id: ComponentId,
@@ -165,7 +208,17 @@ impl Project {
     ) -> Result<PumpPerformance, ProjectError> {
         let duty = self.pump_duty(id)?;
         let design = self.compute_main_dimensions(id)?;
-        Ok(performance::predict(&duty, &design, input)?)
+        let (collector, problem) = match self.collector_data_after(id) {
+            Ok(c) => (c, None),
+            Err(e) => (CollectorData::default(), Some(e)),
+        };
+        let mut curve = performance::predict(&duty, &design, input, &collector)?;
+        if let Some(e) = problem {
+            curve.warnings.push(format!(
+                "the collector after the impeller is left out of the prediction: {e}"
+            ));
+        }
+        Ok(curve)
     }
 
     /// Computes the main dimensions of impeller `id` and marks the step as done.
@@ -639,7 +692,13 @@ mod tests {
         let volute_curve = p
             .compute_performance(impeller, &p.performance_input(impeller).unwrap())
             .unwrap();
-        assert_relative_eq!(volute_curve.design.head, 32.0, max_relative = 1e-9);
+        // The automatic volute is nearly the matched one of the loss split.
+        assert_relative_eq!(volute_curve.design.head, 32.0, max_relative = 5e-3);
+        let data = p.collector_data_after(impeller).unwrap();
+        assert_eq!(data.throat.unwrap().count, 1);
+        assert!(data.volute.is_some() && volute_curve.volute.is_some());
+        assert!(volute_curve.npsh.collector_flow.is_some());
+
         p.add_component(ComponentKind::Stator { vaned: true }, Some(1))
             .unwrap();
         assert_eq!(
@@ -651,6 +710,57 @@ mod tests {
             .unwrap();
         // Diffuser pumps reach a higher head against a closed valve.
         assert!(diffuser_curve.shutoff_head > volute_curve.shutoff_head);
+        // The vane passages are the throat; the volute behind them is not modelled.
+        let data = p.collector_data_after(impeller).unwrap();
+        let vanes = p.compute_diffuser(p.components()[1].id()).unwrap();
+        assert_eq!(data.throat.unwrap().count, vanes.vanes.unwrap().count);
+        assert!(data.volute.is_none() && diffuser_curve.volute.is_none());
+    }
+
+    /// The stage of the design example of Japikse et al. (Chap. 7.5, Fig. 7.73): 5000 gpm,
+    /// 84.05 ft and 1000 rpm, with a vaneless diffuser and a volute. Its volute is
+    /// matched at the design point (λ·AR = 1.0) with λ = 4.18 and a spiral loss
+    /// coefficient of 0.054.
+    #[test]
+    fn the_volute_of_the_book_example_stage_is_matched_like_ours() {
+        use crate::{DesignPoint, EnergyTransfer, FlowRate, GlobalSetup, MachineType};
+        let gpm = 3.785_411_784e-3 / 60.0;
+        let setup = GlobalSetup::new(
+            MachineType::Pump,
+            DesignPoint {
+                flow: FlowRate::Volume(5000.0 * gpm),
+                energy: EnergyTransfer::Head(84.05 * 0.3048),
+                speed: 1000.0 * std::f64::consts::PI / 30.0,
+            },
+        );
+        let mut p = Project::new("Book example", MachineType::Pump, setup).unwrap();
+        let impeller = p.add_component(ComponentKind::Impeller, None).unwrap();
+        p.add_component(ComponentKind::Stator { vaned: false }, None)
+            .unwrap();
+        p.add_component(ComponentKind::Volute, None).unwrap();
+        let curve = p
+            .compute_performance(impeller, &p.performance_input(impeller).unwrap())
+            .unwrap();
+        let v = curve.volute.unwrap();
+        assert_relative_eq!(v.design.swirl, 4.18, max_relative = 0.05);
+        assert_relative_eq!(v.design.matching, 1.0, epsilon = 0.05);
+        assert_relative_eq!(v.design.loss_coefficient, 0.054, epsilon = 0.003);
+    }
+
+    #[test]
+    fn a_volute_behind_a_vaneless_diffuser_still_counts() {
+        let (mut p, impeller, _) = pump_with_volute();
+        p.add_component(ComponentKind::Stator { vaned: false }, Some(1))
+            .unwrap();
+        let data = p.collector_data_after(impeller).unwrap();
+        let volute = data.volute.unwrap();
+        // The spiral starts beyond the diffuser outlet.
+        let diffuser = p.compute_diffuser(p.components()[1].id()).unwrap();
+        assert!(volute.inlet_radius > diffuser.outlet_diameter / 2.0);
+        let curve = p
+            .compute_performance(impeller, &p.performance_input(impeller).unwrap())
+            .unwrap();
+        assert!(curve.volute.is_some());
     }
 
     #[test]

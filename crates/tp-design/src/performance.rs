@@ -11,14 +11,23 @@
 //!    (Chap. 4.1.2, eq. T3.5.1);
 //! 4. below the onset of recirculation the losses cannot be calculated: the head is
 //!    interpolated toward the shut-off head of eqs. 3.27 and 3.28, and the power is
-//!    extrapolated. These points are marked as estimates.
+//!    extrapolated. These points are marked as estimates;
+//! 5. with a volute after the impeller, its losses against flow come from the model of
+//!    [`crate::volute::loss`]. The statistics of eq. 4.14 describe pumps with well
+//!    sized volutes, so at the design point the hydraulic losses are split between an
+//!    equivalent matched volute (λ₆·AR = 1) and the rest of the stage; the rest keeps
+//!    the statistical shape and the actual volute adds its own losses (our split). A
+//!    mismatched volute then loses head at the design point too;
+//! 6. the required NPSH₃ against flow after Gülich Chap. 6.3.3 ([`crate::npsh`]).
 
 use std::f64::consts::PI;
 
 use serde::{Deserialize, Serialize};
 use tp_units::STANDARD_GRAVITY as G;
 
+use crate::npsh::{CollectorThroat, NpshCurve, NpshSettings};
 use crate::pump::{CentrifugalPumpDesign, PumpDuty};
+use crate::volute::loss::{VoluteLoss, VoluteLossGeometry, volute_loss};
 use crate::{DesignError, Param};
 
 /// What collects the flow after the impeller; it sets the shut-off head.
@@ -47,6 +56,21 @@ pub struct PerformanceInput {
     pub max_flow_ratio: Param<f64>,
     /// Points of the curve from shut-off to the largest flow.
     pub points: usize,
+    /// λ_c of the NPSH₃ (Gülich eq. 6.10); automatic: 1.1 for axial inflow.
+    pub npsh_inlet_coefficient: Param<f64>,
+    /// λ_w at the design point; automatic: Gülich Fig. 6.20.
+    pub npsh_blade_coefficient: Param<f64>,
+    /// Exponent of the steep rise of NPSH₃ (eq. 6.22); automatic: 2.5.
+    pub npsh_exponent: Param<f64>,
+}
+
+/// What the prediction knows about the collector after the impeller, beyond its kind.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct CollectorData {
+    /// Its throat, which sets the knee of the NPSH₃ curve.
+    pub throat: Option<CollectorThroat>,
+    /// A volute after the impeller, directly or behind a vaneless diffuser.
+    pub volute: Option<VoluteLossGeometry>,
 }
 
 impl Default for PerformanceInput {
@@ -58,6 +82,9 @@ impl Default for PerformanceInput {
             shutoff_power: Param::Auto,
             max_flow_ratio: Param::Auto,
             points: 61,
+            npsh_inlet_coefficient: Param::Auto,
+            npsh_blade_coefficient: Param::Auto,
+            npsh_exponent: Param::Auto,
         }
     }
 }
@@ -77,6 +104,21 @@ pub struct PerformancePoint {
     pub hydraulic_efficiency: f64,
     /// In the recirculation range, where the values are an estimate.
     pub estimated: bool,
+    /// Required NPSH₃, m.
+    pub npsh_required: f64,
+    /// Head lost in the volute, m; NaN without a volute.
+    pub volute_loss: f64,
+}
+
+/// The volute after the impeller at the design point.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct VoluteSummary {
+    pub design: VoluteLoss,
+    /// Fraction of the hydraulic losses of the design point lost in the volute.
+    pub share: f64,
+    /// Flow at which the spiral turns from accelerating to decelerating
+    /// (λ₆·AR = 1), where its losses are least, m³/s.
+    pub matched_flow: Option<f64>,
 }
 
 /// The predicted characteristic of one stage.
@@ -97,8 +139,16 @@ pub struct PumpPerformance {
     pub recirculation_flow: f64,
     /// Largest flow computed, m³/s.
     pub max_flow: f64,
-    /// NPSH required at the design point, m.
+    /// NPSH₃ at the design point, m.
     pub npsh_required: f64,
+    /// NPSH available at the inlet, m.
+    pub npsh_available: f64,
+    /// Smallest flow at which NPSH₃ reaches the NPSH available, m³/s.
+    pub cavitation_flow: Option<f64>,
+    /// The NPSH₃ curve and its characteristic flows.
+    pub npsh: NpshCurve,
+    /// Losses of the volute after the impeller, if one follows it.
+    pub volute: Option<VoluteSummary>,
     pub warnings: Vec<String>,
 }
 
@@ -145,6 +195,17 @@ struct Model {
     leakage: f64,
     peak_hydraulic_efficiency: f64,
     secondary_power: f64,
+    impeller_radius: f64,
+    volute: Option<VoluteSplit>,
+}
+
+/// The hydraulic losses split between the volute and the rest of the stage.
+struct VoluteSplit {
+    geometry: VoluteLossGeometry,
+    /// Hydraulic losses of the design point, (1 − η_h)·H_th, m.
+    design_losses: f64,
+    /// The part of them not lost in a matched volute, m.
+    design_rest: f64,
 }
 
 impl Model {
@@ -156,15 +217,32 @@ impl Model {
         self.u2 * cu2 / G
     }
 
+    /// Losses of the volute for pump flow `flow` and Euler head `theoretical`: the
+    /// swirl c₂u reaches the volute inlet as a free vortex.
+    fn volute_loss(&self, flow: f64, theoretical: f64) -> Option<VoluteLoss> {
+        let v = self.volute.as_ref()?;
+        let cu2 = G * theoretical / self.u2;
+        let swirl = cu2 * self.impeller_radius / v.geometry.inlet_radius;
+        Some(volute_loss(&v.geometry, flow, swirl))
+    }
+
     fn point(&self, flow_ratio: f64) -> PerformancePoint {
         let flow = flow_ratio * self.flow;
         let hydraulic = self.peak_hydraulic_efficiency * hydraulic_efficiency_ratio(flow_ratio);
         // Seal leakage follows the square root of the pressure across the seal.
         let mut leakage = self.leakage;
-        let (mut theoretical, mut head) = (0.0, 0.0);
+        let (mut theoretical, mut head, mut volute) = (0.0, 0.0, f64::NAN);
         for _ in 0..4 {
             theoretical = self.theoretical_head(flow + leakage);
-            head = hydraulic * theoretical;
+            head = match (&self.volute, self.volute_loss(flow, theoretical)) {
+                (Some(split), Some(loss)) => {
+                    volute = loss.total();
+                    let rest =
+                        split.design_rest * (1.0 - hydraulic) * theoretical / split.design_losses;
+                    theoretical - volute - rest
+                }
+                _ => hydraulic * theoretical,
+            };
             leakage = self.leakage * (head.max(0.0) / self.head).sqrt();
         }
         let power = self.density * G * theoretical * (flow + leakage) + self.secondary_power;
@@ -174,8 +252,10 @@ impl Model {
             theoretical_head: theoretical,
             power,
             efficiency: self.density * G * head * flow / power,
-            hydraulic_efficiency: hydraulic,
+            hydraulic_efficiency: head / theoretical,
             estimated: false,
+            npsh_required: f64::NAN,
+            volute_loss: volute,
         }
     }
 }
@@ -185,6 +265,7 @@ pub fn predict(
     duty: &PumpDuty,
     design: &CentrifugalPumpDesign,
     input: &PerformanceInput,
+    collector: &CollectorData,
 ) -> Result<PumpPerformance, DesignError> {
     let outlet = &design.outlet;
     let tan_beta2b = outlet.blade_angle.tan();
@@ -194,7 +275,8 @@ pub fn predict(
         ));
     }
     let eta = &design.efficiencies;
-    let model = Model {
+    let mut warnings = Vec::new();
+    let mut model = Model {
         flow: duty.flow,
         head: duty.head,
         density: duty.density,
@@ -210,7 +292,52 @@ pub fn predict(
         secondary_power: (design.stage_power
             - duty.density * G * design.theoretical_head * design.impeller_flow)
             .max(0.0),
+        impeller_radius: design.outlet_diameter / 2.0,
+        volute: None,
     };
+    if let Some(geometry) = collector.volute {
+        let theoretical = model.theoretical_head(design.impeller_flow);
+        let design_losses = (1.0 - eta.hydraulic) * theoretical;
+        model.volute = Some(VoluteSplit {
+            geometry,
+            design_losses,
+            design_rest: design_losses,
+        });
+        // The matched volute: the same one with the throat that makes λ₆·AR = 1 at
+        // the design point (the matching grows with the throat area).
+        let actual = model
+            .volute_loss(duty.flow, theoretical)
+            .expect("the split has a volute");
+        let matched = VoluteLossGeometry {
+            throat_area: geometry.throat_area / actual.matching,
+            ..geometry
+        };
+        let swirl = G * theoretical / model.u2 * model.impeller_radius / geometry.inlet_radius;
+        let reference = volute_loss(&matched, duty.flow, swirl).total();
+        if reference > design_losses {
+            warnings.push(format!(
+                "the volute loses {reference:.2} m at the design point, more than the \
+                 {design_losses:.2} m of all the hydraulic losses: check the volute"
+            ));
+        }
+        if let Some(split) = &mut model.volute {
+            split.design_rest = (design_losses - reference).max(0.0);
+        }
+    }
+    let npsh = NpshCurve::new(
+        design,
+        duty.flow,
+        collector.throat,
+        &NpshSettings {
+            inlet_coefficient: input
+                .npsh_inlet_coefficient
+                .resolve(|| crate::npsh::AXIAL_INLET_COEFFICIENT),
+            blade_coefficient: input.npsh_blade_coefficient.manual_value(),
+            exponent: input
+                .npsh_exponent
+                .resolve(|| crate::npsh::DEFAULT_EXPONENT),
+        },
+    );
 
     let onset = input
         .recirculation_onset
@@ -225,6 +352,33 @@ pub fn predict(
         return Err(DesignError::Infeasible(format!(
             "the largest flow must lie between 1.05 and 3 Q_opt, got {max_ratio:.2}"
         )));
+    }
+    for (name, value, range) in [
+        (
+            "λ_c of the NPSH₃",
+            input.npsh_inlet_coefficient.manual_value(),
+            0.5..=3.0,
+        ),
+        (
+            "λ_w of the NPSH₃",
+            input.npsh_blade_coefficient.manual_value(),
+            0.0..=3.0,
+        ),
+        (
+            "NPSH₃ exponent",
+            input.npsh_exponent.manual_value(),
+            1.0..=6.0,
+        ),
+    ] {
+        if let Some(v) = value
+            && !range.contains(&v)
+        {
+            return Err(DesignError::Infeasible(format!(
+                "the {name} must lie between {} and {}, got {v}",
+                range.start(),
+                range.end()
+            )));
+        }
     }
     let psi0 = input
         .shutoff_coefficient
@@ -283,6 +437,10 @@ pub fn predict(
             efficiency: duty.density * G * head * flow / power,
             hydraulic_efficiency: f64::NAN,
             estimated: true,
+            npsh_required: f64::NAN,
+            volute_loss: model
+                .volute_loss(flow, model.theoretical_head(flow + model.leakage))
+                .map_or(f64::NAN, |l| l.total()),
         }
     };
 
@@ -300,6 +458,13 @@ pub fn predict(
     // The onset itself, so the two parts meet in the plots.
     let index = points.partition_point(|p| p.flow < at_onset.flow);
     points.insert(index, at_onset);
+    let with_npsh = |mut p: PerformancePoint| {
+        p.npsh_required = npsh.at(p.flow);
+        p
+    };
+    for p in &mut points {
+        *p = with_npsh(*p);
+    }
 
     // Highest efficiency, by golden-section search in the computed range.
     let (mut a, mut b) = (onset.max(0.3), end);
@@ -313,11 +478,9 @@ pub fn predict(
             a = c;
         }
     }
-    let best = model.point(0.5 * (a + b));
-    let design_point = model.point(1.0);
+    let best = with_npsh(model.point(0.5 * (a + b)));
+    let design_point = with_npsh(model.point(1.0));
     let shutoff = estimate(0.0);
-
-    let mut warnings = Vec::new();
     let rises = points
         .windows(2)
         .any(|w| w[1].head > w[0].head + 1e-6 * duty.head);
@@ -341,6 +504,52 @@ pub fn predict(
         ));
     }
 
+    let volute = model.volute.as_ref().map(|split| {
+        let design = model
+            .volute_loss(duty.flow, design_point.theoretical_head)
+            .expect("the split has a volute");
+        // The spiral decelerates below the matched flow and accelerates above it.
+        let matching = |ratio: f64| {
+            let p = model.point(ratio);
+            model
+                .volute_loss(p.flow, p.theoretical_head)
+                .map_or(f64::NAN, |l| l.matching)
+        };
+        let matched_flow = (matching(0.2) > 1.0 && matching(end) < 1.0).then(|| {
+            let (mut lo, mut hi) = (0.2, end);
+            for _ in 0..60 {
+                let mid = 0.5 * (lo + hi);
+                if matching(mid) > 1.0 {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
+            }
+            0.5 * (lo + hi) * duty.flow
+        });
+        VoluteSummary {
+            design,
+            share: design.total() / split.design_losses,
+            matched_flow,
+        }
+    });
+    if let Some(q) = volute.and_then(|v| v.matched_flow)
+        && (q / duty.flow - 1.0).abs() > 0.15
+    {
+        warnings.push(format!(
+            "the volute has its least loss at {:.0} % of the design flow",
+            100.0 * q / duty.flow
+        ));
+    }
+    let cavitation_flow = npsh.cavitation_flow(design.npsh_available, end * duty.flow);
+    if let Some(q) = cavitation_flow {
+        warnings.push(format!(
+            "NPSH₃ exceeds the NPSH available of {:.2} m above {:.0} % of the design flow",
+            design.npsh_available,
+            100.0 * q / duty.flow
+        ));
+    }
+
     Ok(PumpPerformance {
         points,
         design: design_point,
@@ -350,7 +559,11 @@ pub fn predict(
         shutoff_coefficient: psi0,
         recirculation_flow: onset * duty.flow,
         max_flow: end * duty.flow,
-        npsh_required: design.npsh_required,
+        npsh_required: npsh.design_npsh,
+        npsh_available: design.npsh_available,
+        cavitation_flow,
+        npsh,
+        volute,
         warnings,
     })
 }
@@ -405,7 +618,7 @@ mod tests {
 
     fn performance(input: &PerformanceInput) -> (CentrifugalPumpDesign, PumpPerformance) {
         let d = design(&duty(), &CentrifugalPumpInput::default()).unwrap();
-        let p = predict(&duty(), &d, input).unwrap();
+        let p = predict(&duty(), &d, input, &CollectorData::default()).unwrap();
         (d, p)
     }
 
@@ -470,7 +683,12 @@ mod tests {
         assert_relative_eq!(first.head, p.shutoff_head, max_relative = 1e-12);
         assert!(p.shutoff_head > 32.0);
         assert!(p.shutoff_power > 0.0 && p.shutoff_power < p.design.power);
-        assert!(p.warnings.is_empty(), "{:?}", p.warnings);
+        // Only the NPSH₃ at the end of the curve passes the 10.1 m available.
+        assert!(
+            p.warnings.iter().all(|w| w.starts_with("NPSH₃ exceeds")),
+            "{:?}",
+            p.warnings
+        );
     }
 
     #[test]
@@ -482,8 +700,14 @@ mod tests {
             shutoff_power: Param::Manual(4000.0),
             max_flow_ratio: Param::Manual(1.3),
             points: 21,
+            npsh_inlet_coefficient: Param::Manual(1.3),
+            npsh_blade_coefficient: Param::Manual(0.2),
+            npsh_exponent: Param::Manual(3.0),
         };
         let (d, p) = performance(&input);
+        assert_relative_eq!(p.npsh.inlet_coefficient, 1.3);
+        assert_relative_eq!(p.npsh.blade_coefficient, 0.2);
+        assert_relative_eq!(p.npsh.exponent, 3.0);
         assert_relative_eq!(
             p.recirculation_flow,
             0.6 * duty().flow,
@@ -511,5 +735,96 @@ mod tests {
         };
         let (_, p) = performance(&input);
         assert!(p.warnings.iter().any(|w| w.contains("unstable")));
+    }
+
+    /// The reference volute, sized by the automatic steps, scaled in throat area.
+    fn volute_collector(d: &CentrifugalPumpDesign, throat_scale: f64) -> CollectorData {
+        use crate::outlet::ImpellerOutlet;
+        use crate::volute::{VoluteDesign, VoluteInput};
+        let outlet = ImpellerOutlet::from_pump(d, &duty(), 0.0, 1.0);
+        let volute = VoluteDesign::new(&outlet, &VoluteInput::default()).unwrap();
+        let mut geometry = VoluteLossGeometry::from_design(&volute);
+        geometry.throat_area *= throat_scale;
+        CollectorData {
+            throat: Some(CollectorThroat {
+                count: 1,
+                area: geometry.throat_area,
+            }),
+            volute: Some(geometry),
+        }
+    }
+
+    fn with_collector(collector: &CollectorData) -> PumpPerformance {
+        let d = design(&duty(), &CentrifugalPumpInput::default()).unwrap();
+        predict(&duty(), &d, &PerformanceInput::default(), collector).unwrap()
+    }
+
+    #[test]
+    fn a_matched_volute_takes_a_share_of_the_losses_at_the_design_head() {
+        let (_, plain) = performance(&PerformanceInput::default());
+        let d = design(&duty(), &CentrifugalPumpInput::default()).unwrap();
+        let p = with_collector(&volute_collector(&d, 1.0));
+        // Sized by angular momentum, the volute is nearly the matched one of the split.
+        assert_relative_eq!(p.design.head, 32.0, max_relative = 5e-3);
+        let v = p.volute.unwrap();
+        assert!((0.1..0.9).contains(&v.share), "{}", v.share);
+        assert_relative_eq!(p.design.volute_loss, v.design.total(), max_relative = 1e-9);
+        // Sized by angular momentum, the spiral is matched near the design flow.
+        let matched = v.matched_flow.unwrap() / duty().flow;
+        assert!((0.85..1.15).contains(&matched), "{matched}");
+        // Away from the design point the curve stays close to the statistical one.
+        for (a, b) in p.points.iter().zip(&plain.points) {
+            assert_relative_eq!(a.head, b.head, max_relative = 0.08);
+        }
+        // Volute losses grow toward overload.
+        let last = p.points.last().unwrap();
+        assert!(last.volute_loss > p.design.volute_loss);
+    }
+
+    #[test]
+    fn a_small_throat_moves_the_best_point_to_lower_flow() {
+        let d = design(&duty(), &CentrifugalPumpInput::default()).unwrap();
+        let matched = with_collector(&volute_collector(&d, 1.0));
+        let small = with_collector(&volute_collector(&d, 0.7));
+        assert!(small.best.flow < matched.best.flow);
+        // It no longer reaches the design head.
+        assert!(small.design.head < matched.design.head - 0.5);
+        assert!(
+            small.volute.unwrap().matched_flow.unwrap()
+                < matched.volute.unwrap().matched_flow.unwrap()
+        );
+        // At overload the narrow throat loses more head.
+        let last = |p: &PumpPerformance| *p.points.last().unwrap();
+        assert!(last(&small).head < last(&matched).head);
+    }
+
+    #[test]
+    fn every_point_carries_its_npsh() {
+        let d = design(&duty(), &CentrifugalPumpInput::default()).unwrap();
+        let p = with_collector(&volute_collector(&d, 1.0));
+        assert_relative_eq!(p.design.npsh_required, p.npsh.design_npsh);
+        assert_relative_eq!(p.npsh_required, p.npsh.design_npsh);
+        assert!(p.points.iter().all(|q| q.npsh_required.is_finite()));
+        assert!(p.npsh.collector_flow.is_some());
+        // With 10.1 m available the reference pump cavitates past the steep rise, a
+        // little before the end of the curve.
+        let q = p.cavitation_flow.unwrap();
+        assert!(
+            (1.3..1.5).contains(&(q / duty().flow)),
+            "{}",
+            q / duty().flow
+        );
+        assert_relative_eq!(p.npsh.at(q), p.npsh_available, max_relative = 1e-6);
+        assert!(p.warnings.iter().any(|w| w.starts_with("NPSH₃ exceeds")));
+    }
+
+    #[test]
+    fn manual_npsh_settings_are_checked() {
+        let input = PerformanceInput {
+            npsh_exponent: Param::Manual(0.2),
+            ..PerformanceInput::default()
+        };
+        let d = design(&duty(), &CentrifugalPumpInput::default()).unwrap();
+        assert!(predict(&duty(), &d, &input, &CollectorData::default()).is_err());
     }
 }
