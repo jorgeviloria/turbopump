@@ -1,5 +1,6 @@
-//! `turbopump performance`: predicted characteristic (head, power and efficiency
-//! against flow) of the impellers of a pump project.
+//! `turbopump performance`: predicted characteristic (head, power, efficiency and
+//! required NPSH against flow) of the impellers of a pump project, with the losses of
+//! the volute after them.
 
 use std::fmt::Write as _;
 use std::path::PathBuf;
@@ -22,7 +23,9 @@ pub(crate) struct PerformanceArgs {
     component: Option<u32>,
     /// Fix a setting as KEY=VALUE, or KEY=auto. Keys: collector (volute, diffuser or
     /// vaneless), onset (Q/Q_opt where recirculation starts), psi0 (shut-off pressure
-    /// coefficient), p0 (shut-off power), max (largest Q/Q_opt), points.
+    /// coefficient), p0 (shut-off power), max (largest Q/Q_opt), points, npsh_inlet
+    /// (λ_c of the NPSH₃), npsh_blade (λ_w at the design point), npsh_exponent (steep
+    /// rise of NPSH₃).
     #[arg(long = "set", value_name = "KEY=VALUE")]
     settings: Vec<String>,
     /// Write the curve as CSV in SI units to this file (one impeller only).
@@ -103,6 +106,9 @@ fn apply(input: &mut PerformanceInput, units: &DisplayUnits, setting: &str) -> R
         "psi0" => input.shutoff_coefficient = number(QuantityKind::Dimensionless)?,
         "p0" => input.shutoff_power = number(QuantityKind::Power)?,
         "max" => input.max_flow_ratio = number(QuantityKind::Dimensionless)?,
+        "npsh_inlet" => input.npsh_inlet_coefficient = number(QuantityKind::Dimensionless)?,
+        "npsh_blade" => input.npsh_blade_coefficient = number(QuantityKind::Dimensionless)?,
+        "npsh_exponent" => input.npsh_exponent = number(QuantityKind::Dimensionless)?,
         "points" => {
             input.points = value
                 .parse()
@@ -110,7 +116,8 @@ fn apply(input: &mut PerformanceInput, units: &DisplayUnits, setting: &str) -> R
         }
         _ => {
             return Err(format!(
-                "unknown key {key:?}; valid keys: collector, onset, psi0, p0, max, points"
+                "unknown key {key:?}; valid keys: collector, onset, psi0, p0, max, points, \
+                 npsh_inlet, npsh_blade, npsh_exponent"
             ));
         }
     }
@@ -162,18 +169,72 @@ fn print_report(
         s(Power, c.shutoff_power)
     );
     println!(
-        "Range      recirculation below {} ({:.0} %)   largest flow {} ({:.0} %)   NPSH3 at design {}",
+        "Range      recirculation below {} ({:.0} %)   largest flow {} ({:.0} %)",
         s(VolumeFlow, c.recirculation_flow),
         100.0 * c.recirculation_flow / q_opt,
         s(VolumeFlow, c.max_flow),
         100.0 * c.max_flow / q_opt,
-        s(Head, c.npsh_required)
     );
-    println!();
+    let n = &c.npsh;
+    let ratio = |q: f64| format!("{:.0} %", 100.0 * q / q_opt);
     println!(
-        "  {:>6} {:>14} {:>12} {:>12} {:>7} {:>7}",
-        "Q/Qopt", "Q", "H", "P", "η", "η_h"
+        "NPSH3      {} at design (Gülich eq. 6.10, λc {:.2}, λw {:.3}{})   available {}",
+        s(Head, c.npsh_required),
+        n.inlet_coefficient,
+        n.blade_coefficient,
+        if n.extrapolated {
+            ", extrapolated from Fig. 6.20"
+        } else {
+            ""
+        },
+        s(Head, c.npsh_available)
     );
+    println!(
+        "           steep rise above {} ({}): shockless entry {}, w1 = w1q at {}, collector {}; exponent {:.1}",
+        s(VolumeFlow, n.knee_flow),
+        ratio(n.knee_flow),
+        ratio(n.shockless_flow),
+        n.throat_flow.map_or("—".into(), ratio),
+        n.collector_flow.map_or("—".into(), ratio),
+        n.exponent
+    );
+    if let Some(q) = c.cavitation_flow {
+        println!(
+            "           NPSH3 reaches the NPSH available at {} ({})",
+            s(VolumeFlow, q),
+            ratio(q)
+        );
+    }
+    if let Some(v) = &c.volute {
+        let d = &v.design;
+        println!(
+            "Volute     loses {} at design ({:.0} % of the hydraulic losses): spiral {} (K {:.3}, \
+             Cp {:.3}), cone {}",
+            s(Head, d.total()),
+            100.0 * v.share,
+            s(Head, d.spiral_loss),
+            d.loss_coefficient,
+            d.recovery,
+            s(Head, d.cone_loss)
+        );
+        println!(
+            "           λ {:.2}, AR {:.3}, λ6·AR {:.2} (Japikse eqs. 4.6–4.8); least loss at {}",
+            d.swirl,
+            d.area_ratio,
+            d.matching,
+            v.matched_flow.map_or("—".into(), ratio)
+        );
+    }
+    println!();
+    let volute = c.volute.is_some();
+    print!(
+        "  {:>6} {:>14} {:>12} {:>12} {:>7} {:>7} {:>10}",
+        "Q/Qopt", "Q", "H", "P", "η", "η_h", "NPSH3"
+    );
+    if volute {
+        print!(" {:>10}", "volute");
+    }
+    println!();
     for p in &c.points {
         let mark = if p.estimated { "~" } else { " " };
         let hydraulic = if p.hydraulic_efficiency.is_finite() {
@@ -181,15 +242,20 @@ fn print_report(
         } else {
             "—".into()
         };
-        println!(
-            "{mark} {:>6.3} {:>14} {:>12} {:>12} {:>7.3} {:>7}",
+        print!(
+            "{mark} {:>6.3} {:>14} {:>12} {:>12} {:>7.3} {:>7} {:>10}",
             p.flow / q_opt,
             s(VolumeFlow, p.flow),
             s(Head, p.head),
             s(Power, p.power),
             p.efficiency,
-            hydraulic
+            hydraulic,
+            s(Head, p.npsh_required)
         );
+        if volute {
+            print!(" {:>10}", s(Head, p.volute_loss));
+        }
+        println!();
     }
     println!("  ~ estimate in the recirculation range (Gülich Chap. 4.3)");
     if !c.warnings.is_empty() {
@@ -205,7 +271,8 @@ fn print_report(
 /// The curve as CSV in SI units.
 fn csv(c: &PumpPerformance) -> String {
     let mut out = String::from(
-        "flow_m3_s,head_m,theoretical_head_m,power_w,efficiency,hydraulic_efficiency,estimated\n",
+        "flow_m3_s,head_m,theoretical_head_m,power_w,efficiency,hydraulic_efficiency,estimated,\
+         npsh3_m,volute_loss_m\n",
     );
     for p in &c.points {
         let opt = |v: f64| {
@@ -217,14 +284,16 @@ fn csv(c: &PumpPerformance) -> String {
         };
         let _ = writeln!(
             out,
-            "{},{},{},{},{},{},{}",
+            "{},{},{},{},{},{},{},{},{}",
             p.flow,
             p.head,
             opt(p.theoretical_head),
             p.power,
             p.efficiency,
             opt(p.hydraulic_efficiency),
-            p.estimated
+            p.estimated,
+            opt(p.npsh_required),
+            opt(p.volute_loss)
         );
     }
     out
@@ -242,6 +311,8 @@ mod tests {
         apply(&mut input, &units, "onset=0.5").unwrap();
         apply(&mut input, &units, "p0=3 kW").unwrap();
         apply(&mut input, &units, "points=21").unwrap();
+        apply(&mut input, &units, "npsh_exponent=3").unwrap();
+        assert_eq!(input.npsh_exponent, Param::Manual(3.0));
         assert_eq!(input.collector, Collector::VanedDiffuser);
         assert_eq!(input.recirculation_onset, Param::Manual(0.5));
         assert_eq!(input.shutoff_power, Param::Manual(3000.0));

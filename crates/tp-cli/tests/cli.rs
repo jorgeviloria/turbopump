@@ -465,12 +465,17 @@ fn performance_predicts_the_characteristic() {
     let file_arg = file.to_str().unwrap();
     let out = turbopump(&["performance", file_arg]);
     let text = stdout(&out);
-    assert_eq!(out.status.code(), Some(0), "{text}");
+    // With 10.1 m available, NPSH₃ passes it near the end of the curve: a warning.
+    assert_eq!(out.status.code(), Some(1), "{text}");
+    // The automatic volute is 99 % matched: 0.03 m short of the design head.
     assert!(
-        text.contains("Design     Q 100.0 m³/h   H 32.00 m"),
+        text.contains("Design     Q 100.0 m³/h   H 31.97 m"),
         "{text}"
     );
     assert!(text.contains("Shut-off   H"), "{text}");
+    assert!(text.contains("NPSH3      "), "{text}");
+    assert!(text.contains("Volute     loses"), "{text}");
+    assert!(text.contains("NPSH₃ exceeds the NPSH available"), "{text}");
     // CSV of the curve, with a manual collector and range.
     let csv = dir.join("curve.csv");
     let out = turbopump(&[
@@ -490,6 +495,12 @@ fn performance_predicts_the_characteristic() {
     // Header, 11 points and the onset of recirculation.
     assert_eq!(rows.lines().count(), 13, "{rows}");
     assert!(rows.starts_with("flow_m3_s,head_m"));
+    assert!(
+        rows.lines()
+            .next()
+            .unwrap()
+            .ends_with("npsh3_m,volute_loss_m")
+    );
     let bad = turbopump(&["performance", file_arg, "--set", "onset=7"]);
     assert_eq!(bad.status.code(), Some(2));
     std::fs::remove_dir_all(&dir).unwrap();
