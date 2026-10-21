@@ -4,7 +4,10 @@ use std::path::{Path, PathBuf};
 
 use clap::Args;
 use tp_design::Param;
-use tp_design::volute::{AreaLaw, SectionShape, VoluteGeometry, VoluteInput, VoluteKind};
+use tp_design::volute::{
+    AreaLaw, CutwaterShape, DischargeShape, SectionShape, StraightWall, VoluteGeometry,
+    VoluteInput, VoluteKind,
+};
 use tp_project::{ComponentId, ComponentKind, Project, VOLUTE_STEPS};
 use tp_units::{DisplayUnits, QuantityKind, parse_quantity_or};
 
@@ -24,7 +27,10 @@ pub(crate) struct VoluteArgs {
     /// sections, correction (on or off), length and outlet (discharge diffuser),
     /// incidence (cutwater), wall, type (single or double), rib_wrap (wrap of the inner
     /// volute of a double volute), rib (rib thickness), channel_ratio (outlet over
-    /// inlet area of the outer channel).
+    /// inlet area of the outer channel), discharge (tangential, tangential:inner,
+    /// tangential:centered, tangential:outer, radial or radial:DEGREES from the line
+    /// through the pump axis), bend (bend radius of a radial discharge), cutwater
+    /// (tangent, sharp or rounded), nose (radius of a rounded cutwater).
     #[arg(long = "set", value_name = "KEY=VALUE")]
     settings: Vec<String>,
     /// Write volute.txt (points) and volute.stl (mesh) into this folder.
@@ -121,6 +127,28 @@ fn parse_shape(value: &str) -> Result<SectionShape, String> {
     }
 }
 
+fn parse_discharge(value: &str) -> Result<DischargeShape, String> {
+    let wall = |w| DischargeShape::Tangential { straight_wall: w };
+    match value {
+        "tangential" | "tangential:inner" => Ok(wall(StraightWall::Inner)),
+        "tangential:centered" => Ok(wall(StraightWall::Centered)),
+        "tangential:outer" => Ok(wall(StraightWall::Outer)),
+        "radial" => Ok(DischargeShape::Radial { axis_angle: 0.0 }),
+        _ => value
+            .strip_prefix("radial:")
+            .and_then(|d| d.trim().parse::<f64>().ok())
+            .map(|degrees| DischargeShape::Radial {
+                axis_angle: degrees.to_radians(),
+            })
+            .ok_or_else(|| {
+                format!(
+                    "discharge must be tangential[:inner|centered|outer] or \
+                     radial[:DEGREES], got {value:?}"
+                )
+            }),
+    }
+}
+
 /// Applies one `KEY=VALUE` override to the volute inputs.
 fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result<(), String> {
     let (key, value) = setting
@@ -187,11 +215,35 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
         "rib_wrap" => input.setup.rib_wrap = quantity(Angle)?,
         "rib" => input.setup.rib_thickness = quantity(Length)?,
         "channel_ratio" => input.setup.channel_area_ratio = quantity(Dimensionless)?,
+        "discharge" => input.diffuser.shape = parse_discharge(value)?,
+        "bend" => input.diffuser.bend_radius = quantity(Length)?,
+        "cutwater" => {
+            input.cutwater.shape = match value {
+                "tangent" => CutwaterShape::Tangent,
+                "sharp" => CutwaterShape::Sharp,
+                "rounded" => CutwaterShape::Rounded {
+                    radius: match input.cutwater.shape {
+                        CutwaterShape::Rounded { radius } => radius,
+                        _ => Param::Auto,
+                    },
+                },
+                _ => {
+                    return Err(format!(
+                        "cutwater must be tangent, sharp or rounded, got {value:?}"
+                    ));
+                }
+            }
+        }
+        "nose" => {
+            input.cutwater.shape = CutwaterShape::Rounded {
+                radius: quantity(Length)?,
+            }
+        }
         _ => {
             return Err(format!(
                 "unknown key {key:?}; valid keys: flow-factor, dz, b3, e3, shape, law, \
                  sections, correction, length, outlet, incidence, wall, type, rib_wrap, rib, \
-                 channel_ratio"
+                 channel_ratio, discharge, bend, cutwater, nose"
             ));
         }
     }
@@ -234,6 +286,29 @@ fn print_report(name: &str, id: ComponentId, g: &VoluteGeometry, units: &Display
         s(Angle, d.cutwater_flow_angle),
         s(Angle, d.cutwater_angle)
     );
+    let c = &g.cutwater;
+    match d.cutwater_shape {
+        CutwaterShape::Tangent => {
+            println!("           tangent cutwater: the spiral starts where it clears the diffuser")
+        }
+        shape => println!(
+            "           {} cutwater: tip at {} ({} from the axis), wedge {}{}   nearest to the axis {}",
+            if matches!(shape, CutwaterShape::Sharp) {
+                "sharp"
+            } else {
+                "rounded"
+            },
+            s(Angle, c.angle),
+            s(Length, c.tip.truncate().length()),
+            s(Angle, c.wedge),
+            if c.radius > 0.0 {
+                format!(", nose radius {}", s(Length, c.radius))
+            } else {
+                String::new()
+            },
+            s(Length, c.nose_distance)
+        ),
+    }
     println!("Sections   {shape}; {law}");
     println!(
         "Throat     area {}   height {}   outer radius {}   correction Δa3 {}",
@@ -263,9 +338,27 @@ fn print_report(name: &str, id: ComponentId, g: &VoluteGeometry, units: &Display
         d.throat_aspect
     );
     let dif = &d.diffuser;
+    let discharge = match dif.shape {
+        DischargeShape::Tangential { straight_wall } => format!(
+            "tangential, {} wall straight",
+            match straight_wall {
+                StraightWall::Inner => "inner",
+                StraightWall::Centered => "no",
+                StraightWall::Outer => "outer",
+            }
+        ),
+        DischargeShape::Radial { axis_angle } => format!(
+            "radial, bend R_N {} (Gülich eq. 7.29) turning {}, axis {} from the line through the pump axis",
+            s(Length, dif.bend_radius),
+            s(Angle, g.nozzle_bend),
+            s(Angle, axis_angle)
+        ),
+    };
+    println!("Diffuser   {discharge}");
     println!(
-        "Diffuser   length {}   outlet {}   area ratio {:.2}   c_d {}",
+        "           length {} (centerline {})   outlet {}   area ratio {:.2}   c_d {}",
         s(Length, dif.length),
+        s(Length, g.nozzle_length),
         s(Length, dif.outlet_diameter),
         dif.area_ratio,
         s(Velocity, dif.outlet_velocity)
