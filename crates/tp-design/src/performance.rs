@@ -29,6 +29,7 @@ use tp_units::STANDARD_GRAVITY as G;
 
 use crate::axial_thrust::{AxialForces, AxialThrust, AxialThrustInput};
 use crate::npsh::{CollectorThroat, NpshCurve, NpshSettings};
+use crate::operation::{Operation, OperationInput};
 use crate::pump::{CentrifugalPumpDesign, PumpDuty};
 use crate::radial_thrust::{RadialCollector, RadialThrust, default_shroud_thickness};
 use crate::volute::loss::{VoluteLoss, VoluteLossGeometry, volute_loss};
@@ -71,6 +72,8 @@ pub struct PerformanceInput {
     pub wide_seal_clearances: bool,
     /// Seals and balance holes for the axial force.
     pub axial: AxialThrustInput,
+    /// System curve, speed and trimmed diameter of operation.
+    pub operation: OperationInput,
 }
 
 /// What the prediction knows about the collector after the impeller, beyond its kind.
@@ -98,6 +101,7 @@ impl Default for PerformanceInput {
             npsh_exponent: Param::Auto,
             wide_seal_clearances: false,
             axial: AxialThrustInput::default(),
+            operation: OperationInput::default(),
         }
     }
 }
@@ -196,6 +200,8 @@ pub struct PumpPerformance {
     /// Radial force, when Table 9.4 covers the collector.
     pub radial: Option<RadialSummary>,
     pub axial: AxialSummary,
+    /// The pump in its system.
+    pub operation: Operation,
     pub warnings: Vec<String>,
 }
 
@@ -663,6 +669,17 @@ pub fn predict(
             axial.design.total
         ));
     }
+    let operation = Operation::new(
+        &points,
+        &best,
+        &npsh,
+        design.npsh_available,
+        duty,
+        design,
+        input.collector,
+        &input.operation,
+    )?;
+    warnings.extend(operation.warnings.iter().cloned());
     let cavitation_flow = npsh.cavitation_flow(design.npsh_available, end * duty.flow);
     if let Some(q) = cavitation_flow {
         warnings.push(format!(
@@ -688,6 +705,7 @@ pub fn predict(
         volute,
         radial,
         axial,
+        operation,
         warnings,
     })
 }
@@ -744,6 +762,7 @@ pub const PERFORMANCE_CORRELATIONS: &[crate::pump::correlations::CorrelationInfo
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::operation::OperationInput;
     use crate::pump::{CentrifugalPumpInput, design};
     use approx::assert_relative_eq;
 
@@ -881,6 +900,168 @@ mod tests {
         assert!(a.design.total < 0.5 * single);
     }
 
+    fn operating(edit: &dyn Fn(&mut OperationInput)) -> PumpPerformance {
+        let mut input = PerformanceInput::default();
+        edit(&mut input.operation);
+        performance(&input).1
+    }
+
+    #[test]
+    fn the_default_system_runs_the_pump_at_its_design_point() {
+        let p = operating(&|_| {});
+        let o = &p.operation;
+        let point = o.point.unwrap();
+        assert_relative_eq!(point.flow, duty().flow, max_relative = 0.01);
+        assert_relative_eq!(point.head, o.system.head(point.flow), max_relative = 1e-6);
+        assert_relative_eq!(o.speed_ratio, 1.0);
+        assert_relative_eq!(o.trim_ratio, 1.0);
+        assert_relative_eq!(o.required_speed.unwrap(), 1.0, max_relative = 0.01);
+        // Continuous operation brackets the best point, at 80 % of its efficiency.
+        let (low, high) = o.continuous;
+        assert!(low < o.best.flow && o.best.flow < high);
+        let eff = |q: f64| {
+            o.curve
+                .windows(2)
+                .find(|w| w[0].flow <= q && q <= w[1].flow)
+                .map(|w| {
+                    let t = (q - w[0].flow) / (w[1].flow - w[0].flow);
+                    w[0].efficiency + t * (w[1].efficiency - w[0].efficiency)
+                })
+                .unwrap()
+        };
+        assert_relative_eq!(eff(low), 0.8 * o.best.efficiency, max_relative = 1e-3);
+        assert!(high <= o.curve.last().unwrap().flow);
+    }
+
+    #[test]
+    fn speed_follows_the_similarity_laws() {
+        let full = operating(&|_| {});
+        let slow = operating(&|o| o.speed = Param::Manual(0.8 * duty().speed));
+        let o = &slow.operation;
+        assert_relative_eq!(o.speed_ratio, 0.8, max_relative = 1e-12);
+        assert_relative_eq!(
+            o.best.flow,
+            0.8 * full.operation.best.flow,
+            max_relative = 1e-9
+        );
+        assert_relative_eq!(
+            o.best.head,
+            0.64 * full.operation.best.head,
+            max_relative = 1e-9
+        );
+        assert_relative_eq!(
+            o.best.power,
+            0.512 * full.operation.best.power,
+            max_relative = 1e-9
+        );
+        // A system without static head is a similarity parabola: the operating point
+        // slides along it.
+        let (a, b) = (full.operation.point.unwrap(), o.point.unwrap());
+        assert_relative_eq!(b.flow, 0.8 * a.flow, max_relative = 2e-3);
+        // The speed that brings the full curve through a lower system point.
+        let target = |o: &mut OperationInput| {
+            o.static_head = Param::Manual(10.0);
+            o.system_flow = Param::Manual(0.9 * duty().flow);
+            o.system_head = Param::Manual(26.0);
+        };
+        let ratio = operating(&target).operation.required_speed.unwrap();
+        assert!(ratio < 1.0);
+        let matched = operating(&|o| {
+            target(o);
+            o.speed = Param::Manual(ratio * duty().speed);
+        });
+        let point = matched.operation.point.unwrap();
+        assert_relative_eq!(point.flow, 0.9 * duty().flow, max_relative = 5e-3);
+        assert_relative_eq!(point.head, 26.0, max_relative = 5e-3);
+    }
+
+    #[test]
+    fn trimming_follows_eqs_4_15_to_4_23() {
+        let full = operating(&|_| {});
+        let d2 = full.operation.diameter;
+        let trimmed = operating(&|o| o.trimmed_diameter = Param::Manual(0.9 * d2));
+        let o = &trimmed.operation;
+        // Rays from the origin with m = 2, and Δη = 0.2·(1 − 0.9) for a volute pump.
+        assert_relative_eq!(
+            o.best.flow,
+            0.81 * full.operation.best.flow,
+            max_relative = 1e-9
+        );
+        assert_relative_eq!(
+            o.best.head,
+            0.81 * full.operation.best.head,
+            max_relative = 1e-9
+        );
+        assert_relative_eq!(o.efficiency_drop, 0.02, max_relative = 1e-9);
+        assert_relative_eq!(
+            o.best.efficiency,
+            full.operation.best.efficiency - 0.02,
+            max_relative = 1e-12
+        );
+        // The trim that brings the curve through a lower system point (eq. 4.17).
+        let target = |o: &mut OperationInput| {
+            o.static_head = Param::Manual(10.0);
+            o.system_flow = Param::Manual(0.9 * duty().flow);
+            o.system_head = Param::Manual(26.0);
+        };
+        let ratio = operating(&target).operation.required_trim.unwrap();
+        assert!(ratio > 0.85 && ratio < 1.0, "{ratio}");
+        let matched = operating(&|o| {
+            target(o);
+            o.trimmed_diameter = Param::Manual(ratio * d2);
+        });
+        let point = matched.operation.point.unwrap();
+        assert_relative_eq!(point.flow, 0.9 * duty().flow, max_relative = 5e-3);
+        assert_relative_eq!(point.head, 26.0, max_relative = 5e-3);
+        // Too deep a trim for a volute pump with nq = 36 (eq. 4.23).
+        let deep = operating(&|o| o.trimmed_diameter = Param::Manual(0.75 * d2));
+        assert_relative_eq!(deep.operation.trim_limit, 0.8);
+        assert!(deep.warnings.iter().any(|w| w.contains("eq. 4.23")));
+    }
+
+    #[test]
+    fn operating_limits_and_impossible_systems() {
+        // Far to the left of the best point: a system through the pump curve at 25 %.
+        let q = 0.25 * duty().flow;
+        let curve = operating(&|_| {}).operation.curve;
+        let w = curve
+            .windows(2)
+            .find(|w| w[0].flow <= q && q <= w[1].flow)
+            .unwrap();
+        let h = w[0].head + (q - w[0].flow) / (w[1].flow - w[0].flow) * (w[1].head - w[0].head);
+        let partload = operating(&|o| {
+            o.static_head = Param::Manual(0.9 * h);
+            o.system_flow = Param::Manual(q);
+            o.system_head = Param::Manual(h);
+        });
+        let point = partload.operation.point.unwrap();
+        assert_relative_eq!(point.flow, q, max_relative = 0.02);
+        assert!(
+            partload
+                .warnings
+                .iter()
+                .any(|w| w.contains("continuous operation"))
+        );
+        // A static head above the shut-off head: no crossing.
+        let blocked = operating(&|o| {
+            o.static_head = Param::Manual(60.0);
+            o.system_head = Param::Manual(70.0);
+        });
+        assert!(blocked.operation.point.is_none());
+        assert!(blocked.warnings.iter().any(|w| w.contains("do not cross")));
+        let d = design(&duty(), &CentrifugalPumpInput::default()).unwrap();
+        for edit in [
+            &(|o: &mut OperationInput| o.trimmed_diameter = Param::Manual(1.0))
+                as &dyn Fn(&mut OperationInput),
+            &|o: &mut OperationInput| o.static_head = Param::Manual(40.0),
+            &|o: &mut OperationInput| o.speed = Param::Manual(-1.0),
+        ] {
+            let mut input = PerformanceInput::default();
+            edit(&mut input.operation);
+            assert!(predict(&duty(), &d, &input, &CollectorData::default()).is_err());
+        }
+    }
+
     #[test]
     fn hydraulic_efficiency_peaks_at_nine_tenths() {
         assert_relative_eq!(hydraulic_efficiency_ratio(0.9), 1.0);
@@ -964,6 +1145,7 @@ mod tests {
             npsh_exponent: Param::Manual(3.0),
             wide_seal_clearances: false,
             axial: AxialThrustInput::default(),
+            operation: OperationInput::default(),
         };
         let (d, p) = performance(&input);
         assert_relative_eq!(p.npsh.inlet_coefficient, 1.3);

@@ -8,6 +8,7 @@ pub mod diffuser;
 mod error;
 pub mod impeller;
 pub mod npsh;
+pub mod operation;
 pub mod outlet;
 mod param;
 pub mod performance;
