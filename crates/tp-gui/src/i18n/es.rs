@@ -1059,8 +1059,17 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ),
     ("Length", "Longitud"),
     (
-        "Along the diffuser axis from the throat; automatic: four throat radii",
-        "A lo largo del eje del difusor desde la garganta; automático: cuatro radios de garganta",
+        "Along the centerline from the throat, the bend included; automatic: four throat radii",
+        "A lo largo de la línea media desde la garganta, codo incluido; automático: cuatro radios de garganta",
+    ),
+    ("Volute rotation", "Giro de la voluta"),
+    (
+        "Turns the whole volute about the pump axis: the angle of the cutwater from the x axis; automatic: the discharge points vertically up",
+        "Gira toda la voluta alrededor del eje de la bomba: el ángulo de la lengüeta desde el eje x; automático: la descarga apunta en vertical hacia arriba",
+    ),
+    (
+        "Outlet face from the pump axis",
+        "Brida de salida desde el eje de la bomba",
     ),
     ("Outlet diameter", "Diámetro de salida"),
     (
@@ -1297,8 +1306,8 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Difusor cónico de la garganta a la brida de descarga, recto o con codo, comprobado contra el ángulo de apertura admisible (Gülich ecs. 1.44 y 1.45).",
     ),
     (
-        "Tangential: straight along the flow at the throat. Radial: a bend turning the flow away from the pump axis (Gülich Fig. 7.42)",
-        "Tangencial: recto, en la dirección del flujo en la garganta. Radial: un codo que aleja el flujo del eje de la bomba (Gülich Fig. 7.42)",
+        "Tangential: straight along the flow at the throat. Radial: a bend turning the flow away from the pump axis; at 0° the outlet stands on the pump centerline (Gülich Fig. 7.42)",
+        "Tangencial: recto, en la dirección del flujo en la garganta. Radial: un codo que aleja el flujo del eje de la bomba; con 0° la salida queda sobre la línea del eje (Gülich Fig. 7.42)",
     ),
     ("Axis angle", "Ángulo del eje"),
     (
@@ -1331,7 +1340,10 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "tangential, cutwater wall straight",
         "tangencial, pared de la lengüeta recta",
     ),
-    ("tangential, centred", "tangencial, centrada"),
+    (
+        "tangential, opening to both sides",
+        "tangencial, abierta a ambos lados",
+    ),
     (
         "tangential, outer wall straight",
         "tangencial, pared exterior recta",
@@ -1355,6 +1367,10 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
 
 /// Messages of the design code, most specific first.
 pub(super) static MESSAGES: &[(&str, &str)] = &[
+    (
+        "the bend of the radial discharge ({} mm) is longer than the diffuser ({} mm): the diffuser ends with the bend",
+        "el codo de la descarga radial ({} mm) es más largo que el difusor ({} mm): el difusor acaba con el codo",
+    ),
     (
         "a double volute needs rectangular or trapezoidal sections: its rib runs at one radius across each section",
         "una voluta doble necesita secciones rectangulares o trapezoidales: su nervio va a un mismo radio a lo ancho de cada sección",

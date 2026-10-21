@@ -470,7 +470,8 @@ fn diffuser(
     grid("volute_diffuser").show(ui, |ui| {
         ui.label(tr("Shape")).on_hover_text(tr(
             "Tangential: straight along the flow at the throat. Radial: a bend turning the \
-             flow away from the pump axis (Gülich Fig. 7.42)",
+             flow away from the pump axis; at 0° the outlet stands on the pump centerline \
+             (Gülich Fig. 7.42)",
         ));
         let text = |shape: &DischargeShape| {
             tr(match shape {
@@ -479,7 +480,7 @@ fn diffuser(
                 } => "tangential, cutwater wall straight",
                 DischargeShape::Tangential {
                     straight_wall: StraightWall::Centered,
-                } => "tangential, centred",
+                } => "tangential, opening to both sides",
                 DischargeShape::Tangential {
                     straight_wall: StraightWall::Outer,
                 } => "tangential, outer wall straight",
@@ -492,10 +493,10 @@ fn diffuser(
             .show_ui(ui, |ui| {
                 for option in [
                     DischargeShape::Tangential {
-                        straight_wall: StraightWall::Inner,
+                        straight_wall: StraightWall::Centered,
                     },
                     DischargeShape::Tangential {
-                        straight_wall: StraightWall::Centered,
+                        straight_wall: StraightWall::Inner,
                     },
                     DischargeShape::Tangential {
                         straight_wall: StraightWall::Outer,
@@ -540,7 +541,10 @@ fn diffuser(
         param_f64(
             ui,
             tr("Length"),
-            tr("Along the diffuser axis from the throat; automatic: four throat radii"),
+            tr(
+                "Along the centerline from the throat, the bend included; automatic: four \
+                throat radii",
+            ),
             &mut input.diffuser.length,
             Length,
             dif.map(|d| d.length),
@@ -557,6 +561,19 @@ fn diffuser(
             &units,
             0.005..=10.0,
         );
+        param_f64(
+            ui,
+            tr("Volute rotation"),
+            tr(
+                "Turns the whole volute about the pump axis: the angle of the cutwater from \
+                the x axis; automatic: the discharge points vertically up",
+            ),
+            &mut input.diffuser.rotation,
+            Angle,
+            g.map(|g| g.rotation),
+            &units,
+            (-180f64).to_radians()..=180f64.to_radians(),
+        );
     });
     if let Some(d) = dif {
         section(ui, tr("Results"));
@@ -564,6 +581,13 @@ fn diffuser(
             .num_columns(2)
             .show(ui, |ui| {
                 value_row(ui, tr("Area ratio A_R"), format!("{:.2}", d.area_ratio));
+                if let Some(g) = g {
+                    value_row(
+                        ui,
+                        tr("Outlet face from the pump axis"),
+                        units.show(Length, g.outlet_height),
+                    );
+                }
                 if let Some(g) = g
                     && g.nozzle_bend > 0.0
                 {

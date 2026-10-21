@@ -235,7 +235,7 @@ fn radial_discharge() {
         harness.run();
     }
     harness
-        .get_by_value("tangential, cutwater wall straight")
+        .get_by_value("tangential, opening to both sides")
         .click();
     harness.run();
     harness.get_by_label("radial").click();
