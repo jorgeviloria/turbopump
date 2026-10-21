@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use clap::Args;
 use tp_design::Param;
 use tp_design::performance::{Collector, PerformanceInput, PumpPerformance};
+use tp_design::radial_thrust::RadialCollector;
 use tp_project::{ComponentId, ComponentKind, Project};
 use tp_units::{DisplayUnits, QuantityKind, parse_quantity_or};
 
@@ -25,7 +26,7 @@ pub(crate) struct PerformanceArgs {
     /// vaneless), onset (Q/Q_opt where recirculation starts), psi0 (shut-off pressure
     /// coefficient), p0 (shut-off power), max (largest Q/Q_opt), points, npsh_inlet
     /// (λ_c of the NPSH₃), npsh_blade (λ_w at the design point), npsh_exponent (steep
-    /// rise of NPSH₃).
+    /// rise of NPSH₃), clearances (normal or wide: seal clearances for the radial force).
     #[arg(long = "set", value_name = "KEY=VALUE")]
     settings: Vec<String>,
     /// Write the curve as CSV in SI units to this file (one impeller only).
@@ -109,6 +110,13 @@ fn apply(input: &mut PerformanceInput, units: &DisplayUnits, setting: &str) -> R
         "npsh_inlet" => input.npsh_inlet_coefficient = number(QuantityKind::Dimensionless)?,
         "npsh_blade" => input.npsh_blade_coefficient = number(QuantityKind::Dimensionless)?,
         "npsh_exponent" => input.npsh_exponent = number(QuantityKind::Dimensionless)?,
+        "clearances" => {
+            input.wide_seal_clearances = match value.to_ascii_lowercase().as_str() {
+                "normal" | "auto" => false,
+                "wide" => true,
+                _ => return Err(format!("clearances must be normal or wide, got {value:?}")),
+            }
+        }
         "points" => {
             input.points = value
                 .parse()
@@ -117,7 +125,7 @@ fn apply(input: &mut PerformanceInput, units: &DisplayUnits, setting: &str) -> R
         _ => {
             return Err(format!(
                 "unknown key {key:?}; valid keys: collector, onset, psi0, p0, max, points, \
-                 npsh_inlet, npsh_blade, npsh_exponent"
+                 npsh_inlet, npsh_blade, npsh_exponent, clearances"
             ));
         }
     }
@@ -225,6 +233,26 @@ fn print_report(
             v.matched_flow.map_or("—".into(), ratio)
         );
     }
+    if let Some(r) = &c.radial {
+        let kind = match r.law.collector {
+            RadialCollector::SingleVolute => "single volute".to_owned(),
+            RadialCollector::DoubleVolute { wrap } => {
+                format!("double volute of {:.0}°", wrap.to_degrees())
+            }
+            RadialCollector::VanedDiffuser => "vaned diffuser".to_owned(),
+        };
+        println!(
+            "Radial     {} at design (k_R {:.3}), {} at shut-off (k_R {:.3}); {kind}, Gülich Table 9.4",
+            s(Force, r.design_force),
+            r.law.best_coefficient,
+            s(Force, r.shutoff_force),
+            r.law.shutoff_coefficient
+        );
+        println!(
+            "           for the mechanical design {} (steady plus unsteady, k_R,tot ≥ 0.15)",
+            s(Force, r.design_load)
+        );
+    }
     println!();
     let volute = c.volute.is_some();
     print!(
@@ -272,7 +300,7 @@ fn print_report(
 fn csv(c: &PumpPerformance) -> String {
     let mut out = String::from(
         "flow_m3_s,head_m,theoretical_head_m,power_w,efficiency,hydraulic_efficiency,estimated,\
-         npsh3_m,volute_loss_m\n",
+         npsh3_m,volute_loss_m,radial_force_n\n",
     );
     for p in &c.points {
         let opt = |v: f64| {
@@ -284,7 +312,7 @@ fn csv(c: &PumpPerformance) -> String {
         };
         let _ = writeln!(
             out,
-            "{},{},{},{},{},{},{},{},{}",
+            "{},{},{},{},{},{},{},{},{},{}",
             p.flow,
             p.head,
             opt(p.theoretical_head),
@@ -293,7 +321,8 @@ fn csv(c: &PumpPerformance) -> String {
             opt(p.hydraulic_efficiency),
             p.estimated,
             opt(p.npsh_required),
-            opt(p.volute_loss)
+            opt(p.volute_loss),
+            opt(p.radial_force)
         );
     }
     out
@@ -312,6 +341,9 @@ mod tests {
         apply(&mut input, &units, "p0=3 kW").unwrap();
         apply(&mut input, &units, "points=21").unwrap();
         apply(&mut input, &units, "npsh_exponent=3").unwrap();
+        apply(&mut input, &units, "clearances=wide").unwrap();
+        assert!(input.wide_seal_clearances);
+        assert!(apply(&mut input, &units, "clearances=tight").is_err());
         assert_eq!(input.npsh_exponent, Param::Manual(3.0));
         assert_eq!(input.collector, Collector::VanedDiffuser);
         assert_eq!(input.recirculation_onset, Param::Manual(0.5));

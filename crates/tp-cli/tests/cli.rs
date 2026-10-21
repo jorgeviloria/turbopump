@@ -475,6 +475,7 @@ fn performance_predicts_the_characteristic() {
     assert!(text.contains("Shut-off   H"), "{text}");
     assert!(text.contains("NPSH3      "), "{text}");
     assert!(text.contains("Volute     loses"), "{text}");
+    assert!(text.contains("Radial     "), "{text}");
     assert!(text.contains("NPSH₃ exceeds the NPSH available"), "{text}");
     // CSV of the curve, with a manual collector and range.
     let csv = dir.join("curve.csv");
@@ -499,7 +500,7 @@ fn performance_predicts_the_characteristic() {
         rows.lines()
             .next()
             .unwrap()
-            .ends_with("npsh3_m,volute_loss_m")
+            .ends_with("npsh3_m,volute_loss_m,radial_force_n")
     );
     let bad = turbopump(&["performance", file_arg, "--set", "onset=7"]);
     assert_eq!(bad.status.code(), Some(2));
