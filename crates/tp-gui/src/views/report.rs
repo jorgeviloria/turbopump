@@ -5,6 +5,7 @@ use eframe::egui::{self, Grid, RichText, Ui};
 use tp_design::impeller::BladeLoading;
 use tp_design::impeller::loading::blade_velocities;
 use tp_design::pump::{InletSection, correlations as corr};
+use tp_design::radial_thrust::RadialCollector;
 use tp_design::volute::{AreaLaw, SectionShape};
 use tp_project::{ComponentId, Project};
 use tp_units::{DisplayUnits, QuantityKind};
@@ -465,6 +466,38 @@ pub(crate) fn show(
                                 ui,
                                 tr("NPSH₃ reaches the available"),
                                 format!("{} ({})", s(VolumeFlow, flow), percent(flow)),
+                            );
+                        }
+                        if let Some(r) = &c.radial {
+                            let kind = match r.law.collector {
+                                RadialCollector::SingleVolute => tr("single volute").to_owned(),
+                                RadialCollector::DoubleVolute { wrap } => tf(
+                                    "double volute of {}°",
+                                    &[&format!("{:.0}", wrap.to_degrees())],
+                                ),
+                                RadialCollector::VanedDiffuser => tr("vaned diffuser").to_owned(),
+                            };
+                            value_row(
+                                ui,
+                                tr("Radial force"),
+                                tf(
+                                    "{} at design (k_R {}), {} at shut-off (k_R {}); {}, Gülich Table 9.4",
+                                    &[
+                                        &s(Force, r.design_force),
+                                        &format!("{:.3}", r.law.best_coefficient),
+                                        &s(Force, r.shutoff_force),
+                                        &format!("{:.3}", r.law.shutoff_coefficient),
+                                        &kind,
+                                    ],
+                                ),
+                            );
+                            value_row(
+                                ui,
+                                tr("Radial load for the mechanical design"),
+                                tf(
+                                    "{} (steady plus unsteady, k_R,tot ≥ 0.15)",
+                                    &[&s(Force, r.design_load)],
+                                ),
                             );
                         }
                         if let Some(v) = &c.volute {

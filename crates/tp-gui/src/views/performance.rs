@@ -185,6 +185,19 @@ impl PerformanceView {
                     ],
                 ),
             );
+            if let Some(r) = &curve.radial {
+                line(
+                    ui,
+                    tr("Radial force"),
+                    tf(
+                        "{} at design · {} at shut-off",
+                        &[
+                            &s(QuantityKind::Force, r.design_force),
+                            &s(QuantityKind::Force, r.shutoff_force),
+                        ],
+                    ),
+                );
+            }
             if let Some(v) = &curve.volute {
                 line(
                     ui,

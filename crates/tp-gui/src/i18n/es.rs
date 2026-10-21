@@ -1188,6 +1188,25 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("λ_c of the NPSH₃", "λ_c del NPSH₃"),
     ("λ_w of the NPSH₃", "λ_w del NPSH₃"),
     ("NPSH₃ exponent", "exponente del NPSH₃"),
+    ("Radial force", "Empuje radial"),
+    (
+        "{} at design · {} at shut-off",
+        "{} en el diseño · {} a válvula cerrada",
+    ),
+    ("single volute", "voluta simple"),
+    (
+        "Radial load for the mechanical design",
+        "Carga radial para el diseño mecánico",
+    ),
+    ("double volute of {}°", "voluta doble de {}°"),
+    (
+        "{} at design (k_R {}), {} at shut-off (k_R {}); {}, Gülich Table 9.4",
+        "{} en el diseño (k_R {}), {} a válvula cerrada (k_R {}); {}, Gülich tabla 9.4",
+    ),
+    (
+        "{} (steady plus unsteady, k_R,tot ≥ 0.15)",
+        "{} (estacionario más variable, k_R,tot ≥ 0,15)",
+    ),
 ];
 
 /// Messages of the design code, most specific first.
