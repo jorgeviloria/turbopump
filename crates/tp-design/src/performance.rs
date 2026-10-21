@@ -33,6 +33,7 @@ use crate::npsh::{CollectorThroat, NpshCurve, NpshSettings};
 use crate::operation::{Operation, OperationInput};
 use crate::pump::{CentrifugalPumpDesign, PumpDuty};
 use crate::radial_thrust::{RadialCollector, RadialThrust, default_shroud_thickness};
+use crate::viscous::{VISCOSITY_TOLERANCE, ViscousCorrection, WATER_VISCOSITY, WaterBaseline};
 use crate::volute::loss::{VoluteLoss, VoluteLossGeometry, volute_loss};
 use crate::{DesignError, Param};
 
@@ -77,6 +78,8 @@ pub struct PerformanceInput {
     pub operation: OperationInput,
     /// Seals and gaps of the loss analysis.
     pub losses: LossInput,
+    /// Kinematic viscosity of the liquid, m²/s; automatic: that of the project.
+    pub viscosity: Param<f64>,
 }
 
 /// What the prediction knows about the collector after the impeller, beyond its kind.
@@ -106,6 +109,7 @@ impl Default for PerformanceInput {
             axial: AxialThrustInput::default(),
             operation: OperationInput::default(),
             losses: LossInput::default(),
+            viscosity: Param::Auto,
         }
     }
 }
@@ -206,9 +210,12 @@ pub struct PumpPerformance {
     pub axial: AxialSummary,
     /// The pump in its system.
     pub operation: Operation,
-    /// Leakage, disk friction and mechanical losses of the loss analysis; `None` when
-    /// the statistics of the design stand for them.
+    /// Leakage, disk friction and mechanical losses of the loss analysis for water;
+    /// `None` when the statistics of the design stand for them.
     pub losses: Option<SecondaryLosses>,
+    /// The correction from the water characteristic to the liquid of the project
+    /// (Gülich Chap. 13.1); all factors 1 for cold water.
+    pub viscous: ViscousCorrection,
     /// Overall efficiency of the design statistics (Gülich Table 3.9) and its expected
     /// scatter, for comparison.
     pub statistical_efficiency: f64,
@@ -367,20 +374,23 @@ pub fn predict(
         volute: None,
         losses: None,
     };
+    // The characteristic is predicted for cold water and corrected for the liquid at
+    // the end (Gülich Chap. 13.1).
+    let water = PumpDuty {
+        kinematic_viscosity: WATER_VISCOSITY,
+        ..*duty
+    };
     // The loss analysis replaces the leakage and secondary power of the statistics.
     let axial = AxialThrust::new(duty, design, &input.axial, input.wide_seal_clearances)?;
-    let losses = (!input.losses.statistics)
-        .then(|| {
-            SecondaryLosses::new(
-                duty,
-                design,
-                &axial,
-                &input.losses,
-                input.wide_seal_clearances,
-                design.theoretical_head,
-            )
-        })
-        .transpose()?;
+    let water_losses = SecondaryLosses::new(
+        &water,
+        design,
+        &axial,
+        &input.losses,
+        input.wide_seal_clearances,
+        design.theoretical_head,
+    )?;
+    let losses = (!input.losses.statistics).then_some(water_losses);
     if let Some(l) = &losses {
         model.leakage = l.leakage;
         model.secondary_power = l.secondary_power();
@@ -537,18 +547,93 @@ pub fn predict(
         }
     };
 
+    // Highest efficiency of the water characteristic, by golden-section search in the
+    // computed range.
+    let (mut a, mut b) = (onset.max(0.3), end);
+    let ratio = (5f64.sqrt() - 1.0) / 2.0;
+    for _ in 0..80 {
+        let c = b - ratio * (b - a);
+        let d = a + ratio * (b - a);
+        if model.point(c).efficiency > model.point(d).efficiency {
+            b = d;
+        } else {
+            a = c;
+        }
+    }
+    let best_ratio = 0.5 * (a + b);
+
+    // From water to the liquid of the project: Q, H and η of every point (Gülich Table
+    // 13.1), with the factors of the loss analysis of Table 3.10 at the design point.
+    let water_design = model.point(1.0);
+    let useful = duty.density * G * water_design.head * duty.flow;
+    let baseline = WaterBaseline {
+        nq: design.nq,
+        eyes: design.eyes,
+        omega: duty.speed,
+        impeller_radius: design.outlet_diameter / 2.0,
+        axial_gap: input
+            .losses
+            .axial_gap
+            .resolve(|| crate::losses::AXIAL_GAP_RATIO * design.outlet_diameter / 2.0),
+        hydraulic_efficiency: water_design.hydraulic_efficiency,
+        volumetric_efficiency: water_losses.volumetric_efficiency,
+        disk_share: (water_losses.front_friction + water_losses.rear_friction) / useful,
+        mechanical_share: water_losses.mechanical / useful,
+        inlet_coefficient: input
+            .npsh_inlet_coefficient
+            .resolve(|| crate::npsh::AXIAL_INLET_COEFFICIENT),
+    };
+    let viscosity = input.viscosity.resolve(|| duty.kinematic_viscosity);
+    if viscosity.is_nan() || viscosity <= 0.0 {
+        return Err(DesignError::InvalidInput(
+            "the viscosity must be positive".into(),
+        ));
+    }
+    // Within 5 % of cold water the liquid counts as water.
+    let effective = if (viscosity / WATER_VISCOSITY - 1.0).abs() < VISCOSITY_TOLERANCE {
+        WATER_VISCOSITY
+    } else {
+        viscosity
+    };
+    let viscous = ViscousCorrection::new(effective, &baseline);
+    let best_water_flow = best_ratio * duty.flow;
+    let viscid = |p: PerformancePoint| -> PerformancePoint {
+        let f_q = viscous.flow_factor();
+        let f_h = viscous.head_factor_at(p.flow / best_water_flow);
+        let f_eta = viscous.efficiency_factor;
+        let head = p.head * f_h;
+        PerformancePoint {
+            flow: p.flow * f_q,
+            head,
+            power: p.power * f_q * f_h / f_eta,
+            efficiency: p.efficiency * f_eta,
+            hydraulic_efficiency: if p.theoretical_head.is_finite() {
+                head / p.theoretical_head
+            } else {
+                p.hydraulic_efficiency
+            },
+            ..p
+        }
+    };
+    // NPSH₃ at constant flow (eq. 13.12).
+    let npsh_at = |flow: f64| {
+        let water = npsh.at(flow);
+        water * viscous.npsh_factor(flow / axial.eye_area, water)
+    };
+
     let n = input.points.max(11);
     let mut points: Vec<PerformancePoint> = (0..n)
         .map(|i| end * i as f64 / (n - 1) as f64)
         .map(|r| {
-            if r < onset {
+            viscid(if r < onset {
                 estimate(r)
             } else {
                 model.point(r)
-            }
+            })
         })
         .collect();
     // The onset itself, so the two parts meet in the plots.
+    let at_onset = viscid(at_onset);
     let index = points.partition_point(|p| p.flow < at_onset.flow);
     points.insert(index, at_onset);
     // Radial force: the volute decides it, also behind a vaneless diffuser.
@@ -582,7 +667,7 @@ pub fn predict(
         axial.forces(p.flow, p.head, theoretical)
     };
     let with_npsh = |mut p: PerformancePoint| {
-        p.npsh_required = npsh.at(p.flow);
+        p.npsh_required = npsh_at(p.flow);
         if let Some(law) = &radial {
             p.radial_force = law.force(p.flow / duty.flow, p.head, duty.head);
         }
@@ -593,21 +678,16 @@ pub fn predict(
         *p = with_npsh(*p);
     }
 
-    // Highest efficiency, by golden-section search in the computed range.
-    let (mut a, mut b) = (onset.max(0.3), end);
-    let ratio = (5f64.sqrt() - 1.0) / 2.0;
-    for _ in 0..80 {
-        let c = b - ratio * (b - a);
-        let d = a + ratio * (b - a);
-        if model.point(c).efficiency > model.point(d).efficiency {
-            b = d;
-        } else {
-            a = c;
-        }
+    let best = with_npsh(viscid(model.point(best_ratio)));
+    let design_point = with_npsh(viscid(model.point(1.0)));
+    let shutoff = with_npsh(viscid(estimate(0.0)));
+    if viscous.outside_tests && (viscosity / WATER_VISCOSITY - 1.0).abs() > 0.5 {
+        warnings.push(format!(
+            "the correction for a viscosity of {:.0} mm²/s goes beyond the tests behind it \
+             (Gülich Table 13.1: 7 < nq < 50, up to 4000 mm²/s)",
+            viscosity * 1e6
+        ));
     }
-    let best = with_npsh(model.point(0.5 * (a + b)));
-    let design_point = with_npsh(model.point(1.0));
-    let shutoff = with_npsh(estimate(0.0));
     let rises = points
         .windows(2)
         .any(|w| w[1].head > w[0].head + 1e-6 * duty.head);
@@ -618,10 +698,10 @@ pub fn predict(
                 .into(),
         );
     }
-    if (best.flow / duty.flow - 1.0).abs() > 0.1 {
+    if (best.flow / design_point.flow - 1.0).abs() > 0.1 {
         warnings.push(format!(
             "the predicted best efficiency is at {:.0} % of the design flow",
-            100.0 * best.flow / duty.flow
+            100.0 * best.flow / design_point.flow
         ));
     }
     if end < max_ratio {
@@ -707,7 +787,7 @@ pub fn predict(
     let operation = Operation::new(
         &points,
         &best,
-        &npsh,
+        &npsh_at,
         design.npsh_available,
         duty,
         design,
@@ -715,7 +795,25 @@ pub fn predict(
         &input.operation,
     )?;
     warnings.extend(operation.warnings.iter().cloned());
-    let cavitation_flow = npsh.cavitation_flow(design.npsh_available, end * duty.flow);
+    // Where NPSH₃ of the liquid rises past the NPSH available.
+    let cavitation_flow = points
+        .windows(2)
+        .rposition(|w| {
+            w[0].npsh_required <= design.npsh_available
+                && w[1].npsh_required > design.npsh_available
+        })
+        .map(|i| {
+            let (mut lo, mut hi) = (points[i].flow, points[i + 1].flow);
+            for _ in 0..60 {
+                let mid = 0.5 * (lo + hi);
+                if npsh_at(mid) > design.npsh_available {
+                    hi = mid;
+                } else {
+                    lo = mid;
+                }
+            }
+            0.5 * (lo + hi)
+        });
     if let Some(q) = cavitation_flow {
         warnings.push(format!(
             "NPSH₃ exceeds the NPSH available of {:.2} m above {:.0} % of the design flow",
@@ -731,8 +829,8 @@ pub fn predict(
         shutoff_head,
         shutoff_power: shutoff.power,
         shutoff_coefficient: psi0,
-        recirculation_flow: onset * duty.flow,
-        max_flow: end * duty.flow,
+        recirculation_flow: onset * duty.flow * viscous.flow_factor(),
+        max_flow: end * duty.flow * viscous.flow_factor(),
         npsh_required: npsh.design_npsh,
         npsh_available: design.npsh_available,
         cavitation_flow,
@@ -742,6 +840,7 @@ pub fn predict(
         axial,
         operation,
         losses,
+        viscous,
         statistical_efficiency: design.efficiencies.overall,
         efficiency_tolerance: design.efficiency_tolerance,
         warnings,
@@ -1112,6 +1211,63 @@ mod tests {
     }
 
     #[test]
+    fn a_viscous_liquid_shifts_the_water_curve_by_table_13_1() {
+        let (_, w) = performance(&PerformanceInput::default());
+        assert_relative_eq!(w.viscous.head_factor, 1.0, max_relative = 1e-12);
+        let mut oil = duty();
+        oil.kinematic_viscosity = 300e-6;
+        let d = design(&duty(), &CentrifugalPumpInput::default()).unwrap();
+        let v = predict(
+            &oil,
+            &d,
+            &PerformanceInput::default(),
+            &CollectorData::default(),
+        )
+        .unwrap();
+        let c = v.viscous;
+        assert!(c.head_factor < 0.95 && c.efficiency_factor < c.head_factor);
+        // Q_v = f_Q·Q_w, η_v = f_η·η_w and H_v = f_H(q*)·H_w at every point.
+        assert_relative_eq!(
+            v.design.flow,
+            c.flow_factor() * w.design.flow,
+            max_relative = 1e-9
+        );
+        assert_relative_eq!(
+            v.design.efficiency,
+            c.efficiency_factor * w.design.efficiency,
+            max_relative = 1e-9
+        );
+        let q = w.design.flow / w.best.flow;
+        assert_relative_eq!(
+            v.design.head,
+            c.head_factor_at(q) * w.design.head,
+            max_relative = 1e-6
+        );
+        // Shut-off keeps its head; the power rises.
+        assert_relative_eq!(v.points[0].head, w.points[0].head, max_relative = 1e-9);
+        assert!(v.points[0].power > w.points[0].power);
+        // More NPSH₃ at the same flow.
+        assert!(v.design.npsh_required > w.npsh.at(v.design.flow));
+        // The two methods of Gülich agree within the scatter of the tests.
+        assert!((c.efficiency_factor / c.correlation_efficiency_factor - 1.0).abs() < 0.3);
+        // Too viscous for the tests behind the method.
+        oil.kinematic_viscosity = 6000e-6;
+        let thick = predict(
+            &oil,
+            &d,
+            &PerformanceInput::default(),
+            &CollectorData::default(),
+        )
+        .unwrap();
+        assert!(
+            thick
+                .warnings
+                .iter()
+                .any(|w| w.contains("beyond the tests"))
+        );
+    }
+
+    #[test]
     fn hydraulic_efficiency_peaks_at_nine_tenths() {
         assert_relative_eq!(hydraulic_efficiency_ratio(0.9), 1.0);
         assert!(hydraulic_efficiency_ratio(0.8) < 1.0);
@@ -1205,6 +1361,7 @@ mod tests {
             axial: AxialThrustInput::default(),
             operation: OperationInput::default(),
             losses: LossInput::default(),
+            viscosity: Param::Auto,
         };
         let (d, p) = performance(&input);
         assert_relative_eq!(p.npsh.inlet_coefficient, 1.3);
@@ -1287,6 +1444,7 @@ mod tests {
         .losses
         .unwrap();
         assert!(wide.leakage > 2.0 * l.leakage);
+        // The losses are those of water; an oil goes through the viscous correction.
         let mut oil = duty();
         oil.kinematic_viscosity = 5e-5;
         let p_oil = predict(
@@ -1296,9 +1454,8 @@ mod tests {
             &CollectorData::default(),
         )
         .unwrap();
-        let lo = p_oil.losses.unwrap();
-        assert!(lo.front_friction + lo.rear_friction > l.front_friction + l.rear_friction);
-        assert!(lo.leakage < l.leakage);
+        assert_relative_eq!(p_oil.losses.unwrap().leakage, l.leakage);
+        assert!(p_oil.viscous.efficiency_factor < 1.0);
         // The leakage falls toward shut-off as the head across the seal changes little
         // and grows with it.
         assert!(l.leakage_at(1.2 * p.design.head, p.design.theoretical_head) > l.leakage);

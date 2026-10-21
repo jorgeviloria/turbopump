@@ -20,7 +20,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::npsh::NpshCurve;
 use crate::performance::{Collector, PerformancePoint};
 use crate::pump::{CentrifugalPumpDesign, PumpDuty};
 use crate::{DesignError, Param};
@@ -186,13 +185,13 @@ fn first_rise(curve: &[CurvePoint], f: impl Fn(&CurvePoint) -> f64) -> Option<f6
 
 impl Operation {
     /// The pump of `design` at `duty`, whose predicted points are `points` with best
-    /// point `best` and NPSH₃ curve `npsh`, in the system and at the speed and diameter
-    /// of `input`.
+    /// point `best` and NPSH₃ at each flow `npsh`, in the system and at the speed and
+    /// diameter of `input`.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         points: &[PerformancePoint],
         best: &PerformancePoint,
-        npsh: &NpshCurve,
+        npsh: &dyn Fn(f64) -> f64,
         npsh_available: f64,
         duty: &PumpDuty,
         design: &CentrifugalPumpDesign,
@@ -253,7 +252,7 @@ impl Operation {
                 head,
                 efficiency,
                 power,
-                npsh_required: s * s * npsh.at(flow / s),
+                npsh_required: s * s * npsh(flow / s),
                 estimated: p.estimated,
             }
         };

@@ -17,6 +17,7 @@ pub mod pump;
 pub mod radial_thrust;
 pub mod slip;
 pub mod triangle;
+pub mod viscous;
 pub mod volute;
 
 use serde::{Deserialize, Serialize};
