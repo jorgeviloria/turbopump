@@ -35,7 +35,8 @@ pub(crate) struct PerformanceArgs {
     /// diameter), trim_exponent (m of the trimming law), continuous (η/η_max that bounds
     /// continuous operation), losses (analysis or statistics: how leakage, disk friction
     /// and mechanical losses are found), seal_clearance, seal_length, seal_roughness and
-    /// axial_gap (of the loss analysis).
+    /// axial_gap (of the loss analysis), viscosity (kinematic, e.g. 100 cSt; default the
+    /// liquid of the project).
     #[arg(long = "set", value_name = "KEY=VALUE")]
     settings: Vec<String>,
     /// Write the curve as CSV in SI units to this file (one impeller only).
@@ -161,6 +162,7 @@ fn apply(input: &mut PerformanceInput, units: &DisplayUnits, setting: &str) -> R
         "seal_length" => input.losses.seal_length = number(QuantityKind::Length)?,
         "seal_roughness" => input.losses.seal_roughness = number(QuantityKind::Length)?,
         "axial_gap" => input.losses.axial_gap = number(QuantityKind::Length)?,
+        "viscosity" => input.viscosity = number(QuantityKind::KinematicViscosity)?,
         "points" => {
             input.points = value
                 .parse()
@@ -172,7 +174,7 @@ fn apply(input: &mut PerformanceInput, units: &DisplayUnits, setting: &str) -> R
                  npsh_inlet, npsh_blade, npsh_exponent, clearances, seal, shaft_seal, \
                  balance, rear_seal, k0, static, system_flow, system_head, speed, d2, \
                  trim_exponent, continuous, losses, seal_clearance, seal_length, \
-                 seal_roughness, axial_gap"
+                 seal_roughness, axial_gap, viscosity"
             ));
         }
     }
@@ -217,6 +219,25 @@ fn print_report(
         s(Power, c.best.power),
         c.best.efficiency
     );
+    let v = &c.viscous;
+    if (v.viscosity / tp_design::viscous::WATER_VISCOSITY - 1.0).abs()
+        >= tp_design::viscous::VISCOSITY_TOLERANCE
+    {
+        println!(
+            "Liquid     ν {} (Re {:.3e}): water curve × f_Q = f_H {:.3}, f_η {:.3} by loss analysis (Gülich Table 3.10)",
+            s(KinematicViscosity, v.viscosity),
+            v.reynolds,
+            v.head_factor,
+            v.efficiency_factor
+        );
+        println!(
+            "           correlation of Figs. 13.8–13.9: f_H {:.3}, f_η {:.3} (Re_mod {:.3e}); NPSH3 × {:.3} at design",
+            v.correlation_head_factor,
+            v.correlation_efficiency_factor,
+            v.modified_reynolds,
+            c.design.npsh_required / c.npsh.at(c.design.flow)
+        );
+    }
     match &c.losses {
         Some(l) => {
             println!(
@@ -514,6 +535,8 @@ mod tests {
         apply(&mut input, &units, "d2=160 mm").unwrap();
         apply(&mut input, &units, "speed=1450 rpm").unwrap();
         apply(&mut input, &units, "losses=statistics").unwrap();
+        apply(&mut input, &units, "viscosity=100 cSt").unwrap();
+        assert!(matches!(input.viscosity, Param::Manual(v) if (v - 1e-4).abs() < 1e-12));
         apply(&mut input, &units, "seal_clearance=0.3 mm").unwrap();
         assert!(input.losses.statistics);
         assert_eq!(input.losses.seal_clearance, Param::Manual(0.3e-3));

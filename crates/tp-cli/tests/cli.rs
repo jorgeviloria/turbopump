@@ -499,6 +499,15 @@ fn performance_predicts_the_characteristic() {
         "{text}"
     );
     assert!(text.contains("operating point Q 100.3 m³/h"), "{text}");
+    // An oil shifts the water curve (Gülich Chap. 13.1).
+    let oil = stdout(&turbopump(&[
+        "performance",
+        file_arg,
+        "--set",
+        "viscosity=200 cSt",
+    ]));
+    assert!(oil.contains("Liquid     ν 200.0 mm²/s"), "{oil}");
+    assert!(oil.contains("f_η 0.820 by loss analysis"), "{oil}");
     assert!(text.contains("NPSH3      "), "{text}");
     assert!(text.contains("Volute     loses"), "{text}");
     assert!(text.contains("Radial     "), "{text}");
