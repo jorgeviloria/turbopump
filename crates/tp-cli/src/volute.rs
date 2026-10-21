@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use clap::Args;
 use tp_design::Param;
-use tp_design::volute::{AreaLaw, SectionShape, VoluteGeometry, VoluteInput};
+use tp_design::volute::{AreaLaw, SectionShape, VoluteGeometry, VoluteInput, VoluteKind};
 use tp_project::{ComponentId, ComponentKind, Project, VOLUTE_STEPS};
 use tp_units::{DisplayUnits, QuantityKind, parse_quantity_or};
 
@@ -22,7 +22,9 @@ pub(crate) struct VoluteArgs {
     /// (cutwater diameter), b3 (inlet width), e3 (cutwater thickness), shape
     /// (rectangle, circle or trapezoid:DEGREES), law (auto, momentum or velocity),
     /// sections, correction (on or off), length and outlet (discharge diffuser),
-    /// incidence (cutwater), wall.
+    /// incidence (cutwater), wall, type (single or double), rib_wrap (wrap of the inner
+    /// volute of a double volute), rib (rib thickness), channel_ratio (outlet over
+    /// inlet area of the outer channel).
     #[arg(long = "set", value_name = "KEY=VALUE")]
     settings: Vec<String>,
     /// Write volute.txt (points) and volute.stl (mesh) into this folder.
@@ -175,10 +177,21 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
         "outlet" => input.diffuser.outlet_diameter = quantity(Length)?,
         "incidence" => input.cutwater.incidence = quantity(Angle)?,
         "wall" => input.wall.thickness = quantity(Length)?,
+        "type" => {
+            input.setup.kind = match value {
+                "single" => VoluteKind::Single,
+                "double" => VoluteKind::Double,
+                _ => return Err(format!("type must be single or double, got {value:?}")),
+            }
+        }
+        "rib_wrap" => input.setup.rib_wrap = quantity(Angle)?,
+        "rib" => input.setup.rib_thickness = quantity(Length)?,
+        "channel_ratio" => input.setup.channel_area_ratio = quantity(Dimensionless)?,
         _ => {
             return Err(format!(
                 "unknown key {key:?}; valid keys: flow-factor, dz, b3, e3, shape, law, \
-                 sections, correction, length, outlet, incidence, wall"
+                 sections, correction, length, outlet, incidence, wall, type, rib_wrap, rib, \
+                 channel_ratio"
             ));
         }
     }
@@ -229,6 +242,20 @@ fn print_report(name: &str, id: ComponentId, g: &VoluteGeometry, units: &Display
         s(Length, d.throat.outer_radius),
         s(Length, d.throat_correction)
     );
+    if let Some(rib) = &d.rib {
+        println!(
+            "Double     inner volute wraps {} from the rib nose at {}   rib {}",
+            s(Angle, rib.wrap),
+            s(Angle, rib.start),
+            s(Length, rib.thickness)
+        );
+        println!(
+            "           first throat {} at the rib nose   outer channel {} → {}",
+            s(Area, rib.outer_throat.area),
+            s(Area, rib.channel_inlet_area),
+            s(Area, rib.channel_outlet_area)
+        );
+    }
     println!(
         "           c3q {}   c3q/c2 {:.2} (not much below 0.8, Table 10.2)   B/H {:.2} (2 to 3)",
         s(Velocity, d.throat_velocity),
@@ -250,11 +277,19 @@ fn print_report(name: &str, id: ComponentId, g: &VoluteGeometry, units: &Display
         dif.ideal_pressure_recovery
     );
     println!(
-        "Spiral     {} sections from {} to 360°   wall {}",
+        "Spiral     {} sections from {} to {}   wall {}",
         g.sections.len(),
         s(Angle, g.start_angle),
+        s(Angle, d.rib.map_or(std::f64::consts::TAU, |r| r.start)),
         s(Length, d.wall_thickness)
     );
+    if d.rib.is_some() {
+        println!(
+            "           inner volute {} sections, outer channel {} sections",
+            g.inner_sections.len(),
+            g.outer_channel.len()
+        );
+    }
     if !g.warnings.is_empty() {
         println!();
         println!("Warnings");
