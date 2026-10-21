@@ -29,7 +29,11 @@ pub(crate) struct PerformanceArgs {
     /// rise of NPSH₃), clearances (normal or wide: seal clearances for the radial and
     /// axial forces), seal (annular seal diameter d_sp), shaft_seal (shaft seal
     /// diameter d_D), balance (on or off: balance holes with a rear seal), rear_seal
-    /// (its diameter d_s2), k0 (rotation factor of the liquid in the sidewall gaps).
+    /// (its diameter d_s2), k0 (rotation factor of the liquid in the sidewall gaps),
+    /// static (static head of the system), system_flow and system_head (a point of the
+    /// system curve; default the design point), speed, d2 (trimmed impeller
+    /// diameter), trim_exponent (m of the trimming law), continuous (η/η_max that bounds
+    /// continuous operation).
     #[arg(long = "set", value_name = "KEY=VALUE")]
     settings: Vec<String>,
     /// Write the curve as CSV in SI units to this file (one impeller only).
@@ -131,6 +135,15 @@ fn apply(input: &mut PerformanceInput, units: &DisplayUnits, setting: &str) -> R
                 _ => return Err(format!("balance must be on or off, got {value:?}")),
             }
         }
+        "static" => input.operation.static_head = number(QuantityKind::Head)?,
+        "system_flow" => input.operation.system_flow = number(QuantityKind::VolumeFlow)?,
+        "system_head" => input.operation.system_head = number(QuantityKind::Head)?,
+        "speed" => input.operation.speed = number(QuantityKind::RotationalSpeed)?,
+        "d2" => input.operation.trimmed_diameter = number(QuantityKind::Length)?,
+        "trim_exponent" => input.operation.trim_exponent = number(QuantityKind::Dimensionless)?,
+        "continuous" => {
+            input.operation.continuous_efficiency = number(QuantityKind::Dimensionless)?
+        }
         "points" => {
             input.points = value
                 .parse()
@@ -140,7 +153,8 @@ fn apply(input: &mut PerformanceInput, units: &DisplayUnits, setting: &str) -> R
             return Err(format!(
                 "unknown key {key:?}; valid keys: collector, onset, psi0, p0, max, points, \
                  npsh_inlet, npsh_blade, npsh_exponent, clearances, seal, shaft_seal, \
-                 balance, rear_seal, k0"
+                 balance, rear_seal, k0, static, system_flow, system_head, speed, d2, \
+                 trim_exponent, continuous"
             ));
         }
     }
@@ -268,6 +282,51 @@ fn print_report(
             s(Force, r.design_load)
         );
     }
+    let o = &c.operation;
+    println!(
+        "System     H = {} + R·Q² through {} at {}   (Gülich eqs. 11.1–11.3)",
+        s(Head, o.system.static_head),
+        s(Head, o.system_head),
+        s(VolumeFlow, o.system_flow)
+    );
+    println!(
+        "           speed {} ({:.3} of design)   d2' {} (d2'/d2 {:.3}, Δη {:.3}, limit {:.2}, Gülich eqs. 4.15–4.23)",
+        s(RotationalSpeed, o.speed),
+        o.speed_ratio,
+        s(Length, o.diameter),
+        o.trim_ratio,
+        o.efficiency_drop,
+        o.trim_limit
+    );
+    match &o.point {
+        Some(p) => println!(
+            "           operating point Q {} ({:.0} % of best)   H {}   η {:.3}   P {}   NPSH3 {}",
+            s(VolumeFlow, p.flow),
+            100.0 * p.flow / o.best.flow,
+            s(Head, p.head),
+            p.efficiency,
+            s(Power, p.power),
+            s(Head, p.npsh_required)
+        ),
+        None => println!("           no operating point: the curves do not cross"),
+    }
+    println!(
+        "           continuous operation {} to {} (η ≥ 0.8·η_max, Gülich Chap. 11.6)",
+        s(VolumeFlow, o.continuous.0),
+        s(VolumeFlow, o.continuous.1)
+    );
+    let design_speed = o.speed / o.speed_ratio;
+    let full_diameter = o.diameter / o.trim_ratio;
+    println!(
+        "           through the system point: d2' {}   or {} at full diameter",
+        o.required_trim
+            .map_or("— (needs a larger impeller)".into(), |t| format!(
+                "{} ({t:.3})",
+                s(Length, t * full_diameter)
+            )),
+        o.required_speed
+            .map_or("—".into(), |r| s(RotationalSpeed, r * design_speed))
+    );
     let a = &c.axial;
     let f = &a.design;
     let toward = |force: f64| {
@@ -405,6 +464,12 @@ mod tests {
         apply(&mut input, &units, "balance=on").unwrap();
         apply(&mut input, &units, "seal=90 mm").unwrap();
         apply(&mut input, &units, "k0=0.45").unwrap();
+        apply(&mut input, &units, "static=10 m").unwrap();
+        apply(&mut input, &units, "d2=160 mm").unwrap();
+        apply(&mut input, &units, "speed=1450 rpm").unwrap();
+        assert_eq!(input.operation.static_head, Param::Manual(10.0));
+        assert_eq!(input.operation.trimmed_diameter, Param::Manual(0.16));
+        assert!(matches!(input.operation.speed, Param::Manual(w) if (w - 151.84).abs() < 0.01));
         assert!(input.axial.balance_holes);
         assert_eq!(input.axial.seal_diameter, Param::Manual(0.09));
         assert_eq!(input.axial.rotation_factor, Param::Manual(0.45));
@@ -417,7 +482,7 @@ mod tests {
         assert_eq!(input.points, 21);
         apply(&mut input, &units, "onset=auto").unwrap();
         assert!(input.recirculation_onset.is_auto());
-        assert!(apply(&mut input, &units, "speed=3").is_err());
+        assert!(apply(&mut input, &units, "rpm=3").is_err());
         assert!(apply(&mut input, &units, "collector=pipe").is_err());
     }
 }

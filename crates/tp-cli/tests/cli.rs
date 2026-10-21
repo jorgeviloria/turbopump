@@ -493,6 +493,7 @@ fn performance_predicts_the_characteristic() {
         text.contains("Axial      ") && text.contains("at design toward the suction side"),
         "{text}"
     );
+    assert!(text.contains("operating point Q 99.97 m³/h"), "{text}");
     assert!(text.contains("NPSH3      "), "{text}");
     assert!(text.contains("Volute     loses"), "{text}");
     assert!(text.contains("Radial     "), "{text}");
