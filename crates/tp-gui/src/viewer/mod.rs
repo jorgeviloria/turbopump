@@ -41,10 +41,6 @@ pub(crate) enum CameraView {
     Fit,
     /// Oblique, from the inlet side.
     Iso,
-    /// Along the axis, from the inlet.
-    Inlet,
-    /// Across the axis.
-    Side,
 }
 
 /// A camera turn in progress, from one yaw and pitch to another.
@@ -122,8 +118,6 @@ impl Viewer {
                 }
             }
             CameraView::Iso => self.turn_to((-0.9, 0.55)),
-            CameraView::Inlet => self.turn_to((-FRAC_PI_2, FRAC_PI_2)),
-            CameraView::Side => self.turn_to((-FRAC_PI_2, 0.0)),
         }
     }
 

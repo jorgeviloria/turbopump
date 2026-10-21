@@ -795,34 +795,13 @@ fn view_tab(ui: &mut Ui, cx: &mut RibbonCx<'_>) -> Option<Command> {
             }
         }
     });
+    // The standard views are on the view cube; fitting is here.
     group(ui, tr("Camera"), |ui| {
-        for (glyph, label, view, tip) in [
-            (
-                icon::CORNERS_OUT,
-                "Fit",
-                CameraView::Fit,
-                "Fit the model in the view",
-            ),
-            (
-                icon::CUBE,
-                "Iso",
-                CameraView::Iso,
-                "Oblique view from the inlet side",
-            ),
-            (
-                icon::ARROW_LINE_DOWN,
-                "Inlet",
-                CameraView::Inlet,
-                "Along the axis, from the inlet",
-            ),
-            (icon::COLUMNS, "Side", CameraView::Side, "Across the axis"),
-        ] {
-            if big_button(ui, Icon::Glyph(glyph), tr(label), true, false, None)
-                .on_hover_text(tr(tip))
-                .clicked()
-            {
-                set(Command::Camera(view));
-            }
+        if big_button(ui, Icon::Glyph(icon::CORNERS_OUT), tr("Fit"), true, false, None)
+            .on_hover_text(tr("Fit the model in the view"))
+            .clicked()
+        {
+            set(Command::Camera(CameraView::Fit));
         }
     });
     group(ui, tr("Display"), |ui| {
