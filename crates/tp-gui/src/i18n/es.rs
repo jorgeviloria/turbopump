@@ -645,10 +645,6 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("SVG drawing", "Dibujo SVG"),
     ("DXF drawing", "Dibujo DXF"),
     ("DWG drawing", "Dibujo DWG"),
-    (
-        "DWG export needs the free ODA File Converter ({}). Install it, or set {} to its executable.",
-        "Para exportar a DWG hace falta el ODA File Converter, que es gratuito ({}). Instálalo, o indica su ejecutable en {}.",
-    ),
     ("impeller", "rodete"),
     ("Volute points (TXT)…", "Puntos de la voluta (TXT)…"),
     (

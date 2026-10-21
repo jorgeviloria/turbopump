@@ -29,20 +29,17 @@ pub(crate) struct GeometryArgs {
     #[arg(long = "set", value_name = "KEY=VALUE")]
     settings: Vec<String>,
     /// Write impeller.txt (points), impeller.stl (mesh), and the meridional and front
-    /// drawings as SVG and DXF into this folder.
+    /// drawings as SVG, DXF and DWG into this folder.
     #[arg(long, value_name = "DIR")]
     export: Option<PathBuf>,
-    /// Also write the drawings as DWG (2000, 2004, 2007, 2010, 2013 or 2018; default
-    /// 2018), with the free ODA File Converter, found where it installs or through
-    /// TURBOPUMP_ODAFC.
+    /// DWG format of the exported drawings: 2000, 2004, 2007, 2010, 2013 or 2018.
     #[arg(
         long,
         value_name = "VERSION",
-        num_args = 0..=1,
-        default_missing_value = "2018",
+        default_value = "2018",
         requires = "export"
     )]
-    dwg: Option<DwgVersion>,
+    dwg_version: DwgVersion,
     /// Compute and print without saving the project.
     #[arg(long)]
     dry_run: bool,
@@ -66,15 +63,6 @@ pub(crate) fn run(args: GeometryArgs) -> CliResult {
         });
     }
 
-    // Look for the converter before computing anything, so a missing one fails fast.
-    let to_dwg = match args.dwg {
-        Some(version) => {
-            let converter = dwg::find_converter().ok_or(dwg::DwgError::NotInstalled);
-            Some((version, converter.map_err(|e| e.to_string())?))
-        }
-        None => None,
-    };
-
     let mut warned = false;
     for (id, name) in &impellers {
         let mut input = project.impeller_geometry_input(*id).map_err(err)?;
@@ -94,7 +82,7 @@ pub(crate) fn run(args: GeometryArgs) -> CliResult {
             } else {
                 dir.clone()
             };
-            export(&dir, &geometry, to_dwg.as_ref())?;
+            export(&dir, &geometry, args.dwg_version)?;
         }
     }
 
@@ -109,44 +97,28 @@ pub(crate) fn run(args: GeometryArgs) -> CliResult {
     })
 }
 
-fn export(
-    dir: &Path,
-    g: &ImpellerGeometry,
-    to_dwg: Option<&(DwgVersion, PathBuf)>,
-) -> Result<(), String> {
+fn export(dir: &Path, g: &ImpellerGeometry, dwg_version: DwgVersion) -> Result<(), String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    let meridional = tp_io::drawing::meridional(g);
-    let front = tp_io::drawing::front_view(g);
-    let drawings = [
-        ("meridional", tp_io::dxf::write(&meridional)),
-        ("front", tp_io::dxf::write(&front)),
-    ];
-    let mut files = vec![
-        ("impeller.txt".to_owned(), tp_io::points::geometry_txt(g)),
+    let mut files: Vec<(String, Vec<u8>)> = vec![
+        ("impeller.txt".into(), tp_io::points::geometry_txt(g).into()),
         (
-            "impeller.stl".to_owned(),
-            tp_io::stl::ascii("impeller", &tp_io::mesh::impeller_triangles(g)),
+            "impeller.stl".into(),
+            tp_io::stl::ascii("impeller", &tp_io::mesh::impeller_triangles(g)).into(),
         ),
-        ("meridional.svg".to_owned(), tp_io::svg::write(&meridional)),
-        ("front.svg".to_owned(), tp_io::svg::write(&front)),
     ];
-    files.extend(
-        drawings
-            .iter()
-            .map(|(name, dxf)| (format!("{name}.dxf"), dxf.clone())),
-    );
+    for (name, drawing) in [
+        ("meridional", tp_io::drawing::meridional(g)),
+        ("front", tp_io::drawing::front_view(g)),
+    ] {
+        files.push((format!("{name}.svg"), tp_io::svg::write(&drawing).into()));
+        files.push((format!("{name}.dxf"), tp_io::dxf::write(&drawing).into()));
+        let dwg = dwg::write(&drawing, dwg_version).map_err(|e| format!("{name}.dwg: {e}"))?;
+        files.push((format!("{name}.dwg"), dwg));
+    }
     for (name, content) in files {
         let path = dir.join(name);
         std::fs::write(&path, content).map_err(|e| format!("{}: {e}", path.display()))?;
         println!("Wrote {}", path.display());
-    }
-    if let Some((version, converter)) = to_dwg {
-        for (name, dxf) in &drawings {
-            let path = dir.join(format!("{name}.dwg"));
-            dwg::write(converter, dxf, &path, *version)
-                .map_err(|e| format!("{}: {e}", path.display()))?;
-            println!("Wrote {} (DWG {version})", path.display());
-        }
     }
     Ok(())
 }

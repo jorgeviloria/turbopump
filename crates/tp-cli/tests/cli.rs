@@ -271,70 +271,49 @@ fn geometry_exports_points_mesh_and_drawings() {
         );
     }
     assert!(read("meridional.dxf").contains("SPLINE"));
-    assert!(!export.join("meridional.dwg").exists());
+    // DWG 2018 by default; its file code opens the file.
+    for name in ["meridional.dwg", "front.dwg"] {
+        let dwg = std::fs::read(export.join(name)).unwrap();
+        assert!(dwg.starts_with(b"AC1032") && dwg.len() > 10_000, "{name}");
+    }
 
     let info = stdout(&turbopump(&["info", file_arg]));
     assert!(info.contains("next: CFD setup"), "{info}");
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-/// `turbopump geometry --export --dwg` with `TURBOPUMP_ODAFC` set to `converter`.
-fn geometry_to_dwg(name: &str, converter: &std::path::Path) -> (PathBuf, Output) {
-    let (dir, file) = reference_project(name);
+#[test]
+fn geometry_exports_dwg_in_the_version_asked_for() {
+    let (dir, file) = reference_project("geometry-dwg");
     let file_arg = file.to_str().unwrap();
     assert_eq!(turbopump(&["design", file_arg]).status.code(), Some(0));
     let export = dir.join("out");
-    let out = Command::new(env!("CARGO_BIN_EXE_turbopump"))
-        .args(["geometry", file_arg, "--export", export.to_str().unwrap()])
-        .args(["--dwg", "2013"])
-        .env("TURBOPUMP_COOLPROP", "none")
-        .env("TURBOPUMP_ODAFC", converter)
-        .output()
-        .expect("binary runs");
-    (dir, out)
-}
+    let export_arg = export.to_str().unwrap();
+    let args = [
+        "geometry",
+        file_arg,
+        "--export",
+        export_arg,
+        "--dwg-version",
+        "2013",
+    ];
+    let out = turbopump(&args);
+    assert_eq!(out.status.code(), Some(0), "{}", stdout(&out));
+    let dwg = std::fs::read(export.join("front.dwg")).unwrap();
+    assert!(dwg.starts_with(b"AC1027"));
 
-#[test]
-fn geometry_dwg_without_converter_says_where_to_get_it() {
-    let missing = std::env::temp_dir().join("no-such-oda-file-converter");
-    let (dir, out) = geometry_to_dwg("geometry-no-dwg", &missing);
+    let wrong = [
+        "geometry",
+        file_arg,
+        "--export",
+        export_arg,
+        "--dwg-version",
+        "2019",
+    ];
+    let out = turbopump(&wrong);
     assert_eq!(out.status.code(), Some(2));
-    let error = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        error.contains("ODA File Converter") && error.contains("TURBOPUMP_ODAFC"),
-        "{error}"
-    );
+    assert!(String::from_utf8_lossy(&out.stderr).contains("2000, 2004, 2007, 2010, 2013, 2018"));
     std::fs::remove_dir_all(&dir).unwrap();
-}
-
-#[cfg(unix)]
-#[test]
-fn geometry_dwg_runs_the_converter_on_each_drawing() {
-    use std::os::unix::fs::PermissionsExt;
-    // A stand-in that "converts" by copying the DXF and noting the version asked for.
-    let bin = scratch_dir("fake-odafc");
-    let converter = bin.join("ODAFileConverter");
-    std::fs::write(
-        &converter,
-        "#!/bin/sh\nfor f in \"$1\"/*.dxf; do b=$(basename \"$f\" .dxf); \
-         { echo \"$3\"; cat \"$f\"; } > \"$2/$b.dwg\"; done\n",
-    )
-    .unwrap();
-    std::fs::set_permissions(&converter, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-    let (dir, out) = geometry_to_dwg("geometry-dwg", &converter);
-    let text = stdout(&out);
-    assert_eq!(out.status.code(), Some(0), "{text}");
-    for name in ["meridional", "front"] {
-        let dwg = std::fs::read_to_string(dir.join("out").join(format!("{name}.dwg"))).unwrap();
-        assert!(
-            dwg.starts_with("ACAD2013\n") && dwg.contains("AC1015"),
-            "{name}"
-        );
-        assert!(text.contains(&format!("{name}.dwg (DWG 2013)")), "{text}");
-    }
-    std::fs::remove_dir_all(&dir).unwrap();
-    std::fs::remove_dir_all(&bin).unwrap();
 }
 
 #[test]

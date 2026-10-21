@@ -9,7 +9,7 @@ use tp_design::volute::VoluteGeometry;
 use tp_project::{ComponentId, Project};
 
 use crate::derived::Derived;
-use crate::i18n::{tf, tr};
+use crate::i18n::tr;
 
 /// Whether this build can make CAD solids (the `cad` feature).
 pub(crate) const CAD_AVAILABLE: bool = cfg!(feature = "cad");
@@ -54,7 +54,13 @@ pub(crate) fn save_text(
     project_name: &str,
 ) -> Result<Option<PathBuf>, String> {
     let (suffix, extension, filter) = kind.file();
-    save_file(suffix, extension, filter, || kind.contents(g), project_name)
+    save_file(
+        suffix,
+        extension,
+        filter,
+        || Ok(kind.contents(g).into_bytes()),
+        project_name,
+    )
 }
 
 /// The views of the impeller drawn by `tp-io`.
@@ -69,7 +75,7 @@ pub(crate) enum DrawingView {
 pub(crate) enum DrawingFormat {
     Svg,
     Dxf,
-    /// DXF converted by the ODA File Converter, which the user installs.
+    /// AutoCAD 2018 format.
     Dwg,
 }
 
@@ -118,6 +124,16 @@ impl DrawingExport {
         }
     }
 
+    /// The file's content.
+    pub fn contents(self, g: &ImpellerGeometry) -> Result<Vec<u8>, String> {
+        let drawing = self.drawing(g);
+        Ok(match self.format {
+            DrawingFormat::Svg => tp_io::svg::write(&drawing).into_bytes(),
+            DrawingFormat::Dxf => tp_io::dxf::write(&drawing).into_bytes(),
+            DrawingFormat::Dwg => tp_io::dwg::write(&drawing, tp_io::dwg::DwgVersion::default())?,
+        })
+    }
+
     fn file(self) -> (&'static str, &'static str, &'static str) {
         // (file-name suffix, extension, filter name)
         let suffix = match self.view {
@@ -132,50 +148,14 @@ impl DrawingExport {
     }
 }
 
-/// Asks for a file name and writes the drawing. For DWG, the ODA File Converter must be
-/// installed; it is looked for before asking. `Ok(None)` when the user cancelled.
+/// Asks for a file name and writes the drawing. `Ok(None)` when the user cancelled.
 pub(crate) fn save_drawing(
     kind: DrawingExport,
     g: &ImpellerGeometry,
     project_name: &str,
 ) -> Result<Option<PathBuf>, String> {
     let (suffix, extension, filter) = kind.file();
-    let drawing = kind.drawing(g);
-    match kind.format {
-        DrawingFormat::Svg => save_file(
-            suffix,
-            extension,
-            filter,
-            || tp_io::svg::write(&drawing),
-            project_name,
-        ),
-        DrawingFormat::Dxf => save_file(
-            suffix,
-            extension,
-            filter,
-            || tp_io::dxf::write(&drawing),
-            project_name,
-        ),
-        DrawingFormat::Dwg => {
-            let converter = tp_io::dwg::find_converter().ok_or_else(|| {
-                tf(
-                    "DWG export needs the free ODA File Converter ({}). Install it, or set {} to its executable.",
-                    &[&tp_io::dwg::DOWNLOAD_URL, &tp_io::dwg::CONVERTER_ENV],
-                )
-            })?;
-            let Some(path) = ask_path(suffix, extension, filter, project_name) else {
-                return Ok(None);
-            };
-            tp_io::dwg::write(
-                &converter,
-                &tp_io::dxf::write(&drawing),
-                &path,
-                tp_io::dwg::DwgVersion::default(),
-            )
-            .map_err(|e| format!("{}: {e}", path.display()))?;
-            Ok(Some(path))
-        }
-    }
+    save_file(suffix, extension, filter, || kind.contents(g), project_name)
 }
 
 /// Exports of the volute written by `tp-io`.
@@ -213,28 +193,30 @@ pub(crate) fn save_volute(
         VoluteExport::Points => ("volute", "txt", tr("Text")),
         VoluteExport::Mesh => ("volute", "stl", tr("STL mesh")),
     };
-    save_file(suffix, extension, filter, || kind.contents(g), project_name)
-}
-
-/// The file the user picks to save to, `None` when cancelled.
-fn ask_path(suffix: &str, extension: &str, filter: &str, project_name: &str) -> Option<PathBuf> {
-    rfd::FileDialog::new()
-        .add_filter(filter, &[extension])
-        .set_file_name(format!("{project_name}-{suffix}.{extension}"))
-        .save_file()
+    save_file(
+        suffix,
+        extension,
+        filter,
+        || Ok(kind.contents(g).into_bytes()),
+        project_name,
+    )
 }
 
 fn save_file(
     suffix: &str,
     extension: &str,
     filter: &str,
-    contents: impl FnOnce() -> String,
+    contents: impl FnOnce() -> Result<Vec<u8>, String>,
     project_name: &str,
 ) -> Result<Option<PathBuf>, String> {
-    let Some(path) = ask_path(suffix, extension, filter, project_name) else {
+    let Some(path) = rfd::FileDialog::new()
+        .add_filter(filter, &[extension])
+        .set_file_name(format!("{project_name}-{suffix}.{extension}"))
+        .save_file()
+    else {
         return Ok(None);
     };
-    std::fs::write(&path, contents()).map_err(|e| format!("{}: {e}", path.display()))?;
+    std::fs::write(&path, contents()?).map_err(|e| format!("{}: {e}", path.display()))?;
     Ok(Some(path))
 }
 
@@ -901,6 +883,10 @@ mod tests {
                 "{kind:?}"
             );
             assert!(!kind.drawing(g).entities.is_empty(), "{kind:?}");
+            let bytes = kind.contents(g).expect("written");
+            if kind.format == DrawingFormat::Dwg {
+                assert!(bytes.starts_with(b"AC1032"), "{kind:?}");
+            }
         }
     }
 }

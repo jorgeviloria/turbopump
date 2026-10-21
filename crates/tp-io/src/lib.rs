@@ -1,7 +1,7 @@
 //! Export of Turbopump geometry.
 //!
-//! Every writer returns the file content as a `String`; callers decide where to write it.
-//! The exception is [`dwg`], which runs an external converter on files.
+//! Every writer returns the file content, as a `String` or, for the binary DWG, as bytes;
+//! callers decide where to write it.
 
 pub mod drawing;
 pub mod dwg;

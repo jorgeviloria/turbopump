@@ -1,5 +1,6 @@
 //! Two-dimensional drawings of the impeller, independent of the file format: layers and
-//! entities in model coordinates (metres), written by [`crate::svg`] and [`crate::dxf`].
+//! entities in model coordinates (metres), written by [`crate::svg`], [`crate::dxf`] and
+//! [`crate::dwg`].
 //!
 //! Curves the design defines exactly stay exact: the hub and shroud contours are the
 //! design's own Bézier curves, circles are circles. Curves the design computes point by
@@ -14,8 +15,19 @@ use tp_math::{Bezier, DVec2};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LinePattern {
     Continuous,
-    /// Long dash, gap, dot, gap: axes of symmetry.
+    /// Long dash, gap, short dash, gap: axes of symmetry.
     Center,
+}
+
+impl LinePattern {
+    /// Name of the line type in CAD files, its description and its elements in
+    /// millimetres: dash > 0, gap < 0.
+    pub fn line_type(self) -> (&'static str, &'static str, &'static [f64]) {
+        match self {
+            LinePattern::Continuous => ("CONTINUOUS", "Solid line", &[]),
+            LinePattern::Center => ("CENTER", "Center ____ _ ____ _", &[12.0, -3.0, 2.0, -3.0]),
+        }
+    }
 }
 
 /// A layer: its name in CAD files and how its entities are drawn.
@@ -155,6 +167,31 @@ impl Drawing {
     /// The layers in use, each once, in order of first use.
     pub fn layers(&self) -> Vec<Layer> {
         layers_of(&self.entities)
+    }
+
+    /// The entities and the caption under the view, on the text layer: what a CAD file
+    /// holds, where the caption is not a page footer.
+    pub fn with_caption(&self) -> Vec<Entity> {
+        let mut entities = self.entities.clone();
+        if !self.caption.is_empty() {
+            entities.push(Entity {
+                layer: TEXT,
+                shape: Shape::Text {
+                    at: self.window.0 - DVec2::new(0.0, 2.0 * self.text_height),
+                    height: self.text_height,
+                    value: self.caption.clone(),
+                },
+            });
+        }
+        entities
+    }
+
+    /// Lower-left and upper-right corners of the window with the caption under it.
+    pub fn extents(&self) -> (DVec2, DVec2) {
+        (
+            self.window.0 - DVec2::new(0.0, 3.0 * self.text_height),
+            self.window.1,
+        )
     }
 }
 

@@ -8,6 +8,8 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+# Writes DWG (MPL-2.0, pure Rust).
+acadrust.workspace = true
 # Reads and writes DXF (MIT).
 dxf.workspace = true
 tp-design.workspace = true

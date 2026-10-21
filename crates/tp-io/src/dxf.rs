@@ -13,18 +13,10 @@ use ::dxf::tables::{Layer as DxfLayer, LineType};
 use ::dxf::{Color, LwPolylineVertex, Point};
 use tp_math::DVec2;
 
-use crate::drawing::{Drawing, Entity, LinePattern, Shape, TEXT, layers_of};
+use crate::drawing::{Drawing, Entity, LinePattern, Shape, layers_of};
 
 /// Millimetres per metre: the drawing model is in metres, the DXF in millimetres.
-const MM: f64 = 1000.0;
-
-/// Name and pattern (mm: dash > 0, gap < 0, dot 0) of the line type of `pattern`.
-fn line_type(pattern: LinePattern) -> (&'static str, &'static [f64]) {
-    match pattern {
-        LinePattern::Continuous => ("CONTINUOUS", &[]),
-        LinePattern::Center => ("CENTER", &[12.0, -3.0, 2.0, -3.0]),
-    }
-}
+pub(crate) const MM: f64 = 1000.0;
 
 fn point(p: DVec2) -> Point {
     Point::new(p.x * MM, p.y * MM, 0.0)
@@ -85,23 +77,12 @@ pub fn write(drawing: &Drawing) -> String {
     out.header.default_drawing_units = Units::Millimeters;
     out.header.drawing_units = DrawingUnits::Metric;
 
-    // The caption goes under the view, on the text layer.
-    let mut entities = drawing.entities.clone();
-    if !drawing.caption.is_empty() {
-        entities.push(Entity {
-            layer: TEXT,
-            shape: Shape::Text {
-                at: drawing.window.0 - DVec2::new(0.0, 2.0 * drawing.text_height),
-                height: drawing.text_height,
-                value: drawing.caption.clone(),
-            },
-        });
-    }
+    let entities = drawing.with_caption();
     let layers = layers_of(&entities);
 
     // Extents, limits and the view the file opens with: the window and the caption.
-    let low = point(drawing.window.0 - DVec2::new(0.0, 3.0 * drawing.text_height));
-    let high = point(drawing.window.1);
+    let (low, high) = drawing.extents();
+    let (low, high) = (point(low), point(high));
     out.header.minimum_drawing_extents = low.clone();
     out.header.maximum_drawing_extents = high.clone();
     out.header.minimum_drawing_limits = low.clone();
@@ -115,10 +96,10 @@ pub fn write(drawing: &Drawing) -> String {
 
     // CONTINUOUS is always defined; the others only when a layer uses them.
     if layers.iter().any(|l| l.pattern == LinePattern::Center) {
-        let (name, lengths) = line_type(LinePattern::Center);
+        let (name, description, lengths) = LinePattern::Center.line_type();
         out.add_line_type(LineType {
             name: name.to_owned(),
-            description: "Center ____ _ ____ _".to_owned(),
+            description: description.to_owned(),
             element_count: i32::try_from(lengths.len()).expect("short pattern"),
             total_pattern_length: lengths.iter().map(|l| l.abs()).sum(),
             dash_dot_space_lengths: lengths.to_vec(),
@@ -129,7 +110,7 @@ pub fn write(drawing: &Drawing) -> String {
         out.add_layer(DxfLayer {
             name: layer.name.to_owned(),
             color: Color::from_index(layer.aci),
-            line_type_name: line_type(layer.pattern).0.to_owned(),
+            line_type_name: layer.pattern.line_type().0.to_owned(),
             ..Default::default()
         });
     }
@@ -147,7 +128,7 @@ pub fn write(drawing: &Drawing) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::drawing::{CONTOUR, front_view, meridional};
+    use crate::drawing::{CONTOUR, TEXT, front_view, meridional};
     use crate::mesh::tests::reference;
     use approx::assert_relative_eq;
 
