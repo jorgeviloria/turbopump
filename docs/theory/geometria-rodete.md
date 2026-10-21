@@ -178,7 +178,9 @@ $$\xi_{ef} = \frac{2\pi\,\psi_{opt}}{\eta_h\,z\,L^*\,(w_1^* + w_2^*)}, \qquad \x
 
 ## 7. Salidas
 
-`turbopump geometry proyecto.tpj --export carpeta` escribe:
+`turbopump geometry proyecto.tpj --export carpeta` escribe los archivos de la tabla.
+Con `--dwg` añade `meridional.dwg` y `front.dwg`, convertidos por el ODA File Converter
+(ver el README).
 
 | Archivo | Contenido |
 |---|---|
@@ -186,6 +188,24 @@ $$\xi_{ef} = \frac{2\pi\,\psi_{opt}}{\eta_h\,z\,L^*\,(w_1^* + w_2^*)}, \qquad \x
 | `impeller.stl` | Malla de todos los álabes, cubo y carcasa en mm, para verla en FreeCAD, ParaView u otro visor. No es un sólido cerrado |
 | `meridional.svg` | Contorno, spans, cuasi-ortogonales y bordes |
 | `front.svg` | Vista desde la entrada con las secciones de cubo y carcasa |
+| `meridional.dxf`, `front.dxf` | Los mismos dibujos en DXF (AutoCAD 2000, mm), con una capa por tipo de línea |
+
+Los dos dibujos salen de un modelo de plano común (`tp_io::drawing`). El cubo y la
+carcasa conservan su forma exacta: son las curvas de Bézier del diseño, que en SVG se
+escriben como trazos cúbicos y en DXF como `SPLINE` de grado p con p + 1 polos y los
+nudos 0 y 1 repetidos p + 1 veces (Piegl y Tiller, *The NURBS Book*, 2.ª ed., §2.2).
+Las curvas que el diseño calcula punto a punto (spans, secciones del álabe) son
+polilíneas.
+
+| Capa | Contenido |
+|---|---|
+| `CONTOUR` | Cubo, carcasa y diámetro exterior |
+| `AXIS` | Eje (línea de trazo y punto `CENTER`) |
+| `CONSTRUCTION` | Cuasi-ortogonales y círculos de la boca y el cubo |
+| `STREAMLINES` | Spans |
+| `BLADE-EDGES` | Bordes de ataque y de salida, con sus rótulos |
+| `BLADE-HUB`, `BLADE-SHROUD` | Contorno del álabe en el cubo y en la carcasa (vista frontal) |
+| `TEXT` | Pie del dibujo con las dimensiones principales |
 
 ## 8. Resultados de referencia
 

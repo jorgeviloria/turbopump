@@ -134,8 +134,8 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
   primera vez se toma la del sistema. Los avisos del diseño también se traducen.
 - **Edición:** todo se puede deshacer y rehacer (Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z). Un
   arrastre completo cuenta como un solo paso.
-- **Exportación:** puntos, malla STL, dibujos SVG y sólidos CAD STEP, IGES o STL, que se
-  construyen en segundo plano.
+- **Exportación:** puntos, malla STL, dibujos en SVG, DXF o DWG, y sólidos CAD STEP, IGES
+  o STL, que se construyen en segundo plano.
 
 Las pruebas de la interfaz usan [kittest](https://github.com/rerun-io/kittest) y no
 necesitan GPU. Las capturas con wgpu se generan a mano en `target/screenshots/`:
@@ -174,11 +174,13 @@ cargo run -p tp-cli -- design bomba.tpj --set d2=180 --set z=6
 ```
 
 Construir la geometría del rodete (contorno meridional, flujo meridional, álabes,
-espesores y bordes) y exportar puntos, malla STL y dibujos:
+espesores y bordes) y exportar puntos, malla STL y dibujos en SVG y DXF:
 
 ```bash
 cargo run -p tp-cli -- geometry bomba.tpj --export salida
 ```
+
+Con `--dwg` también se guardan los dibujos en DWG (ver [DWG](#dwg)).
 
 | Vista meridional | Vista frontal |
 |---|---|
@@ -278,6 +280,20 @@ Durante el desarrollo se puede usar la copia que descarga `cargo` para las prueb
 ```bash
 export TURBOPUMP_COOLPROP="$(cargo run -q -p tp-fluids --example coolprop_path)"
 ```
+
+## DWG
+
+Turbopump escribe los dibujos en DXF, el formato de intercambio documentado de AutoCAD,
+y los convierte a DWG con el [ODA File Converter](https://www.opendesign.com/guestfiles/oda_file_converter),
+un programa gratuito de la Open Design Alliance que no viene con Turbopump: hay que
+instalarlo aparte (Windows, macOS o Linux). Turbopump lo busca:
+
+1. en la ruta de la variable `TURBOPUMP_ODAFC`, si está definida;
+2. donde lo dejan sus instaladores, y en el `PATH`.
+
+La versión del DWG se elige con `--dwg 2018` (2000, 2004, 2007, 2010, 2013 o 2018; por
+defecto 2018). En macOS el conversor abre su ventana un momento; en Linux sin pantalla
+necesita una virtual, como la de `xvfb-run`.
 
 ## Licencia
 
