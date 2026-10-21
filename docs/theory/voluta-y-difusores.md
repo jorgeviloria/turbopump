@@ -257,6 +257,37 @@ dentro del disco y que quepan en el círculo. En la bomba de referencia (salida 
 94,1 mm, pared de 6 mm) sale una brida de 190 × 20 mm con 8 taladros de 14 mm en un
 círculo de 148 mm.
 
+**Tensiones en la pared** (estimación orientativa para elegir el espesor; derivación
+propia con la teoría de membrana). Cada sección se trata como un anillo de un toro de
+pared delgada: un círculo de la misma área, de radio $a = \sqrt{A/\pi}$, cuyo centro gira
+a un radio $R$ alrededor de un eje.
+
+- En la espiral, el eje es el de la bomba y $R$ el radio del centroide de la sección. En
+  el codo de una descarga radial, el eje es el del codo y $R = R_N$. El tramo recto de la
+  tobera es un tubo recto ($R \to \infty$).
+- En el punto del anillo a un ángulo $\theta$, a $r = R + a\sin\theta$ del eje, el
+  equilibrio a lo largo del eje de la parte del toro entre la cresta ($\theta = 0$) y ese
+  punto, $\sigma_1\,t\,2\pi r\sin\theta = p\,\pi\,(r^2 - R^2)$, da la tensión en la
+  sección:
+  $$\sigma_1 = \frac{p\,a}{t}\,\frac{2R + a\sin\theta}{2\,(R + a\sin\theta)}$$
+  máxima en el lado interior ($\sin\theta = -1$):
+  $\sigma_1 = \frac{p\,a}{t}\,\frac{2R - a}{2\,(R - a)}$.
+- La ecuación de membrana $\sigma_1/a + \sigma_2\sin\theta/r = p/t$ da la tensión a lo
+  largo del tubo, $\sigma_2 = p\,a/(2t)$, igual en todo el anillo. Con $R \to \infty$
+  ambas son las de un tubo recto.
+- **Presión:** por defecto la subida a válvula cerrada sobre la presión de aspiración,
+  $p = \rho g H_0$ con $H_0 = H\,\psi_0/\psi_{opt}$ (Gülich ecs. 3.28 y 3.26). Si la
+  aspiración está por encima de la atmósfera, hay que sumarla a mano.
+- **Tensión admisible:** por defecto 50 MPa, alrededor de un quinto de la resistencia de
+  una fundición gris de 250 MPa (elección propia). El programa da el espesor con el que
+  $\sigma_1$ llega a la admisible, $t\,\sigma_1/\sigma_{adm}$ (las tensiones de membrana van
+  con $1/t$), y avisa si la pared se queda corta.
+
+En la voluta de referencia, a 3,8 bar, la tensión máxima es de unos 4 MPa en el codo de
+la descarga: con 50 MPa bastaría medio milímetro. La pared la fijan la fundición y la
+rigidez, no la presión. Las paredes planas de las secciones rectangulares y
+trapezoidales además se flexionan, y eso no entra en esta estimación.
+
 ### 7. Voluta doble
 
 Una voluta doble (Gülich, cap. 7.8.1 y Fig. 7.39) parte la espiral con un **nervio**
@@ -612,7 +643,8 @@ Tras el difusor, la voluta recibe mucho menos momento angular: $c_u r$ baja de 1
 - **Carcasa:** su espesor es constante y no hay tapas ni pies; la brida no lleva
   resalte ni medidas de una norma de bridas, y la pared que
   rodea el anillo de entrada termina en un cilindro, sin los extremos cónicos que
-  llevan algunas carcasas. No se calculan las tensiones en la pared.
+  llevan algunas carcasas. Las tensiones son de membrana en un toro equivalente: sin
+  la flexión de las paredes planas ni concentraciones en la lengüeta o la brida.
 - **Flujo:**
   - el difusor sin álabes no tiene rozamiento;
   - en el difusor con álabes el flujo sale sin desviación.
