@@ -418,6 +418,20 @@ impl PerformanceView {
                     )
                 },
             );
+            if let Some(h) = &axial.balance_holes {
+                line(
+                    ui,
+                    tr("Balance holes"),
+                    tf(
+                        "{} × {} inside the rear seal d_s2 {}",
+                        &[
+                            &h.count,
+                            &s(QuantityKind::Length, h.diameter),
+                            &s(QuantityKind::Length, h.seal_diameter),
+                        ],
+                    ),
+                );
+            }
             if let Some(v) = &curve.volute {
                 line(
                     ui,

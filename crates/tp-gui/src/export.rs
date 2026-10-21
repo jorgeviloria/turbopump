@@ -190,7 +190,7 @@ mod cad {
     use std::sync::mpsc::{Receiver, TryRecvError, channel};
 
     use eframe::egui::{self, Grid, Ui};
-    use tp_cad::{CadOptions, Shape};
+    use tp_cad::{BalanceHoleOptions, BalanceHoles, CadOptions, Shape};
     use tp_design::Param;
     use tp_design::diffuser::DiffuserDesign;
     use tp_design::impeller::ImpellerGeometry;
@@ -216,6 +216,10 @@ mod cad {
         casing: Option<(f64, f64)>,
         diffuser_volume: Option<f64>,
         wall_thickness: f64,
+        bore_diameter: f64,
+        boss_diameter: f64,
+        fillet_radius: f64,
+        balance_holes: Option<BalanceHoles>,
         problems: Vec<String>,
     }
 
@@ -226,6 +230,9 @@ mod cad {
         stl: bool,
         wall: Param<f64>,
         bore: Param<f64>,
+        boss: Param<f64>,
+        fillet: Param<f64>,
+        balance_holes: bool,
         /// Material density, kg/m³.
         density: f64,
         job: Option<Receiver<Result<CadReport, String>>>,
@@ -240,6 +247,9 @@ mod cad {
                 stl: false,
                 wall: Param::Auto,
                 bore: Param::Auto,
+                boss: Param::Auto,
+                fillet: Param::Auto,
+                balance_holes: false,
                 density: 7850.0,
                 job: None,
                 last: None,
@@ -310,7 +320,8 @@ mod cad {
                 }
             }
         }
-        let problems = [
+        let mut problems: Vec<String> = cad.warnings.clone();
+        let invalid = [
             ("blade", Some(&cad.blade)),
             ("flow domain", Some(&cad.fluid)),
             ("impeller", Some(&cad.impeller)),
@@ -329,8 +340,8 @@ mod cad {
                 "the {} is not a single valid solid ({} solids)",
                 &[&tr(label), &s.solid_count()],
             )
-        })
-        .collect();
+        });
+        problems.extend(invalid);
         Ok(CadReport {
             folder: folder.to_owned(),
             files,
@@ -340,6 +351,10 @@ mod cad {
             casing: volute.as_ref().map(|(_, c, wall)| (c.volume(), *wall)),
             diffuser_volume: diffuser.as_ref().map(|d| d.fluid_volume()),
             wall_thickness: cad.wall_thickness,
+            bore_diameter: cad.bore_diameter,
+            boss_diameter: cad.boss_diameter,
+            fillet_radius: cad.fillet_radius,
+            balance_holes: cad.balance_holes,
             problems,
         })
     }
@@ -371,11 +386,15 @@ mod cad {
             g: ImpellerGeometry,
             stator: Option<DiffuserDesign>,
             volute: Option<VoluteGeometry>,
+            holes: Option<BalanceHoleOptions>,
             folder: PathBuf,
         ) {
             let options = CadOptions {
                 wall_thickness: self.wall.manual_value(),
                 bore_diameter: self.bore.manual_value(),
+                boss_diameter: self.boss.manual_value(),
+                fillet_radius: self.fillet.manual_value(),
+                balance_holes: holes,
                 ..CadOptions::default()
             };
             let formats: Vec<&'static str> =
@@ -408,6 +427,36 @@ mod cad {
                     self.last = Some(Err(tf("could not start the export: {}", &[&e])));
                 }
             }
+        }
+
+        /// The balance holes of impeller `id` when asked for: one per channel, sized for
+        /// the automatic rear seal of the axial thrust.
+        fn hole_options(
+            &self,
+            project: &Project,
+            id: ComponentId,
+        ) -> Result<Option<BalanceHoleOptions>, String> {
+            use tp_design::axial_thrust::{AxialThrust, AxialThrustInput};
+            if !self.balance_holes {
+                return Ok(None);
+            }
+            let duty = project.pump_duty(id).map_err(|e| e.to_string())?;
+            let design = project
+                .compute_main_dimensions(id)
+                .map_err(|e| e.to_string())?;
+            let input = AxialThrustInput {
+                balance_holes: true,
+                ..AxialThrustInput::default()
+            };
+            let axial =
+                AxialThrust::new(&duty, &design, &input, false).map_err(|e| e.to_string())?;
+            Ok(axial
+                .balance_holes(design.blade_count)
+                .map(|h| BalanceHoleOptions {
+                    count: h.count,
+                    diameter: h.diameter,
+                    seal_diameter: h.seal_diameter,
+                }))
         }
 
         pub(super) fn ui(
@@ -478,10 +527,36 @@ mod cad {
                         &units,
                         0.0..=1.0,
                     );
+                    let wall = self.wall.manual_value().unwrap_or((0.02 * d2).max(0.003));
+                    let bore = self.bore.manual_value().unwrap_or(g.basis.hub_diameter);
+                    param_f64(
+                        ui,
+                        tr("Boss diameter"),
+                        tr("Around the bore; automatic: the bore plus a wall of a quarter of it, no thinner than the wall"),
+                        &mut self.boss,
+                        Length,
+                        Some(bore + 2.0 * (0.25 * bore).max(wall)),
+                        &units,
+                        0.0..=1.0,
+                    );
+                    param_f64(
+                        ui,
+                        tr("Fillet radius"),
+                        tr("Where the blades meet hub and shroud; automatic: half the blade thickness; 0 for sharp edges"),
+                        &mut self.fillet,
+                        Length,
+                        Some(0.5 * g.basis.blade_thickness),
+                        &units,
+                        0.0..=0.05,
+                    );
                     ui.label(tr("Material density"));
                     quantity(ui, &mut self.density, Density, &units, 100.0..=30_000.0);
                     ui.end_row();
                 });
+            ui.checkbox(&mut self.balance_holes, tr("Balance holes"))
+                .on_hover_text(tr(
+                    "One per channel inside the rear seal, sized by Gülich Chap. 9.2.2",
+                ));
             if stator.is_some() {
                 ui.label(tr(if stator_design.is_some() {
                     "The diffuser flow domain and vanes are exported too."
@@ -519,16 +594,22 @@ mod cad {
                     } else {
                         "Accept the geometry steps up to the blade edges first."
                     }));
-                if response.clicked()
-                    && let Some(folder) = rfd::FileDialog::new().pick_folder()
-                {
-                    self.start(
-                        ui.ctx(),
-                        g.clone(),
-                        stator_design.cloned(),
-                        volute_geometry.cloned(),
-                        folder,
-                    );
+                if response.clicked() {
+                    match self.hole_options(project, id) {
+                        Ok(holes) => {
+                            if let Some(folder) = rfd::FileDialog::new().pick_folder() {
+                                self.start(
+                                    ui.ctx(),
+                                    g.clone(),
+                                    stator_design.cloned(),
+                                    volute_geometry.cloned(),
+                                    holes,
+                                    folder,
+                                );
+                            }
+                        }
+                        Err(e) => self.last = Some(Err(e)),
+                    }
                 }
                 if !ready {
                     ui.weak(tr("Accept the geometry steps up to the blade edges first."));
@@ -567,6 +648,38 @@ mod cad {
                             tr("Flow domain"),
                             format!("{:.1} cm³", report.fluid_volume * 1e6),
                         );
+                        value_row(
+                            ui,
+                            tr("Hub"),
+                            tf(
+                                "bore {} · boss {}",
+                                &[
+                                    &units.show(Length, report.bore_diameter),
+                                    &units.show(Length, report.boss_diameter),
+                                ],
+                            ),
+                        );
+                        if report.fillet_radius > 0.0 {
+                            value_row(
+                                ui,
+                                tr("Fillet radius"),
+                                units.show(Length, report.fillet_radius),
+                            );
+                        }
+                        if let Some(h) = &report.balance_holes {
+                            value_row(
+                                ui,
+                                tr("Balance holes"),
+                                tf(
+                                    "{} × {} on {}",
+                                    &[
+                                        &h.count,
+                                        &units.show(Length, h.diameter),
+                                        &units.show(Length, h.pitch_diameter),
+                                    ],
+                                ),
+                            );
+                        }
                         if let Some(v) = report.diffuser_volume {
                             value_row(
                                 ui,

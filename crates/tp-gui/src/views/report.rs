@@ -721,6 +721,20 @@ pub(crate) fn show(
                                     ],
                                 ),
                             );
+                            if let Some(h) = &a.balance_holes {
+                                value_row(
+                                    ui,
+                                    tr("Balance holes"),
+                                    tf(
+                                        "{} × {} inside the rear seal d_s2 {} (Gülich Chap. 9.2.2)",
+                                        &[
+                                            &h.count,
+                                            &s(Length, h.diameter),
+                                            &s(Length, h.seal_diameter),
+                                        ],
+                                    ),
+                                );
+                            }
                         }
                         if let Some(v) = &c.volute {
                             let d = &v.design;

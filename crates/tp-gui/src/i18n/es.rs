@@ -6,6 +6,30 @@
 
 /// English text → Spanish text.
 pub(super) static TEXTS: &[(&str, &str)] = &[
+    (
+        "{} × {} inside the rear seal d_s2 {} (Gülich Chap. 9.2.2)",
+        "{} × {} dentro del anillo trasero d_s2 {} (Gülich, cap. 9.2.2)",
+    ),
+    (
+        "{} × {} inside the rear seal d_s2 {}",
+        "{} × {} dentro del anillo trasero d_s2 {}",
+    ),
+    ("Boss diameter", "Diámetro del manguito"),
+    (
+        "Around the bore; automatic: the bore plus a wall of a quarter of it, no thinner than the wall",
+        "Alrededor del agujero del eje; automático: el agujero más una pared de un cuarto de él, no más fina que la pared",
+    ),
+    ("Fillet radius", "Radio de redondeo"),
+    (
+        "Where the blades meet hub and shroud; automatic: half the blade thickness; 0 for sharp edges",
+        "Donde los álabes tocan el cubo y la tapa; automático: la mitad del espesor del álabe; 0 para aristas vivas",
+    ),
+    (
+        "One per channel inside the rear seal, sized by Gülich Chap. 9.2.2",
+        "Uno por canal dentro del anillo trasero, dimensionados según Gülich, cap. 9.2.2",
+    ),
+    ("bore {} · boss {}", "agujero {} · manguito {}"),
+    ("{} × {} on {}", "{} × {} en {}"),
     ("volute casing", "carcasa de la voluta"),
     ("Volute casing", "Carcasa de la voluta"),
     ("{} cm³, {}, wall {}", "{} cm³, {}, pared {}"),
