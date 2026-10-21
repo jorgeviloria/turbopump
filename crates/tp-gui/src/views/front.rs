@@ -121,21 +121,42 @@ pub(crate) fn show(
             }
             if let Some(v) = volute {
                 let sign = v.basis.rotation_sign;
-                // Outer wall of the spiral, from the start to the throat.
-                let outer: PlotPoints = v
-                    .sections
-                    .iter()
-                    .map(|s| {
-                        let r = s.outline.iter().map(|p| p.x).fold(0.0, f64::max);
-                        let t = sign * s.angle;
-                        view(r * t.cos(), r * t.sin(), scale)
-                    })
-                    .collect();
+                // A wall traced through the outermost (or innermost) point of sections.
+                let wall = |sections: &[tp_design::volute::VoluteSection], outer: bool| {
+                    sections
+                        .iter()
+                        .map(|s| {
+                            let xs = s.outline.iter().map(|p| p.x);
+                            let r = if outer {
+                                xs.fold(0.0, f64::max)
+                            } else {
+                                xs.fold(f64::INFINITY, f64::min)
+                            };
+                            let t = sign * s.angle;
+                            view(r * t.cos(), r * t.sin(), scale)
+                        })
+                        .collect::<Vec<_>>()
+                };
+                // Outer wall of the spiral, from the start to the throat; in a double
+                // volute it goes on as the outer channel.
+                let mut outer = wall(&v.sections, true);
+                outer.extend(wall(&v.outer_channel, true));
                 plot.line(
-                    Line::new(tr("volute"), outer)
+                    Line::new(tr("volute"), PlotPoints::from(outer))
                         .color(palette.volute)
                         .width(2.0),
                 );
+                // The rib of a double volute: the outer wall of the inner volute and
+                // the inner wall of the outer channel.
+                if !v.inner_sections.is_empty() {
+                    for side in [wall(&v.inner_sections, true), wall(&v.outer_channel, false)] {
+                        plot.line(
+                            Line::new(tr("volute"), PlotPoints::from(side))
+                                .color(palette.volute)
+                                .width(1.5),
+                        );
+                    }
+                }
                 plot.line(
                     Line::new(
                         tr("cutwater d_z"),

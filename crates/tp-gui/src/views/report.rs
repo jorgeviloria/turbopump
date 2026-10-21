@@ -596,6 +596,38 @@ pub(crate) fn show(
                 );
                 value_row(ui, tr("Cross sections"), shape);
                 value_row(ui, tr("Area law"), law);
+                if let Some(rib) = &d.rib {
+                    value_row(
+                        ui,
+                        tr("Double volute"),
+                        tf(
+                            "inner volute of {} from the rib nose at {}, rib {}",
+                            &[
+                                &s(Angle, rib.wrap),
+                                &s(Angle, rib.start),
+                                &s(Length, rib.thickness),
+                            ],
+                        ),
+                    );
+                    value_row(
+                        ui,
+                        tr("Throats of the partial volutes"),
+                        format!(
+                            "{} · {}",
+                            s(Area, rib.outer_throat.area),
+                            s(Area, d.throat.area)
+                        ),
+                    );
+                    value_row(
+                        ui,
+                        tr("Outer channel"),
+                        format!(
+                            "{} → {}",
+                            s(Area, rib.channel_inlet_area),
+                            s(Area, rib.channel_outlet_area)
+                        ),
+                    );
+                }
                 value_row(ui, tr("Throat area A₃q"), s(Area, d.throat.area));
                 value_row(ui, tr("Throat height"), s(Length, d.throat.height));
                 value_row(

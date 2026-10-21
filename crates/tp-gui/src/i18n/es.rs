@@ -1207,10 +1207,70 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "{} (steady plus unsteady, k_R,tot ≥ 0.15)",
         "{} (estacionario más variable, k_R,tot ≥ 0,15)",
     ),
+    ("Double volute", "Voluta doble"),
+    (
+        "Throats of the partial volutes",
+        "Gargantas de las volutas parciales",
+    ),
+    ("Outer channel", "Canal exterior"),
+    (
+        "inner volute of {} from the rib nose at {}, rib {}",
+        "voluta interior de {} desde la nariz del nervio a {}, nervio de {}",
+    ),
+    ("Type", "Tipo"),
+    (
+        "A double volute splits the spiral with a rib to cut the radial force (Gülich Chap. 7.8.1 and Table 9.4)",
+        "Una voluta doble divide la espiral con un nervio para reducir el empuje radial (Gülich cap. 7.8.1 y tabla 9.4)",
+    ),
+    (
+        "Inner volute wrap ε_sp",
+        "Ángulo de la voluta interior ε_sp",
+    ),
+    (
+        "From the rib nose to the throat; 180°, or 170° with an even number of blades (Gülich Chap. 7.8.1)",
+        "De la nariz del nervio a la garganta; 180°, o 170° con un número par de álabes (Gülich cap. 7.8.1)",
+    ),
+    ("Rib thickness", "Espesor del nervio"),
+    (
+        "Wall between the inner volute and the outer channel; automatic: e₃",
+        "Pared entre la voluta interior y el canal exterior; automático: e₃",
+    ),
+    ("Outer channel A_out/A_in", "Canal exterior A_sal/A_ent"),
+    (
+        "Area ratio of the outer channel from the rib nose to the discharge; automatic: constant area",
+        "Relación de áreas del canal exterior desde la nariz del nervio hasta la descarga; automático: área constante",
+    ),
+    ("Rib nose at", "Nariz del nervio a"),
+    (
+        "the rib thickness must be positive",
+        "el espesor del nervio debe ser positivo",
+    ),
+    (
+        "the rib of the double volute starts before the spiral",
+        "el nervio de la voluta doble empieza antes que la espiral",
+    ),
+    ("single", "simple"),
+    ("double", "doble"),
 ];
 
 /// Messages of the design code, most specific first.
 pub(super) static MESSAGES: &[(&str, &str)] = &[
+    (
+        "the inner volute of a double volute must wrap more than 90° and at most 240°, got {}°",
+        "la voluta interior de una voluta doble debe abarcar más de 90° y como mucho 240°; se recibió {}°",
+    ),
+    (
+        "the area ratio of the outer channel must lie between 0.8 and 3, got {}",
+        "la relación de áreas del canal exterior debe estar entre 0,8 y 3; se recibió {}",
+    ),
+    (
+        "the inner volute wraps {}°: past 180° the long outer channel adds losses and radial force at overload (Gülich Chap. 7.8.1)",
+        "la voluta interior abarca {}°: pasados 180° el canal exterior largo añade pérdidas y empuje radial en sobrecarga (Gülich cap. 7.8.1)",
+    ),
+    (
+        "with {} blades and a rib at 180° two blades pass the cutwaters at once: Gülich advises 165° to 170° (Chap. 7.8.1)",
+        "con {} álabes y un nervio a 180° dos álabes pasan por las lengüetas a la vez: Gülich aconseja de 165° a 170° (cap. 7.8.1)",
+    ),
     (
         "the volute loses {} m at the design point, more than the {} m of all the hydraulic losses: check the volute",
         "la voluta pierde {} m en el punto de diseño, más que los {} m de todas las pérdidas hidráulicas: revisa la voluta",

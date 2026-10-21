@@ -3,7 +3,7 @@
 
 use eframe::egui::{ComboBox, DragValue, Grid, Ui};
 use egui_plot::{Line, Plot, PlotPoints};
-use tp_design::volute::{AreaLaw, DEFAULT_FLANK_ANGLE_DEG, SectionShape, VoluteInput};
+use tp_design::volute::{AreaLaw, DEFAULT_FLANK_ANGLE_DEG, SectionShape, VoluteInput, VoluteKind};
 use tp_project::{ComponentId, DesignStep, Project};
 use tp_units::QuantityKind;
 
@@ -118,6 +118,66 @@ fn setup(
             0.0002..=0.2,
         );
     });
+    section(ui, tr("Type"));
+    grid("volute_kind").show(ui, |ui| {
+        ui.label(tr("Volute")).on_hover_text(tr(
+            "A double volute splits the spiral with a rib to cut the radial force \
+             (Gülich Chap. 7.8.1 and Table 9.4)",
+        ));
+        let text = |k: VoluteKind| {
+            tr(match k {
+                VoluteKind::Single => "single",
+                VoluteKind::Double => "double",
+            })
+        };
+        ComboBox::from_id_salt("volute_kind")
+            .selected_text(text(input.setup.kind))
+            .show_ui(ui, |ui| {
+                for kind in [VoluteKind::Single, VoluteKind::Double] {
+                    ui.selectable_value(&mut input.setup.kind, kind, text(kind));
+                }
+            });
+        ui.end_row();
+        if input.setup.kind == VoluteKind::Double {
+            let rib = d.and_then(|d| d.rib);
+            param_f64(
+                ui,
+                tr("Inner volute wrap ε_sp"),
+                tr(
+                    "From the rib nose to the throat; 180°, or 170° with an even number of \
+                    blades (Gülich Chap. 7.8.1)",
+                ),
+                &mut input.setup.rib_wrap,
+                Angle,
+                rib.map(|r| r.wrap),
+                &units,
+                (90.5f64).to_radians()..=(240f64).to_radians(),
+            );
+            param_f64(
+                ui,
+                tr("Rib thickness"),
+                tr("Wall between the inner volute and the outer channel; automatic: e₃"),
+                &mut input.setup.rib_thickness,
+                Length,
+                rib.map(|r| r.thickness),
+                &units,
+                0.0005..=0.1,
+            );
+            param_f64(
+                ui,
+                tr("Outer channel A_out/A_in"),
+                tr(
+                    "Area ratio of the outer channel from the rib nose to the discharge; \
+                    automatic: constant area",
+                ),
+                &mut input.setup.channel_area_ratio,
+                Dimensionless,
+                rib.map(|r| r.channel_outlet_area / r.channel_inlet_area),
+                &units,
+                0.8..=3.0,
+            );
+        }
+    });
     if let Some(g) = g {
         let d = &g.design;
         section(ui, tr("Results"));
@@ -146,6 +206,18 @@ fn setup(
                     tr("c₂u of the impeller"),
                     units.show(Velocity, g.basis.cu),
                 );
+                if let Some(rib) = &d.rib {
+                    value_row(ui, tr("Rib nose at"), units.show(Angle, rib.start));
+                    value_row(
+                        ui,
+                        tr("Throats of the partial volutes"),
+                        format!(
+                            "{} · {}",
+                            units.show(Area, rib.outer_throat.area),
+                            units.show(Area, d.throat.area)
+                        ),
+                    );
+                }
             });
     }
     "edit volute setup"

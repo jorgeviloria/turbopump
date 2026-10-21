@@ -188,3 +188,27 @@ fn spanish() {
         save(&mut harness, name);
     }
 }
+
+/// A double volute: front view and 3D, chosen in the volute-setup step.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn double_volute() {
+    let mut harness = harness(egui::Theme::Light);
+    for _ in 0..6 {
+        harness.get_by_label_contains("Accept step").click();
+        harness.run();
+    }
+    harness.get_by_label_contains("Volute setup").click();
+    harness.run();
+    harness.get_by_value("single").click();
+    harness.run();
+    harness.get_by_label("double").click();
+    harness.run();
+    harness.state_mut().focus_view(View::FrontView);
+    harness.remove_cursor();
+    harness.run();
+    save(&mut harness, "double-volute-front");
+    harness.state_mut().focus_view(View::View3d);
+    harness.run();
+    save(&mut harness, "double-volute-3d");
+}
