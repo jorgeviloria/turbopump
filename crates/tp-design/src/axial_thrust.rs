@@ -17,6 +17,9 @@
 //! - With balance holes and a rear annular seal of diameter d_s2:
 //!   F_ax = (0.1 to 0.2)·F_Hy + F_Hy,T9.2.13 − F_I + F_w (eq. T9.2.14); we take 0.15 of
 //!   the force without holes.
+//! - Balance holes, one per channel, together at least 4 times the flow area of the
+//!   rear seal worn to twice its clearance: ¼·z·d² ≥ 4·d_s2·s with s = 2·s₀ (Gülich
+//!   Chap. 9.2.2), s₀ from eq. 3.12; rounded up to 0.5 mm (our choice).
 //! - Double-entry impellers: |F_ax| = f_ax·ρ/2·u₂²·(d₂² − d_sp²) with f_ax = 0.01 to 0.02
 //!   for the steady force (eq. T9.2.15); we take 0.015. Its sign is not known.
 //!
@@ -109,6 +112,26 @@ pub struct AxialThrust {
     pub eye_area: f64,
     /// Total pressure at the pump inlet, Pa.
     pub inlet_total_pressure: f64,
+    /// Factor on the seal clearances of eq. 3.12: 1, or 2 with wide clearances.
+    pub clearance_factor: f64,
+}
+
+/// Balance holes through the rear shroud.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct BalanceHoleSize {
+    pub count: u32,
+    /// m
+    pub diameter: f64,
+    /// Rear seal d_s2 and its radial clearance s₀, m.
+    pub seal_diameter: f64,
+    pub seal_clearance: f64,
+}
+
+/// Smallest diameter of `count` balance holes behind a rear seal of diameter
+/// `seal_diameter` and radial clearance `clearance` (m): ¼·z·d² = 4·d_s2·(2·s₀)
+/// (Gülich Chap. 9.2.2, with the clearance doubled for wear).
+pub fn balance_hole_diameter(count: u32, seal_diameter: f64, clearance: f64) -> f64 {
+    (16.0 * seal_diameter * 2.0 * clearance / f64::from(count.max(1))).sqrt()
 }
 
 /// φ_sp = 5.5·10⁻⁴·ψ_opt^1.5·(n_q/20)^0.4 for the clearances of eq. 3.12 (Gülich eq.
@@ -220,6 +243,21 @@ impl AxialThrust {
             design_head: duty.head,
             eye_area: PI / 4.0 * (design.inlet_diameter.powi(2) - dn * dn),
             inlet_total_pressure: duty.inlet_total_pressure,
+            clearance_factor: clearance,
+        })
+    }
+
+    /// One balance hole per channel of an impeller with `channels` blades, sized as in
+    /// [`balance_hole_diameter`] and rounded up to 0.5 mm; `None` without balance holes.
+    pub fn balance_holes(&self, channels: u32) -> Option<BalanceHoleSize> {
+        let seal = self.rear_seal_diameter?;
+        let clearance = self.clearance_factor * crate::losses::seal_clearance(seal);
+        let exact = balance_hole_diameter(channels, seal, clearance);
+        Some(BalanceHoleSize {
+            count: channels,
+            diameter: (exact / 0.5e-3).ceil() * 0.5e-3,
+            seal_diameter: seal,
+            seal_clearance: clearance,
         })
     }
 
@@ -306,6 +344,18 @@ impl AxialThrust {
 mod tests {
     use super::*;
     use approx::assert_relative_eq;
+
+    #[test]
+    fn balance_holes_pass_four_times_the_worn_seal_gap() {
+        // ¼·z·d² = 4·d_s2·2·s₀: 7 holes behind an 84 mm seal with 0.184 mm clearance.
+        let d = balance_hole_diameter(7, 0.084, 0.184e-3);
+        assert_relative_eq!(
+            0.25 * 7.0 * d * d,
+            4.0 * 0.084 * 2.0 * 0.184e-3,
+            max_relative = 1e-12
+        );
+        assert!((d - 8.4e-3).abs() < 0.05e-3, "{d}");
+    }
 
     #[test]
     fn rotation_and_leakage_follow_table_9_1() {

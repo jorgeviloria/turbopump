@@ -31,7 +31,7 @@ use std::f64::consts::PI;
 use serde::{Deserialize, Serialize};
 use tp_units::STANDARD_GRAVITY as G;
 
-use crate::axial_thrust::{AxialForces, AxialThrust, AxialThrustInput};
+use crate::axial_thrust::{AxialForces, AxialThrust, AxialThrustInput, BalanceHoleSize};
 use crate::losses::{ImpellerChannels, ImpellerLosses, LossInput, SecondaryLosses, outlet_shock};
 use crate::npsh::{CollectorThroat, NpshCurve, NpshSettings};
 use crate::operation::{Operation, OperationInput};
@@ -156,6 +156,8 @@ pub struct AxialSummary {
     pub largest: f64,
     /// The rough estimate of Gülich eq. T9.2.12 at the design point, N.
     pub estimate: (f64, f64),
+    /// The balance holes, when the impeller has them.
+    pub balance_holes: Option<BalanceHoleSize>,
 }
 
 /// Radial force on the impeller.
@@ -850,6 +852,7 @@ pub fn predict(
             .map(|p| p.axial_force.abs())
             .fold(0.0, f64::max),
         estimate: axial.estimate(design_point.head),
+        balance_holes: axial.balance_holes(design.blade_count),
     };
     // Without balance holes the shrouds push toward the suction side; a reversed force
     // comes from a high suction pressure.
