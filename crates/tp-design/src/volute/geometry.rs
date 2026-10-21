@@ -13,8 +13,8 @@ use super::{
     CutwaterShape, DischargeShape, SectionShape, SectionSize, StraightWall, VoluteDesign,
     VoluteInput,
 };
-use crate::DesignError;
 use crate::outlet::ImpellerOutlet;
+use crate::{DesignError, Param};
 
 /// Points on each straight edge of a rectangular or trapezoidal outline.
 const EDGE_POINTS: usize = 10;
@@ -465,7 +465,33 @@ fn centroid(points: &[DVec2]) -> DVec2 {
 }
 
 impl VoluteGeometry {
+    /// The volute of `input` for the impeller `basis`. A flange height H fixes the
+    /// length of the diffuser: past the bend the outlet face moves away from the pump
+    /// axis as much as the diffuser grows, so the length is that of a first build plus
+    /// the difference in H.
     pub fn build(basis: &ImpellerOutlet, input: &VoluteInput) -> Result<Self, DesignError> {
+        let Param::Manual(height) = input.diffuser.flange_height else {
+            return Self::build_with_length(basis, input);
+        };
+        let mut free = input.clone();
+        free.diffuser.flange_height = Param::Auto;
+        let first = Self::build_with_length(basis, &free)?;
+        let bend = first.design.diffuser.bend_radius * first.nozzle_bend;
+        let at_bend = first.outlet_height - (first.nozzle_length - bend);
+        let length = bend + (height - at_bend);
+        if length < bend.max(1e-3) {
+            return Err(DesignError::InvalidInput(format!(
+                "the flange height H = {:.1} mm leaves no room for the diffuser: it must \
+                 exceed {:.1} mm",
+                height * 1e3,
+                (at_bend + bend.max(1e-3) - bend) * 1e3
+            )));
+        }
+        free.diffuser.length = Param::Manual(length);
+        Self::build_with_length(basis, &free)
+    }
+
+    fn build_with_length(basis: &ImpellerOutlet, input: &VoluteInput) -> Result<Self, DesignError> {
         let design = VoluteDesign::new(basis, input)?;
         let count = input.spiral.sections.resolve(|| DEFAULT_SECTIONS);
         if count < 4 {
@@ -1233,6 +1259,44 @@ mod tests {
         let s = &g.sections[10];
         let p = s.points(1.0)[0];
         assert_relative_eq!(p.y.atan2(p.x).rem_euclid(TAU), s.angle, epsilon = 1e-9);
+    }
+
+    #[test]
+    fn the_flange_height_sets_the_diffuser_length() {
+        use crate::volute::{DischargeShape, StraightWall};
+        for shape in [
+            DischargeShape::default(),
+            DischargeShape::Tangential {
+                straight_wall: StraightWall::Centered,
+            },
+        ] {
+            let mut input = VoluteInput::default();
+            input.diffuser.shape = shape;
+            let free = VoluteGeometry::build(&reference_basis(), &input).unwrap();
+            // 50 mm higher: the diffuser grows by as much along its straight part.
+            input.diffuser.flange_height = Param::Manual(free.outlet_height + 0.05);
+            let g = VoluteGeometry::build(&reference_basis(), &input).unwrap();
+            assert_relative_eq!(
+                g.outlet_height,
+                free.outlet_height + 0.05,
+                max_relative = 1e-9
+            );
+            assert_relative_eq!(
+                g.design.diffuser.length,
+                free.nozzle_length + 0.05,
+                max_relative = 1e-9
+            );
+            // The design sees the longer diffuser: it may widen more.
+            assert!(g.design.diffuser.outlet_diameter >= free.design.diffuser.outlet_diameter);
+            // An outlet face that the diffuser cannot reach is refused: for a radial
+            // discharge anything inside the bend, for a tangential one the throat.
+            let unreachable = match shape {
+                DischargeShape::Radial { .. } => free.basis.impeller_diameter / 2.0,
+                _ => 1e-3,
+            };
+            input.diffuser.flange_height = Param::Manual(unreachable);
+            assert!(VoluteGeometry::build(&reference_basis(), &input).is_err());
+        }
     }
 
     #[test]

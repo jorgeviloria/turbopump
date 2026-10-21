@@ -182,6 +182,11 @@ pub struct DischargeInput {
     pub length: Param<f64>,
     /// Outlet (discharge nozzle) diameter, m.
     pub outlet_diameter: Param<f64>,
+    /// Round the automatic outlet diameter to the nearest nominal size DN.
+    pub nominal_size: bool,
+    /// Height H of the outlet face: its distance from the pump axis, m. When set, it
+    /// fixes the length of the diffuser instead of `length`.
+    pub flange_height: Param<f64>,
     /// Turn of the whole volute about the pump axis: the angle of the cutwater from the
     /// x axis, counter-clockwise about z, rad. Automatic: the discharge points along +y,
     /// vertically up in the front view.
@@ -228,6 +233,113 @@ pub struct CutwaterInput {
 pub struct WallInput {
     /// Casing wall thickness, m.
     pub thickness: Param<f64>,
+    pub flange: FlangeInput,
+}
+
+/// The flange at the outlet of the discharge diffuser. Every size is automatic by
+/// default, from proportions of our own: set them to the standard in use.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FlangeInput {
+    /// Draw the flange on the casing.
+    pub enabled: bool,
+    /// m
+    pub outer_diameter: Param<f64>,
+    pub thickness: Param<f64>,
+    pub bolt_circle: Param<f64>,
+    pub bolt_hole: Param<f64>,
+    pub bolts: Param<u32>,
+}
+
+impl Default for FlangeInput {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            outer_diameter: Param::Auto,
+            thickness: Param::Auto,
+            bolt_circle: Param::Auto,
+            bolt_hole: Param::Auto,
+            bolts: Param::Auto,
+        }
+    }
+}
+
+/// A flange of bore `bore` (m): a disk of `outer_diameter` and `thickness` with
+/// `bolts` holes of `bolt_hole` on `bolt_circle`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct Flange {
+    pub bore: f64,
+    pub outer_diameter: f64,
+    pub thickness: f64,
+    pub bolt_circle: f64,
+    pub bolt_hole: f64,
+    pub bolts: u32,
+}
+
+/// Nominal pipe sizes DN, mm (the preferred numbers of ISO 6708).
+pub const NOMINAL_SIZES: &[f64] = &[
+    10.0, 15.0, 20.0, 25.0, 32.0, 40.0, 50.0, 65.0, 80.0, 100.0, 125.0, 150.0, 200.0, 250.0, 300.0,
+    350.0, 400.0, 450.0, 500.0, 600.0, 700.0, 800.0, 900.0, 1000.0, 1200.0,
+];
+
+/// The nominal size DN nearest to diameter `d`, m.
+pub fn nominal_size(d: f64) -> f64 {
+    let mm = d * 1e3;
+    NOMINAL_SIZES
+        .iter()
+        .copied()
+        .min_by(|a, b| (a - mm).abs().total_cmp(&(b - mm).abs()))
+        .expect("the list is not empty")
+        * 1e-3
+}
+
+impl Flange {
+    /// The flange of a bore `bore` on a casing wall `wall` (m). Automatic proportions
+    /// (our own, not a standard): bolt holes max(14 mm, 0.12·d), bolt circle
+    /// d + 2·(wall + 1.5·hole), outer diameter the bolt circle plus 3 holes, thickness
+    /// max(2·wall, 0.15·d + 6 mm), and bolts in fours about six holes apart.
+    pub fn new(bore: f64, wall: f64, input: &FlangeInput) -> Result<Self, DesignError> {
+        let hole = input.bolt_hole.resolve(|| (0.12 * bore).max(0.014));
+        let circle = input
+            .bolt_circle
+            .resolve(|| bore + 2.0 * (wall + 1.5 * hole));
+        let outer = input.outer_diameter.resolve(|| circle + 3.0 * hole);
+        let thickness = input
+            .thickness
+            .resolve(|| (2.0 * wall).max(0.15 * bore + 0.006));
+        let bolts = input.bolts.resolve(|| {
+            let fours = (PI * circle / (4.0 * 6.0 * hole)).ceil().max(1.0);
+            4 * fours as u32
+        });
+        require(hole > 0.0 && thickness > 0.0 && bolts >= 3, || {
+            "the flange needs a positive thickness and hole size, and three bolts or more".into()
+        })?;
+        require(
+            circle - hole > bore + 2.0 * wall && circle + hole < outer,
+            || {
+                format!(
+                    "the bolt holes on a {:.0} mm circle must clear the bore with its wall and \
+                 stay inside the {:.0} mm flange",
+                    circle * 1e3,
+                    outer * 1e3
+                )
+            },
+        )?;
+        require(PI * circle / f64::from(bolts) > 1.5 * hole, || {
+            format!(
+                "{bolts} bolt holes of {:.0} mm do not fit on the bolt circle",
+                hole * 1e3
+            )
+        })?;
+        Ok(Self {
+            bore,
+            outer_diameter: outer,
+            thickness,
+            bolt_circle: circle,
+            bolt_hole: hole,
+            bolts,
+        })
+    }
 }
 
 /// Inputs of the volute design steps, one group per step.
@@ -358,6 +470,8 @@ pub struct VoluteDesign {
     pub nose_radius: f64,
     pub diffuser: DischargeDiffuser,
     pub wall_thickness: f64,
+    /// The flange at the outlet, if drawn.
+    pub flange: Option<Flange>,
     pub warnings: Vec<String>,
     /// Constant K of the angular momentum law: ∫b/r dr = K·ε.
     momentum_constant: f64,
@@ -720,6 +834,12 @@ impl VoluteDesign {
         require(wall_thickness > 0.0, || {
             "the wall thickness must be positive".into()
         })?;
+        let flange = input
+            .wall
+            .flange
+            .enabled
+            .then(|| Flange::new(diffuser.outlet_diameter, wall_thickness, &input.wall.flange))
+            .transpose()?;
 
         let mut warnings = Vec::new();
         if cutwater_diameter < min_cutwater_diameter * (1.0 - 1e-9) {
@@ -790,6 +910,7 @@ impl VoluteDesign {
             nose_radius,
             diffuser,
             wall_thickness,
+            flange,
             warnings,
             momentum_constant,
             throat_corrected: input.spiral.cutwater_correction,
@@ -834,10 +955,15 @@ impl VoluteDesign {
         // Eq. 1.44: ϑ_al = 16.5°·√(R₁/L).
         let allowable_angle = (16.5 * (r1 / length).sqrt()).to_radians();
         let outlet_diameter = input.outlet_diameter.resolve(|| {
-            if basis.nq > NO_DIFFUSION_NQ {
+            let d = if basis.nq > NO_DIFFUSION_NQ {
                 2.0 * r1
             } else {
                 2.0 * (r1 + length * (DIFFUSER_ANGLE_USE * allowable_angle).tan())
+            };
+            if input.nominal_size {
+                nominal_size(d)
+            } else {
+                d
             }
         });
         require(outlet_diameter > 0.0, || {
@@ -1149,6 +1275,47 @@ mod tests {
         let double = double_with(|_| {}).unwrap();
         let single = VoluteDesign::new(&reference_basis(), &VoluteInput::default()).unwrap();
         assert!(double.friction_integral() > single.friction_integral());
+    }
+
+    #[test]
+    fn flanges_follow_our_proportions_and_nominal_sizes() {
+        assert_relative_eq!(nominal_size(0.083), 0.080);
+        assert_relative_eq!(nominal_size(0.0921), 0.100);
+        // A 100 mm bore on a 6 mm wall: 14 mm holes on 154 mm, a 196 mm disk 21 mm
+        // thick, two fours of bolts.
+        let f = Flange::new(0.1, 0.006, &FlangeInput::default()).unwrap();
+        assert_relative_eq!(f.bolt_hole, 0.014);
+        assert_relative_eq!(f.bolt_circle, 0.154, max_relative = 1e-12);
+        assert_relative_eq!(f.outer_diameter, 0.196, max_relative = 1e-12);
+        assert_relative_eq!(f.thickness, 0.021, max_relative = 1e-12);
+        assert_eq!(f.bolts, 8);
+        // Holes cutting into the wall around the bore are refused.
+        let tight = FlangeInput {
+            bolt_circle: Param::Manual(0.11),
+            ..FlangeInput::default()
+        };
+        assert!(Flange::new(0.1, 0.006, &tight).is_err());
+        // The volute carries one unless switched off.
+        let mut input = VoluteInput::default();
+        assert!(
+            VoluteDesign::new(&reference_basis(), &input)
+                .unwrap()
+                .flange
+                .is_some()
+        );
+        input.wall.flange.enabled = false;
+        assert!(
+            VoluteDesign::new(&reference_basis(), &input)
+                .unwrap()
+                .flange
+                .is_none()
+        );
+        input.diffuser.nominal_size = true;
+        let d = VoluteDesign::new(&reference_basis(), &input).unwrap();
+        assert_relative_eq!(
+            d.diffuser.outlet_diameter,
+            nominal_size(d.diffuser.outlet_diameter)
+        );
     }
 
     #[test]

@@ -168,7 +168,13 @@ impl Project {
         let components = self.components();
         let volute = |at: usize| -> Result<CollectorData, ProjectError> {
             let id = components[at].id();
-            let design = VoluteDesign::new(&self.volute_basis(id)?, &self.volute_input(id)?)?;
+            let (basis, input) = (self.volute_basis(id)?, self.volute_input(id)?);
+            // A flange height fixes the length of the diffuser through the geometry.
+            let design = if input.diffuser.flange_height.manual_value().is_some() {
+                VoluteGeometry::build(&basis, &input)?.design
+            } else {
+                VoluteDesign::new(&basis, &input)?
+            };
             // A double volute has two throats; their mean stands for both.
             let throat = match &design.rib {
                 Some(rib) => CollectorThroat {
