@@ -797,9 +797,16 @@ fn view_tab(ui: &mut Ui, cx: &mut RibbonCx<'_>) -> Option<Command> {
     });
     // The standard views are on the view cube; fitting is here.
     group(ui, tr("Camera"), |ui| {
-        if big_button(ui, Icon::Glyph(icon::CORNERS_OUT), tr("Fit"), true, false, None)
-            .on_hover_text(tr("Fit the model in the view"))
-            .clicked()
+        if big_button(
+            ui,
+            Icon::Glyph(icon::CORNERS_OUT),
+            tr("Fit"),
+            true,
+            false,
+            None,
+        )
+        .on_hover_text(tr("Fit the model in the view"))
+        .clicked()
         {
             set(Command::Camera(CameraView::Fit));
         }
