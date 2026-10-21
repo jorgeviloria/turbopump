@@ -158,14 +158,16 @@ fn cap(out: &mut Vec<Triangle>, ring: &[DVec3]) {
 }
 
 /// Inner surface of the volute: spiral channel and discharge diffuser, closed at the
-/// start of the spiral and at the outlet.
+/// start of the spiral and at the outlet. A double volute gives one closed surface for
+/// each channel and one for the diffuser.
 pub fn volute_triangles(g: &VoluteGeometry) -> Vec<Triangle> {
-    let rings = g.rings();
     let mut out = Vec::new();
-    loft_rings(&mut out, &rings);
-    if let (Some(first), Some(last)) = (rings.first(), rings.last()) {
-        cap(&mut out, first);
-        cap(&mut out, last);
+    for rings in g.channels() {
+        loft_rings(&mut out, &rings);
+        if let (Some(first), Some(last)) = (rings.first(), rings.last()) {
+            cap(&mut out, first);
+            cap(&mut out, last);
+        }
     }
     out
 }

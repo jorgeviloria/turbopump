@@ -118,7 +118,26 @@ pub fn volute_txt(g: &VoluteGeometry) -> String {
             let _ = writeln!(out, "{} {} {}", number(p.x), number(p.y), number(p.z));
         }
     }
-    for (i, n) in g.nozzle.iter().enumerate().skip(1) {
+    for (label, sections) in [
+        ("inner volute section", &g.inner_sections),
+        ("outer channel section", &g.outer_channel),
+    ] {
+        for s in sections {
+            let _ = writeln!(
+                out,
+                "[{label} angle={} area={} outer_radius={}]",
+                number(s.angle),
+                number(s.size.area),
+                number(s.size.outer_radius)
+            );
+            for p in s.points(sign) {
+                let _ = writeln!(out, "{} {} {}", number(p.x), number(p.y), number(p.z));
+            }
+        }
+    }
+    // A double volute's diffuser starts from both channels: its first outline is new.
+    let first = if g.design.rib.is_some() { 0 } else { 1 };
+    for (i, n) in g.nozzle.iter().enumerate().skip(first) {
         let _ = writeln!(out, "[diffuser section={i} area={}]", number(n.area));
         for p in &n.points {
             let _ = writeln!(out, "{} {} {}", number(p.x), number(p.y), number(p.z));
