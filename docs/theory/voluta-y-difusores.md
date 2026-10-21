@@ -118,9 +118,27 @@ chocar con la pared interior de la tobera; en la bomba de referencia, a 13°.
 
 ### 4. Difusor de descarga
 
-Es un cono recto desde la garganta hasta un círculo de diámetro $d_d$. La pared del lado
-de la lengüeta es la recta que pasa por la nariz, así que la tobera no estrecha el paso
-junto a la espiral.
+Va de la garganta a un círculo de diámetro $d_d$ a lo largo de una **línea media**. Las
+secciones son perpendiculares a ella y pasan de la forma de la garganta a la del
+círculo, mientras el radio equivalente crece linealmente con la longitud recorrida.
+Hay dos formas (Gülich, cap. 7.8.1, punto 4):
+
+- **Tangencial:** recto, en la dirección del flujo en la garganta. Se elige qué pared
+  queda recta:
+  - la del lado de la lengüeta (por defecto): la tobera solo se abre hacia fuera y no
+    estrecha el paso junto a la espiral;
+  - ninguna: se abre hacia los dos lados, centrada en su eje;
+  - la exterior: se abre hacia la lengüeta.
+- **Radial** (Fig. 7.42): un codo que gira el flujo hacia fuera, seguido del tramo
+  recto.
+  - El radio medio del codo es $R_N \approx 1{,}5\sqrt{4A_{3q}/\pi}$ (ec. 7.29).
+  - El codo gira hasta que el tramo recto forma el ángulo pedido con la línea que va del
+    eje de la bomba al final del codo. Con 0° la descarga sale en línea con el eje de la
+    bomba: es la **descarga central** de las bombas de proceso.
+  - Gülich señala que los datos de difusores rectos valen también para toberas curvas.
+
+La longitud $L$ es la del tramo recto. En una descarga radial la línea media suma
+además el arco del codo.
 
 El radio equivalente de entrada es $R_1 = \sqrt{A_{3q}/\pi}$. Para no despegar, el
 semiángulo de apertura no debe pasar del admisible (ec. 1.44):
@@ -150,6 +168,44 @@ $$c_{3u} = c_{2u}\,\frac{d_2}{d_z}, \qquad c_{3m} = \frac{Q_{Le}}{\pi\,d_z\,b_3}
 
 El ángulo de la lengüeta es $\alpha_{3B} = \alpha'_3 + i_3$ (ec. T7.7.6). La incidencia
 vale 0 por defecto, y fuera de ±3° el programa avisa.
+
+**Forma de la lengüeta** (Gülich, cap. 7.8.1, punto 7, y Fig. 7.41b). Hay tres:
+
+| Forma | Cómo se construye |
+|---|---|
+| Tangente | la espiral empieza donde su pared exterior deja libre la pared interior de la tobera; la lengüeta es una cuña fina tangente al círculo base, sin nariz diseñada |
+| Afilada | la espiral empieza junto a la lengüeta (3°) y corta la pared interior de la tobera; la lengüeta es la cuña entre las dos paredes, con la punta donde se cruzan |
+| Redondeada (por defecto) | la cuña afilada más una **nariz** de radio $\rho$ cuyo punto más interior queda sobre el círculo $d_z$, unida a la punta por sus tangentes |
+
+**La nariz redondeada:**
+
+- $\rho$ vale por defecto $e_3/2$, así que su centro cae en el punto de remanso
+  $r'_z = r_z + e_3/2$ de Gülich. La holgura con el rodete es la de diseño, $d_z$.
+- No puede pasar de la distancia entre el círculo $d_z$ y la punta de la cuña; si no,
+  la nariz saldría de la cuña y estrecharía la garganta.
+
+**Por qué no un simple redondeo tangente a las dos paredes:** la cuña natural es muy
+fina (5,5° en la bomba de referencia), porque la pared de la espiral sale con el ángulo
+del flujo y la de la tobera casi en la misma dirección. Un redondeo de radio $e_3/2$
+tangente a las dos tendría que retroceder hasta donde la cuña mide $e_3$. La nariz
+quedaría a 110,8 mm del eje en vez de 96,5, y la holgura efectiva pasaría de
+$d_z/d_2$ = 1,12 a 1,29. Por eso la nariz se fija en $d_z$, como en la figura 7.41b, y
+el material que añade lo compensa la corrección de la garganta (ec. 7.28).
+
+**Cuando la pared se aparta enseguida** (descarga radial): la espiral no llega a cortar
+la pared interior de la tobera. Entonces empieza donde la deja libre, como en la
+lengüeta tangente, y la punta de la cuña está ahí. Lo mismo ocurre cuando las dos
+paredes solo se rozan (cuña de menos de 3°).
+
+El informe da la posición de la punta, el ángulo de la cuña y el **diámetro efectivo de
+la lengüeta**: el doble de la distancia del eje al punto más cercano de la lengüeta.
+
+En la bomba de referencia, con descarga tangencial:
+
+| Forma | Punta | Cuña | Más cerca del eje |
+|---|---|---|---|
+| Afilada | 10,4°, a 100,6 mm | 5,5° | 100,6 mm |
+| Redondeada, $\rho$ = 1,72 mm | igual | igual | 96,5 mm ($d_z/2$) |
 
 ### 6. Espesor de pared
 
@@ -348,6 +404,15 @@ También avisan:
 
 ## CAD
 
+**Espiral, tobera y lengüeta:**
+
+- Con la lengüeta tangente, la espiral y la tobera son un único sólido.
+- Con la afilada o la redondeada son dos, que se unen. La espiral entra 1,5° en la
+  tobera para que la unión no trabaje con caras coincidentes, y la lengüeta queda
+  donde la pared de la espiral sale de la tobera.
+- La nariz redondeada se talla en el dominio fluido como un prisma con el contorno de
+  la nariz en el plano medio, en toda la altura de la voluta.
+
 Los sólidos se construyen en milímetros con Open CASCADE:
 
 - **Voluta:** cada sección es un contorno cerrado con una arista por tramo suave, para
@@ -419,8 +484,12 @@ Tras el difusor, la voluta recibe mucho menos momento angular: $c_u r$ baja de 1
 - **Secciones:** solo rectangulares, trapezoidales y circulares, simétricas. Faltan las
   de Bézier, las asimétricas y las externas.
 - **Áreas de la espiral:** faltan las reglas de Pfleiderer y Stepanoff.
-- **Tobera:** solo es recta, no curva ni tangencial.
-- **Lengüeta:** no se puede elegir entre redondeada y arista viva.
+- **Tobera:** tangencial o radial, siempre en el plano medio: no hay codo en z ni
+  desplazamiento axial, y la brida es siempre circular.
+- **Lengüeta:** su nariz es un arco con tangentes rectas hasta la punta, sin un perfil
+  elíptico ni una curva editable. En la vista 3D, la espiral y la tobera de una
+  lengüeta afilada o redondeada se ven solapadas; el corte limpio y la nariz salen en
+  el CAD.
 - **Sólidos:** el CAD da el dominio fluido, no la carcasa con su espesor de pared.
 - **Flujo:**
   - el difusor sin álabes no tiene rozamiento;
