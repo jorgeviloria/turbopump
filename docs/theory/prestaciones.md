@@ -10,9 +10,11 @@ Implementación:
 - [`crates/tp-design/src/volute/loss.rs`](../../crates/tp-design/src/volute/loss.rs) (pérdidas de la voluta);
 - [`crates/tp-design/src/radial_thrust.rs`](../../crates/tp-design/src/radial_thrust.rs) (empuje radial);
 - [`crates/tp-design/src/axial_thrust.rs`](../../crates/tp-design/src/axial_thrust.rs) (empuje axial);
-- [`crates/tp-design/src/operation.rs`](../../crates/tp-design/src/operation.rs) (punto de trabajo).
+- [`crates/tp-design/src/operation.rs`](../../crates/tp-design/src/operation.rs) (punto de trabajo);
+- [`crates/tp-design/src/losses.rs`](../../crates/tp-design/src/losses.rs) (pérdidas secundarias);
+- [`crates/tp-design/src/viscous.rs`](../../crates/tp-design/src/viscous.rs) (líquidos viscosos).
 
-Este documento recoge ocho análisis de un rodete ya diseñado:
+Este documento recoge diez análisis de un rodete ya diseñado:
 
 - la **curva característica** prevista: altura, potencia y rendimiento frente al caudal;
 - el **flujo potencial** en la sección meridional;
@@ -22,10 +24,12 @@ Este documento recoge ocho análisis de un rodete ya diseñado:
 - el **empuje radial** sobre el rodete frente al caudal;
 - el **empuje axial** sobre el rodete frente al caudal;
 - el **punto de trabajo** en la instalación, con otra velocidad o el rodete recortado, y
-  el rango de funcionamiento continuo.
+  el rango de funcionamiento continuo;
+- el **rendimiento por suma de pérdidas**;
+- la **corrección por viscosidad** para aceites y otros líquidos viscosos.
 
 Las referencias principales son de Gülich, *Centrifugal Pumps*, 2.ª edición: capítulos 3
-a 6, 9 y 11. El modelo de la voluta es el de D. Japikse, W. D. Marscher y R. B. Furst,
+a 6, 9, 11 y 13. El modelo de la voluta es el de D. Japikse, W. D. Marscher y R. B. Furst,
 *Centrifugal Pump Design and Performance*, Concepts ETI 1997, capítulo 4.3. Aquí solo se
 citan los números de ecuación; la redacción, las derivaciones y las elecciones propias se
 señalan como tales.
@@ -644,6 +648,69 @@ fuga que la estadística: el rodete pasa menos caudal y da un poco más de altur
 **Claves:** `--set losses=`, `seal_clearance=`, `seal_length=`, `seal_roughness=` y
 `axial_gap=`.
 
+## 10. Líquidos viscosos
+
+La curva se prevé siempre para agua fría ($\nu$ = 1 mm²/s), también el análisis de
+pérdidas de la sección 9, y después se corrige para el líquido (Gülich cap. 13.1, tabla
+13.1). A cada punto le corresponde un punto del líquido:
+
+$$Q_v = f_Q\,Q_w, \qquad H_v = f_H(q^*)\,H_w, \qquad \eta_v = f_\eta\,\eta_w,
+\qquad P_v = \frac{\rho g Q_v H_v}{\eta_v}$$
+
+con $f_H(q^*) = 1 - (1 - f_H)\,q^{*0{,}75}$ y $q^* = Q_w/Q_{BEP,w}$ (ec. T13.1.6). A
+válvula cerrada la altura no cambia; la potencia sube.
+
+**Factores por análisis de pérdidas** (tabla 3.10, el método que el libro considera más
+preciso cuando se conoce la geometría):
+
+- **Rozamiento en los canales:** $c_f$ a $Re = \omega r_2^2/\nu$.
+  - El turbulento sale de la ec. T3.10.16 (ec. 1.33) y el laminar de la ec. T3.10.17
+    (ec. 1.33a).
+  - El libro pasa de uno a otro en $Re_{crit} = 3\cdot10^6/(1 + 10^4\,Tu^{1,7})$.
+    Tomamos el mayor de los dos: equivale a una transición temprana por la turbulencia
+    de la bomba y evita que el rozamiento baje al pasar a laminar (elección propia).
+  - Rugosidad de 16 µm, la clase N9 (elección propia).
+- **Rendimiento hidráulico:**
+  $f_{\eta h} = 1 - \frac{\zeta_R}{\psi}\left(\frac{c_{f,v}}{c_{f,w}} - 1\right)$ con
+  $\frac{\zeta_R}{\psi} = \left(\frac{1}{\eta_h} - 1\right)(0{,}635 - 0{,}0016\,n_q\sqrt{f_q})$
+  (ecs. T3.10.18 y T3.10.19), y $f_Q = f_H = f_{\eta h}$ (ec. T3.10.22).
+- **Rendimiento total:** $f_\eta$ de la ec. T3.10.20. Usa el rozamiento de disco y las
+  pérdidas mecánicas del agua, con el disco escalado por $k_{RR,v}/k_{RR,w}$ de la ec.
+  T3.6.3. La fuga no cambia ($f_{\eta vol}$ = 1, como supone la tabla).
+
+**Correlación de comparación** (figs. 13.8 y 13.9, ecs. T13.1.1 a T13.1.4):
+
+- $f_H = Re_{mod}^{-6{,}7/Re_{mod}^{0{,}735}}$ y $f_\eta = Re_{mod}^{-19/Re_{mod}^{0{,}705}}$;
+- $Re_{mod} = Re\,\omega_s^{1{,}5} f_q^{0{,}75}$ y $\omega_s = n_q/52{,}9$.
+
+Gülich da una dispersión de ±15 % frente a los ensayos.
+
+**Normalización:** los dos juegos de factores se dividen por su valor con agua, para
+que el agua dé exactamente 1 (elección propia). La correlación sola daría 0,987 en
+$f_\eta$ con agua. Un líquido a menos de un 5 % de la viscosidad del agua fría se trata
+como agua, sin corrección.
+
+**NPSH₃** a caudal constante (ec. 13.12), también normalizado con el agua:
+$f_{NPSH} = 1 + \zeta_E\,(c_{f,v}/c_{f,w})\,c_{1m}^2/(2g\,NPSH_3)$, con
+$\zeta_E = \lambda_c - 1$.
+
+**Bomba de referencia** (el punto de diseño del agua, 100 m³/h a 32,2 m, pasa a):
+
+| $\nu$ | Punto | η | $f_H$ / $f_\eta$ por pérdidas | Correlación | NPSH₃ × |
+|---|---|---|---|---|---|
+| 10 mm²/s | 98,9 m³/h, 31,9 m | 0,829 | 0,989 / 0,972 | 0,989 / 0,958 | 1,008 |
+| 50 mm²/s | 96,4 m³/h, 31,0 m | 0,785 | 0,964 / 0,920 | 0,964 / 0,871 | 1,027 |
+| 200 mm²/s | 92,0 m³/h, 29,5 m | 0,700 | 0,920 / 0,820 | 0,913 / 0,715 | 1,058 |
+| 1000 mm²/s | 73,5 m³/h, 23,1 m | 0,409 | 0,735 / 0,479 | 0,780 / 0,419 | 1,170 |
+
+Los dos métodos dan casi la misma altura. En el rendimiento el análisis de pérdidas es
+algo más optimista, dentro de la dispersión del libro.
+
+**Dónde:** `--set viscosity=` (admite cSt) o el apartado *Liquid* de la vista *Curves*.
+Por defecto se usa la viscosidad del líquido del proyecto. Fuera de 7 < $n_q$ < 50 o por
+encima de 4000 mm²/s el programa avisa, porque son los límites de los ensayos de la
+tabla 13.1.
+
 ## Dónde se usa
 
 - **Interfaz:**
@@ -699,6 +766,9 @@ fuga que la estadística: el rodete pasa menos caudal y da un poco más de altur
   - discos lisos, anillos lisos sin ranuras ni cámaras, y sin el anillo entre etapas ni
     el disco de equilibrado de las multietapa;
   - el dimensionado del rodete sigue usando la $\eta_v$ de la estadística.
+- **Viscosidad:** la corrección es empírica, del orden de ±15 %. No tiene en cuenta el
+  calentamiento del líquido, que cambia la viscosidad localmente, ni el arranque con
+  líquido frío.
 - **Punto de trabajo:**
   - la velocidad no cambia el rendimiento (sin efecto de Reynolds);
   - el recorte aplica la misma caída de rendimiento a toda la curva y deja el NPSH₃ como
