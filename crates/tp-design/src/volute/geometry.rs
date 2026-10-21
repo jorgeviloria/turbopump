@@ -63,8 +63,14 @@ pub struct VoluteGeometry {
     pub design: VoluteDesign,
     /// Wrap angle of the first section, rad; the cutwater fills the space before it.
     pub start_angle: f64,
-    /// Sections from the start angle to the throat (2π).
+    /// Sections from the start angle to the throat (2π); for a double volute, to the
+    /// rib nose.
     pub sections: Vec<VoluteSection>,
+    /// Double volute: sections of the inner volute, from just after the rib nose to 2π.
+    pub inner_sections: Vec<VoluteSection>,
+    /// Double volute: sections of the outer channel, outside the rib, from the rib nose
+    /// to 2π.
+    pub outer_channel: Vec<VoluteSection>,
     /// Discharge diffuser from the throat (first) to the outlet (last).
     pub nozzle: Vec<NozzleSection>,
     /// Unit vector of the diffuser axis.
@@ -72,15 +78,52 @@ pub struct VoluteGeometry {
     pub warnings: Vec<String>,
 }
 
+/// Turn by which the channels of a double volute reach into the discharge diffuser, so
+/// that the solids overlap where they meet, rad.
+const CHANNEL_OVERLAP: f64 = 1.5 * std::f64::consts::PI / 180.0;
+
 impl VoluteGeometry {
-    /// Every outline in 3D from the start of the spiral to the diffuser outlet.
-    pub fn rings(&self) -> Vec<Vec<DVec3>> {
+    /// The pieces of the flow channel, each a sequence of outlines in 3D to loft
+    /// through. A single volute is one piece from the start of the spiral to the
+    /// diffuser outlet. A double volute has three: the first partial volute with the
+    /// outer channel, the inner volute, and the discharge diffuser; the first two reach
+    /// a little into the third.
+    pub fn channels(&self) -> Vec<Vec<Vec<DVec3>>> {
         let sign = self.basis.rotation_sign;
-        self.sections
-            .iter()
-            .map(|s| s.points(sign))
-            .chain(self.nozzle.iter().skip(1).map(|n| n.points.clone()))
-            .collect()
+        if self.design.rib.is_none() {
+            return vec![
+                self.sections
+                    .iter()
+                    .map(|s| s.points(sign))
+                    .chain(self.nozzle.iter().skip(1).map(|n| n.points.clone()))
+                    .collect(),
+            ];
+        }
+        let extended = |sections: &[VoluteSection]| -> Vec<Vec<DVec3>> {
+            let mut rings: Vec<Vec<DVec3>> = sections.iter().map(|s| s.points(sign)).collect();
+            if let Some(last) = sections.last() {
+                let beyond = VoluteSection {
+                    angle: last.angle + CHANNEL_OVERLAP,
+                    ..last.clone()
+                };
+                rings.push(beyond.points(sign));
+            }
+            rings
+        };
+        // The throat of the first partial volute and the start of the outer channel
+        // share the angle of the rib nose: the channel takes over there.
+        let first = &self.sections[..self.sections.len() - 1];
+        let outer: Vec<VoluteSection> = first.iter().chain(&self.outer_channel).cloned().collect();
+        vec![
+            extended(&outer),
+            extended(&self.inner_sections),
+            self.nozzle.iter().map(|n| n.points.clone()).collect(),
+        ]
+    }
+
+    /// Every outline in 3D, from the start of the spiral to the diffuser outlet.
+    pub fn rings(&self) -> Vec<Vec<DVec3>> {
+        self.channels().into_iter().flatten().collect()
     }
 
     /// Indices where the pieces of every outline start: flanks, rounded corners, outer
@@ -259,9 +302,67 @@ impl VoluteGeometry {
             )
         };
 
+        // Double volute: the outer channel outside the rib, and the section where both
+        // channels meet the discharge diffuser.
+        let base_width = |height: f64| match shape {
+            SectionShape::Trapezoidal { flank_angle } => {
+                design.inlet_width + 2.0 * height * flank_angle.tan()
+            }
+            _ => design.inlet_width,
+        };
+        let inner_height = |angle: f64| -> Result<f64, DesignError> {
+            match &design.rib {
+                Some(rib) if angle > rib.start => Ok(design.section(angle)?.height),
+                _ => Ok(0.0),
+            }
+        };
+        let channel = |angle: f64| -> Result<VoluteSection, DesignError> {
+            let rib = design.rib.as_ref().expect("a double volute");
+            let a = inner_height(angle)?;
+            let base = base_width(a);
+            let rz = design.stagnation_radius + a + rib.thickness;
+            let area = rib.channel_area(angle);
+            let part = super::Shape {
+                kind: shape,
+                b3: base,
+                rz,
+            };
+            let height = part.height_for_area(area);
+            Ok(VoluteSection {
+                angle,
+                size: part.size(height),
+                outline: fitted_outline(shape, base, rz, height, zm, area),
+            })
+        };
+        let union = |angle: f64| -> Result<VoluteSection, DesignError> {
+            let outer = channel(angle)?.size.outer_radius;
+            let height = outer - design.stagnation_radius;
+            let outline = outline(
+                shape,
+                design.inlet_width,
+                design.stagnation_radius,
+                height,
+                zm,
+            );
+            let area = polygon_area(&outline).abs();
+            Ok(VoluteSection {
+                angle,
+                size: SectionSize {
+                    height,
+                    outer_radius: outer,
+                    area,
+                    centroid_radius: centroid(&outline).x,
+                },
+                outline,
+            })
+        };
+
         // The diffuser continues the path of the section centroids at the throat.
-        let throat = make(TAU)?;
-        let before = design.section(TAU - 0.02)?;
+        let (throat, before) = if design.rib.is_some() {
+            (union(TAU)?, union(TAU - 0.02)?.size)
+        } else {
+            (make(TAU)?, design.section(TAU - 0.02)?)
+        };
         let axis = (position(TAU, &throat.size) - position(TAU - 0.02, &before)).normalize();
 
         // The spiral starts where its outer wall clears the inner wall of the diffuser,
@@ -284,9 +385,44 @@ impl VoluteGeometry {
         }
         let start = start + 2f64.to_radians();
 
-        let sections = (0..=count)
-            .map(|i| make(start + (TAU - start) * f64::from(i) / f64::from(count)))
-            .collect::<Result<Vec<_>, _>>()?;
+        // Sections spread over their wrap in proportion to the single spiral.
+        let spread = |from: f64, to: f64| -> Vec<f64> {
+            let n = ((f64::from(count) * (to - from) / (TAU - start)).round() as u32).max(4);
+            (0..=n)
+                .map(|i| from + (to - from) * f64::from(i) / f64::from(n))
+                .collect()
+        };
+        let (sections, inner_sections, outer_channel) = match &design.rib {
+            None => (
+                spread(start, TAU)
+                    .into_iter()
+                    .map(make)
+                    .collect::<Result<Vec<_>, _>>()?,
+                Vec::new(),
+                Vec::new(),
+            ),
+            Some(rib) => {
+                if rib.start <= start + 10f64.to_radians() {
+                    return Err(DesignError::Infeasible(
+                        "the rib of the double volute starts before the spiral".into(),
+                    ));
+                }
+                (
+                    spread(start, rib.start)
+                        .into_iter()
+                        .map(make)
+                        .collect::<Result<Vec<_>, _>>()?,
+                    spread(rib.start + start, TAU)
+                        .into_iter()
+                        .map(make)
+                        .collect::<Result<Vec<_>, _>>()?,
+                    spread(rib.start, TAU)
+                        .into_iter()
+                        .map(channel)
+                        .collect::<Result<Vec<_>, _>>()?,
+                )
+            }
+        };
 
         let nozzle = nozzle(&design, &throat, sign, axis);
         let warnings = design.warnings.clone();
@@ -295,6 +431,8 @@ impl VoluteGeometry {
             design,
             start_angle: start,
             sections,
+            inner_sections,
+            outer_channel,
             nozzle,
             nozzle_axis: axis,
             warnings,
@@ -500,5 +638,72 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn double(wrap: Option<f64>) -> VoluteGeometry {
+        let mut input = VoluteInput::default();
+        input.setup.kind = crate::volute::VoluteKind::Double;
+        if let Some(w) = wrap {
+            input.setup.rib_wrap = crate::Param::Manual(w);
+        }
+        VoluteGeometry::build(&reference_basis(), &input).unwrap()
+    }
+
+    #[test]
+    fn a_double_volute_has_an_inner_volute_and_an_outer_channel() {
+        let g = double(None);
+        let rib = g.design.rib.unwrap();
+        // Seven blades: the rib wraps 180°.
+        assert_relative_eq!(rib.wrap, std::f64::consts::PI);
+        assert_relative_eq!(g.sections.last().unwrap().angle, rib.start);
+        assert_relative_eq!(g.outer_channel.first().unwrap().angle, rib.start);
+        assert_relative_eq!(g.outer_channel.last().unwrap().angle, TAU);
+        assert_relative_eq!(g.inner_sections.last().unwrap().angle, TAU);
+        assert!(g.inner_sections.first().unwrap().angle > rib.start);
+        // The rib keeps the outer channel off the inner volute by its thickness.
+        for c in &g.outer_channel {
+            let inner = g.design.section(c.angle).unwrap();
+            let gap = c.outline.iter().map(|p| p.x).fold(f64::INFINITY, f64::min)
+                - if c.angle > rib.start {
+                    inner.outer_radius
+                } else {
+                    g.design.stagnation_radius
+                };
+            assert_relative_eq!(gap, rib.thickness, epsilon = 1e-6);
+            assert_relative_eq!(
+                polygon_area(&c.outline).abs(),
+                rib.channel_area(c.angle),
+                max_relative = 1e-5
+            );
+        }
+        // Three pieces to loft, each with the same outline structure.
+        let channels = g.channels();
+        assert_eq!(channels.len(), 3);
+        for ring in channels.iter().flatten() {
+            assert_eq!(ring.len(), OUTLINE_POINTS);
+        }
+        // The diffuser starts from both channels and the rib between them.
+        let first = &g.nozzle[0];
+        let outer = g.outer_channel.last().unwrap();
+        assert!(first.area > g.design.throat.area + outer.size.area);
+        assert_eq!(g.nozzle.len(), NOZZLE_SECTIONS + 1);
+    }
+
+    #[test]
+    fn every_shape_builds_as_a_double_volute() {
+        for shape in [
+            SectionShape::Rectangular,
+            SectionShape::Circular,
+            SectionShape::default(),
+        ] {
+            let mut input = VoluteInput::default();
+            input.setup.kind = crate::volute::VoluteKind::Double;
+            input.cross_section.shape = shape;
+            let g = VoluteGeometry::build(&reference_basis(), &input).unwrap();
+            assert!(!g.inner_sections.is_empty() && !g.outer_channel.is_empty());
+        }
+        // A shorter rib moves the nose later.
+        let short = double(Some(150f64.to_radians()));
+        assert_relative_eq!(short.design.rib.unwrap().start, 210f64.to_radians());
     }
 }

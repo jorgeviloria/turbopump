@@ -11,6 +11,12 @@
 //! 3. flow angle at the cutwater (eqs. T7.7.3 to T7.7.6);
 //! 4. discharge diffuser checked against the allowable opening angle (eqs. 1.44, 1.45).
 //!
+//! A double volute (Gülich Chap. 7.8.1, Fig. 7.39) splits the spiral with a rib. The
+//! first partial volute runs from the cutwater to the rib nose and goes on as the outer
+//! channel around the second, inner volute, which wraps ε_sp from the rib nose to the
+//! throat. Each partial volute is sized like a single one for the flow of its wrap
+//! (item 8), and both meet the discharge diffuser.
+//!
 //! [`loss`] estimates the hydraulic losses of a volute against flow.
 
 mod geometry;
@@ -62,10 +68,27 @@ pub enum AreaLaw {
     ConstantVelocity,
 }
 
+/// Single or double volute (Gülich Fig. 7.39).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VoluteKind {
+    #[default]
+    Single,
+    /// Two partial volutes split by a rib, with a common discharge.
+    Double,
+}
+
 /// Inputs of the volute-setup step.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct VoluteSetupInput {
+    pub kind: VoluteKind,
+    /// Wrap angle ε_sp of the inner volute of a double volute, rad.
+    pub rib_wrap: Param<f64>,
+    /// Thickness of the rib of a double volute, m.
+    pub rib_thickness: Param<f64>,
+    /// Outlet over inlet area of the outer channel of a double volute.
+    pub channel_area_ratio: Param<f64>,
     /// Q_Le/Q_opt: allowance for leakage that flows through the volute (eq. T7.7.1).
     pub flow_factor: Param<f64>,
     /// Cutwater (base circle) diameter d_z, m.
@@ -178,6 +201,30 @@ pub struct DischargeDiffuser {
     pub ideal_pressure_recovery: f64,
 }
 
+/// The rib of a double volute.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Rib {
+    /// Wrap angle ε_sp of the inner volute, rad.
+    pub wrap: f64,
+    /// Wrap angle of the rib nose from the cutwater, 2π − ε_sp, rad.
+    pub start: f64,
+    /// m
+    pub thickness: f64,
+    /// Throat of the first partial volute, at the rib nose.
+    pub outer_throat: SectionSize,
+    /// Area of the outer channel at the rib nose and at the discharge, m².
+    pub channel_inlet_area: f64,
+    pub channel_outlet_area: f64,
+}
+
+impl Rib {
+    /// Area of the outer channel at wrap angle `angle` between the rib nose and 2π.
+    pub fn channel_area(&self, angle: f64) -> f64 {
+        let s = ((angle - self.start) / (TAU - self.start)).clamp(0.0, 1.0);
+        self.channel_inlet_area + (self.channel_outlet_area - self.channel_inlet_area) * s
+    }
+}
+
 /// Result of the volute design, in SI units.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VoluteDesign {
@@ -193,7 +240,11 @@ pub struct VoluteDesign {
     /// The law actually used (never `Auto`).
     pub law: AreaLaw,
     pub shape: SectionShape,
-    /// Throat section, including the cutwater correction.
+    pub kind: VoluteKind,
+    /// The rib of a double volute.
+    pub rib: Option<Rib>,
+    /// Throat section, including the cutwater correction; for a double volute, the
+    /// throat of the inner volute.
     pub throat: SectionSize,
     /// Throat height added for the cutwater blockage Δa₃, m.
     pub throat_correction: f64,
@@ -214,6 +265,8 @@ pub struct VoluteDesign {
     pub warnings: Vec<String>,
     /// Constant K of the angular momentum law: ∫b/r dr = K·ε.
     momentum_constant: f64,
+    /// Whether the throats are enlarged for the cutwater (eq. 7.28).
+    throat_corrected: bool,
 }
 
 /// Default flank angle of trapezoidal sections, degrees.
@@ -424,16 +477,44 @@ impl VoluteDesign {
             law => law,
         };
 
-        // Throat from angular momentum for both laws, then the cutwater correction
-        // Δa₃/a₃ = 0.2·(e₃/a₃)² (eq. 7.28).
-        let a3 = section.height_for_integral(momentum_constant * TAU)?;
-        let throat_correction = if input.spiral.cutwater_correction {
-            0.2 * cutwater_thickness * cutwater_thickness / a3
-        } else {
-            0.0
+        // A double volute: the inner volute wraps ε_sp, 180° by default and 170° with an
+        // even number of blades so that two blades never pass the cutwaters together
+        // (Gülich Chap. 7.8.1, item 1).
+        let even_blades = basis.impeller_blades.is_multiple_of(2);
+        let rib_wrap = match setup.kind {
+            VoluteKind::Single => None,
+            VoluteKind::Double => {
+                let wrap = setup
+                    .rib_wrap
+                    .resolve(|| if even_blades { 170f64.to_radians() } else { PI });
+                require(
+                    wrap > 90f64.to_radians() && wrap <= 240f64.to_radians(),
+                    || {
+                        format!(
+                            "the inner volute of a double volute must wrap more than 90° and \
+                             at most 240°, got {:.1}°",
+                            wrap.to_degrees()
+                        )
+                    },
+                )?;
+                Some(wrap)
+            }
         };
-        let throat = section.size(a3 + throat_correction);
-        let throat_velocity = flow / throat.area;
+
+        // Throat of a partial volute of wrap `wrap` from angular momentum, for both
+        // laws, then the cutwater correction Δa₃/a₃ = 0.2·(e₃/a₃)² (eq. 7.28).
+        let partial_throat = |wrap: f64| -> Result<(SectionSize, f64), DesignError> {
+            let a = section.height_for_integral(momentum_constant * wrap)?;
+            let correction = if input.spiral.cutwater_correction {
+                0.2 * cutwater_thickness * cutwater_thickness / a
+            } else {
+                0.0
+            };
+            Ok((section.size(a + correction), correction))
+        };
+        let inner_wrap = rib_wrap.unwrap_or(TAU);
+        let (throat, throat_correction) = partial_throat(inner_wrap)?;
+        let throat_velocity = flow * inner_wrap / TAU / throat.area;
         let throat_aspect = match shape {
             SectionShape::Circular => 1.0,
             _ => (inlet_width + 2.0 * section.slope() * throat.height) / throat.height,
@@ -449,7 +530,35 @@ impl VoluteDesign {
         let incidence = input.cutwater.incidence.resolve(|| 0.0);
         let cutwater_angle = cutwater_flow_angle + incidence;
 
-        let diffuser = Self::discharge(basis, &input.diffuser, flow, throat.area)?;
+        let rib = match rib_wrap {
+            None => None,
+            Some(wrap) => {
+                let start = TAU - wrap;
+                let (outer_throat, _) = partial_throat(start)?;
+                let thickness = setup.rib_thickness.resolve(|| cutwater_thickness);
+                require(thickness > 0.0, || {
+                    "the rib thickness must be positive".into()
+                })?;
+                let ratio = setup.channel_area_ratio.resolve(|| 1.0);
+                require((0.8..=3.0).contains(&ratio), || {
+                    format!(
+                        "the area ratio of the outer channel must lie between 0.8 and 3, \
+                         got {ratio}"
+                    )
+                })?;
+                Some(Rib {
+                    wrap,
+                    start,
+                    thickness,
+                    outer_throat,
+                    channel_inlet_area: outer_throat.area,
+                    channel_outlet_area: outer_throat.area * ratio,
+                })
+            }
+        };
+        // Both channels feed the discharge diffuser.
+        let discharge_area = throat.area + rib.map_or(0.0, |r| r.channel_outlet_area);
+        let diffuser = Self::discharge(basis, &input.diffuser, flow, discharge_area)?;
         let wall_thickness = input.wall.thickness.resolve(|| (0.03 * d2).max(0.006));
         require(wall_thickness > 0.0, || {
             "the wall thickness must be positive".into()
@@ -478,6 +587,22 @@ impl VoluteDesign {
                 diffuser.allowable_angle.to_degrees()
             ));
         }
+        if let Some(r) = &rib {
+            if r.wrap > PI + 1e-9 {
+                warnings.push(format!(
+                    "the inner volute wraps {:.0}°: past 180° the long outer channel adds \
+                     losses and radial force at overload (Gülich Chap. 7.8.1)",
+                    r.wrap.to_degrees()
+                ));
+            }
+            if even_blades && (r.wrap - PI).abs() < 0.5f64.to_radians() {
+                warnings.push(format!(
+                    "with {} blades and a rib at 180° two blades pass the cutwaters at once: \
+                     Gülich advises 165° to 170° (Chap. 7.8.1)",
+                    basis.impeller_blades
+                ));
+            }
+        }
         if basis.nq > NO_DIFFUSION_NQ && diffuser.area_ratio > 1.05 {
             warnings.push(format!(
                 "above nq ≈ {NO_DIFFUSION_NQ} the discharge nozzle should not decelerate \
@@ -495,6 +620,8 @@ impl VoluteDesign {
             stagnation_radius,
             law,
             shape,
+            kind: setup.kind,
+            rib,
             throat,
             throat_correction,
             throat_velocity,
@@ -506,6 +633,7 @@ impl VoluteDesign {
             wall_thickness,
             warnings,
             momentum_constant,
+            throat_corrected: input.spiral.cutwater_correction,
         })
     }
 
@@ -557,18 +685,33 @@ impl VoluteDesign {
     }
 
     /// The cross section at wrap angle `angle` (rad) from the cutwater; 2π is the throat.
+    /// In a double volute the first partial volute runs to the rib nose and the inner
+    /// one from there to 2π.
     pub fn section(&self, angle: f64) -> Result<SectionSize, DesignError> {
+        match &self.rib {
+            Some(rib) if angle > rib.start => self.partial_section(angle - rib.start, rib.wrap),
+            Some(rib) => self.partial_section(angle, rib.start),
+            None => self.partial_section(angle, TAU),
+        }
+    }
+
+    /// Section at `angle` of a partial volute of wrap `wrap`, whose throat is sized by
+    /// angular momentum for the flow of its wrap (Gülich Chap. 7.8.1, item 8).
+    fn partial_section(&self, angle: f64, wrap: f64) -> Result<SectionSize, DesignError> {
         let shape = self.shape();
-        let fraction = (angle / TAU).clamp(0.0, 1.0);
-        let height = match self.law {
-            AreaLaw::ConstantVelocity => {
-                // Eq. 7.27 on the uncorrected throat, then the correction ramps up.
-                let throat = shape.area(self.throat.height - self.throat_correction);
-                shape.height_for_area(throat * fraction)
-            }
-            _ => shape.height_for_integral(self.momentum_constant * angle.max(0.0))?,
+        let end = shape.height_for_integral(self.momentum_constant * wrap)?;
+        let correction = if self.throat_corrected {
+            0.2 * self.cutwater_thickness * self.cutwater_thickness / end
+        } else {
+            0.0
         };
-        Ok(shape.size(height + self.throat_correction * fraction))
+        let fraction = (angle / wrap).clamp(0.0, 1.0);
+        let height = match self.law {
+            // Eq. 7.27 on the uncorrected throat, then the correction ramps up.
+            AreaLaw::ConstantVelocity => shape.height_for_area(shape.area(end) * fraction),
+            _ => shape.height_for_integral(self.momentum_constant * angle.clamp(0.0, wrap))?,
+        };
+        Ok(shape.size(height + correction * fraction))
     }
 
     /// ∫ b/r dr of a section of the given height.
@@ -835,5 +978,96 @@ mod tests {
         input.setup.cutwater_diameter = Param::Manual(0.18);
         let close = VoluteDesign::new(&b, &input).unwrap();
         assert!(close.warnings.iter().any(|w| w.contains("Table 10.2")));
+    }
+
+    fn double_with(input: impl FnOnce(&mut VoluteInput)) -> Result<VoluteDesign, DesignError> {
+        let mut volute = VoluteInput::default();
+        volute.setup.kind = VoluteKind::Double;
+        input(&mut volute);
+        VoluteDesign::new(&reference_basis(), &volute)
+    }
+
+    #[test]
+    fn double_volute_partial_throats_follow_angular_momentum() {
+        let single = design_with(SectionShape::Rectangular, AreaLaw::AngularMomentum);
+        let d = double_with(|v| {
+            v.cross_section.shape = SectionShape::Rectangular;
+            v.spiral.law = AreaLaw::AngularMomentum;
+            v.spiral.cutwater_correction = false;
+        })
+        .unwrap();
+        let rib = d.rib.unwrap();
+        assert_eq!(d.kind, VoluteKind::Double);
+        // Seven blades: 180°, and the two partial volutes are alike.
+        assert_relative_eq!(rib.wrap, PI);
+        assert_relative_eq!(rib.outer_throat.area, d.throat.area, max_relative = 1e-12);
+        // Each throat satisfies eq. 3.14 for half the flow: ∫b/r dr = π·Q/(2π·c₂u·r₂).
+        let k = d.flow / (TAU * reference_basis().cu * 0.086);
+        assert_relative_eq!(
+            d.momentum_integral(d.throat.height),
+            k * PI,
+            max_relative = 1e-9
+        );
+        // Under half the single throat: with b·ln(1 + a/r'_z) the outer part of a
+        // section carries less flow, so half the integral needs less than half the area.
+        let ratio = d.throat.area / single.throat.area;
+        // For rectangles it is 1/(1 + √(1 + a/r'_z)) of the single throat.
+        let x = single.throat.height / single.stagnation_radius;
+        assert_relative_eq!(ratio, 1.0 / (1.0 + (1.0 + x).sqrt()), max_relative = 1e-3);
+        // The first partial volute is the single spiral up to the rib nose (the single
+        // one carries a little of its cutwater correction).
+        let s90 = single.section(PI / 2.0).unwrap();
+        assert_relative_eq!(
+            d.section(PI / 2.0).unwrap().area,
+            s90.area,
+            max_relative = 1e-3
+        );
+        // The inner volute starts again from zero after the nose.
+        assert!(d.section(rib.start + 0.01).unwrap().area < 0.05 * d.throat.area);
+        assert_relative_eq!(
+            d.section(TAU).unwrap().area,
+            d.throat.area,
+            max_relative = 1e-12
+        );
+        // Half the flow through each throat; both feed the discharge diffuser.
+        assert_relative_eq!(
+            d.throat_velocity,
+            0.5 * d.flow / d.throat.area,
+            max_relative = 1e-12
+        );
+        assert_relative_eq!(
+            d.diffuser.inlet_area,
+            d.throat.area + rib.channel_outlet_area,
+            max_relative = 1e-12
+        );
+        assert_relative_eq!(rib.thickness, d.cutwater_thickness);
+    }
+
+    #[test]
+    fn double_volute_rib_limits() {
+        // An even blade count turns the default rib to 170°.
+        let mut basis = reference_basis();
+        basis.impeller_blades = 6;
+        let mut input = VoluteInput::default();
+        input.setup.kind = VoluteKind::Double;
+        let d = VoluteDesign::new(&basis, &input).unwrap();
+        assert_relative_eq!(d.rib.unwrap().wrap, 170f64.to_radians());
+        // 180° with six blades and 200° are allowed with a warning; 80° is not.
+        input.setup.rib_wrap = Param::Manual(PI);
+        let d = VoluteDesign::new(&basis, &input).unwrap();
+        assert!(d.warnings.iter().any(|w| w.contains("two blades")));
+        let d = double_with(|v| v.setup.rib_wrap = Param::Manual(200f64.to_radians())).unwrap();
+        assert!(d.warnings.iter().any(|w| w.contains("past 180°")));
+        assert!(double_with(|v| v.setup.rib_wrap = Param::Manual(80f64.to_radians())).is_err());
+        assert!(double_with(|v| v.setup.channel_area_ratio = Param::Manual(5.0)).is_err());
+        // A widening outer channel.
+        let d = double_with(|v| v.setup.channel_area_ratio = Param::Manual(1.5)).unwrap();
+        let rib = d.rib.unwrap();
+        assert_relative_eq!(rib.channel_outlet_area, 1.5 * rib.channel_inlet_area);
+        assert_relative_eq!(
+            rib.channel_area(0.5 * (rib.start + TAU)),
+            1.25 * rib.channel_inlet_area,
+            max_relative = 1e-12
+        );
     }
 }

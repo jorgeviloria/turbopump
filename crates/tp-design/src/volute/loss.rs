@@ -49,14 +49,17 @@ pub struct VoluteLossGeometry {
 
 impl VoluteLossGeometry {
     /// The loss model of a designed volute: the spiral starts at the cutwater circle
-    /// with the inlet width b₃, and the cone recovery comes from [`cone_recovery`].
+    /// with the inlet width b₃, and the cone recovery comes from [`cone_recovery`]. A
+    /// double volute counts both partial throats: each collects its share of the flow
+    /// over its share of the inlet, so their sum gives the same AR.
     pub fn from_design(volute: &super::VoluteDesign) -> Self {
         let cone = &volute.diffuser;
         let throat_radius = (cone.inlet_area / PI).sqrt();
+        let throat_area = volute.throat.area + volute.rib.map_or(0.0, |r| r.outer_throat.area);
         Self {
             inlet_radius: volute.cutwater_diameter / 2.0,
             inlet_width: volute.inlet_width,
-            throat_area: volute.throat.area,
+            throat_area,
             throat_radius: volute.throat.centroid_radius,
             cone_ideal_recovery: cone.ideal_pressure_recovery,
             cone_recovery: cone_recovery(cone.area_ratio, cone.length / throat_radius),
