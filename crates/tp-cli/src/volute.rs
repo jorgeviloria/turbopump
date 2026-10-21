@@ -6,9 +6,9 @@ use clap::Args;
 use tp_design::Param;
 use tp_design::volute::stress::StressPlace;
 use tp_design::volute::{
-    AreaLaw, BezierBase, BezierSide, CutwaterShape, DEFAULT_CONE_ANGLE_DEG, DischargeShape,
-    ExternalRound, InnerPosition, RadiusSide, SectionDefinition, SectionShape, SegmentPoint,
-    SideShape, StraightWall, VoluteGeometry, VoluteInput, VoluteKind,
+    AreaLaw, BendWall, BezierBase, BezierSide, CutwaterShape, DEFAULT_CONE_ANGLE_DEG,
+    DischargeShape, ExternalRound, InnerPosition, InternalRound, RadiusSide, SectionDefinition,
+    SectionShape, SegmentPoint, SideShape, StraightWall, VoluteGeometry, VoluteInput, VoluteKind,
 };
 use tp_project::{ComponentId, ComponentKind, Project, VOLUTE_STEPS};
 use tp_units::{DisplayUnits, QuantityKind, parse_quantity_or};
@@ -28,7 +28,9 @@ pub(crate) struct VoluteArgs {
     /// section of the whole spiral: rectangle, trapezoid, round, bezier,
     /// bezier-trapezoid, segments, radius or external, each with optional parameters
     /// after a colon, e.g. trapezoid:30, round:ratio=1.2, radius:main=40mm,cone=30,
-    /// segments:points=0/0.08+0.55/1/0.4, external:right,square; shape@DEGREES=… defines
+    /// segments:points=0/0.08+0.55/1/0.4, external:right,square, internal:neck=10mm,
+    /// inner=sharp (an internal section beside the impeller, through a bend whose walls
+    /// are sharp, straight or round, toward +z unless left); shape@DEGREES=… defines
     /// it at one wrap angle, blending between angles, and remove, off or on drop or
     /// toggle that definition; shape.right=… or shape@DEGREES.right=… gives the +z side
     /// its own shape, symmetric undoes it), law (auto, momentum or velocity),
@@ -296,6 +298,9 @@ fn parse_side(spec: &str, units: &DisplayUnits) -> Result<SideShape, String> {
 /// A whole cross section from `TYPE[:PARAMS]`: a symmetric side or `external`.
 fn parse_section(spec: &str, units: &DisplayUnits) -> Result<SectionShape, String> {
     let (kind, rest) = spec.split_once(':').unwrap_or((spec, ""));
+    if kind == "internal" {
+        return parse_internal(rest, units).map(SectionShape::RoundInternal);
+    }
     if kind != "external" {
         return parse_side(spec, units).map(SectionShape::symmetric);
     }
@@ -315,6 +320,47 @@ fn parse_section(spec: &str, units: &DisplayUnits) -> Result<SectionShape, Strin
         }
     }
     Ok(SectionShape::RoundExternal(round))
+}
+
+/// The parameters of an internal section: the ellipse ratio, the side (+z unless `left`),
+/// the neck width and the walls and ratios of the bend.
+fn parse_internal(rest: &str, units: &DisplayUnits) -> Result<InternalRound, String> {
+    let wall = |name: &str, value: &str| match value {
+        "sharp" => Ok(BendWall::Sharp),
+        "straight" => Ok(BendWall::Straight),
+        "round" => Ok(BendWall::Round),
+        _ => Err(format!(
+            "{name} must be sharp, straight or round, got {value:?}"
+        )),
+    };
+    let mut round = InternalRound::default();
+    for (name, value) in spec_params(rest, "ratio") {
+        match name {
+            "ratio" => round.ellipse_ratio = number(name, value)?,
+            "left" => round.open_to_right = false,
+            "right" => round.open_to_right = true,
+            "neck" => {
+                round.neck_width = if value.eq_ignore_ascii_case("auto") {
+                    Param::Auto
+                } else {
+                    parse_quantity_or(value, QuantityKind::Length, units.get(QuantityKind::Length))
+                        .map(Param::Manual)
+                        .map_err(|e| format!("neck: {e}"))?
+                };
+            }
+            "inner" => round.inner_bend = wall(name, value)?,
+            "outer" => round.outer_bend = wall(name, value)?,
+            "bend" => round.bend_ratio = number(name, value)?,
+            "area" => round.area_ratio = number(name, value)?,
+            _ => {
+                return Err(format!(
+                    "internal sections have no parameter {name:?}; valid: ratio, left, right, \
+                     neck, inner, outer, bend, area"
+                ));
+            }
+        }
+    }
+    Ok(round)
 }
 
 /// Applies `shape[@DEGREES][.right]=VALUE`: the cross section of the whole spiral, the
@@ -342,7 +388,7 @@ fn apply_shape(
     let sections = &mut input.cross_section.sections;
     let set_right = |shape: &mut SectionShape| -> Result<(), String> {
         let SectionShape::Sides { right: side, .. } = shape else {
-            return Err("an external round section has no sides of its own".into());
+            return Err("a round asymmetric section has no sides of its own".into());
         };
         *side = match value {
             "symmetric" => None,
@@ -389,6 +435,12 @@ fn apply_shape(
         }),
     }
     Ok(())
+}
+
+/// Distance from the midplane where the bend of an internal volute ends and its neck
+/// starts.
+fn bend_end(bend: &tp_design::volute::section::Bend) -> f64 {
+    bend.outer.last().map_or(0.0, |neck| neck[0].x.abs())
 }
 
 /// Description of a cross section with its main parameters.
@@ -440,6 +492,21 @@ fn describe_section(shape: &SectionShape, units: &DisplayUnits) -> String {
             },
             if r.square_on_top { ", square top" } else { "" }
         ),
+        SectionShape::RoundInternal(r) => {
+            let wall = |w: BendWall| match w {
+                BendWall::Sharp => "sharp",
+                BendWall::Straight => "straight",
+                BendWall::Round => "round",
+            };
+            format!(
+                "round asymmetric internal toward {}z, ellipse ratio {}, bend {} inside and {} \
+                 outside",
+                if r.open_to_right { "+" } else { "−" },
+                r.ellipse_ratio,
+                wall(r.inner_bend),
+                wall(r.outer_bend)
+            )
+        }
     }
 }
 
@@ -667,6 +734,16 @@ fn print_report(name: &str, id: ComponentId, g: &VoluteGeometry, units: &Display
         ),
     }
     println!("Sections   {shape}; {law}");
+    if let Some(bend) = &g.bend {
+        println!(
+            "Bend       neck {} high from {} above r'z, {} long; the spiral starts {} from \
+             the midplane",
+            s(Length, bend.top - bend.floor),
+            s(Length, bend.floor),
+            s(Length, (bend.face.abs() - bend_end(bend)).max(0.0)),
+            s(Length, bend.face.abs()),
+        );
+    }
     println!(
         "Throat     area {}   height {}   outer radius {}   correction Δa3 {}",
         s(Area, d.throat.area),

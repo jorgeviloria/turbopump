@@ -400,6 +400,36 @@ fn volute_designs_and_exports() {
         "--dry-run",
     ]));
     assert!(double.contains("made trapezoidal at 30.0°"), "{double}");
+    // An internal section beside the impeller, with its bend and neck.
+    let internal = stdout(&turbopump(&[
+        "volute",
+        file_arg,
+        "--set",
+        "shape=internal:ratio=1.2,neck=10mm,inner=sharp",
+        "--dry-run",
+    ]));
+    assert!(
+        internal.contains(
+            "round asymmetric internal toward +z, ellipse ratio 1.2, bend sharp inside and \
+             round outside"
+        ),
+        "{internal}"
+    );
+    assert!(
+        internal.contains("Bend       neck 27.57 mm high"),
+        "{internal}"
+    );
+    assert!(internal.contains("10.00 mm long"), "{internal}");
+    let mixed = turbopump(&[
+        "volute",
+        file_arg,
+        "--set",
+        "shape=internal",
+        "--set",
+        "shape@120=trapezoid",
+        "--dry-run",
+    ]);
+    assert_ne!(mixed.status.code(), Some(0));
     let unknown = turbopump(&["volute", file_arg, "--set", "shape=radius:foo=1"]);
     assert_eq!(unknown.status.code(), Some(2));
     // The outlet face set at 250 mm from the axis, a nominal outlet and the flange.
