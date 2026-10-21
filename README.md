@@ -83,9 +83,10 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
   componente, con un punto verde si está terminado o naranja si quedó desactualizado.
   El botón + añade un rodete, un difusor con o sin álabes o una voluta, simple o doble
   (con nervio de nariz redonda o elíptica, que reduce el empuje radial). La voluta
-  admite descarga tangencial o
-  radial (también en línea con el eje de la bomba) y lengüeta tangente, afilada o
-  redondeada con su radio.
+  admite descarga tangencial, abierta a ambos lados o con una pared recta, o radial
+  (también central, sobre la línea del eje de la bomba). Por defecto gira para que la
+  descarga quede vertical. La lengüeta puede ser tangente, afilada o redondeada con su
+  radio.
 - **Panel izquierdo**, que se pliega con un botón para dejar más sitio a la vista, con
   dos pestañas:
   - *Design*: los pasos de cada componente, con su estado (pendiente, hecho o

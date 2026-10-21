@@ -125,20 +125,26 @@ Hay dos formas (Gülich, cap. 7.8.1, punto 4):
 
 - **Tangencial:** recto, en la dirección del flujo en la garganta. Se elige qué pared
   queda recta:
-  - la del lado de la lengüeta (por defecto): la tobera solo se abre hacia fuera y no
-    estrecha el paso junto a la espiral;
-  - ninguna: se abre hacia los dos lados, centrada en su eje;
+  - ninguna (por defecto): se abre por igual a los dos lados de su eje, como un cono;
+  - la del lado de la lengüeta: la tobera solo se abre hacia fuera;
   - la exterior: se abre hacia la lengüeta.
-- **Radial** (Fig. 7.42): un codo que gira el flujo hacia fuera, seguido del tramo
-  recto.
+- **Radial** (Fig. 7.42): un codo que gira el flujo hacia fuera, en sentido contrario
+  a la curvatura de la espiral, y un tramo recto si queda longitud.
   - El radio medio del codo es $R_N \approx 1{,}5\sqrt{4A_{3q}/\pi}$ (ec. 7.29).
   - El codo gira hasta que el tramo recto forma el ángulo pedido con la línea que va del
-    eje de la bomba al final del codo. Con 0° la descarga sale en línea con el eje de la
-    bomba: es la **descarga central** de las bombas de proceso.
-  - Gülich señala que los datos de difusores rectos valen también para toberas curvas.
+    eje de la bomba al final del codo. Con 0° la descarga queda **sobre la línea del
+    eje** de la bomba: es la descarga central de las bombas de proceso.
 
-La longitud $L$ es la del tramo recto. En una descarga radial la línea media suma
-además el arco del codo.
+La longitud $L$ se mide a lo largo de la línea media e **incluye el codo**: Gülich (cap.
+7.8.2, punto 4) aplica a las toberas curvas los datos de los difusores rectos. Si el
+codo es más largo que $L$, la tobera acaba con el codo y el programa avisa.
+
+**Giro de la voluta:** por defecto toda la voluta gira alrededor del eje de la bomba
+hasta que la descarga apunta en vertical hacia arriba (+y), como en los planos de
+bombas. Con la descarga central, la brida queda justo encima del eje. También se puede
+fijar el ángulo de la lengüeta desde el eje x. Los ángulos de la espiral se siguen
+midiendo desde la lengüeta. Se informa la distancia del eje de la bomba a la brida de
+salida, medida a lo largo del eje de la tobera.
 
 El radio equivalente de entrada es $R_1 = \sqrt{A_{3q}/\pi}$. Para no despegar, el
 semiángulo de apertura no debe pasar del admisible (ec. 1.44):
@@ -151,7 +157,7 @@ $$\tan\vartheta_{eq} = \frac{R_1}{L}\left(\sqrt{A_R} - 1\right)$$
 
 Valores automáticos:
 
-- longitud $L = 4\,R_1$;
+- longitud $L = 4\,R_1$, codo incluido;
 - diámetro de salida para abrir al 85 % de $\vartheta_{al}$;
 - por encima de $n_q = 80$ la tobera no decelera más ($A_R = 1$), y si se fuerza otra
   cosa el programa avisa.
@@ -185,8 +191,8 @@ vale 0 por defecto, y fuera de ±3° el programa avisa.
   la nariz saldría de la cuña y estrecharía la garganta.
 
 **Por qué no un simple redondeo tangente a las dos paredes:** la cuña natural es muy
-fina (5,5° en la bomba de referencia), porque la pared de la espiral sale con el ángulo
-del flujo y la de la tobera casi en la misma dirección. Un redondeo de radio $e_3/2$
+fina (5,5° en la bomba de referencia con la pared de la lengüeta recta), porque la pared
+de la espiral sale con el ángulo del flujo y la de la tobera casi en la misma dirección. Un redondeo de radio $e_3/2$
 tangente a las dos tendría que retroceder hasta donde la cuña mide $e_3$. La nariz
 quedaría a 110,8 mm del eje en vez de 96,5, y la holgura efectiva pasaría de
 $d_z/d_2$ = 1,12 a 1,29. Por eso la nariz se fija en $d_z$, como en la figura 7.41b, y
@@ -195,17 +201,23 @@ el material que añade lo compensa la corrección de la garganta (ec. 7.28).
 **Cuando la pared se aparta enseguida** (descarga radial): la espiral no llega a cortar
 la pared interior de la tobera. Entonces empieza donde la deja libre, como en la
 lengüeta tangente, y la punta de la cuña está ahí. Lo mismo ocurre cuando las dos
-paredes solo se rozan (cuña de menos de 3°).
+paredes solo se rozan (cuña de menos de 4°).
 
 El informe da la posición de la punta, el ángulo de la cuña y el **diámetro efectivo de
 la lengüeta**: el doble de la distancia del eje al punto más cercano de la lengüeta.
 
-En la bomba de referencia, con descarga tangencial:
+En la bomba de referencia:
 
-| Forma | Punta | Cuña | Más cerca del eje |
-|---|---|---|---|
-| Afilada | 10,4°, a 100,6 mm | 5,5° | 100,6 mm |
-| Redondeada, $\rho$ = 1,72 mm | igual | igual | 96,5 mm ($d_z/2$) |
+| Descarga | Lengüeta | Punta | Cuña | Más cerca del eje |
+|---|---|---|---|---|
+| Tangencial abierta a ambos lados | afilada | 22,1°, a 103,3 mm | 11,6° | 103,3 mm |
+| Tangencial con la pared de la lengüeta recta | afilada | 10,4°, a 100,8 mm | 5,5° | 100,8 mm |
+| Radial central | afilada | 12,8°, a 101,3 mm | 6,8° | 101,3 mm |
+| Cualquiera | redondeada, $\rho$ = 1,72 mm | igual | igual | 96,6 mm ($d_z/2$) |
+
+Al abrirse a ambos lados, la pared interior de la tobera se inclina hacia el eje y la
+lengüeta queda más larga y más gruesa. Con la descarga radial central, la brida de
+salida queda a 224,6 mm del eje (1,30 $d_2$) y el codo gira 63,7°.
 
 ### 6. Espesor de pared
 
@@ -447,6 +459,14 @@ También avisan:
 - La nariz redondeada se talla en el dominio fluido como un prisma con el contorno de
   la nariz en el plano medio, en toda la altura de la voluta. El nervio de la voluta
   doble se resta del mismo modo.
+- Junto a la garganta, la tobera y el comienzo de la espiral comparten las paredes
+  laterales durante un tramo, y con secciones rectangulares también con el anillo de
+  entrada. Por eso:
+  - el anillo es un 0,5 % más estrecho que $b_3$;
+  - las operaciones booleanas se repiten con una tolerancia de contacto de 0; 0,001;
+    0,0001 y 0,01 mm hasta que el dominio fluido sale como un único sólido válido.
+- En una matriz de 75 combinaciones (forma de sección, voluta simple o doble, cinco
+  descargas y tres lengüetas) solo fallan dos, ambas con la pared exterior recta.
 
 Los sólidos se construyen en milímetros con Open CASCADE:
 
@@ -523,7 +543,9 @@ Tras el difusor, la voluta recibe mucho menos momento angular: $c_u r$ baja de 1
   de Bézier, las asimétricas y las externas.
 - **Áreas de la espiral:** faltan las reglas de Pfleiderer y Stepanoff.
 - **Tobera:** tangencial o radial, siempre en el plano medio: no hay codo en z ni
-  desplazamiento axial, y la brida es siempre circular.
+  desplazamiento axial, y la brida es siempre circular. La longitud se fija a lo largo
+  de la línea media, no por la altura de la brida. Con la pared exterior recta, alguna
+  combinación de lengüeta puede dar un sólido no válido.
 - **Lengüeta:** su nariz es un arco con tangentes rectas hasta la punta, sin un perfil
   elíptico ni una curva editable. En la vista 3D, la espiral y la tobera de una
   lengüeta afilada o redondeada se ven solapadas; el corte limpio y la nariz salen en
