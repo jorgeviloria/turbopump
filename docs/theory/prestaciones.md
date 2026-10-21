@@ -325,7 +325,7 @@ $r_6 = r_5$ las dos formas son la ec. 4.8. Con nuestra lectura, una espiral dime
 por momento angular tiene su menor pérdida en su caudal de diseño, como dice Gülich en el
 capítulo 4.2.
 
-**Entrada y garganta.** La entrada es el círculo de la lengüeta con el ancho $b_3$; el
+**Entrada y garganta.** La entrada es el círculo del corte de agua con el ancho $b_3$; el
 giro llega a ella como vórtice libre desde $r_2$, también a través de un difusor sin
 álabes. La garganta y su radio de centro salen del diseño de la voluta.
 
@@ -787,9 +787,14 @@ tabla 13.1.
 ## Dónde se usa
 
 - **Interfaz:**
-  - vista *Curves*, con el inicio de la recirculación, $\psi_0$ y el caudal máximo
-    ajustables, y una cuarta gráfica con el NPSH₃, el NPSH disponible y la pérdida en
-    la voluta;
+  - vista *Curves*: las cuatro gráficas (altura, rendimiento, potencia y NPSH₃ con el
+    NPSH disponible y la pérdida en la voluta) en una cuadrícula de 2×2 que deja libre el
+    panel de propiedades, con una leyenda común para los puntos de diseño, de máximo
+    rendimiento y de trabajo y las líneas de recirculación y de funcionamiento
+    continuo. Encima, una línea con las cifras clave (diseño, máximo rendimiento, punto
+    de trabajo, NPSH₃ y empujes); el resto de resultados va plegado en *More results*,
+    y los ajustes (inicio de la recirculación, $\psi_0$, caudal máximo, líquido y
+    funcionamiento en la instalación) en *Settings*;
   - opción *potential flow* de la vista meridional;
   - cuarta gráfica de la vista *Blade*;
   - secciones nuevas del informe.
@@ -801,8 +806,8 @@ tabla 13.1.
   `shaft_seal=`, `balance=on`, `rear_seal=` y `k0=`. El CSV añade la columna
   `axial_force_n`.
 - **Interfaz:** la vista *Curves* da el empuje axial en el diseño y a válvula cerrada,
-  con una casilla para los agujeros de equilibrado; el informe da sus partes. Su
-  apartado *Operation in the system* fija la altura estática, el punto de la
+  con una casilla para los agujeros de equilibrado en sus ajustes; el informe da sus
+  partes. El apartado *Operation in the system* de los ajustes fija la altura estática, el punto de la
   instalación, la velocidad y el diámetro recortado. Dibuja la curva de la instalación,
   el punto de trabajo, la curva a la velocidad y el diámetro de funcionamiento y los
   límites del rango continuo.

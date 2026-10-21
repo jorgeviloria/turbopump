@@ -85,7 +85,7 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
   (con nervio de nariz redonda o elíptica, que reduce el empuje radial). La voluta
   admite descarga radial (por defecto, central sobre la línea del eje de la bomba) o
   tangencial, abierta a ambos lados o con una pared recta. Por defecto gira para que
-  la descarga quede vertical. La lengüeta puede ser tangente, afilada o redondeada con su
+  la descarga quede vertical. El corte de agua puede ser tangente, afilado o redondeado con su
   radio.
 - **Panel izquierdo**, que se pliega con un botón para dejar más sitio a la vista, con
   dos pestañas:

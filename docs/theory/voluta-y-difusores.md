@@ -11,7 +11,7 @@ $c_{2u} = 13{,}2$ m/s frente a $c_{2m} = 2{,}8$ m/s. Los componentes que siguen 
 parte de esa energía cinética en presión y llevan el caudal hasta la tubería. Turbopump
 tiene tres:
 
-- **voluta de salida:** canal en espiral, lengüeta y difusor de descarga;
+- **voluta de salida:** canal en espiral, corte de agua y difusor de descarga;
 - **difusor sin álabes:** anillo de paredes paralelas;
 - **difusor con álabes:** corona de álabes fijos entre $d_3$ y $d_4$.
 
@@ -44,28 +44,28 @@ medio del canal, el número de álabes del rodete y el sentido de giro.
 Si cambia un dato aguas arriba, los pasos de los componentes de detrás quedan
 desactualizados (⟲) hasta que se vuelven a aceptar.
 
-**Ángulos:** el ángulo de la espiral $\varepsilon$ se mide desde la lengüeta en el sentido
-de giro. La lengüeta está sobre el eje $+x$, y una sección de ángulo $\varepsilon$ queda en
+**Ángulos:** el ángulo de la espiral $\varepsilon$ se mide desde el corte de agua en el sentido
+de giro. El corte de agua está sobre el eje $+x$, y una sección de ángulo $\varepsilon$ queda en
 $\theta = s\,\varepsilon$. El signo $s$ es el mismo que en el rodete
 ([geometria-rodete.md](geometria-rodete.md)).
 
 ## Voluta
 
 Se diseña en seis pasos: datos de partida, sección transversal, desarrollo de la
-espiral, difusor de descarga, lengüeta y espesor de pared.
+espiral, difusor de descarga, corte de agua y espesor de pared.
 
 ### 1. Datos de partida
 
 - **Caudal de diseño:** $Q_{Le} = Q \cdot (Q_{Le}/Q)$. El factor vale 1 por defecto y
   permite reservar caudal para las fugas que pasan por la voluta (ec. T7.7.1).
-- **Diámetro de la lengüeta:** el mínimo de la tabla 10.2 para que las pulsaciones de
+- **Diámetro del corte de agua:** el mínimo de la tabla 10.2 para que las pulsaciones de
   presión sean bajas:
 
   $$\frac{d_z}{d_2} \ge 1{,}03 + 0{,}1\,\frac{n_q}{40} + 0{,}07\,\frac{\rho H}{\rho_{Ref} H_{Ref}}$$
 
   Aquí $\rho_{Ref} = 1000$ kg/m³ y $H_{Ref} = 1000$ m. El valor automático es ese
   mínimo, y un valor manual por debajo genera un aviso.
-- **Espesor de la lengüeta:** $e_3 \approx 0{,}02\,d_2$ (cap. 7.8.1). El flujo se
+- **Espesor del corte de agua:** $e_3 \approx 0{,}02\,d_2$ (cap. 7.8.1). El flujo se
   estanca en la nariz, a $r'_z = r_z + e_3/2$, y desde ese radio se integran las
   secciones.
 - **Anchura de entrada:** $b_3/b_2$ baja linealmente de 2,0 (con $n_q \le 15$) a 1,2 (con
@@ -274,7 +274,7 @@ $$A(\varepsilon) = A_{3q}\,\frac{\varepsilon}{2\pi}$$
 **Ley automática:** velocidad constante por debajo de $n_q = 30$ y momento angular por
 encima. El libro sitúa el cambio entre 25 y 35.
 
-**Corrección por la lengüeta** (ec. 7.28): la lengüeta estorba al flujo en la garganta,
+**Corrección por el corte de agua** (ec. 7.28): el corte de agua estorba al flujo en la garganta,
 y su altura se aumenta en
 
 $$\frac{\Delta a_3}{a_3} = 0{,}2\left(\frac{e_3}{a_3}\right)^2$$
@@ -292,8 +292,8 @@ Hay dos formas (Gülich, cap. 7.8.1, punto 4):
 - **Tangencial:** recto, en la dirección del flujo en la garganta. Se elige qué pared
   queda recta:
   - ninguna: se abre por igual a los dos lados de su eje, como un cono;
-  - la del lado de la lengüeta: la tobera solo se abre hacia fuera;
-  - la exterior: se abre hacia la lengüeta.
+  - la del lado del corte de agua: la tobera solo se abre hacia fuera;
+  - la exterior: se abre hacia el corte de agua.
 - **Radial** (Fig. 7.42): un codo que gira el flujo hacia fuera, en sentido contrario
   a la curvatura de la espiral, y un tramo recto si queda longitud.
   - El radio medio del codo es $R_N \approx 1{,}5\sqrt{4A_{3q}/\pi}$ (ec. 7.29).
@@ -321,8 +321,8 @@ la predicción de prestaciones usa la tobera que resulta.
 **Giro de la voluta:** por defecto toda la voluta gira alrededor del eje de la bomba
 hasta que la descarga apunta en vertical hacia arriba (+y), como en los planos de
 bombas. Con la descarga central, la brida queda justo encima del eje. También se puede
-fijar el ángulo de la lengüeta desde el eje x. Los ángulos de la espiral se siguen
-midiendo desde la lengüeta. Se informa la distancia del eje de la bomba a la brida de
+fijar el ángulo del corte de agua desde el eje x. Los ángulos de la espiral se siguen
+midiendo desde el corte de agua. Se informa la distancia del eje de la bomba a la brida de
 salida, medida a lo largo del eje de la tobera.
 
 El radio equivalente de entrada es $R_1 = \sqrt{A_{3q}/\pi}$. Para no despegar, el
@@ -345,24 +345,24 @@ Valores automáticos:
 
 La recuperación ideal es $c_{p,id} = 1 - 1/A_R^2$ (ec. 1.40).
 
-### 5. Lengüeta
+### 5. Corte de agua
 
-El ángulo del flujo en la lengüeta sale del vórtice libre y del caudal que pasa por el
-círculo $d_z$ (ecs. T7.7.3 a T7.7.5). Con una sola lengüeta no hay bloqueo:
+El ángulo del flujo en el corte de agua sale del vórtice libre y del caudal que pasa por el
+círculo $d_z$ (ecs. T7.7.3 a T7.7.5). Con un solo corte de agua no hay bloqueo:
 
 $$c_{3u} = c_{2u}\,\frac{d_2}{d_z}, \qquad c_{3m} = \frac{Q_{Le}}{\pi\,d_z\,b_3}, \qquad
 \tan\alpha'_3 = \frac{c_{3m}}{c_{3u}}$$
 
-El ángulo de la lengüeta es $\alpha_{3B} = \alpha'_3 + i_3$ (ec. T7.7.6). La incidencia
+El ángulo del corte de agua es $\alpha_{3B} = \alpha'_3 + i_3$ (ec. T7.7.6). La incidencia
 vale 0 por defecto, y fuera de ±3° el programa avisa.
 
-**Forma de la lengüeta** (Gülich, cap. 7.8.1, punto 7, y Fig. 7.41b). Hay tres:
+**Forma del corte de agua** (Gülich, cap. 7.8.1, punto 7, y Fig. 7.41b). Hay tres:
 
 | Forma | Cómo se construye |
 |---|---|
-| Tangente | la espiral empieza donde su pared exterior deja libre la pared interior de la tobera; la lengüeta es una cuña fina tangente al círculo base, sin nariz diseñada |
-| Afilada | la espiral empieza junto a la lengüeta (3°) y corta la pared interior de la tobera; la lengüeta es la cuña entre las dos paredes, con la punta donde se cruzan |
-| Redondeada (por defecto) | la cuña afilada más una **nariz** de radio $\rho$ cuyo punto más interior queda sobre el círculo $d_z$, unida a la punta por sus tangentes |
+| Tangente | la espiral empieza donde su pared exterior deja libre la pared interior de la tobera; el corte de agua es una cuña fina tangente al círculo base, sin nariz diseñada |
+| Afilado | la espiral empieza junto al corte de agua (3°) y corta la pared interior de la tobera; el corte de agua es la cuña entre las dos paredes, con la punta donde se cruzan |
+| Redondeado (por defecto) | la cuña afilada más una **nariz** de radio $\rho$ cuyo punto más interior queda sobre el círculo $d_z$, unida a la punta por sus tangentes |
 
 **La nariz redondeada:**
 
@@ -372,7 +372,7 @@ vale 0 por defecto, y fuera de ±3° el programa avisa.
   la nariz saldría de la cuña y estrecharía la garganta.
 
 **Por qué no un simple redondeo tangente a las dos paredes:** la cuña natural es muy
-fina (5,5° en la bomba de referencia con la pared de la lengüeta recta), porque la pared
+fina (5,5° en la bomba de referencia con la pared del corte de agua recta), porque la pared
 de la espiral sale con el ángulo del flujo y la de la tobera casi en la misma dirección. Un redondeo de radio $e_3/2$
 tangente a las dos tendría que retroceder hasta donde la cuña mide $e_3$. La nariz
 quedaría a 110,8 mm del eje en vez de 96,5, y la holgura efectiva pasaría de
@@ -380,24 +380,24 @@ $d_z/d_2$ = 1,12 a 1,29. Por eso la nariz se fija en $d_z$, como en la figura 7.
 el material que añade lo compensa la corrección de la garganta (ec. 7.28).
 
 **Cuando la pared se aparta enseguida** (descarga radial): la espiral no llega a cortar
-la pared interior de la tobera. Entonces empieza donde la deja libre, como en la
-lengüeta tangente, y la punta de la cuña está ahí. Lo mismo ocurre cuando las dos
+la pared interior de la tobera. Entonces empieza donde la deja libre, como en el
+corte de agua tangente, y la punta de la cuña está ahí. Lo mismo ocurre cuando las dos
 paredes solo se rozan (cuña de menos de 4°).
 
-El informe da la posición de la punta, el ángulo de la cuña y el **diámetro efectivo de
-la lengüeta**: el doble de la distancia del eje al punto más cercano de la lengüeta.
+El informe da la posición de la punta, el ángulo de la cuña y el **diámetro efectivo del
+corte de agua**: el doble de la distancia del eje al punto más cercano del corte de agua.
 
 En la bomba de referencia:
 
-| Descarga | Lengüeta | Punta | Cuña | Más cerca del eje |
+| Descarga | Corte de agua | Punta | Cuña | Más cerca del eje |
 |---|---|---|---|---|
-| Tangencial abierta a ambos lados | afilada | 22,1°, a 103,3 mm | 11,6° | 103,3 mm |
-| Tangencial con la pared de la lengüeta recta | afilada | 10,4°, a 100,8 mm | 5,5° | 100,8 mm |
-| Radial central | afilada | 12,8°, a 101,3 mm | 6,8° | 101,3 mm |
-| Cualquiera | redondeada, $\rho$ = 1,72 mm | igual | igual | 96,6 mm ($d_z/2$) |
+| Tangencial abierta a ambos lados | afilado | 22,1°, a 103,3 mm | 11,6° | 103,3 mm |
+| Tangencial con la pared del corte de agua recta | afilado | 10,4°, a 100,8 mm | 5,5° | 100,8 mm |
+| Radial central | afilado | 12,8°, a 101,3 mm | 6,8° | 101,3 mm |
+| Cualquiera | redondeado, $\rho$ = 1,72 mm | igual | igual | 96,6 mm ($d_z/2$) |
 
-Al abrirse a ambos lados, la pared interior de la tobera se inclina hacia el eje y la
-lengüeta queda más larga y más gruesa. Con la descarga radial central, la brida de
+Al abrirse a ambos lados, la pared interior de la tobera se inclina hacia el eje y el
+corte de agua queda más largo y más grueso. Con la descarga radial central, la brida de
 salida queda a 224,6 mm del eje (1,30 $d_2$) y el codo gira 63,7°.
 
 ### 6. Espesor de pared
@@ -462,7 +462,7 @@ el empuje radial (cap. 9.3.4 y tabla 9.4). Se elige en el paso de datos de parti
 
 **Partes:**
 
-- **Primera voluta parcial:** de la lengüeta a la nariz del nervio, en
+- **Primera voluta parcial:** del corte de agua a la nariz del nervio, en
   $\varepsilon_r = 2\pi - \varepsilon_{sp}$. Sus secciones son las de la voluta simple.
 - **Voluta interior:** de la nariz del nervio a la garganta, en $2\pi$. Abarca
   $\varepsilon_{sp}$ y recoge su parte del caudal.
@@ -470,7 +470,7 @@ el empuje radial (cap. 9.3.4 y tabla 9.4). Se elige en el paso de datos de parti
   hasta la descarga. Es la parte de cada sección más allá del nervio, así que la pared
   exterior sigue sin escalón desde la primera voluta parcial.
   - En la nariz su área es la garganta de la primera voluta parcial menos lo que ocupa
-    el nervio: una aceleración local, como la que provoca la lengüeta.
+    el nervio: una aceleración local, como la que provoca el corte de agua.
   - En la descarga es esa garganta por la relación $A_{sal}/A_{3q,1}$, que por defecto
     es 1 (elección propia). Entre medias el área crece de forma lineal.
   - Gülich dice que a $n_q$ bajo y medio el canal frena el flujo y se dimensiona como un
@@ -483,7 +483,7 @@ el empuje radial (cap. 9.3.4 y tabla 9.4). Se elige en el paso de datos de parti
 - Cada voluta parcial de ángulo $\varepsilon_{sp}$ se dimensiona para el caudal
   $Q_{Le}\,\varepsilon_{sp}/2\pi$ con la conservación del momento angular (cap. 7.8.1,
   punto 8). Su garganta cumple $\int b/r\,dr = \varepsilon_{sp}\,Q_{Le}/(2\pi c_{2u} r_2)$
-  y lleva la corrección de la ec. 7.28: la garganta interior por la lengüeta, con
+  y lleva la corrección de la ec. 7.28: la garganta interior por el corte de agua, con
   $e_3$, y la de la primera voluta parcial por la nariz del nervio, con su espesor.
 - Con la ley de velocidad constante, el área crece en proporción al ángulo dentro de
   cada voluta parcial.
@@ -495,10 +495,10 @@ el empuje radial (cap. 9.3.4 y tabla 9.4). Se elige en el paso de datos de parti
 
 | Dato | Valor | Fuente |
 |---|---|---|
-| $\varepsilon_{sp}$ | 180°, o 170° con un número par de álabes, para que dos álabes no pasen a la vez por las dos lengüetas | Gülich cap. 7.8.1, punto 1 |
+| $\varepsilon_{sp}$ | 180°, o 170° con un número par de álabes, para que dos álabes no pasen a la vez por los dos cortes de agua | Gülich cap. 7.8.1, punto 1 |
 | Por debajo de 90° | error: no reduce el empuje radial | idem |
 | Por encima de 180° | aviso: el canal exterior largo añade pérdidas y empuje en sobrecarga | idem |
-| Espesor del nervio | $e_3$, el de la lengüeta (Gülich lo deja al cálculo resistente y a la fundición) | elección propia |
+| Espesor del nervio | $e_3$, el del corte de agua (Gülich lo deja al cálculo resistente y a la fundición) | elección propia |
 | Nariz y cola | largo/espesor 1, un semicírculo; de 1 a 5 | elección propia |
 | Nervio más grueso que 2/3 de la primera garganta | error | elección propia |
 | Secciones que no son de paredes rectas con un solo ángulo de cono | se convierten en el trapecio de la primera definición, con aviso: el nervio va a un radio fijo a lo ancho de la sección | — |
@@ -515,10 +515,10 @@ el empuje radial (cap. 9.3.4 y tabla 9.4). Se elige en el paso de datos de parti
   con tangente continua.
 - **Dirección:** la nariz apunta a lo largo de la pared de la voluta interior. Al
   empezar en $r'_z$ con un área casi nula, esa pared sale con el ángulo del flujo
-  $\alpha'_3$ (ecs. T7.7.3 a T7.7.5), que es lo que Gülich pide a la lengüeta (cap.
+  $\alpha'_3$ (ecs. T7.7.3 a T7.7.5), que es lo que Gülich pide al corte de agua (cap.
   7.8.1, punto 7: ángulo de calado según el flujo, incidencia de ±3°). La nariz queda
   así con incidencia casi nula sin otro dato.
-- **Perfil:** Gülich aconseja perfilar la lengüeta de forma elíptica para que acepte
+- **Perfil:** Gülich aconseja perfilar el corte de agua de forma elíptica para que acepte
   cambios de dirección del flujo, y definir su espesor por un círculo (mismo punto).
   Por defecto la nariz es un semicírculo; una relación mayor la alarga.
 
@@ -680,11 +680,11 @@ También avisan:
 
 ## CAD
 
-**Espiral, tobera y lengüeta:**
+**Espiral, tobera y corte de agua:**
 
-- Con la lengüeta tangente, la espiral y la tobera son un único sólido.
-- Con la afilada o la redondeada son dos, que se unen. La espiral entra 1,5° en la
-  tobera para que la unión no trabaje con caras coincidentes, y la lengüeta queda
+- Con el corte de agua tangente, la espiral y la tobera son un único sólido.
+- Con el afilado o el redondeado son dos, que se unen. La espiral entra 1,5° en la
+  tobera para que la unión no trabaje con caras coincidentes, y el corte de agua queda
   donde la pared de la espiral sale de la tobera.
 - La nariz redondeada se talla en el dominio fluido como un prisma con el contorno de
   la nariz en el plano medio, en toda la altura de la voluta. El nervio de la voluta
@@ -695,7 +695,7 @@ También avisan:
   - el anillo es un 0,5 % más estrecho que $b_3$;
   - las operaciones booleanas se repiten con una tolerancia de contacto de 0; 0,001;
     0,0001; 0,01 y 0,1 mm, en dos etapas: primero la unión de las piezas del canal y
-    después la del anillo y los cortes de la lengüeta y el nervio;
+    después la del anillo y los recortes de la nariz del corte de agua y del nervio;
   - si un intento deja un sólido con el volumen correcto pero con un defecto topológico
     pequeño, se repara con la sanación de formas de Open CASCADE antes de probar la
     siguiente tolerancia: cuesta mucho menos que repetir la operación;
@@ -705,7 +705,7 @@ También avisan:
     Bézier altas, por ejemplo, la unión exacta pierde la tobera y la buena sale con
     0,1 mm.
 - En una matriz de 75 combinaciones (forma de sección, voluta simple o doble, cinco
-  descargas y tres lengüetas) solo fallan dos, ambas con la pared exterior recta.
+  descargas y tres cortes de agua) solo fallan dos, ambas con la pared exterior recta.
 
 Los sólidos se construyen en milímetros con Open CASCADE:
 
@@ -720,16 +720,16 @@ Los sólidos se construyen en milímetros con Open CASCADE:
   con y sin estas tres medidas (contornos de 56 puntos, perfil del codo con splines,
   reparación de formas): la externa pasa de 55 a 34 s y la interna de 90 a 38 s. Casi
   todo es un único corte booleano, que Open CASCADE ya reparte entre núcleos.
-- **Voluta interna:** la espiral empieza a 3° de la lengüeta y se funde con la tobera, que
-  la atraviesa al principio: la lengüeta sale de esa intersección, como en las volutas de
-  lengüeta afilada. El anillo de entrada se revoluciona junto con el codo y el cuello, que
+- **Voluta interna:** la espiral empieza a 3° del corte de agua y se funde con la tobera, que
+  la atraviesa al principio: el corte de agua sale de esa intersección, como en las volutas de
+  corte de agua afilado. El anillo de entrada se revoluciona junto con el codo y el cuello, que
   entran un poco en la espiral, algo más bajos que el cuello en la cara para no correr
   sobre su techo plano. La carcasa añade el perfil del codo y el cuello desplazado el
   espesor de pared, trazado con splines entre sus esquinas para que tenga pocas caras,
   y el hueco del rodete ($r < r_2$) se abre solo en el lado opuesto a la espiral, porque
   esta queda por dentro de $r_2$. El loft recorre la
-  espiral y la tobera, y se une al anillo que va de la salida del rodete al círculo de
-  la lengüeta. El resultado es el dominio fluido, `volute.<ext>`.
+  espiral y la tobera, y se une al anillo que va de la salida del rodete al círculo del
+  corte de agua. El resultado es el dominio fluido, `volute.<ext>`.
 - **Carcasa de la voluta,** `volute-casing.<ext>` (construcción propia):
   - cada contorno del loft del fluido se desplaza hacia fuera el espesor de pared en su
     propio plano: cada punto se mueve por la bisectriz de las normales de sus dos
@@ -738,12 +738,12 @@ Los sólidos se construyen en milímetros con Open CASCADE:
     espesor;
   - con los contornos desplazados se hacen los mismos lofts que en el fluido, pero cada
     uno en dos mitades que se tocan en su contorno central. El comienzo de la espiral
-    corre justo por dentro de su garganta, con la lengüeta entre ambos; desplazados
+    corre justo por dentro de su garganta, con el corte de agua entre ambos; desplazados
     hacia fuera se cortarían dentro de un mismo loft, y Open CASCADE da entonces
     resultados sin sentido aunque el sólido parezca válido;
   - a la unión de las mitades se le restan el dominio fluido y un cilindro con el radio
     $r_2$ en toda la altura, el espacio del rodete;
-  - quedan macizos la lengüeta y su nariz, el nervio de la voluta doble y unas paredes
+  - quedan macizos el corte de agua y su nariz, el nervio de la voluta doble y unas paredes
     laterales a ambos lados del anillo de entrada, entre $r'_z$ menos el espesor y
     $r'_z$. La carcasa es abierta hacia el rodete y termina en la brida de salida;
   - la brida es un disco que se une a la carcasa. Su diámetro interior es medio
@@ -824,23 +824,23 @@ Tras el difusor, la voluta recibe mucho menos momento angular: $c_u r$ baja de 1
 - **Multietapa:** no hay canales de retorno.
 - **Secciones:** la voluta doble solo admite paredes rectas con un ángulo de cono. Si las
   definiciones mezclan formas de esquinas distintas, las esquinas vivas que no comparten
-  se suavizan en el CAD. En la voluta interna, la lengüeta es solo la intersección de la
+  se suavizan en el CAD. En la voluta interna, el corte de agua es solo la intersección de la
   espiral y la tobera, sin nariz ni corrección propia. La holgura con el rodete supone
   el espesor de pared por defecto de su modelo CAD: si al exportar se pone otro, la
   comprobación no lo ve.
 - **Áreas de la espiral:** faltan las reglas de Pfleiderer y Stepanoff.
 - **Tobera:** tangencial o radial, siempre en el plano medio: no hay codo en z ni
   desplazamiento axial, y la salida es siempre circular, sin brida rectangular. Con la
-  pared exterior recta, alguna combinación de lengüeta puede dar un sólido no válido.
-- **Lengüeta:** su nariz es un arco con tangentes rectas hasta la punta, sin un perfil
-  elíptico ni una curva editable. En la vista 3D, la espiral y la tobera de una
-  lengüeta afilada o redondeada se ven solapadas; el corte limpio y la nariz salen en
+  pared exterior recta, alguna combinación de corte de agua puede dar un sólido no válido.
+- **Corte de agua:** su nariz es un arco con tangentes rectas hasta la punta, sin un perfil
+  elíptico ni una curva editable. En la vista 3D, la espiral y la tobera de un
+  corte de agua afilado o redondeado se ven solapadas; el corte limpio y la nariz salen en
   el CAD.
 - **Carcasa:** su espesor es constante y no hay tapas ni pies; la brida no lleva
   resalte ni medidas de una norma de bridas, y la pared que
   rodea el anillo de entrada termina en un cilindro, sin los extremos cónicos que
   llevan algunas carcasas. Las tensiones son de membrana en un toro equivalente: sin
-  la flexión de las paredes planas ni concentraciones en la lengüeta o la brida.
+  la flexión de las paredes planas ni concentraciones en el corte de agua o la brida.
 - **Flujo:**
   - el difusor sin álabes no tiene rozamiento;
   - en el difusor con álabes el flujo sale sin desviación.
