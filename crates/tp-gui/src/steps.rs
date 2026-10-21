@@ -183,7 +183,7 @@ pub(crate) fn show(ui: &mut Ui, cx: &mut EditCtx<'_>) {
     }
 }
 
-/// The buttons under the step: accept, reset, back and next.
+/// The buttons under the step: back and next.
 pub(crate) fn footer(ui: &mut Ui, cx: &mut EditCtx<'_>) {
     let p = Palette::of(ui);
     let Selection::Step(id, step) = *cx.selection else {
@@ -200,22 +200,7 @@ pub(crate) fn footer(ui: &mut Ui, cx: &mut EditCtx<'_>) {
         return;
     };
     let (back, next) = neighbours(kind, step);
-    let mut target = None;
-    // Back and next go on the right of the same row when they fit, else on a row of
-    // their own, so a long label never draws over them.
-    let fits = ui
-        .horizontal(|ui| {
-            buttons(ui, cx, &project, id, step);
-            let fits = ui.available_width() >= navigation_width(ui);
-            if fits {
-                target = navigation(ui, back, next);
-            }
-            fits
-        })
-        .inner;
-    if !fits {
-        ui.horizontal(|ui| target = navigation(ui, back, next));
-    }
+    let target = ui.horizontal(|ui| navigation(ui, back, next)).inner;
     if let Some(target) = target {
         *cx.selection = Selection::Step(id, target);
     }
@@ -229,8 +214,20 @@ fn back_text() -> String {
     format!("{} {}", icon::CARET_LEFT, tr("Back"))
 }
 
-/// Width the back and next buttons take.
-fn navigation_width(ui: &Ui) -> f32 {
+fn accept_text() -> String {
+    format!("{}  {}", icon::CHECK, tr("Accept step"))
+}
+
+fn reset_text() -> String {
+    format!(
+        "{}  {}",
+        icon::ARROW_COUNTER_CLOCKWISE,
+        tr("Reset to automatic")
+    )
+}
+
+/// Width the accept and reset buttons take.
+fn buttons_width(ui: &Ui) -> f32 {
     let text_width = |text: String| {
         egui::WidgetText::from(text)
             .into_galley(
@@ -243,8 +240,8 @@ fn navigation_width(ui: &Ui) -> f32 {
             .x
     };
     let spacing = ui.spacing();
-    text_width(next_text())
-        + text_width(back_text())
+    text_width(accept_text())
+        + text_width(reset_text())
         + 4.0 * spacing.button_padding.x
         + 2.0 * spacing.item_spacing.x
 }
@@ -633,7 +630,9 @@ fn step_panel(ui: &mut Ui, cx: &mut EditCtx<'_>, id: ComponentId, step: DesignSt
     let p = Palette::of(ui);
     let status = component.status(step);
     let (glyph, color) = status_icon(&p, status);
-    ui.horizontal(|ui| {
+    // Accept and reset sit on the right of the status when they fit, else just below.
+    let actions = accept_state(&project, cx.derived, id, step) != AcceptState::NotApplicable;
+    let placed = ui.horizontal(|ui| {
         egui::Frame::new()
             .fill(color.gamma_multiply(0.14))
             .corner_radius(10)
@@ -648,7 +647,17 @@ fn step_panel(ui: &mut Ui, cx: &mut EditCtx<'_>, id: ComponentId, step: DesignSt
         if let Some(text) = intro(component.kind(), step) {
             widgets::info(ui, text);
         }
+        let fits = actions && ui.available_width() >= buttons_width(ui) + 8.0;
+        if fits {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                buttons(ui, cx, &project, id, step);
+            });
+        }
+        fits
     });
+    if actions && !placed.inner {
+        ui.horizontal(|ui| buttons(ui, cx, &project, id, step));
+    }
 
     if !is_available(component.kind(), step) {
         ui.separator();
@@ -702,7 +711,7 @@ fn buttons(
         return;
     }
     let ready = state == AcceptState::Ready;
-    let text = format!("{}  {}", icon::CHECK, tr("Accept step"));
+    let text = accept_text();
     let button = if ready {
         egui::Button::new(RichText::new(text).color(p.on_accent)).fill(p.accent)
     } else {
@@ -721,11 +730,7 @@ fn buttons(
         accept(cx, id, step);
     }
     if ui
-        .button(format!(
-            "{}  {}",
-            icon::ARROW_COUNTER_CLOCKWISE,
-            tr("Reset to automatic")
-        ))
+        .button(reset_text())
         .on_hover_text(tr(
             "Return every value of this step to its automatic proposal",
         ))
