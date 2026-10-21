@@ -286,9 +286,11 @@ mod tests {
             for discharge in [
                 DischargeShape::default(),
                 DischargeShape::Tangential {
+                    straight_wall: StraightWall::Centered,
+                },
+                DischargeShape::Tangential {
                     straight_wall: StraightWall::Inner,
                 },
-                DischargeShape::Radial { axis_angle: 0.0 },
             ] {
                 for cutwater in [CutwaterShape::default(), CutwaterShape::Tangent] {
                     let mut input = VoluteInput::default();
@@ -320,7 +322,9 @@ mod tests {
             assert_eq!(cad.fluid.solid_count(), 1, "{cutwater:?} {discharge:?}");
             cad.fluid_volume()
         };
-        let straight = DischargeShape::default();
+        let straight = DischargeShape::Tangential {
+            straight_wall: StraightWall::Centered,
+        };
         let sharp = fluid(CutwaterShape::Sharp, straight);
         let rounded = fluid(
             CutwaterShape::Rounded {
