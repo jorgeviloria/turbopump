@@ -1198,6 +1198,47 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("λ_w of the NPSH₃", "λ_w del NPSH₃"),
     ("NPSH₃ exponent", "exponente del NPSH₃"),
     ("Radial force", "Empuje radial"),
+    ("Axial force", "Empuje axial"),
+    ("toward the suction side", "hacia la aspiración"),
+    ("toward the pressure side", "hacia la impulsión"),
+    (
+        "{} at design {} · {} at shut-off",
+        "{} en el diseño {} · {} a válvula cerrada",
+    ),
+    (
+        "about {} of either sign (double entry)",
+        "unos {} en cualquier sentido (doble aspiración)",
+    ),
+    (
+        "about {} of either sign; double-entry impeller, Gülich eq. T9.2.15",
+        "unos {} en cualquier sentido; rodete de doble aspiración, Gülich ec. T9.2.15",
+    ),
+    (
+        "{} at design {}, {} at shut-off, largest {}; Gülich Table 9.2",
+        "{} en el diseño {}, {} a válvula cerrada, máximo {}; Gülich tabla 9.2",
+    ),
+    (
+        "Axial force parts at design",
+        "Partes del empuje axial en el diseño",
+    ),
+    (
+        "shrouds {} (k {} front, {} rear{}), momentum {}, shaft {}",
+        "discos {} (k {} delantero, {} trasero{}), cantidad de movimiento {}, eje {}",
+    ),
+    (", balance holes", ", agujeros de equilibrado"),
+    (
+        "Annular and shaft seals",
+        "Anillo de desgaste y sello del eje",
+    ),
+    (
+        "d_sp {}, d_D {}; rough estimate {} to {} (eq. T9.2.12)",
+        "d_sp {}, d_D {}; estimación rápida de {} a {} (ec. T9.2.12)",
+    ),
+    ("Balance holes", "Agujeros de equilibrado"),
+    (
+        "Holes in the rear shroud with an annular seal there: most of the axial force on the shrouds cancels (Gülich eq. T9.2.14)",
+        "Agujeros en el disco trasero con un anillo de desgaste allí: se anula la mayor parte del empuje axial sobre los discos (Gülich ec. T9.2.14)",
+    ),
     (
         "{} at design · {} at shut-off",
         "{} en el diseño · {} a válvula cerrada",
@@ -1367,6 +1408,26 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
 
 /// Messages of the design code, most specific first.
 pub(super) static MESSAGES: &[(&str, &str)] = &[
+    (
+        "the axial force points to the pressure side ({} N at design): the suction pressure on the shaft outweighs the shrouds (Gülich Chap. 9.2.2)",
+        "el empuje axial apunta hacia la impulsión ({} N en el diseño): la presión de aspiración sobre el eje pesa más que los discos (Gülich cap. 9.2.2)",
+    ),
+    (
+        "the shaft seal diameter must be positive and below the {} mm annular seal",
+        "el diámetro del sello del eje debe ser positivo y menor que el anillo de desgaste de {} mm",
+    ),
+    (
+        "the annular seal diameter {} mm must stay below d₂ = {} mm",
+        "el diámetro del anillo de desgaste, {} mm, debe quedar por debajo de d₂ = {} mm",
+    ),
+    (
+        "the rear seal diameter {} mm must lie between the shaft seal and d₂",
+        "el diámetro del anillo trasero, {} mm, debe quedar entre el sello del eje y d₂",
+    ),
+    (
+        "the rotation factor k_o must lie between 0.1 and 1, got {}",
+        "el factor de rotación k_o debe estar entre 0,1 y 1; se recibió {}",
+    ),
     (
         "the bend of the radial discharge ({} mm) is longer than the diffuser ({} mm): the diffuser ends with the bend",
         "el codo de la descarga radial ({} mm) es más largo que el difusor ({} mm): el difusor acaba con el codo",

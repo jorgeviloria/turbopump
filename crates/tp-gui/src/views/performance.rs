@@ -26,6 +26,7 @@ pub(crate) struct PerformanceView {
     onset: Param<f64>,
     shutoff: Param<f64>,
     max_flow: Param<f64>,
+    balance_holes: bool,
     cache: Option<(Key, Result<PumpPerformance, String>)>,
 }
 
@@ -81,6 +82,7 @@ impl PerformanceView {
         input.recirculation_onset = self.onset;
         input.shutoff_coefficient = self.shutoff;
         input.max_flow_ratio = self.max_flow;
+        input.axial.balance_holes = self.balance_holes;
         let key = (derived.revision(), id, input.clone());
         if self.cache.as_ref().is_none_or(|(k, _)| *k != key) {
             let curve = project
@@ -134,6 +136,11 @@ impl PerformanceView {
                 &mut self.max_flow,
                 curve.max_flow / q_opt,
             );
+            ui.checkbox(&mut self.balance_holes, tr("Balance holes"))
+                .on_hover_text(tr(
+                    "Holes in the rear shroud with an annular seal there: most of the axial \
+                     force on the shrouds cancels (Gülich eq. T9.2.14)",
+                ));
         });
 
         // Key numbers.
@@ -198,6 +205,30 @@ impl PerformanceView {
                     ),
                 );
             }
+            let axial = &curve.axial;
+            line(
+                ui,
+                tr("Axial force"),
+                if axial.law.eyes > 1.5 {
+                    tf(
+                        "about {} of either sign (double entry)",
+                        &[&s(QuantityKind::Force, axial.design.total)],
+                    )
+                } else {
+                    tf(
+                        "{} at design {} · {} at shut-off",
+                        &[
+                            &s(QuantityKind::Force, axial.design.total.abs()),
+                            &tr(if axial.design.total >= 0.0 {
+                                "toward the suction side"
+                            } else {
+                                "toward the pressure side"
+                            }),
+                            &s(QuantityKind::Force, axial.shutoff.total),
+                        ],
+                    )
+                },
+            );
             if let Some(v) = &curve.volute {
                 line(
                     ui,

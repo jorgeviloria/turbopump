@@ -500,6 +500,68 @@ pub(crate) fn show(
                                 ),
                             );
                         }
+                        let a = &c.axial;
+                        let f = &a.design;
+                        if a.law.eyes > 1.5 {
+                            value_row(
+                                ui,
+                                tr("Axial force"),
+                                tf(
+                                    "about {} of either sign; double-entry impeller, Gülich eq. T9.2.15",
+                                    &[&s(Force, f.total)],
+                                ),
+                            );
+                        } else {
+                            value_row(
+                                ui,
+                                tr("Axial force"),
+                                tf(
+                                    "{} at design {}, {} at shut-off, largest {}; Gülich Table 9.2",
+                                    &[
+                                        &s(Force, f.total.abs()),
+                                        &tr(if f.total >= 0.0 {
+                                            "toward the suction side"
+                                        } else {
+                                            "toward the pressure side"
+                                        }),
+                                        &s(Force, a.shutoff.total),
+                                        &s(Force, a.largest),
+                                    ],
+                                ),
+                            );
+                            value_row(
+                                ui,
+                                tr("Axial force parts at design"),
+                                tf(
+                                    "shrouds {} (k {} front, {} rear{}), momentum {}, shaft {}",
+                                    &[
+                                        &s(Force, f.hydraulic),
+                                        &format!("{:.2}", f.front_rotation),
+                                        &format!("{:.2}", f.rear_rotation),
+                                        &if a.law.rear_seal_diameter.is_some() {
+                                            tr(", balance holes").to_owned()
+                                        } else {
+                                            String::new()
+                                        },
+                                        &s(Force, f.momentum),
+                                        &s(Force, f.shaft),
+                                    ],
+                                ),
+                            );
+                            value_row(
+                                ui,
+                                tr("Annular and shaft seals"),
+                                tf(
+                                    "d_sp {}, d_D {}; rough estimate {} to {} (eq. T9.2.12)",
+                                    &[
+                                        &s(Length, a.law.seal_diameter),
+                                        &s(Length, a.law.shaft_seal_diameter),
+                                        &s(Force, a.estimate.0),
+                                        &s(Force, a.estimate.1),
+                                    ],
+                                ),
+                            );
+                        }
                         if let Some(v) = &c.volute {
                             let d = &v.design;
                             value_row(
