@@ -1,6 +1,12 @@
-//! CAD solid of the volute flow domain: the vaneless ring after the impeller, the
-//! spiral channel and the discharge diffuser. A double volute lofts its whole sections
-//! as one spiral and cuts the rib out of it.
+//! CAD solids of the volute: the flow domain (the vaneless ring after the impeller, the
+//! spiral channel and the discharge diffuser) and the casing around it. A double volute
+//! lofts its whole sections as one spiral and cuts the rib out of it.
+//!
+//! The casing ([`build_volute_casing`]) lofts the outlines of the flow domain offset by
+//! the wall thickness ([`VoluteGeometry::casing_lofts`]) and cuts the flow domain and the
+//! space of the impeller (r < r₂) out of them. The cutwater, the rib of a double volute and the
+//! walls beside the vaneless ring stay as material; the casing ends flat at the outlet
+//! of the diffuser and is open toward the impeller.
 
 use tp_design::volute::VoluteGeometry;
 use tp_math::DVec3;
@@ -24,6 +30,20 @@ impl VoluteCad {
     /// Volume of the flow domain, m³.
     pub fn fluid_volume(&self) -> f64 {
         self.fluid.volume() / MM.powi(3)
+    }
+}
+
+/// The casing of one volute, in millimetres: the material around the flow domain, as
+/// thick as the wall.
+#[derive(Debug)]
+pub struct VoluteCasing {
+    pub solid: Shape,
+}
+
+impl VoluteCasing {
+    /// Volume of the material, m³.
+    pub fn volume(&self) -> f64 {
+        self.solid.volume() / MM.powi(3)
     }
 }
 
@@ -58,20 +78,46 @@ fn section_wire(ring: &[DVec3], breaks: &[usize]) -> Result<Shape, CadError> {
 /// inlet ring.
 const FUZZY_GAPS: [f64; 4] = [0.0, 1e-3, 1e-4, 1e-2];
 
-/// Builds the volute channel and its flow domain from the geometry.
-pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
-    let breaks = g.ring_breaks();
-    let lofts = g
-        .lofts()
+/// One solid lofted through each sequence of outlines.
+fn loft_pieces(pieces: &[Vec<Vec<DVec3>>], breaks: &[usize]) -> Result<Vec<Shape>, CadError> {
+    pieces
         .iter()
         .map(|rings| {
             let wires = rings
                 .iter()
-                .map(|ring| section_wire(ring, &breaks))
+                .map(|ring| section_wire(ring, breaks))
                 .collect::<Result<Vec<_>, _>>()?;
             occ::loft(&wires)
         })
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect()
+}
+
+/// The first attempt over [`FUZZY_GAPS`] whose result is `sound`, else the first that
+/// built at all.
+fn first_sound<T>(
+    attempt: impl Fn(f64) -> Result<T, CadError>,
+    sound: impl Fn(&T) -> bool,
+) -> Result<T, CadError> {
+    let mut fallback = None;
+    let mut error = None;
+    for fuzzy in FUZZY_GAPS {
+        match attempt(fuzzy) {
+            Ok(result) if sound(&result) => return Ok(result),
+            Ok(result) => {
+                fallback.get_or_insert(result);
+            }
+            Err(e) => {
+                error.get_or_insert(e);
+            }
+        }
+    }
+    fallback.map_or_else(|| Err(error.expect("at least one attempt")), Ok)
+}
+
+/// Builds the volute channel and its flow domain from the geometry.
+pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
+    let breaks = g.ring_breaks();
+    let lofts = loft_pieces(&g.lofts(), &breaks)?;
 
     // Ring between the impeller outlet and the cutwater circle, as wide as the volute
     // inlet. It reaches slightly into the channel so the two solids overlap.
@@ -130,36 +176,82 @@ pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
         ])?);
     }
 
-    let assemble = |fuzzy: f64| -> Result<VoluteCad, CadError> {
-        // A turn by zero copies the first piece for this attempt.
-        let mut channel = lofts[0].rotated_z(0.0)?;
-        for piece in &lofts[1..] {
-            channel = channel.fuse_fuzzy(piece, fuzzy)?;
-        }
+    let assemble = |fuzzy: f64| -> Result<(Shape, Shape), CadError> {
+        let mut channel = fuse_all(&lofts, fuzzy)?;
         let mut fluid = ring.fuse_fuzzy(&channel, fuzzy)?;
         for tool in &tools {
             fluid = fluid.cut_fuzzy(tool, fuzzy)?;
             channel = channel.cut_fuzzy(tool, fuzzy)?;
         }
-        Ok(VoluteCad { channel, fluid })
+        Ok((channel, fluid))
     };
     // The flow domain is what gets exported.
-    let sound = |cad: &VoluteCad| cad.fluid.is_valid() && cad.fluid.solid_count() == 1;
-    // The first sound attempt, else the first that built at all.
-    let mut fallback = None;
-    let mut error = None;
-    for fuzzy in FUZZY_GAPS {
-        match assemble(fuzzy) {
-            Ok(cad) if sound(&cad) => return Ok(cad),
-            Ok(cad) => {
-                fallback.get_or_insert(cad);
+    let (channel, fluid) = first_sound(assemble, |(_, fluid)| {
+        fluid.is_valid() && fluid.solid_count() == 1
+    })?;
+
+    Ok(VoluteCad { channel, fluid })
+}
+
+/// Builds the casing around the flow domain `cad` of the volute `g`.
+pub fn build_volute_casing(g: &VoluteGeometry, cad: &VoluteCad) -> Result<VoluteCasing, CadError> {
+    // The start of the spiral runs just inside its throat, the cutwater between them:
+    // offset outward, the two would cut into each other within one loft. Each piece is
+    // lofted in two halves, which meet on their middle outline.
+    let halves: Vec<Vec<Vec<DVec3>>> = g
+        .casing_lofts()
+        .into_iter()
+        .flat_map(|rings| {
+            let mid = rings.len() / 2;
+            if mid < 2 {
+                vec![rings]
+            } else {
+                vec![rings[..=mid].to_vec(), rings[mid..].to_vec()]
             }
-            Err(e) => {
-                error.get_or_insert(e);
-            }
-        }
+        })
+        .collect();
+    let outer = loft_pieces(&halves, &g.ring_breaks())?;
+    // The space of the impeller, through the whole height of the casing.
+    let zs = halves.iter().flatten().flatten().map(|p| p.z);
+    let (z_lo, z_hi) = zs.fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), z| {
+        (lo.min(z), hi.max(z))
+    });
+    let margin = 0.1 * (z_hi - z_lo);
+    let (lo, hi) = ((z_lo - margin) * MM, (z_hi + margin) * MM);
+    let r2 = g.inlet_ring().0 * MM;
+    let point = |r: f64, z: f64| DVec3::new(r, 0.0, z);
+    let impeller = occ::revolve_z(&occ::planar_face(&occ::wire(&[
+        occ::line_edge(point(0.0, lo), point(r2, lo))?,
+        occ::line_edge(point(r2, lo), point(r2, hi))?,
+        occ::line_edge(point(r2, hi), point(0.0, hi))?,
+        occ::line_edge(point(0.0, hi), point(0.0, lo))?,
+    ])?)?)?;
+    // A failed boolean may still give one valid solid: the casing must also have lost
+    // the channel out of its outer volume (quick estimates of the volumes).
+    let channel = cad.channel.volume_with_tolerance(0.0);
+    let enclose = |fuzzy: f64| -> Result<(Shape, f64), CadError> {
+        let space = cad.fluid.fuse_fuzzy(&impeller, fuzzy)?;
+        let whole = fuse_all(&outer, fuzzy)?;
+        let gross = whole.volume_with_tolerance(0.0);
+        Ok((whole.cut_fuzzy(&space, fuzzy)?, gross))
+    };
+    let sound = |(solid, gross): &(Shape, f64)| {
+        solid.is_valid()
+            && solid.solid_count() == 1
+            && solid.volume_with_tolerance(0.0) < gross - 0.8 * channel
+    };
+    let (solid, _) = first_sound(enclose, sound)?;
+    Ok(VoluteCasing { solid })
+}
+
+/// The union of `pieces`.
+fn fuse_all(pieces: &[Shape], fuzzy: f64) -> Result<Shape, CadError> {
+    // A turn by zero copies the first piece for this attempt.
+    let mut whole = pieces[0].rotated_z(0.0)?;
+    for piece in &pieces[1..] {
+        whole = whole.fuse_fuzzy(piece, fuzzy)?;
     }
-    fallback.map_or_else(|| Err(error.expect("at least one attempt")), Ok)
+    Ok(whole)
 }
 
 #[cfg(test)]
@@ -231,6 +323,56 @@ mod tests {
             let ring = PI * (outer * outer - inner * inner) * g.design.inlet_width;
             let fluid = cad.fluid.volume_with_tolerance(1e-3) / MM.powi(3);
             assert!(fluid > channel + 0.8 * ring && fluid < channel + 1.3 * ring);
+        }
+    }
+
+    /// Wetted outline times wall thickness, along the path of the outline centroids.
+    fn shell_estimate(g: &VoluteGeometry) -> f64 {
+        let t = g.design.wall_thickness;
+        let perimeter = |ring: &[DVec3]| -> f64 {
+            (0..ring.len())
+                .map(|i| ring[i].distance(ring[(i + 1) % ring.len()]))
+                .sum()
+        };
+        let centroid = |ring: &[DVec3]| ring.iter().copied().sum::<DVec3>() / ring.len() as f64;
+        g.lofts()
+            .iter()
+            .flat_map(|rings| {
+                rings.windows(2).map(|w| {
+                    0.5 * (perimeter(&w[0]) + perimeter(&w[1]))
+                        * t
+                        * centroid(&w[0]).distance(centroid(&w[1]))
+                })
+            })
+            .sum()
+    }
+
+    #[test]
+    fn the_casing_wraps_the_flow_domain_in_one_solid() {
+        use tp_design::volute::VoluteKind;
+        // The trapezoidal default, rectangles whose flat sides meet in the throat, and
+        // a double volute.
+        let edits: [&dyn Fn(&mut VoluteInput); 3] = [
+            &|_| {},
+            &|v| v.cross_section.shape = SectionShape::Rectangular,
+            &|v| v.setup.kind = VoluteKind::Double,
+        ];
+        for edit in edits {
+            let mut input = VoluteInput::default();
+            edit(&mut input);
+            let g = VoluteGeometry::build(&basis(), &input).unwrap();
+            let cad = build_volute(&g).unwrap();
+            let casing = build_volute_casing(&g, &cad).unwrap();
+            assert!(casing.solid.is_valid() && casing.solid.solid_count() == 1);
+            // The shell around the channel, plus the cutwater and the walls beside the
+            // inlet ring.
+            let volume = casing.solid.volume_with_tolerance(0.0) / MM.powi(3);
+            let shell = shell_estimate(&g);
+            assert!(
+                volume > 0.9 * shell && volume < 1.6 * shell,
+                "{:?}: {volume} vs {shell}",
+                input.cross_section.shape
+            );
         }
     }
 
