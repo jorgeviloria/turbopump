@@ -9,6 +9,7 @@
 
 mod app;
 mod derived;
+mod dialogs;
 mod diffuser_steps;
 mod export;
 mod i18n;

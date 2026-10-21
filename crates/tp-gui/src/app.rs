@@ -14,8 +14,9 @@ use tp_project::{
 use tp_units::{DisplayUnits, QuantityKind};
 
 use crate::derived::Derived;
+use crate::dialogs::{self, Choice};
 use crate::export::{self, Exports};
-use crate::i18n::{self, Language, message, tf, tr};
+use crate::i18n::{self, Language, message, project_name, tf, tr};
 use crate::messages::{self, Message};
 use crate::ribbon::{Command, Ribbon, RibbonCx};
 use crate::settings::{self, Section, SettingsCx};
@@ -27,9 +28,6 @@ use crate::views::cross_section::CrossSectionView;
 use crate::views::performance::PerformanceView;
 use crate::views::{blade, front, meridional::MeridionalView, report};
 use crate::{default_project, steps, tree, widgets};
-
-/// Where the documentation lives.
-const PROJECT_PAGE: &str = "https://github.com/jorgeviloria/turbopump";
 
 /// What the step panel shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -960,7 +958,9 @@ impl TurbopumpApp {
             }
             Command::About => self.dialog = Some(Dialog::About),
             Command::Settings(section) => self.dialog = Some(Dialog::Settings(section)),
-            Command::Documentation => ctx.open_url(egui::OpenUrl::new_tab(PROJECT_PAGE)),
+            Command::Documentation => {
+                ctx.open_url(egui::OpenUrl::new_tab(dialogs::PROJECT_PAGE));
+            }
         }
     }
 
@@ -1386,25 +1386,9 @@ impl TurbopumpApp {
                 }
             }
             Dialog::ConfirmDiscard(pending) => {
-                let mut choice = None;
-                let name = self.doc.project().info.name.clone();
-                let response = Modal::new(egui::Id::new("confirm_discard")).show(ctx, |ui| {
-                    ui.heading(tr("Unsaved changes"));
-                    ui.label(tf("Save the changes to \"{}\" first?", &[&name]));
-                    ui.add_space(8.0);
-                    ui.horizontal(|ui| {
-                        if ui.button(tr("Save")).clicked() {
-                            choice = Some(Choice::Save);
-                        }
-                        if ui.button(tr("Don't save")).clicked() {
-                            choice = Some(Choice::Discard);
-                        }
-                        if ui.button(tr("Cancel")).clicked() {
-                            choice = Some(Choice::Cancel);
-                        }
-                    });
-                });
-                match choice {
+                let name = project_name(&self.doc.project().info.name);
+                let quitting = matches!(pending, Pending::Quit);
+                match dialogs::confirm_discard(ctx, name, quitting) {
                     Some(Choice::Save) => {
                         if self.save() {
                             self.finish(pending, ctx);
@@ -1416,21 +1400,10 @@ impl TurbopumpApp {
                         None
                     }
                     Some(Choice::Cancel) => None,
-                    None if response.should_close() => None,
                     None => Some(Dialog::ConfirmDiscard(pending)),
                 }
             }
-            Dialog::About => {
-                let response = Modal::new(egui::Id::new("about")).show(ctx, |ui| {
-                    ui.heading(tr("Turbopump"));
-                    ui.label(tf("Version {}", &[&env!("CARGO_PKG_VERSION")]));
-                    ui.label(tr("Open-source preliminary design of turbomachinery."));
-                    ui.label(tr("License: MIT OR Apache-2.0"));
-                    ui.add_space(6.0);
-                    ui.button(tr("Close")).clicked()
-                });
-                (!response.inner && !response.should_close()).then_some(Dialog::About)
-            }
+            Dialog::About => dialogs::about(ctx).then_some(Dialog::About),
             Dialog::Settings(mut section) => {
                 let cx = SettingsCx {
                     theme: ctx.options(|o| o.theme_preference),
@@ -1458,12 +1431,6 @@ impl TurbopumpApp {
             ctx.send_viewport_cmd(ViewportCommand::Close);
         }
     }
-}
-
-enum Choice {
-    Save,
-    Discard,
-    Cancel,
 }
 
 impl eframe::App for TurbopumpApp {

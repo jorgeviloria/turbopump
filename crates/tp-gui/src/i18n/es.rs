@@ -1306,6 +1306,51 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Las secciones planas con B/H = 2 a 3 pierden menos (Gülich p. 414)",
     ),
     ("Corners", "Esquinas"),
+    // About and the confirmation before discarding changes.
+    (
+        "and the Turbopump contributors",
+        "y los colaboradores de Turbopump",
+    ),
+    ("Built with", "Hecho con"),
+    ("Methods and references", "Métodos y referencias"),
+    ("License", "Licencia"),
+    (
+        "Free software: you may use, study, change and share it under the MIT or the Apache-2.0 license, at your choice. It comes without any warranty.",
+        "Software libre: puedes usarlo, estudiarlo, modificarlo y compartirlo bajo la licencia MIT o la Apache-2.0, a tu elección. Se ofrece sin ninguna garantía.",
+    ),
+    ("Project page", "Página del proyecto"),
+    (
+        "Version {} · open-source preliminary design of turbomachinery",
+        "Versión {} · diseño preliminar de turbomáquinas de código abierto",
+    ),
+    ("Save the changes to “{}”?", "¿Guardar los cambios de «{}»?"),
+    (
+        "If you close without saving, the changes are lost.",
+        "Si cierras sin guardar, los cambios se pierden.",
+    ),
+    (
+        "If you open another project without saving, the changes are lost.",
+        "Si abres otro proyecto sin guardar, los cambios se pierden.",
+    ),
+    (
+        "Language of the whole program",
+        "Lenguaje de todo el programa",
+    ),
+    ("Interface and windows", "Interfaz y ventanas"),
+    ("Plots and curves", "Gráficas y curvas"),
+    (
+        "3D view on the graphics card",
+        "Vista 3D en la tarjeta gráfica",
+    ),
+    (
+        "CAD solids, STEP, IGES and STL",
+        "Sólidos CAD, STEP, IGES y STL",
+    ),
+    ("Fluid properties", "Propiedades del fluido"),
+    ("DXF drawings", "Planos DXF"),
+    ("DWG drawings", "Planos DWG"),
+    ("Typeface", "Tipografía"),
+    ("Icons", "Iconos"),
     ("Wrap angle φ", "Ángulo de envolvimiento φ"),
     (
         "Where round the spiral this shape applies, from the start of the spiral",

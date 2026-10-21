@@ -434,3 +434,43 @@ fn view_cube() {
         }
     }
 }
+
+/// The "About" window and the question before discarding unsaved changes.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn dialogs() {
+    for (theme, suffix) in [(egui::Theme::Light, "light"), (egui::Theme::Dark, "dark")] {
+        let mut harness = harness(theme);
+        harness.get_by_label("Help tab").click();
+        harness.run();
+        harness.get_by_label_contains("About").click();
+        harness.run();
+        harness.remove_cursor();
+        harness.run();
+        save(&mut harness, &format!("about-{suffix}"));
+        // The references and the license, further down.
+        harness.hover_at(egui::pos2(480.0, 300.0));
+        harness.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -600.0),
+            modifiers: egui::Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        });
+        harness.run();
+        harness.remove_cursor();
+        harness.run();
+        save(&mut harness, &format!("about-end-{suffix}"));
+        harness.get_by_label("Close").click();
+        harness.run();
+        // An accepted step leaves unsaved changes; a new project asks first.
+        harness.get_by_label_contains("Accept step").click();
+        harness.run();
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::N);
+        harness.run();
+        harness.get_by_label("Create").click();
+        harness.run();
+        harness.remove_cursor();
+        harness.run();
+        save(&mut harness, &format!("unsaved-{suffix}"));
+    }
+}
