@@ -357,7 +357,51 @@ fn volute_designs_and_exports() {
         "law=velocity",
         "--dry-run",
     ]));
-    assert!(manual.contains("circular; constant velocity"), "{manual}");
+    assert!(manual.contains("round; constant velocity"), "{manual}");
+    // Definitions round the spiral: line segments at 120° with a trapezoidal +z side,
+    // blending to a radius-based throat.
+    let defined = stdout(&turbopump(&[
+        "volute",
+        file_arg,
+        "--set",
+        "shape=radius:main=40mm,cone=25",
+        "--set",
+        "shape@120=segments:points=0/0.1+0.5/1/0.3",
+        "--set",
+        "shape@120.right=trapezoid:20",
+        "--dry-run",
+    ]));
+    assert!(
+        defined.contains(
+            "line segments, 2 corners (−z) / trapezoidal, flanks at 20.00 ° (+z) at 120.0 °, \
+             blending to radius based, cone at 25.00 ° at 360.0 °"
+        ),
+        "{defined}"
+    );
+    let external = stdout(&turbopump(&[
+        "volute",
+        file_arg,
+        "--set",
+        "shape=external:ratio=1.2,right,square",
+        "--dry-run",
+    ]));
+    assert!(
+        external.contains("round asymmetric toward +z, ellipse ratio 1.2, square top"),
+        "{external}"
+    );
+    // A double volute turns round sections into its straight walls, and says so.
+    let double = stdout(&turbopump(&[
+        "volute",
+        file_arg,
+        "--set",
+        "shape=round",
+        "--set",
+        "type=double",
+        "--dry-run",
+    ]));
+    assert!(double.contains("made trapezoidal at 30.0°"), "{double}");
+    let unknown = turbopump(&["volute", file_arg, "--set", "shape=radius:foo=1"]);
+    assert_eq!(unknown.status.code(), Some(2));
     // The outlet face set at 250 mm from the axis, a nominal outlet and the flange.
     let flanged = stdout(&turbopump(&[
         "volute",

@@ -6,8 +6,9 @@ use clap::Args;
 use tp_design::Param;
 use tp_design::volute::stress::StressPlace;
 use tp_design::volute::{
-    AreaLaw, CutwaterShape, DischargeShape, SectionShape, StraightWall, VoluteGeometry,
-    VoluteInput, VoluteKind,
+    AreaLaw, BezierBase, BezierSide, CutwaterShape, DEFAULT_CONE_ANGLE_DEG, DischargeShape,
+    ExternalRound, InnerPosition, RadiusSide, SectionDefinition, SectionShape, SegmentPoint,
+    SideShape, StraightWall, VoluteGeometry, VoluteInput, VoluteKind,
 };
 use tp_project::{ComponentId, ComponentKind, Project, VOLUTE_STEPS};
 use tp_units::{DisplayUnits, QuantityKind, parse_quantity_or};
@@ -23,8 +24,14 @@ pub(crate) struct VoluteArgs {
     #[arg(long)]
     component: Option<u32>,
     /// Fix an input as KEY=VALUE, or KEY=auto. Keys: flow-factor (Q_Le/Q), dz
-    /// (cutwater diameter), b3 (inlet width), e3 (cutwater thickness), shape
-    /// (rectangle, circle or trapezoid:DEGREES), law (auto, momentum or velocity),
+    /// (cutwater diameter), b3 (inlet width), e3 (cutwater thickness), shape (the cross
+    /// section of the whole spiral: rectangle, trapezoid, round, bezier,
+    /// bezier-trapezoid, segments, radius or external, each with optional parameters
+    /// after a colon, e.g. trapezoid:30, round:ratio=1.2, radius:main=40mm,cone=30,
+    /// segments:points=0/0.08+0.55/1/0.4, external:right,square; shape@DEGREES=… defines
+    /// it at one wrap angle, blending between angles, and remove, off or on drop or
+    /// toggle that definition; shape.right=… or shape@DEGREES.right=… gives the +z side
+    /// its own shape, symmetric undoes it), law (auto, momentum or velocity),
     /// sections, correction (on or off), length (along the diffuser centerline) and
     /// outlet (discharge diffuser), incidence (cutwater), wall, type (single or double),
     /// rib_wrap (wrap of the inner volute of a double volute), rib (rib thickness),
@@ -118,20 +125,321 @@ fn export(dir: &Path, g: &VoluteGeometry) -> Result<(), String> {
     Ok(())
 }
 
-fn parse_shape(value: &str) -> Result<SectionShape, String> {
-    match value {
-        "rectangle" => Ok(SectionShape::Rectangular),
-        "circle" => Ok(SectionShape::Circular),
-        "trapezoid" => Ok(SectionShape::default()),
-        _ => value
-            .strip_prefix("trapezoid:")
-            .and_then(|d| d.trim().parse::<f64>().ok())
-            .map(|degrees| SectionShape::Trapezoidal {
-                flank_angle: degrees.to_radians(),
+/// The parameters after `TYPE:` in a cross-section spec: `name=value` pairs or flags
+/// separated by commas, where a bare first value names `positional`.
+fn spec_params<'a>(rest: &'a str, positional: &'static str) -> Vec<(&'a str, &'a str)> {
+    rest.split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .enumerate()
+        .map(|(i, item)| match item.split_once('=') {
+            Some((name, value)) => (name.trim(), value.trim()),
+            None if i == 0 && item.parse::<f64>().is_ok() => (positional, item),
+            None => (item, ""),
+        })
+        .collect()
+}
+
+fn number(name: &str, value: &str) -> Result<f64, String> {
+    value
+        .parse::<f64>()
+        .map_err(|_| format!("{name} must be a number, got {value:?}"))
+}
+
+/// One side of a cross section from `TYPE[:PARAMS]`.
+fn parse_side(spec: &str, units: &DisplayUnits) -> Result<SideShape, String> {
+    let (kind, rest) = spec.split_once(':').unwrap_or((spec, ""));
+    let degrees = |name: &str, value: &str| number(name, value).map(f64::to_radians);
+    let length = |name: &str, value: &str| -> Result<Param<f64>, String> {
+        if value.eq_ignore_ascii_case("auto") {
+            return Ok(Param::Auto);
+        }
+        parse_quantity_or(value, QuantityKind::Length, units.get(QuantityKind::Length))
+            .map(Param::Manual)
+            .map_err(|e| format!("{name}: {e}"))
+    };
+    let unknown = |name: &str, kind: &str, valid: &str| {
+        Err(format!(
+            "{kind} sections have no parameter {name:?}; valid: {valid}"
+        ))
+    };
+    match kind {
+        "rectangle" | "rectangular" => {
+            let mut tangent_angle = 0.0;
+            for (name, value) in spec_params(rest, "tangent") {
+                match name {
+                    "tangent" => tangent_angle = degrees(name, value)?,
+                    _ => return unknown(name, kind, "tangent"),
+                }
+            }
+            Ok(SideShape::Rectangular { tangent_angle })
+        }
+        "trapezoid" | "trapezoidal" => {
+            let (mut cone_angle, mut tangent_angle) = (DEFAULT_CONE_ANGLE_DEG.to_radians(), 0.0);
+            for (name, value) in spec_params(rest, "cone") {
+                match name {
+                    "cone" => cone_angle = degrees(name, value)?,
+                    "tangent" => tangent_angle = degrees(name, value)?,
+                    _ => return unknown(name, kind, "cone, tangent"),
+                }
+            }
+            Ok(SideShape::Trapezoidal {
+                cone_angle,
+                tangent_angle,
             })
-            .ok_or_else(|| {
-                format!("shape must be rectangle, circle or trapezoid:DEGREES, got {value:?}")
-            }),
+        }
+        "round" | "circle" => {
+            let mut ellipse_ratio = 1.0;
+            for (name, value) in spec_params(rest, "ratio") {
+                match name {
+                    "ratio" => ellipse_ratio = number(name, value)?,
+                    _ => return unknown(name, kind, "ratio"),
+                }
+            }
+            Ok(SideShape::Round { ellipse_ratio })
+        }
+        "bezier" | "bezier-rectangle" | "bezier-trapezoid" => {
+            let mut b = BezierSide {
+                base: if kind == "bezier-trapezoid" {
+                    BezierBase::Trapezoid
+                } else {
+                    BezierBase::Rectangle
+                },
+                ..BezierSide::default()
+            };
+            let params = spec_params(rest, "cone");
+            let absolute = params.iter().any(|(name, _)| *name == "absolute");
+            if absolute {
+                b.position = InnerPosition::Absolute;
+                b.point1 = 0.0;
+                b.point3 = 0.0;
+            }
+            let inner = |name: &str, value: &str| -> Result<f64, String> {
+                if absolute {
+                    length(name, value)?
+                        .manual_value()
+                        .ok_or_else(|| format!("{name} needs a length"))
+                } else {
+                    number(name, value)
+                }
+            };
+            for (name, value) in params {
+                match name {
+                    "cone" => b.cone_angle = degrees(name, value)?,
+                    "tangent" => b.tangent_angle = degrees(name, value)?,
+                    "p1" => b.point1 = inner(name, value)?,
+                    "p3" => b.point3 = inner(name, value)?,
+                    "p2" => {
+                        let (u, v) = value
+                            .split_once('/')
+                            .ok_or_else(|| format!("p2 expects A/B, got {value:?}"))?;
+                        b.point2 = [number(name, u)?, number(name, v)?];
+                    }
+                    "absolute" => {}
+                    _ => return unknown(name, kind, "cone, tangent, p1, p3, p2, absolute"),
+                }
+            }
+            Ok(SideShape::Bezier(b))
+        }
+        "segments" => {
+            let mut points = tp_design::volute::section::default_segments();
+            for (name, value) in spec_params(rest, "points") {
+                match name {
+                    "points" => {
+                        points = value
+                            .split('+')
+                            .map(|p| {
+                                let v: Vec<f64> = p
+                                    .split('/')
+                                    .map(|x| number("points", x))
+                                    .collect::<Result<_, _>>()?;
+                                match v[..] {
+                                    [out, up] => Ok(SegmentPoint {
+                                        out,
+                                        up,
+                                        radius: 0.0,
+                                    }),
+                                    [out, up, radius] => Ok(SegmentPoint { out, up, radius }),
+                                    _ => Err(format!(
+                                        "each corner is OUT/UP or OUT/UP/RADIUS over H, got {p:?}"
+                                    )),
+                                }
+                            })
+                            .collect::<Result<_, _>>()?;
+                    }
+                    _ => return unknown(name, kind, "points"),
+                }
+            }
+            Ok(SideShape::LineSegments { points })
+        }
+        "radius" => {
+            let mut r = RadiusSide::default();
+            for (name, value) in spec_params(rest, "main") {
+                match name {
+                    "base" => r.base_height = length(name, value)?,
+                    "base_radius" => r.base_radius = length(name, value)?,
+                    "cone" => r.cone_angle = degrees(name, value)?,
+                    "corner" => r.corner_radius = length(name, value)?,
+                    "main" => r.main_radius = length(name, value)?,
+                    _ => return unknown(name, kind, "base, base_radius, cone, corner, main"),
+                }
+            }
+            Ok(SideShape::RadiusBased(r))
+        }
+        _ => Err(format!(
+            "unknown cross section {kind:?}; valid: rectangle, trapezoid, round, bezier, \
+             bezier-trapezoid, segments, radius, external"
+        )),
+    }
+}
+
+/// A whole cross section from `TYPE[:PARAMS]`: a symmetric side or `external`.
+fn parse_section(spec: &str, units: &DisplayUnits) -> Result<SectionShape, String> {
+    let (kind, rest) = spec.split_once(':').unwrap_or((spec, ""));
+    if kind != "external" {
+        return parse_side(spec, units).map(SectionShape::symmetric);
+    }
+    let mut round = ExternalRound::default();
+    for (name, value) in spec_params(rest, "ratio") {
+        match name {
+            "ratio" => round.ellipse_ratio = number(name, value)?,
+            "right" => round.open_to_right = true,
+            "square" => round.square_on_top = true,
+            "below" => round.strictly_external = false,
+            _ => {
+                return Err(format!(
+                    "external sections have no parameter {name:?}; valid: ratio, right, \
+                     square, below"
+                ));
+            }
+        }
+    }
+    Ok(SectionShape::RoundExternal(round))
+}
+
+/// Applies `shape[@DEGREES][.right]=VALUE`: the cross section of the whole spiral, the
+/// definition at one wrap angle, or its +z side.
+fn apply_shape(
+    input: &mut VoluteInput,
+    units: &DisplayUnits,
+    key: &str,
+    value: &str,
+) -> Result<(), String> {
+    let rest = &key["shape".len()..];
+    let (place, right) = match rest.strip_suffix(".right") {
+        Some(place) => (place, true),
+        None => (rest, false),
+    };
+    let angle = match place.strip_prefix('@') {
+        Some(degrees) => Some(number("the angle", degrees)?.to_radians()),
+        None if place.is_empty() => None,
+        None => {
+            return Err(format!(
+                "unknown key {key:?}; use shape, shape@DEGREES or .right"
+            ));
+        }
+    };
+    let sections = &mut input.cross_section.sections;
+    let set_right = |shape: &mut SectionShape| -> Result<(), String> {
+        let SectionShape::Sides { right: side, .. } = shape else {
+            return Err("an external round section has no sides of its own".into());
+        };
+        *side = match value {
+            "symmetric" => None,
+            _ => Some(parse_side(value, units)?),
+        };
+        Ok(())
+    };
+    let Some(angle) = angle else {
+        if right {
+            for d in sections.iter_mut() {
+                set_right(&mut d.shape)?;
+            }
+        } else {
+            *sections = vec![SectionDefinition::at_throat(parse_section(value, units)?)];
+        }
+        return Ok(());
+    };
+    let existing = sections
+        .iter()
+        .position(|d| (d.angle - angle).abs() < 0.5f64.to_radians());
+    match (value, existing) {
+        ("remove", Some(i)) => {
+            sections.remove(i);
+        }
+        ("off" | "on", Some(i)) => sections[i].active = value == "on",
+        ("remove" | "off" | "on", None) => {
+            return Err(format!(
+                "no cross section is defined at {:.1}°",
+                angle.to_degrees()
+            ));
+        }
+        (_, Some(i)) if right => set_right(&mut sections[i].shape)?,
+        (_, None) if right => {
+            return Err(format!(
+                "no cross section is defined at {:.1}°",
+                angle.to_degrees()
+            ));
+        }
+        (_, Some(i)) => sections[i].shape = parse_section(value, units)?,
+        (_, None) => sections.push(SectionDefinition {
+            angle,
+            active: true,
+            shape: parse_section(value, units)?,
+        }),
+    }
+    Ok(())
+}
+
+/// Description of a cross section with its main parameters.
+fn describe_section(shape: &SectionShape, units: &DisplayUnits) -> String {
+    let side = |s: &SideShape| -> String {
+        let deg = |a: f64| show(units, QuantityKind::Angle, a);
+        match s {
+            SideShape::Rectangular { tangent_angle } if *tangent_angle > 0.0 => {
+                format!("rectangular, top at {}", deg(*tangent_angle))
+            }
+            SideShape::Trapezoidal {
+                cone_angle,
+                tangent_angle,
+            } => {
+                let top = if *tangent_angle > 0.0 {
+                    format!(", top at {}", deg(*tangent_angle))
+                } else {
+                    String::new()
+                };
+                format!("trapezoidal, flanks at {}{top}", deg(*cone_angle))
+            }
+            SideShape::Round { ellipse_ratio } if (*ellipse_ratio - 1.0).abs() > 1e-12 => {
+                format!("round, ellipse ratio {ellipse_ratio}")
+            }
+            SideShape::Bezier(b) if b.base == BezierBase::Trapezoid => {
+                format!("Bézier, trapezoid type at {}", deg(b.cone_angle))
+            }
+            SideShape::LineSegments { points } => {
+                format!("line segments, {} corners", points.len())
+            }
+            SideShape::RadiusBased(r) => format!("radius based, cone at {}", deg(r.cone_angle)),
+            other => other.name().to_owned(),
+        }
+    };
+    match shape {
+        SectionShape::Sides { left, right: None } => side(left),
+        SectionShape::Sides {
+            left,
+            right: Some(right),
+        } => format!("{} (−z) / {} (+z)", side(left), side(right)),
+        SectionShape::RoundExternal(r) => format!(
+            "round asymmetric toward {}z, ellipse ratio {}{}{}",
+            if r.open_to_right { "+" } else { "−" },
+            r.ellipse_ratio,
+            if r.strictly_external {
+                ""
+            } else {
+                ", also below r'z"
+            },
+            if r.square_on_top { ", square top" } else { "" }
+        ),
     }
 }
 
@@ -186,7 +494,7 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
         "dz" => input.setup.cutwater_diameter = quantity(Length)?,
         "b3" => input.setup.inlet_width = quantity(Length)?,
         "e3" => input.setup.cutwater_thickness = quantity(Length)?,
-        "shape" => input.cross_section.shape = parse_shape(value)?,
+        key if key.starts_with("shape") => apply_shape(input, units, key, value)?,
         "law" => {
             input.spiral.law = match value {
                 "auto" => AreaLaw::Auto,
@@ -297,12 +605,21 @@ fn print_report(name: &str, id: ComponentId, g: &VoluteGeometry, units: &Display
     let b = &g.basis;
     println!("{name} ({id}): volute");
     println!();
-    let shape = match d.shape {
-        SectionShape::Rectangular => "rectangular".to_owned(),
-        SectionShape::Circular => "circular".to_owned(),
-        SectionShape::Trapezoidal { flank_angle } => {
-            format!("trapezoidal, flanks at {}", s(Angle, flank_angle))
-        }
+    let definitions = d.cross_sections.definitions();
+    let shape = if let [only] = definitions {
+        describe_section(&only.shape, units)
+    } else {
+        definitions
+            .iter()
+            .map(|def| {
+                format!(
+                    "{} at {}",
+                    describe_section(&def.shape, units),
+                    s(Angle, def.angle)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", blending to ")
     };
     let law = match d.law {
         AreaLaw::ConstantVelocity => "constant velocity (Gülich eqs. 7.26–7.27)",
