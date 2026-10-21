@@ -1066,9 +1066,13 @@ mod tests {
     use crate::volute::AreaLaw;
     use approx::assert_relative_eq;
 
-    /// Default inputs with the cutwater kept on the x axis.
+    /// Default inputs with a straight (tangential) discharge and the cutwater kept on
+    /// the x axis.
     fn unturned() -> VoluteInput {
         let mut input = VoluteInput::default();
+        input.diffuser.shape = DischargeShape::Tangential {
+            straight_wall: StraightWall::Centered,
+        };
         input.diffuser.rotation = crate::Param::Manual(0.0);
         input
     }
@@ -1187,9 +1191,15 @@ mod tests {
 
     #[test]
     fn the_volute_turns_to_a_vertical_discharge() {
-        for shape in [
+        assert_eq!(
             DischargeShape::default(),
-            DischargeShape::Radial { axis_angle: 0.0 },
+            DischargeShape::Radial { axis_angle: 0.0 }
+        );
+        for shape in [
+            DischargeShape::Tangential {
+                straight_wall: StraightWall::Centered,
+            },
+            DischargeShape::default(),
         ] {
             let mut input = VoluteInput::default();
             input.diffuser.shape = shape;

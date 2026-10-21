@@ -162,11 +162,11 @@ pub enum DischargeShape {
     Radial { axis_angle: f64 },
 }
 
+/// By default a centerline discharge: the bend turns the outlet onto the line through
+/// the pump axis, as on process pumps (our choice).
 impl Default for DischargeShape {
     fn default() -> Self {
-        DischargeShape::Tangential {
-            straight_wall: StraightWall::Centered,
-        }
+        DischargeShape::Radial { axis_angle: 0.0 }
     }
 }
 
