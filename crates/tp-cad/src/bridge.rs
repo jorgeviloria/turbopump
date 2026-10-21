@@ -36,8 +36,13 @@ pub(crate) mod ffi {
         /// `op`: 0 cut, 1 fuse, 2 common.
         fn boolean_op(a: &Shape, b: &Shape, op: u8, fuzzy: f64) -> Result<UniquePtr<Shape>>;
         fn make_compound(shapes: &ShapeList) -> Result<UniquePtr<Shape>>;
-        /// Cylinder along +z from `base`.
-        fn cylinder_z(base: &P3, radius: f64, height: f64) -> Result<UniquePtr<Shape>>;
+        /// Cylinder from `base` along `direction`.
+        fn cylinder(
+            base: &P3,
+            direction: &P3,
+            radius: f64,
+            height: f64,
+        ) -> Result<UniquePtr<Shape>>;
         /// `samples` points along each edge, in the order of OCCT's indexed edge map
         /// (indices from 1); NaN for degenerate edges.
         fn edge_samples(shape: &Shape, samples: usize) -> Vec<P3>;

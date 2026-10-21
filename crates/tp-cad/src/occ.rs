@@ -192,14 +192,22 @@ pub fn prism_z(face: &Shape, height: f64) -> Result<Shape, CadError> {
     op("extrusion", ffi::prism_z(&face.0, height))
 }
 
-/// Cylinder of `radius` along +z from `base` over `height`, mm.
-pub fn cylinder_z(base: DVec3, radius: f64, height: f64) -> Result<Shape, CadError> {
-    if !(radius > 0.0 && height > 0.0) {
+/// Cylinder of `radius` from `base` along `direction` over `height`, mm.
+pub fn cylinder(
+    base: DVec3,
+    direction: DVec3,
+    radius: f64,
+    height: f64,
+) -> Result<Shape, CadError> {
+    if !(radius > 0.0 && height > 0.0 && direction.length() > 0.0) {
         return Err(CadError::Input(
-            "a cylinder needs a positive radius and height".into(),
+            "a cylinder needs a positive radius and height and an axis".into(),
         ));
     }
-    op("cylinder", ffi::cylinder_z(&p3(base), radius, height))
+    op(
+        "cylinder",
+        ffi::cylinder(&p3(base), &p3(direction.normalize()), radius, height),
+    )
 }
 
 /// Solid of revolution of a planar face through 360° about the z axis.

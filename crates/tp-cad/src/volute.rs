@@ -34,10 +34,14 @@ impl VoluteCad {
 }
 
 /// The casing of one volute, in millimetres: the material around the flow domain, as
-/// thick as the wall.
+/// thick as the wall, with the flange at the outlet.
 #[derive(Debug)]
 pub struct VoluteCasing {
     pub solid: Shape,
+    /// Whether the flange is on the casing.
+    pub flange: bool,
+    /// What could not be built as asked.
+    pub warnings: Vec<String>,
 }
 
 impl VoluteCasing {
@@ -241,7 +245,64 @@ pub fn build_volute_casing(g: &VoluteGeometry, cad: &VoluteCad) -> Result<Volute
             && solid.volume_with_tolerance(0.0) < gross - 0.8 * channel
     };
     let (solid, _) = first_sound(enclose, sound)?;
-    Ok(VoluteCasing { solid })
+    let Some(f) = &g.design.flange else {
+        return Ok(VoluteCasing {
+            solid,
+            flange: false,
+            warnings: Vec::new(),
+        });
+    };
+    match flange(g, f).and_then(|disk| {
+        let joined = solid.fuse(&disk)?;
+        Ok(joined)
+    }) {
+        Ok(joined) if joined.is_valid() && joined.solid_count() == 1 => Ok(VoluteCasing {
+            solid: joined,
+            flange: true,
+            warnings: Vec::new(),
+        }),
+        result => Ok(VoluteCasing {
+            solid,
+            flange: false,
+            warnings: vec![format!(
+                "the flange could not be joined to the casing{}: the casing ends flat",
+                result.err().map_or(String::new(), |e| format!(" ({e})"))
+            )],
+        }),
+    }
+}
+
+/// The flange at the outlet of the diffuser: a disk whose front face is the outlet face,
+/// with the bore and the bolt holes through it. The bore is a little wider than the
+/// flow so that it runs inside the casing wall instead of on the flow surface; the
+/// bolt holes straddle the plane of the pump axis.
+fn flange(g: &VoluteGeometry, f: &tp_design::volute::Flange) -> Result<Shape, CadError> {
+    let outlet = g
+        .nozzle
+        .last()
+        .ok_or_else(|| CadError::Input("the volute has no diffuser".into()))?;
+    let axis = outlet.tangent.normalize();
+    let face = outlet.center * MM;
+    let thickness = f.thickness * MM;
+    let back = face - axis * thickness;
+    let disk = occ::cylinder(back, axis, f.outer_diameter / 2.0 * MM, thickness)?;
+    let margin = thickness;
+    let bore = occ::cylinder(
+        back - axis * margin,
+        axis,
+        (f.bore / 2.0 + 0.5 * g.design.wall_thickness) * MM,
+        thickness + 2.0 * margin,
+    )?;
+    let (u, v) = (DVec3::Z, axis.cross(DVec3::Z));
+    let holes = (0..f.bolts)
+        .map(|k| {
+            let angle = std::f64::consts::TAU * (f64::from(k) + 0.5) / f64::from(f.bolts);
+            let at = back - axis * margin
+                + (u * angle.cos() + v * angle.sin()) * (f.bolt_circle / 2.0 * MM);
+            occ::cylinder(at, axis, f.bolt_hole / 2.0 * MM, thickness + 2.0 * margin)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    disk.cut(&bore)?.cut(&occ::compound(&holes)?)
 }
 
 /// The union of `pieces`.
@@ -364,9 +425,16 @@ mod tests {
             let cad = build_volute(&g).unwrap();
             let casing = build_volute_casing(&g, &cad).unwrap();
             assert!(casing.solid.is_valid() && casing.solid.solid_count() == 1);
-            // The shell around the channel, plus the cutwater and the walls beside the
-            // inlet ring.
-            let volume = casing.solid.volume_with_tolerance(0.0) / MM.powi(3);
+            assert!(casing.flange, "{:?}", casing.warnings);
+            // The shell around the channel, plus the cutwater, the walls beside the
+            // inlet ring and the flange beyond the wall, less its bolt holes.
+            let f = g.design.flange.unwrap();
+            let t = g.design.wall_thickness;
+            let ring = |d: f64| PI / 4.0 * d * d * f.thickness;
+            let flange = ring(f.outer_diameter)
+                - ring(f.bore + 2.0 * t)
+                - f64::from(f.bolts) * ring(f.bolt_hole);
+            let volume = casing.solid.volume_with_tolerance(0.0) / MM.powi(3) - flange;
             let shell = shell_estimate(&g);
             assert!(
                 volume > 0.9 * shell && volume < 1.6 * shell,

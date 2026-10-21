@@ -354,9 +354,11 @@ rust::Vec<double> solid_volumes(const Shape &shape) {
   return volumes;
 }
 
-std::unique_ptr<Shape> cylinder_z(const P3 &base, double radius, double height) {
+std::unique_ptr<Shape> cylinder(const P3 &base, const P3 &direction, double radius,
+                                double height) {
   return guard("cylinder", [&] {
-    BRepPrimAPI_MakeCylinder cylinder(gp_Ax2(point(base), gp::DZ()), radius, height);
+    const gp_Dir axis(direction.x, direction.y, direction.z);
+    BRepPrimAPI_MakeCylinder cylinder(gp_Ax2(point(base), axis), radius, height);
     return wrap(cylinder.Shape(), "cylinder");
   });
 }

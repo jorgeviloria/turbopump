@@ -417,7 +417,7 @@ pub fn build_impeller(g: &ImpellerGeometry, options: &CadOptions) -> Result<Impe
                 .map(|i| {
                     let angle = first + 2.0 * PI * f64::from(i) / f64::from(holes.count);
                     let base = DVec3::new(r * angle.cos(), r * angle.sin(), start) * MM;
-                    occ::cylinder_z(base, radius * MM, height * MM)
+                    occ::cylinder(base, DVec3::Z, radius * MM, height * MM)
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             impeller = impeller.cut(&occ::compound(&cylinders)?)?;
