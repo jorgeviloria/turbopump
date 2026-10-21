@@ -627,6 +627,21 @@ pub(crate) fn show(
                             s(Area, rib.channel_outlet_area)
                         ),
                     );
+                    if let Some(r) = &v.rib {
+                        value_row(
+                            ui,
+                            tr("Rib nose"),
+                            tf(
+                                "{}:1 ellipse {} long, tip at {}, {} from the axis",
+                                &[
+                                    &format!("{:.2}", rib.nose_ratio),
+                                    &s(Length, rib.nose_length()),
+                                    &s(Angle, r.nose_angle),
+                                    &s(Length, r.nose_distance),
+                                ],
+                            ),
+                        );
+                    }
                 }
                 value_row(ui, tr("Throat area A₃q"), s(Area, d.throat.area));
                 value_row(ui, tr("Throat height"), s(Length, d.throat.height));

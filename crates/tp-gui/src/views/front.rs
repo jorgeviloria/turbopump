@@ -138,24 +138,25 @@ pub(crate) fn show(
                         .collect::<Vec<_>>()
                 };
                 // Outer wall of the spiral, from the start to the throat; in a double
-                // volute it goes on as the outer channel.
+                // volute it goes on around the outer channel.
                 let mut outer = wall(&v.sections, true);
-                outer.extend(wall(&v.outer_channel, true));
+                outer.extend(wall(&v.envelope, true));
                 plot.line(
                     Line::new(tr("volute"), PlotPoints::from(outer))
                         .color(palette.volute)
                         .width(2.0),
                 );
-                // The rib of a double volute: the outer wall of the inner volute and
-                // the inner wall of the outer channel.
-                if !v.inner_sections.is_empty() {
-                    for side in [wall(&v.inner_sections, true), wall(&v.outer_channel, false)] {
-                        plot.line(
-                            Line::new(tr("volute"), PlotPoints::from(side))
-                                .color(palette.volute)
-                                .width(1.5),
-                        );
-                    }
+                // The rib of a double volute, with its nose and tail.
+                if let Some(rib) = &v.rib {
+                    let mut outline = rib.outline();
+                    outline.push(outline[0]);
+                    let points: PlotPoints =
+                        outline.iter().map(|p| view(p.x, p.y, scale)).collect();
+                    plot.line(
+                        Line::new(tr("volute"), points)
+                            .color(palette.volute)
+                            .width(1.5),
+                    );
                 }
                 plot.line(
                     Line::new(

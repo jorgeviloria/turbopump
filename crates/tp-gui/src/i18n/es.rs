@@ -1235,12 +1235,30 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Wall between the inner volute and the outer channel; automatic: e₃",
         "Pared entre la voluta interior y el canal exterior; automático: e₃",
     ),
-    ("Outer channel A_out/A_in", "Canal exterior A_sal/A_ent"),
     (
-        "Area ratio of the outer channel from the rib nose to the discharge; automatic: constant area",
-        "Relación de áreas del canal exterior desde la nariz del nervio hasta la descarga; automático: área constante",
+        "Outer channel outlet/first throat",
+        "Salida del canal exterior/primera garganta",
+    ),
+    (
+        "Area of the outer channel at the discharge over the throat of the first partial volute; automatic: 1",
+        "Área del canal exterior en la descarga sobre la garganta de la primera voluta parcial; automático: 1",
+    ),
+    (
+        "Rib nose length/thickness",
+        "Largo/espesor de la nariz del nervio",
+    ),
+    (
+        "Elliptic nose and tail of the rib: 1 for a semicircle, longer for a nose less sensitive to the flow angle (Gülich Chap. 7.8.1, item 7)",
+        "Nariz y cola elípticas del nervio: 1 para un semicírculo, más largas para una nariz menos sensible al ángulo del flujo (Gülich cap. 7.8.1, punto 7)",
     ),
     ("Rib nose at", "Nariz del nervio a"),
+    ("Tip of the rib nose", "Punta de la nariz del nervio"),
+    ("{}, {} from the axis", "{}, a {} del eje"),
+    ("Rib nose", "Nariz del nervio"),
+    (
+        "{}:1 ellipse {} long, tip at {}, {} from the axis",
+        "elipse {}:1 de {} de largo, punta a {}, a {} del eje",
+    ),
     (
         "the rib thickness must be positive",
         "el espesor del nervio debe ser positivo",
@@ -1337,6 +1355,18 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
 
 /// Messages of the design code, most specific first.
 pub(super) static MESSAGES: &[(&str, &str)] = &[
+    (
+        "a double volute needs rectangular or trapezoidal sections: its rib runs at one radius across each section",
+        "una voluta doble necesita secciones rectangulares o trapezoidales: su nervio va a un mismo radio a lo ancho de cada sección",
+    ),
+    (
+        "the rib ({} mm) is too thick for the {} mm high throat of the first partial volute",
+        "el nervio ({} mm) es demasiado grueso para la garganta de {} mm de alto de la primera voluta parcial",
+    ),
+    (
+        "the nose ratio of the rib must lie between 1 and 5, got {}",
+        "la relación de la nariz del nervio debe estar entre 1 y 5; se recibió {}",
+    ),
     (
         "the axis of a radial discharge must lie between 0° and 80° from the line through the pump axis, got {}°",
         "el eje de una descarga radial debe estar entre 0° y 80° de la línea que pasa por el eje de la bomba; se recibió {}°",

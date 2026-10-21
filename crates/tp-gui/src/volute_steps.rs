@@ -169,14 +169,27 @@ fn setup(
             );
             param_f64(
                 ui,
-                tr("Outer channel A_out/A_in"),
+                tr("Rib nose length/thickness"),
                 tr(
-                    "Area ratio of the outer channel from the rib nose to the discharge; \
-                    automatic: constant area",
+                    "Elliptic nose and tail of the rib: 1 for a semicircle, longer for a \
+                    nose less sensitive to the flow angle (Gülich Chap. 7.8.1, item 7)",
+                ),
+                &mut input.setup.rib_nose_ratio,
+                Dimensionless,
+                rib.map(|r| r.nose_ratio),
+                &units,
+                1.0..=5.0,
+            );
+            param_f64(
+                ui,
+                tr("Outer channel outlet/first throat"),
+                tr(
+                    "Area of the outer channel at the discharge over the throat of the first \
+                    partial volute; automatic: 1",
                 ),
                 &mut input.setup.channel_area_ratio,
                 Dimensionless,
-                rib.map(|r| r.channel_outlet_area / r.channel_inlet_area),
+                rib.map(|r| r.channel_outlet_area / r.outer_throat.area),
                 &units,
                 0.8..=3.0,
             );
@@ -212,6 +225,19 @@ fn setup(
                 );
                 if let Some(rib) = &d.rib {
                     value_row(ui, tr("Rib nose at"), units.show(Angle, rib.start));
+                    if let Some(r) = &g.rib {
+                        value_row(
+                            ui,
+                            tr("Tip of the rib nose"),
+                            tf(
+                                "{}, {} from the axis",
+                                &[
+                                    &units.show(Angle, r.nose_angle),
+                                    &units.show(Length, r.nose_distance),
+                                ],
+                            ),
+                        );
+                    }
                     value_row(
                         ui,
                         tr("Throats of the partial volutes"),

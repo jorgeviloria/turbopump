@@ -208,6 +208,11 @@ fn double_volute() {
     harness.remove_cursor();
     harness.run();
     save(&mut harness, "double-volute-front");
+    // Without the properties panel the rib nose shows on the right.
+    harness.get_by_label_contains("Properties").click();
+    harness.remove_cursor();
+    harness.run();
+    save(&mut harness, "double-volute-rib");
     harness.state_mut().focus_view(View::View3d);
     harness.run();
     save(&mut harness, "double-volute-3d");
