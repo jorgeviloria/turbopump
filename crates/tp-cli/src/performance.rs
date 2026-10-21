@@ -450,6 +450,15 @@ fn print_report(
             s(Force, a.estimate.0),
             s(Force, a.estimate.1)
         );
+        if let Some(h) = &a.balance_holes {
+            println!(
+                "           balance holes {} × {} behind the rear seal d_s2 {} (s {} worn to twice); Gülich Chap. 9.2.2",
+                h.count,
+                s(Length, h.diameter),
+                s(Length, h.seal_diameter),
+                s(Length, h.seal_clearance)
+            );
+        }
     }
     println!();
     let volute = c.volute.is_some();

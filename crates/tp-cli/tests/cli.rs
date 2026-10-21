@@ -439,10 +439,18 @@ fn cad_exports_impeller_and_flow_domain() {
         out_dir.to_str().unwrap(),
         "--format",
         "step,stl",
+        "--balance-holes",
     ]);
     let text = stdout(&out);
     assert_eq!(out.status.code(), Some(1), "{text}");
     assert!(text.contains("Solids           valid"), "{text}");
+    // Hollow hub, fillets and the balance holes of the axial thrust.
+    assert!(
+        text.contains("Hub              bore 19.28 mm, boss"),
+        "{text}"
+    );
+    assert!(text.contains("Fillets          1.500 mm"), "{text}");
+    assert!(text.contains("Balance holes    7 × 8.500 mm"), "{text}");
     // OCCT's transfer statistics are silenced.
     assert!(!text.contains("Statistics on Transfer"), "{text}");
     for name in ["impeller.step", "fluid.step", "impeller.stl", "fluid.stl"] {

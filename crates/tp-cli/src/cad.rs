@@ -4,7 +4,8 @@
 use std::path::{Path, PathBuf};
 
 use clap::{Args, ValueEnum};
-use tp_cad::{CadOptions, ImpellerCad, Shape};
+use tp_cad::{BalanceHoleOptions, CadOptions, ImpellerCad, Shape};
+use tp_design::axial_thrust::{AxialThrust, AxialThrustInput};
 use tp_project::{
     ComponentId, ComponentKind, DesignStep, Project, StepStatus, VANED_STEPS, VANELESS_STEPS,
     VOLUTE_STEPS,
@@ -50,6 +51,18 @@ pub(crate) struct CadArgs {
     /// Bore diameter of the hub (default: hub diameter at the eye).
     #[arg(long)]
     bore: Option<String>,
+    /// Outer diameter of the boss around the bore (default: the bore plus a wall of a
+    /// quarter of it, no thinner than the wall thickness).
+    #[arg(long)]
+    boss: Option<String>,
+    /// Fillet radius where the blades meet hub and shroud (default: half the blade
+    /// thickness; 0 for sharp edges).
+    #[arg(long)]
+    fillet: Option<String>,
+    /// Drill one balance hole per channel inside the rear seal, sized by Gülich
+    /// Chap. 9.2.2.
+    #[arg(long)]
+    balance_holes: bool,
     /// Material density for the masses of the impeller and the volute casing.
     #[arg(long, default_value = "7850 kg/m3")]
     density: String,
@@ -81,6 +94,8 @@ pub(crate) fn run(args: CadArgs) -> CliResult {
     let options = CadOptions {
         wall_thickness: length(&args.wall, &units)?,
         bore_diameter: length(&args.bore, &units)?,
+        boss_diameter: length(&args.boss, &units)?,
+        fillet_radius: length(&args.fillet, &units)?,
         ..CadOptions::default()
     };
     let density = parse_quantity_or(
@@ -137,6 +152,14 @@ pub(crate) fn run(args: CadArgs) -> CliResult {
             ));
         }
         let geometry = project.compute_impeller_geometry(*id).map_err(err)?;
+        let options = CadOptions {
+            balance_holes: if args.balance_holes {
+                Some(balance_holes(&project, *id)?)
+            } else {
+                None
+            },
+            ..options
+        };
         println!("{name} ({id}): building CAD solids…");
         let cad = tp_cad::build_impeller(&geometry, &options).map_err(|e| e.to_string())?;
         warned |= !report(&cad, density, &units);
@@ -255,6 +278,26 @@ pub(crate) fn run(args: CadArgs) -> CliResult {
     })
 }
 
+/// One balance hole per channel, sized for the rear seal of the axial thrust (Gülich
+/// Chap. 9.2.2) with the automatic seal diameters.
+fn balance_holes(project: &Project, id: ComponentId) -> Result<BalanceHoleOptions, String> {
+    let duty = project.pump_duty(id).map_err(err)?;
+    let design = project.compute_main_dimensions(id).map_err(err)?;
+    let input = AxialThrustInput {
+        balance_holes: true,
+        ..AxialThrustInput::default()
+    };
+    let axial = AxialThrust::new(&duty, &design, &input, false).map_err(|e| e.to_string())?;
+    let size = axial
+        .balance_holes(design.blade_count)
+        .ok_or("the axial thrust has no rear seal for balance holes")?;
+    Ok(BalanceHoleOptions {
+        count: size.count,
+        diameter: size.diameter,
+        seal_diameter: size.seal_diameter,
+    })
+}
+
 /// Prints volumes and checks; returns whether every solid is valid.
 fn report(cad: &ImpellerCad, density: f64, units: &DisplayUnits) -> bool {
     let impeller = cad.impeller_volume();
@@ -270,6 +313,29 @@ fn report(cad: &ImpellerCad, density: f64, units: &DisplayUnits) -> bool {
         show(units, QuantityKind::Density, density)
     );
     println!("  Flow domain      {:.1} cm³", fluid * 1e6);
+    let length = |v: f64| show(units, QuantityKind::Length, v);
+    println!(
+        "  Hub              bore {}, boss {}",
+        length(cad.bore_diameter),
+        length(cad.boss_diameter)
+    );
+    if cad.fillet_radius > 0.0 {
+        println!(
+            "  Fillets          {} at the blade roots",
+            length(cad.fillet_radius)
+        );
+    }
+    if let Some(h) = &cad.balance_holes {
+        println!(
+            "  Balance holes    {} × {} on {} (Gülich Chap. 9.2.2)",
+            h.count,
+            length(h.diameter),
+            length(h.pitch_diameter)
+        );
+    }
+    for w in &cad.warnings {
+        println!("  warning: {w}");
+    }
     let checks = [
         ("blade", &cad.blade),
         ("flow domain", &cad.fluid),
@@ -288,7 +354,7 @@ fn report(cad: &ImpellerCad, density: f64, units: &DisplayUnits) -> bool {
     if ok {
         println!("  Solids           valid (blade, flow domain and impeller are single solids)");
     }
-    ok
+    ok && cad.warnings.is_empty()
 }
 
 fn format_mass(kg: f64) -> String {
