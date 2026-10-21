@@ -26,6 +26,7 @@ clap = { version = "4.6", features = ["derive"] }
 coolprop-sys = "8"
 cxx = "1"
 cxx-build = "1"
+dxf = "0.6.2"
 glam = { version = "0.34", features = ["serde"] }
 libloading = "0.9"
 occt-sys = "7.8.1"

@@ -871,6 +871,15 @@ impl TurbopumpApp {
                     self.report_export(result);
                 }
             }
+            Command::ExportDrawing(kind) => {
+                if let Some(g) = self
+                    .active_impeller()
+                    .and_then(|id| self.derived.geometry(id))
+                {
+                    let result = export::save_drawing(kind, g, &self.doc.project().info.name);
+                    self.report_export(result);
+                }
+            }
             Command::ExportVolute(kind) => {
                 if let Some(g) = self.active_volute().and_then(|id| self.derived.volute(id)) {
                     let result = export::save_volute(kind, g, &self.doc.project().info.name);

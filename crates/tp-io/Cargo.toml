@@ -1,6 +1,6 @@
 [package]
 name = "tp-io"
-description = "Geometry export for Turbopump: point lists, STL meshes and SVG drawings"
+description = "Geometry export for Turbopump: point lists, STL meshes, and drawings as SVG, DXF and DWG"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,6 +8,8 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+# Reads and writes DXF (MIT).
+dxf.workspace = true
 tp-design.workspace = true
 tp-math.workspace = true
 

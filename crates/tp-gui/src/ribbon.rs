@@ -9,7 +9,7 @@ use eframe::egui::{
 use tp_project::{ComponentId, ComponentKind, DesignStep, Project, StepStatus};
 
 use crate::app::{Selection, View};
-use crate::export::{CAD_AVAILABLE, TextExport, VoluteExport};
+use crate::export::{CAD_AVAILABLE, DrawingExport, TextExport, VoluteExport};
 use crate::i18n::{Language, component_name, message, project_name, tf, tr};
 use crate::icons;
 use crate::steps::{self, AcceptState};
@@ -36,6 +36,7 @@ pub(crate) enum Command {
     Accept(ComponentId, DesignStep),
     Reset(ComponentId, DesignStep),
     ExportText(TextExport),
+    ExportDrawing(DrawingExport),
     ExportVolute(VoluteExport),
     ExportCad,
     Focus(View),
@@ -316,6 +317,15 @@ fn export_items(ui: &mut Ui, cx: &RibbonCx<'_>) -> Option<Command> {
             .clicked()
         {
             command = Some(Command::ExportText(kind));
+        }
+    }
+    ui.separator();
+    for kind in DrawingExport::ALL {
+        if ui
+            .add_enabled(cx.has_geometry, egui::Button::new(kind.menu_label()))
+            .clicked()
+        {
+            command = Some(Command::ExportDrawing(kind));
         }
     }
     if cx.has_volute {

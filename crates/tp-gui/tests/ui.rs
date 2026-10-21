@@ -429,3 +429,15 @@ fn internal_sections_share_their_bend() {
         .unwrap();
     assert!(g.bend.is_some());
 }
+
+#[test]
+fn file_menu_offers_the_drawings_as_svg_dxf_and_dwg() {
+    let mut harness = harness();
+    harness.get_by_label("File").click();
+    harness.run();
+    for view in ["Meridional drawing", "Front view drawing"] {
+        for format in ["SVG", "DXF", "DWG"] {
+            harness.get_by_label(&format!("{view} ({format})…"));
+        }
+    }
+}

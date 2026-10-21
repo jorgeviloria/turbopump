@@ -9,7 +9,7 @@ use tp_design::volute::VoluteGeometry;
 use tp_project::{ComponentId, Project};
 
 use crate::derived::Derived;
-use crate::i18n::tr;
+use crate::i18n::{tf, tr};
 
 /// Whether this build can make CAD solids (the `cad` feature).
 pub(crate) const CAD_AVAILABLE: bool = cfg!(feature = "cad");
@@ -19,24 +19,15 @@ pub(crate) const CAD_AVAILABLE: bool = cfg!(feature = "cad");
 pub(crate) enum TextExport {
     Points,
     Mesh,
-    Meridional,
-    Front,
 }
 
 impl TextExport {
-    pub const ALL: [TextExport; 4] = [
-        TextExport::Points,
-        TextExport::Mesh,
-        TextExport::Meridional,
-        TextExport::Front,
-    ];
+    pub const ALL: [TextExport; 2] = [TextExport::Points, TextExport::Mesh];
 
     pub fn menu_label(self) -> &'static str {
         tr(match self {
             TextExport::Points => "Geometry points (TXT)…",
             TextExport::Mesh => "Surface mesh (STL)…",
-            TextExport::Meridional => "Meridional drawing (SVG)…",
-            TextExport::Front => "Front view drawing (SVG)…",
         })
     }
 
@@ -45,8 +36,6 @@ impl TextExport {
         match self {
             TextExport::Points => ("points", "txt", tr("Text")),
             TextExport::Mesh => ("mesh", "stl", tr("STL mesh")),
-            TextExport::Meridional => ("meridional", "svg", tr("SVG drawing")),
-            TextExport::Front => ("front", "svg", tr("SVG drawing")),
         }
     }
 
@@ -54,8 +43,6 @@ impl TextExport {
         match self {
             TextExport::Points => tp_io::points::geometry_txt(g),
             TextExport::Mesh => tp_io::stl::ascii("impeller", &tp_io::mesh::impeller_triangles(g)),
-            TextExport::Meridional => tp_io::svg::meridional(g),
-            TextExport::Front => tp_io::svg::front_view(g),
         }
     }
 }
@@ -68,6 +55,127 @@ pub(crate) fn save_text(
 ) -> Result<Option<PathBuf>, String> {
     let (suffix, extension, filter) = kind.file();
     save_file(suffix, extension, filter, || kind.contents(g), project_name)
+}
+
+/// The views of the impeller drawn by `tp-io`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DrawingView {
+    Meridional,
+    Front,
+}
+
+/// File formats of the drawings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DrawingFormat {
+    Svg,
+    Dxf,
+    /// DXF converted by the ODA File Converter, which the user installs.
+    Dwg,
+}
+
+/// A drawing export: one view in one format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct DrawingExport {
+    pub view: DrawingView,
+    pub format: DrawingFormat,
+}
+
+impl DrawingExport {
+    pub const ALL: [DrawingExport; 6] = {
+        use DrawingFormat::{Dwg, Dxf, Svg};
+        use DrawingView::{Front, Meridional};
+        [
+            DrawingExport::new(Meridional, Svg),
+            DrawingExport::new(Meridional, Dxf),
+            DrawingExport::new(Meridional, Dwg),
+            DrawingExport::new(Front, Svg),
+            DrawingExport::new(Front, Dxf),
+            DrawingExport::new(Front, Dwg),
+        ]
+    };
+
+    const fn new(view: DrawingView, format: DrawingFormat) -> Self {
+        Self { view, format }
+    }
+
+    pub fn menu_label(self) -> &'static str {
+        use DrawingFormat::{Dwg, Dxf, Svg};
+        use DrawingView::{Front, Meridional};
+        tr(match (self.view, self.format) {
+            (Meridional, Svg) => "Meridional drawing (SVG)…",
+            (Meridional, Dxf) => "Meridional drawing (DXF)…",
+            (Meridional, Dwg) => "Meridional drawing (DWG)…",
+            (Front, Svg) => "Front view drawing (SVG)…",
+            (Front, Dxf) => "Front view drawing (DXF)…",
+            (Front, Dwg) => "Front view drawing (DWG)…",
+        })
+    }
+
+    pub fn drawing(self, g: &ImpellerGeometry) -> tp_io::drawing::Drawing {
+        match self.view {
+            DrawingView::Meridional => tp_io::drawing::meridional(g),
+            DrawingView::Front => tp_io::drawing::front_view(g),
+        }
+    }
+
+    fn file(self) -> (&'static str, &'static str, &'static str) {
+        // (file-name suffix, extension, filter name)
+        let suffix = match self.view {
+            DrawingView::Meridional => "meridional",
+            DrawingView::Front => "front",
+        };
+        match self.format {
+            DrawingFormat::Svg => (suffix, "svg", tr("SVG drawing")),
+            DrawingFormat::Dxf => (suffix, "dxf", tr("DXF drawing")),
+            DrawingFormat::Dwg => (suffix, "dwg", tr("DWG drawing")),
+        }
+    }
+}
+
+/// Asks for a file name and writes the drawing. For DWG, the ODA File Converter must be
+/// installed; it is looked for before asking. `Ok(None)` when the user cancelled.
+pub(crate) fn save_drawing(
+    kind: DrawingExport,
+    g: &ImpellerGeometry,
+    project_name: &str,
+) -> Result<Option<PathBuf>, String> {
+    let (suffix, extension, filter) = kind.file();
+    let drawing = kind.drawing(g);
+    match kind.format {
+        DrawingFormat::Svg => save_file(
+            suffix,
+            extension,
+            filter,
+            || tp_io::svg::write(&drawing),
+            project_name,
+        ),
+        DrawingFormat::Dxf => save_file(
+            suffix,
+            extension,
+            filter,
+            || tp_io::dxf::write(&drawing),
+            project_name,
+        ),
+        DrawingFormat::Dwg => {
+            let converter = tp_io::dwg::find_converter().ok_or_else(|| {
+                tf(
+                    "DWG export needs the free ODA File Converter ({}). Install it, or set {} to its executable.",
+                    &[&tp_io::dwg::DOWNLOAD_URL, &tp_io::dwg::CONVERTER_ENV],
+                )
+            })?;
+            let Some(path) = ask_path(suffix, extension, filter, project_name) else {
+                return Ok(None);
+            };
+            tp_io::dwg::write(
+                &converter,
+                &tp_io::dxf::write(&drawing),
+                &path,
+                tp_io::dwg::DwgVersion::default(),
+            )
+            .map_err(|e| format!("{}: {e}", path.display()))?;
+            Ok(Some(path))
+        }
+    }
 }
 
 /// Exports of the volute written by `tp-io`.
@@ -108,6 +216,14 @@ pub(crate) fn save_volute(
     save_file(suffix, extension, filter, || kind.contents(g), project_name)
 }
 
+/// The file the user picks to save to, `None` when cancelled.
+fn ask_path(suffix: &str, extension: &str, filter: &str, project_name: &str) -> Option<PathBuf> {
+    rfd::FileDialog::new()
+        .add_filter(filter, &[extension])
+        .set_file_name(format!("{project_name}-{suffix}.{extension}"))
+        .save_file()
+}
+
 fn save_file(
     suffix: &str,
     extension: &str,
@@ -115,11 +231,7 @@ fn save_file(
     contents: impl FnOnce() -> String,
     project_name: &str,
 ) -> Result<Option<PathBuf>, String> {
-    let Some(path) = rfd::FileDialog::new()
-        .add_filter(filter, &[extension])
-        .set_file_name(format!("{project_name}-{suffix}.{extension}"))
-        .save_file()
-    else {
+    let Some(path) = ask_path(suffix, extension, filter, project_name) else {
         return Ok(None);
     };
     std::fs::write(&path, contents()).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -774,6 +886,21 @@ mod tests {
             assert!(text.len() > 1000, "{kind:?}");
         }
         assert!(TextExport::Mesh.contents(g).starts_with("solid"));
-        assert!(TextExport::Front.contents(g).contains("<svg"));
+    }
+
+    #[test]
+    fn every_drawing_has_a_label_and_a_file_type() {
+        let project = default_project();
+        let mut derived = Derived::default();
+        derived.update(&project);
+        let g = derived.geometry(project.components()[0].id()).unwrap();
+        for kind in DrawingExport::ALL {
+            let (_, extension, _) = kind.file();
+            assert!(
+                kind.menu_label().contains(&extension.to_uppercase()),
+                "{kind:?}"
+            );
+            assert!(!kind.drawing(g).entities.is_empty(), "{kind:?}");
+        }
     }
 }

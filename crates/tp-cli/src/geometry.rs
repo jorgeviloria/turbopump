@@ -1,13 +1,14 @@
 //! `turbopump geometry`: meridional contour, meridional flow and blades of the
 //! impellers of a pump project.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::Args;
 use tp_design::Param;
 use tp_design::impeller::ImpellerGeometryInput;
 use tp_design::impeller::blade::{BetaDistribution, EdgeShape};
 use tp_design::impeller::{BladeLoading, ImpellerGeometry};
+use tp_io::dwg::{self, DwgVersion};
 use tp_project::{ComponentId, ComponentKind, Project};
 use tp_units::{DisplayUnits, QuantityKind, parse_quantity_or};
 
@@ -27,10 +28,21 @@ pub(crate) struct GeometryArgs {
     /// smooth:IN,OUT), le and te (cut, round or ellipse:RATIO), e-le, e-te (thickness).
     #[arg(long = "set", value_name = "KEY=VALUE")]
     settings: Vec<String>,
-    /// Write impeller.txt (points), impeller.stl (mesh), meridional.svg and front.svg
-    /// into this folder.
+    /// Write impeller.txt (points), impeller.stl (mesh), and the meridional and front
+    /// drawings as SVG and DXF into this folder.
     #[arg(long, value_name = "DIR")]
     export: Option<PathBuf>,
+    /// Also write the drawings as DWG (2000, 2004, 2007, 2010, 2013 or 2018; default
+    /// 2018), with the free ODA File Converter, found where it installs or through
+    /// TURBOPUMP_ODAFC.
+    #[arg(
+        long,
+        value_name = "VERSION",
+        num_args = 0..=1,
+        default_missing_value = "2018",
+        requires = "export"
+    )]
+    dwg: Option<DwgVersion>,
     /// Compute and print without saving the project.
     #[arg(long)]
     dry_run: bool,
@@ -54,6 +66,15 @@ pub(crate) fn run(args: GeometryArgs) -> CliResult {
         });
     }
 
+    // Look for the converter before computing anything, so a missing one fails fast.
+    let to_dwg = match args.dwg {
+        Some(version) => {
+            let converter = dwg::find_converter().ok_or(dwg::DwgError::NotInstalled);
+            Some((version, converter.map_err(|e| e.to_string())?))
+        }
+        None => None,
+    };
+
     let mut warned = false;
     for (id, name) in &impellers {
         let mut input = project.impeller_geometry_input(*id).map_err(err)?;
@@ -73,7 +94,7 @@ pub(crate) fn run(args: GeometryArgs) -> CliResult {
             } else {
                 dir.clone()
             };
-            export(&dir, &geometry)?;
+            export(&dir, &geometry, to_dwg.as_ref())?;
         }
     }
 
@@ -88,21 +109,44 @@ pub(crate) fn run(args: GeometryArgs) -> CliResult {
     })
 }
 
-fn export(dir: &std::path::Path, g: &ImpellerGeometry) -> Result<(), String> {
+fn export(
+    dir: &Path,
+    g: &ImpellerGeometry,
+    to_dwg: Option<&(DwgVersion, PathBuf)>,
+) -> Result<(), String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    let files = [
-        ("impeller.txt", tp_io::points::geometry_txt(g)),
+    let meridional = tp_io::drawing::meridional(g);
+    let front = tp_io::drawing::front_view(g);
+    let drawings = [
+        ("meridional", tp_io::dxf::write(&meridional)),
+        ("front", tp_io::dxf::write(&front)),
+    ];
+    let mut files = vec![
+        ("impeller.txt".to_owned(), tp_io::points::geometry_txt(g)),
         (
-            "impeller.stl",
+            "impeller.stl".to_owned(),
             tp_io::stl::ascii("impeller", &tp_io::mesh::impeller_triangles(g)),
         ),
-        ("meridional.svg", tp_io::svg::meridional(g)),
-        ("front.svg", tp_io::svg::front_view(g)),
+        ("meridional.svg".to_owned(), tp_io::svg::write(&meridional)),
+        ("front.svg".to_owned(), tp_io::svg::write(&front)),
     ];
+    files.extend(
+        drawings
+            .iter()
+            .map(|(name, dxf)| (format!("{name}.dxf"), dxf.clone())),
+    );
     for (name, content) in files {
         let path = dir.join(name);
         std::fs::write(&path, content).map_err(|e| format!("{}: {e}", path.display()))?;
         println!("Wrote {}", path.display());
+    }
+    if let Some((version, converter)) = to_dwg {
+        for (name, dxf) in &drawings {
+            let path = dir.join(format!("{name}.dwg"));
+            dwg::write(converter, dxf, &path, *version)
+                .map_err(|e| format!("{}: {e}", path.display()))?;
+            println!("Wrote {} (DWG {version})", path.display());
+        }
     }
     Ok(())
 }

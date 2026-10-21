@@ -626,13 +626,29 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Geometry points (TXT)…", "Puntos de la geometría (TXT)…"),
     ("Surface mesh (STL)…", "Malla de superficie (STL)…"),
     ("Meridional drawing (SVG)…", "Dibujo meridional (SVG)…"),
+    ("Meridional drawing (DXF)…", "Dibujo meridional (DXF)…"),
+    ("Meridional drawing (DWG)…", "Dibujo meridional (DWG)…"),
     (
         "Front view drawing (SVG)…",
         "Dibujo de la vista frontal (SVG)…",
     ),
+    (
+        "Front view drawing (DXF)…",
+        "Dibujo de la vista frontal (DXF)…",
+    ),
+    (
+        "Front view drawing (DWG)…",
+        "Dibujo de la vista frontal (DWG)…",
+    ),
     ("Text", "Texto"),
     ("STL mesh", "Malla STL"),
     ("SVG drawing", "Dibujo SVG"),
+    ("DXF drawing", "Dibujo DXF"),
+    ("DWG drawing", "Dibujo DWG"),
+    (
+        "DWG export needs the free ODA File Converter ({}). Install it, or set {} to its executable.",
+        "Para exportar a DWG hace falta el ODA File Converter, que es gratuito ({}). Instálalo, o indica su ejecutable en {}.",
+    ),
     ("impeller", "rodete"),
     ("Volute points (TXT)…", "Puntos de la voluta (TXT)…"),
     (
