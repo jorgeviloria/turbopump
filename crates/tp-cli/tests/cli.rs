@@ -358,6 +358,22 @@ fn volute_designs_and_exports() {
         "--dry-run",
     ]));
     assert!(manual.contains("circular; constant velocity"), "{manual}");
+    // The outlet face set at 250 mm from the axis, a nominal outlet and the flange.
+    let flanged = stdout(&turbopump(&[
+        "volute",
+        file_arg,
+        "--set",
+        "height=250 mm",
+        "--set",
+        "dn=on",
+        "--dry-run",
+    ]));
+    assert!(
+        flanged.contains("outlet face 250.0 mm from the pump axis"),
+        "{flanged}"
+    );
+    assert!(flanged.contains("outlet 100.0 mm"), "{flanged}");
+    assert!(flanged.contains("Flange     196.0 mm"), "{flanged}");
     // A double volute with an elliptic rib nose, exported with its rib.
     let double_dir = dir.join("double");
     let double = stdout(&turbopump(&[

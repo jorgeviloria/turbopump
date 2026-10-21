@@ -244,12 +244,21 @@ pub(crate) fn run(args: CadArgs) -> CliResult {
         let casing = tp_cad::build_volute_casing(&geometry, &cad).map_err(|e| e.to_string())?;
         let material = casing.volume();
         println!(
-            "  Volute casing      {:.1} cm³, {} at {}, wall {}",
+            "  Volute casing      {:.1} cm³, {} at {}, wall {}{}",
             material * 1e6,
             format_mass(material * density),
             show(&units, QuantityKind::Density, density),
-            show(&units, QuantityKind::Length, geometry.design.wall_thickness)
+            show(&units, QuantityKind::Length, geometry.design.wall_thickness),
+            if casing.flange {
+                ", with its flange"
+            } else {
+                ""
+            }
         );
+        for w in &casing.warnings {
+            println!("  warning: {w}");
+            warned = true;
+        }
         for (label, shape) in [("flow domain", &cad.fluid), ("casing", &casing.solid)] {
             if !shape.is_valid() || shape.solid_count() != 1 {
                 println!("  warning: the volute {label} is not a single valid solid");

@@ -33,7 +33,10 @@ pub(crate) struct VoluteArgs {
     /// or radial:DEGREES from the line through the pump axis; tangential, opening to both
     /// sides; tangential:inner or tangential:outer with that wall straight), bend (bend radius of a radial discharge), rotation (angle
     /// of the cutwater from the x axis; auto turns the discharge vertically up), cutwater
-    /// (tangent, sharp or rounded), nose (radius of a rounded cutwater).
+    /// (tangent, sharp or rounded), nose (radius of a rounded cutwater), height (H, the
+    /// outlet face from the pump axis, which sets the diffuser length), dn (on: round the
+    /// automatic outlet to the nearest nominal size), flange (on or off), flange_d
+    /// (outer diameter), flange_t (thickness), bolt_circle, bolt_hole and bolts.
     #[arg(long = "set", value_name = "KEY=VALUE")]
     settings: Vec<String>,
     /// Write volute.txt (points) and volute.stl (mesh) into this folder.
@@ -130,6 +133,14 @@ fn parse_shape(value: &str) -> Result<SectionShape, String> {
     }
 }
 
+fn on_off(value: &str) -> Result<bool, String> {
+    match value {
+        "on" => Ok(true),
+        "off" => Ok(false),
+        _ => Err(format!("expected on or off, got {value:?}")),
+    }
+}
+
 fn parse_discharge(value: &str) -> Result<DischargeShape, String> {
     let wall = |w| DischargeShape::Tangential { straight_wall: w };
     match value {
@@ -205,6 +216,24 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
             }
         }
         "length" => input.diffuser.length = quantity(Length)?,
+        "height" => input.diffuser.flange_height = quantity(Length)?,
+        "dn" => input.diffuser.nominal_size = on_off(value)?,
+        "flange" => input.wall.flange.enabled = on_off(value)?,
+        "flange_d" => input.wall.flange.outer_diameter = quantity(Length)?,
+        "flange_t" => input.wall.flange.thickness = quantity(Length)?,
+        "bolt_circle" => input.wall.flange.bolt_circle = quantity(Length)?,
+        "bolt_hole" => input.wall.flange.bolt_hole = quantity(Length)?,
+        "bolts" => {
+            input.wall.flange.bolts = if auto {
+                Param::Auto
+            } else {
+                Param::Manual(
+                    value
+                        .parse()
+                        .map_err(|_| format!("bolts must be a whole number, got {value:?}"))?,
+                )
+            }
+        }
         "outlet" => input.diffuser.outlet_diameter = quantity(Length)?,
         "incidence" => input.cutwater.incidence = quantity(Angle)?,
         "wall" => input.wall.thickness = quantity(Length)?,
@@ -248,7 +277,8 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
             return Err(format!(
                 "unknown key {key:?}; valid keys: flow-factor, dz, b3, e3, shape, law, \
                  sections, correction, length, outlet, incidence, wall, type, rib_wrap, rib, \
-                 rib_nose, channel_ratio, discharge, bend, rotation, cutwater, nose"
+                 rib_nose, channel_ratio, discharge, bend, rotation, cutwater, nose, height, \
+                 dn, flange, flange_d, flange_t, bolt_circle, bolt_hole, bolts"
             ));
         }
     }
@@ -404,6 +434,16 @@ fn print_report(name: &str, id: ComponentId, g: &VoluteGeometry, units: &Display
             "           inner volute {} sections, outer channel {} sections",
             g.inner_sections.len(),
             g.outer_channel.len()
+        );
+    }
+    if let Some(f) = &d.flange {
+        println!(
+            "Flange     {} × {}   {} bolt holes of {} on {}   (our proportions, not a standard)",
+            s(Length, f.outer_diameter),
+            s(Length, f.thickness),
+            f.bolts,
+            s(Length, f.bolt_hole),
+            s(Length, f.bolt_circle)
         );
     }
     if !g.warnings.is_empty() {
