@@ -16,6 +16,7 @@ mod icons;
 mod messages;
 mod ribbon;
 mod section_editor;
+mod settings;
 mod steps;
 mod theme;
 mod tree;

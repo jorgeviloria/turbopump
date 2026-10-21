@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use eframe::egui::{
     self, Button, CentralPanel, Frame, Key, KeyboardShortcut, Margin, Modal, Modifiers, Panel,
-    RichText, Ui, ViewportCommand,
+    RichText, ThemePreference, Ui, ViewportCommand,
 };
 use eframe::egui_wgpu::RenderState;
 use tp_project::{
@@ -18,6 +18,7 @@ use crate::export::{self, Exports};
 use crate::i18n::{self, Language, message, tf, tr};
 use crate::messages::{self, Message};
 use crate::ribbon::{Command, Ribbon, RibbonCx};
+use crate::settings::{self, Section, SettingsCx};
 use crate::steps::AcceptState;
 use crate::theme::{self, Palette, icon};
 use crate::tree::StageParts;
@@ -162,6 +163,29 @@ impl View {
 
 /// Key of the language in the stored preferences.
 const LANGUAGE_KEY: &str = "language";
+/// Keys of the theme, the interface scale and "view follows step".
+const THEME_KEY: &str = "theme";
+const ZOOM_KEY: &str = "zoom";
+const FOLLOW_STEP_KEY: &str = "follow_step";
+
+/// Code of a theme in the stored preferences.
+fn theme_code(theme: ThemePreference) -> &'static str {
+    match theme {
+        ThemePreference::Light => "light",
+        ThemePreference::Dark => "dark",
+        ThemePreference::System => "system",
+    }
+}
+
+fn theme_from_code(code: &str) -> Option<ThemePreference> {
+    [
+        ThemePreference::Light,
+        ThemePreference::Dark,
+        ThemePreference::System,
+    ]
+    .into_iter()
+    .find(|&t| theme_code(t) == code)
+}
 
 /// Spanish if the system speaks it, else English.
 fn system_language() -> Language {
@@ -308,6 +332,7 @@ enum Dialog {
     NewProject(NewProjectForm),
     ConfirmDiscard(Pending),
     About,
+    Settings(Section),
 }
 
 /// The Turbopump editor.
@@ -327,6 +352,9 @@ pub struct TurbopumpApp {
     tree_open: bool,
     /// Language of the interface, kept between sessions.
     language: Language,
+    /// Theme and interface scale last frame, kept between sessions.
+    theme: ThemePreference,
+    zoom: f32,
     /// Width of the open properties panel, set by dragging its edge.
     sidebar_width: f32,
     meridional: MeridionalView,
@@ -362,12 +390,27 @@ impl TurbopumpApp {
         theme::install(&cc.egui_ctx);
         let mut app = Self::with_document(Document::new(default_project()));
         app.styled = true;
-        // The stored choice, else the system's language. Without storage (tests), English.
+        // The stored choices, else the system's language and the light theme. Without
+        // storage (tests), English and the theme the harness sets.
         if let Some(storage) = cc.storage {
             app.language = storage
                 .get_string(LANGUAGE_KEY)
                 .and_then(|code| Language::from_code(&code))
                 .unwrap_or_else(system_language);
+            let theme = storage
+                .get_string(THEME_KEY)
+                .and_then(|code| theme_from_code(&code))
+                .unwrap_or(ThemePreference::Light);
+            cc.egui_ctx.set_theme(theme);
+            if let Some(zoom) = storage.get_string(ZOOM_KEY).and_then(|z| z.parse().ok()) {
+                cc.egui_ctx.set_zoom_factor(zoom);
+            }
+            if let Some(follow) = storage
+                .get_string(FOLLOW_STEP_KEY)
+                .and_then(|f| f.parse().ok())
+            {
+                app.follow_step = follow;
+            }
         }
         i18n::set(app.language);
         if let Some(path) = path {
@@ -388,6 +431,8 @@ impl TurbopumpApp {
             follow_step: true,
             tree_open: true,
             language: Language::English,
+            theme: ThemePreference::Light,
+            zoom: 1.0,
             sidebar_width: SIDEBAR_WIDTH,
             meridional: MeridionalView::default(),
             cross_section: CrossSectionView::default(),
@@ -441,6 +486,8 @@ impl TurbopumpApp {
             return;
         }
         i18n::set(self.language);
+        self.theme = ctx.options(|o| o.theme_preference);
+        self.zoom = ctx.zoom_factor();
         self.handle_shortcuts(&ctx);
         self.handle_close_request(&ctx);
         self.derived.update(self.doc.project());
@@ -477,12 +524,10 @@ impl TurbopumpApp {
                     has_volute: volute.is_some_and(|id| self.derived.volute(id).is_some()),
                     cad_running: self.exports.cad_running(),
                     options: &mut self.viewer.options,
-                    theme: ctx.options(|o| o.theme_preference),
                     tree_open: self.tree_open,
                     sidebar_open: self.sidebar_open,
                     messages_open: self.show_messages,
                     follow_step: self.follow_step,
-                    language: self.language,
                 };
                 command = self.ribbon.show(ui, &mut cx);
             });
@@ -849,10 +894,21 @@ impl TurbopumpApp {
                 } else {
                     DisplayUnits::si()
                 };
-                self.edit_ctx().edit(tr("change units"), |p| {
-                    p.display_units = preset;
-                    Ok(())
-                });
+                if self.doc.project().display_units != preset {
+                    self.edit_ctx().edit(tr("change units"), |p| {
+                        p.display_units = preset;
+                        Ok(())
+                    });
+                }
+            }
+            Command::Unit(kind, symbol) => {
+                let mut units = self.doc.project().display_units.clone();
+                if units.get(kind).symbol != symbol && units.set(kind, symbol).is_ok() {
+                    self.edit_ctx().edit(tr("change units"), |p| {
+                        p.display_units = units;
+                        Ok(())
+                    });
+                }
             }
             Command::Add(index) => tree::add_component(&mut self.edit_ctx(), index),
             Command::Remove(id) => tree::remove_component(&mut self.edit_ctx(), id),
@@ -897,11 +953,13 @@ impl TurbopumpApp {
             Command::ToggleMessages => self.show_messages = !self.show_messages,
             Command::FollowStep => self.follow_step = !self.follow_step,
             Command::Theme(preference) => ctx.set_theme(preference),
+            Command::Zoom(zoom) => ctx.set_zoom_factor(zoom),
             Command::Language(language) => {
                 self.language = language;
                 i18n::set(language);
             }
             Command::About => self.dialog = Some(Dialog::About),
+            Command::Settings(section) => self.dialog = Some(Dialog::Settings(section)),
             Command::Documentation => ctx.open_url(egui::OpenUrl::new_tab(PROJECT_PAGE)),
         }
     }
@@ -1030,6 +1088,9 @@ impl TurbopumpApp {
             }
             if i.consume_shortcut(&shortcut(Modifiers::COMMAND, Key::N)) {
                 self.dialog = Some(Dialog::NewProject(NewProjectForm::default()));
+            }
+            if i.consume_shortcut(&shortcut(Modifiers::COMMAND, Key::Comma)) {
+                self.dialog = Some(Dialog::Settings(Section::default()));
             }
             if !editing {
                 if i.consume_shortcut(&shortcut(command_shift, Key::Z))
@@ -1210,12 +1271,21 @@ impl TurbopumpApp {
                     self.show_messages = !self.show_messages;
                 }
                 ui.separator();
-                let units = if self.doc.project().display_units == DisplayUnits::us() {
+                let current = &self.doc.project().display_units;
+                let units = if *current == DisplayUnits::us() {
                     tr("US units")
-                } else {
+                } else if *current == DisplayUnits::si() {
                     tr("SI units")
+                } else {
+                    tr("Custom units")
                 };
-                ui.label(RichText::new(units).color(p.weak));
+                if ui
+                    .add(Button::new(RichText::new(units).color(p.weak)).frame(false))
+                    .on_hover_text(tr("Change the units"))
+                    .clicked()
+                {
+                    self.dialog = Some(Dialog::Settings(Section::Units));
+                }
                 ui.separator();
                 let source = match &self.derived.liquid {
                     Some(Ok(l)) => match l.source {
@@ -1361,6 +1431,20 @@ impl TurbopumpApp {
                 });
                 (!response.inner && !response.should_close()).then_some(Dialog::About)
             }
+            Dialog::Settings(mut section) => {
+                let cx = SettingsCx {
+                    theme: ctx.options(|o| o.theme_preference),
+                    zoom: ctx.zoom_factor(),
+                    language: self.language,
+                    units: &units,
+                    follow_step: self.follow_step,
+                };
+                let outcome = settings::show(ctx, &mut section, &cx);
+                for command in outcome.commands {
+                    self.run(command, ctx);
+                }
+                (!outcome.close).then_some(Dialog::Settings(section))
+            }
         };
         if self.dialog.is_none() {
             self.dialog = keep;
@@ -1390,6 +1474,9 @@ impl eframe::App for TurbopumpApp {
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         storage.set_string(LANGUAGE_KEY, self.language.code().to_owned());
+        storage.set_string(THEME_KEY, theme_code(self.theme).to_owned());
+        storage.set_string(ZOOM_KEY, self.zoom.to_string());
+        storage.set_string(FOLLOW_STEP_KEY, self.follow_step.to_string());
     }
 }
 

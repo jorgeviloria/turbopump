@@ -7,11 +7,13 @@ use eframe::egui::{
     Sense, Stroke, StrokeKind, ThemePreference, Ui, Vec2, WidgetInfo, WidgetType, pos2, vec2,
 };
 use tp_project::{ComponentId, ComponentKind, DesignStep, Project, StepStatus};
+use tp_units::QuantityKind;
 
 use crate::app::{Selection, View};
 use crate::export::{CAD_AVAILABLE, DrawingExport, TextExport, VoluteExport};
 use crate::i18n::{Language, component_name, message, project_name, tf, tr};
 use crate::icons;
+use crate::settings::Section;
 use crate::steps::{self, AcceptState};
 use crate::theme::{Palette, bold, component_color, icon};
 use crate::tree::{ADD_ENTRIES, step_title};
@@ -29,6 +31,8 @@ pub(crate) enum Command {
     Redo,
     GlobalSetup,
     UsUnits(bool),
+    /// Display unit of a quantity, by symbol.
+    Unit(QuantityKind, &'static str),
     /// Index into [`ADD_ENTRIES`].
     Add(usize),
     Remove(ComponentId),
@@ -46,7 +50,10 @@ pub(crate) enum Command {
     ToggleMessages,
     FollowStep,
     Theme(ThemePreference),
+    /// Scale of the whole interface.
+    Zoom(f32),
     Language(Language),
+    Settings(Section),
     About,
     Documentation,
 }
@@ -84,12 +91,10 @@ pub(crate) struct RibbonCx<'a> {
     pub has_volute: bool,
     pub cad_running: bool,
     pub options: &'a mut ViewOptions,
-    pub theme: ThemePreference,
     pub tree_open: bool,
     pub sidebar_open: bool,
     pub messages_open: bool,
     pub follow_step: bool,
-    pub language: Language,
 }
 
 /// Height of a large button.
@@ -148,6 +153,13 @@ impl Ribbon {
                             .clicked()
                         {
                             self.collapsed = !self.collapsed;
+                        }
+                        if ui
+                            .add(egui::Button::new(icon::GEAR_SIX).frame(false))
+                            .on_hover_text(tr("Settings: theme, language, units…"))
+                            .clicked()
+                        {
+                            command = Some(Command::Settings(Section::default()));
                         }
                         let dirty = if cx.dirty { " •" } else { "" };
                         ui.label(
@@ -292,6 +304,14 @@ impl Ribbon {
                 Command::Save,
             );
             item(ui, icon::FLOPPY_DISK, tr("Save as…"), "", Command::SaveAs);
+            ui.separator();
+            item(
+                ui,
+                icon::GEAR_SIX,
+                tr("Settings…"),
+                &format!("{cmd},"),
+                Command::Settings(Section::default()),
+            );
             ui.separator();
             if let Some(c) = export_items(ui, cx) {
                 command = Some(c);
@@ -582,15 +602,6 @@ fn home(ui: &mut Ui, cx: &mut RibbonCx<'_>) -> Option<Command> {
         {
             set(Command::GlobalSetup);
         }
-        let us = cx.project.display_units == tp_units::DisplayUnits::us();
-        stack(ui, |ui| {
-            if small_button(ui, icon::RULER, tr("SI units"), true, !us).clicked() && us {
-                set(Command::UsUnits(false));
-            }
-            if small_button(ui, icon::RULER, tr("US units"), true, us).clicked() && !us {
-                set(Command::UsUnits(true));
-            }
-        });
     });
     group(ui, tr("Components"), |ui| {
         for (index, entry) in ADD_ENTRIES.iter().enumerate().take(4) {
@@ -891,35 +902,20 @@ fn view_tab(ui: &mut Ui, cx: &mut RibbonCx<'_>) -> Option<Command> {
             }
         });
     });
-    group(ui, tr("Theme"), |ui| {
-        stack(ui, |ui| {
-            for (glyph, label, theme) in [
-                (icon::SUN, "Light", ThemePreference::Light),
-                (icon::MOON, "Dark", ThemePreference::Dark),
-                (icon::CIRCLE_HALF, "System", ThemePreference::System),
-            ] {
-                if small_button(ui, glyph, tr(label), true, cx.theme == theme).clicked() {
-                    set(Command::Theme(theme));
-                }
-            }
-        });
-    });
-    group(ui, tr("Language"), |ui| {
-        stack(ui, |ui| {
-            for language in Language::ALL {
-                if small_button(
-                    ui,
-                    icon::TRANSLATE,
-                    language.name(),
-                    true,
-                    cx.language == language,
-                )
-                .clicked()
-                {
-                    set(Command::Language(language));
-                }
-            }
-        });
+    group(ui, tr("Preferences"), |ui| {
+        if big_button(
+            ui,
+            Icon::Glyph(icon::GEAR_SIX),
+            tr("Settings"),
+            true,
+            false,
+            None,
+        )
+        .on_hover_text(tr("Theme, language, units and behavior of the editor"))
+        .clicked()
+        {
+            set(Command::Settings(Section::default()));
+        }
     });
     command
 }

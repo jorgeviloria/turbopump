@@ -1,7 +1,7 @@
 //! Interaction tests of the editor. They drive the real application through its
 //! accessibility tree and need no GPU (the 3D view shows a notice instead).
 
-use eframe::egui::{Key, Modifiers};
+use eframe::egui::{self, Key, Modifiers};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 use tp_gui::{Selection, TurbopumpApp, View};
@@ -23,6 +23,24 @@ fn status(harness: &Harness<'_, TurbopumpApp>, step: DesignStep) -> StepStatus {
 
 fn accept(harness: &mut Harness<'_, TurbopumpApp>) {
     harness.get_by_label_contains(ACCEPT).click();
+    harness.run();
+}
+
+/// Opens the settings window, picks `language` on its language page (`page` in the
+/// current language) and closes it with the button labelled `close`.
+fn choose_language(
+    harness: &mut Harness<'_, TurbopumpApp>,
+    page: &str,
+    language: &str,
+    close: &str,
+) {
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run();
+    harness.get_by_label_contains(page).click();
+    harness.run();
+    harness.get_by_label_contains(language).click();
+    harness.run();
+    harness.get_by_label(close).click();
     harness.run();
 }
 
@@ -291,8 +309,7 @@ fn the_interface_switches_to_spanish_and_back() {
     let mut harness = harness();
     harness.get_by_label("View tab").click();
     harness.run();
-    harness.get_by_label_contains("Español").click();
-    harness.run();
+    choose_language(&mut harness, "Language", "Español", "Cerrar");
     // The step editor, the tree and the toolbar now read in Spanish.
     harness.get_by_label_contains("Aceptar paso");
     assert!(
@@ -317,9 +334,55 @@ fn the_interface_switches_to_spanish_and_back() {
         status(&harness, DesignStep::MainDimensions),
         StepStatus::Done
     );
-    harness.get_by_label_contains("English").click();
-    harness.run();
+    choose_language(&mut harness, "Idioma", "English", "Close");
     harness.get_by_label_contains(ACCEPT);
+}
+
+#[test]
+fn the_settings_window_changes_theme_size_and_units() {
+    let mut harness = harness();
+    // From the View tab of the toolbar.
+    harness.get_by_label("View tab").click();
+    harness.run();
+    harness.get_all_by_label("Settings").next().unwrap().click();
+    harness.run();
+    harness.get_by_label_contains("Dark").click();
+    harness.run();
+    assert_eq!(harness.ctx.theme(), egui::Theme::Dark);
+    harness.get_by_label("125 %").click();
+    harness.run();
+    harness.get_by_label("100 %").click();
+    harness.run();
+
+    // The units belong to the project: one undo step each.
+    harness.get_by_label_contains("Units").click();
+    harness.run();
+    harness.get_by_label("US customary").click();
+    harness.run();
+    let units =
+        |h: &Harness<'_, TurbopumpApp>| h.state().document().project().display_units.clone();
+    assert_eq!(units(&harness), tp_units::DisplayUnits::us());
+    harness.get_by_label("Close").click();
+    harness.run();
+    harness.get_by_label("US units");
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert_eq!(units(&harness), tp_units::DisplayUnits::si());
+
+    // The status bar opens the units page; a single unit makes the set custom.
+    harness.get_by_label("SI units").click();
+    harness.run();
+    harness.get_by_value("mm").click();
+    harness.run();
+    harness.get_by_label("in").click();
+    harness.run();
+    let custom = units(&harness);
+    assert_eq!(custom.get(tp_units::QuantityKind::Length).symbol, "in");
+    assert_eq!(custom.get(tp_units::QuantityKind::Head).symbol, "m");
+    harness.get_by_label("Custom");
+    harness.key_press(Key::Escape);
+    harness.run();
+    harness.get_by_label("Custom units");
 }
 
 #[test]

@@ -236,9 +236,13 @@ fn properties_folded() {
 #[ignore = "needs a GPU; run with --ignored"]
 fn spanish() {
     let mut harness = harness(egui::Theme::Light);
-    harness.get_by_label("View tab").click();
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Comma);
+    harness.run();
+    harness.get_by_label_contains("Language").click();
     harness.run();
     harness.get_by_label_contains("Español").click();
+    harness.run();
+    harness.get_by_label("Cerrar").click();
     harness.run();
     harness.get_by_label_contains("Aceptar paso").click();
     harness.run();
@@ -254,6 +258,33 @@ fn spanish() {
         harness.state_mut().focus_view(view);
         harness.run();
         save(&mut harness, name);
+    }
+}
+
+/// The settings window, page by page, in both themes.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn settings() {
+    for (theme, suffix) in [(egui::Theme::Light, "light"), (egui::Theme::Dark, "dark")] {
+        let mut harness = harness(theme);
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Comma);
+        harness.run();
+        for (page, name) in [
+            ("Appearance", "appearance"),
+            ("Language", "language"),
+            ("Units", "units"),
+            ("Behavior", "behavior"),
+        ] {
+            harness
+                .get_all_by_label_contains(page)
+                .next()
+                .unwrap()
+                .click();
+            harness.run();
+            harness.remove_cursor();
+            harness.run();
+            save(&mut harness, &format!("settings-{name}-{suffix}"));
+        }
     }
 }
 
