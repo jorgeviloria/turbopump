@@ -110,6 +110,9 @@ fn changing_the_global_setup_makes_done_steps_outdated() {
         .unwrap()
         .click();
     harness.run();
+    // The rotation is a combo box showing "clockwise".
+    harness.get_by_value("clockwise").click();
+    harness.run();
     harness.get_by_label("counter-clockwise").click();
     harness.run();
     assert_eq!(

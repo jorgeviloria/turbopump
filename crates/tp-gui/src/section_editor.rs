@@ -17,9 +17,9 @@ use tp_units::{DisplayUnits, QuantityKind};
 
 use crate::app::EditCtx;
 use crate::i18n::{tf, tr};
-use crate::steps::{grid, section};
+use crate::steps::{section, section_info};
 use crate::theme::{bold, icon};
-use crate::widgets::{param_f64, quantity, value_row};
+use crate::widgets::{info, label, param_f64, props, quantity, value_info, value_row};
 
 /// Key of the definition selected for editing, shared with the cross-section view.
 fn selection_key(id: ComponentId) -> Id {
@@ -299,11 +299,6 @@ pub(crate) fn step(
     let units = cx.units();
     let g = cx.derived.volute(id);
     let b3 = g.map(|g| g.design.inlet_width);
-    ui.weak(tr(
-        "Each definition gives the shape of the sections at one wrap angle φ; the spiral \
-         development scales it to the height its flow needs, and the shape blends smoothly \
-         between definitions. Flat sections with B/H = 2 to 3 lose least (Gülich p. 414).",
-    ));
     let sections = &mut input.cross_section.sections;
     let count = sections.len();
     let mut current = selected(ui.ctx(), id, count);
@@ -390,9 +385,13 @@ pub(crate) fn step(
     select(ui.ctx(), id, current);
 
     let definition = &mut sections[current];
-    section(
+    section_info(
         ui,
         &tf("Section at {}", &[&units.show(Angle, definition.angle)]),
+        tr(
+            "Drag the control points of Bézier and line-segment sides in the cross-section \
+             view; right-click there to add or remove a corner.",
+        ),
     );
     match &mut definition.shape {
         SectionShape::Sides { left, right } => {
@@ -422,37 +421,31 @@ pub(crate) fn step(
             }
         }
     }
-    ui.add_space(4.0);
-    ui.weak(tr(
-        "Drag the control points of Bézier and line-segment sides in the cross-section \
-         view; right-click there to add or remove a corner.",
-    ));
 
     if let Some(g) = g {
         let d = &g.design;
         section(ui, tr("Throat"));
-        Grid::new("volute_shape_results")
-            .num_columns(2)
-            .show(ui, |ui| {
-                value_row(ui, tr("Height"), units.show(Length, d.throat.height));
-                value_row(
-                    ui,
-                    tr("Width over height B/H"),
-                    tf("{} (2 to 3)", &[&format!("{:.2}", d.throat_aspect)]),
-                );
-                value_row(ui, tr("Area A₃q"), units.show(Area, d.throat.area));
-                if let Some(side) = d.side_gap {
-                    let text = match (side.reach, side.gap) {
-                        (Reach::Eye, _) => tr("into the suction eye").to_owned(),
-                        (_, Some(gap)) => tf(
-                            "{} (at least {})",
-                            &[&units.show(Length, gap), &units.show(Length, side.required)],
-                        ),
-                        _ => tr("clear: the spiral stays outside r₂").to_owned(),
-                    };
-                    value_row(ui, tr("Gap to the impeller"), text);
-                }
-            });
+        props(ui, "volute_shape_results", |ui| {
+            value_row(ui, tr("Height"), units.show(Length, d.throat.height));
+            value_info(
+                ui,
+                tr("Width over height B/H"),
+                tr("Flat sections with B/H = 2 to 3 lose least (Gülich p. 414)"),
+                format!("{:.2}", d.throat_aspect),
+            );
+            value_row(ui, tr("Area A₃q"), units.show(Area, d.throat.area));
+            if let Some(side) = d.side_gap {
+                let text = match (side.reach, side.gap) {
+                    (Reach::Eye, _) => tr("into the suction eye").to_owned(),
+                    (_, Some(gap)) => tf(
+                        "{} (at least {})",
+                        &[&units.show(Length, gap), &units.show(Length, side.required)],
+                    ),
+                    _ => tr("clear: the spiral stays outside r₂").to_owned(),
+                };
+                value_row(ui, tr("Gap to the impeller"), text);
+            }
+        });
     }
     "edit volute cross section"
 }
@@ -466,7 +459,7 @@ fn angle_row(
     max_deg: f64,
     units: &DisplayUnits,
 ) {
-    ui.label(label).on_hover_text(hint);
+    crate::widgets::label(ui, label, hint);
     quantity(
         ui,
         value,
@@ -486,7 +479,7 @@ fn number_row(
     value: &mut f64,
     range: std::ops::RangeInclusive<f64>,
 ) {
-    ui.label(label).on_hover_text(hint);
+    crate::widgets::label(ui, label, hint);
     ui.add(
         DragValue::new(value)
             .range(range)
@@ -513,7 +506,7 @@ fn side_editor(
     let id = format!("section_side_{}_{}", salt.0, salt.1);
     match side {
         SideShape::Rectangular { tangent_angle } => {
-            grid(&id).show(ui, |ui| {
+            props(ui, &id, |ui| {
                 angle_row(
                     ui,
                     tr("Tangent angle λ"),
@@ -528,7 +521,7 @@ fn side_editor(
             cone_angle,
             tangent_angle,
         } => {
-            grid(&id).show(ui, |ui| {
+            props(ui, &id, |ui| {
                 angle_row(
                     ui,
                     tr("Cone angle δ"),
@@ -548,7 +541,7 @@ fn side_editor(
             });
         }
         SideShape::Round { ellipse_ratio } => {
-            grid(&id).show(ui, |ui| {
+            props(ui, &id, |ui| {
                 number_row(
                     ui,
                     tr("Ellipse ratio"),
@@ -562,7 +555,7 @@ fn side_editor(
         SideShape::LineSegments { points } => segments_editor(ui, &id, points),
         SideShape::RadiusBased(r) => {
             let lengths = b3.map(|b3| r.lengths(b3));
-            grid(&id).show(ui, |ui| {
+            props(ui, &id, |ui| {
                 use QuantityKind::Length;
                 param_f64(
                     ui,
@@ -577,7 +570,9 @@ fn side_editor(
                 param_f64(
                     ui,
                     tr("Base radius R_B"),
-                    tr("Rounds the base into the cone, limited by their lengths; automatic: 0.1·b₃"),
+                    tr(
+                        "Rounds the base into the cone, limited by their lengths; automatic: 0.1·b₃",
+                    ),
                     &mut r.base_radius,
                     Length,
                     lengths.map(|l| l.1),
@@ -625,7 +620,7 @@ fn side_editor(
 
 fn bezier_editor(ui: &mut Ui, id: &str, b: &mut BezierSide, b3: Option<f64>, units: &DisplayUnits) {
     use tp_design::volute::section::{MAX_CONE_ANGLE_DEG, MAX_TANGENT_ANGLE_DEG};
-    grid(id).show(ui, |ui| {
+    props(ui, id, |ui| {
         if b.base == BezierBase::Trapezoid {
             angle_row(
                 ui,
@@ -644,10 +639,14 @@ fn bezier_editor(ui: &mut Ui, id: &str, b: &mut BezierSide, b3: Option<f64>, uni
             MAX_TANGENT_ANGLE_DEG,
             units,
         );
-        ui.label(tr("Inner point position")).on_hover_text(tr(
-            "Points 1 and 3 as a fraction of the way from the end point to the corner S \
+        label(
+            ui,
+            tr("Inner point position"),
+            tr(
+                "Points 1 and 3 as a fraction of the way from the end point to the corner S \
              (relative), or as their distance from S (absolute)",
-        ));
+            ),
+        );
         let before = b.position;
         ComboBox::from_id_salt((id, "position"))
             .selected_text(match b.position {
@@ -683,8 +682,7 @@ fn bezier_editor(ui: &mut Ui, id: &str, b: &mut BezierSide, b3: Option<f64>, uni
                     0.0..=1.0,
                 ),
                 InnerPosition::Absolute => {
-                    ui.label(label)
-                        .on_hover_text(tr("Distance from the corner S"));
+                    crate::widgets::label(ui, label, tr("Distance from the corner S"));
                     quantity(ui, value, QuantityKind::Length, units, 0.0..=1.0);
                     ui.label("");
                     ui.end_row();
@@ -709,10 +707,16 @@ fn bezier_editor(ui: &mut Ui, id: &str, b: &mut BezierSide, b3: Option<f64>, uni
 }
 
 fn segments_editor(ui: &mut Ui, id: &str, points: &mut Vec<SegmentPoint>) {
-    ui.weak(tr(
-        "Corners from the inlet point, in units of the section height H: out from the \
-         side wall, up from r'_z, and the radius that rounds them (0: sharp).",
-    ));
+    ui.horizontal(|ui| {
+        ui.label(tr("Corners"));
+        info(
+            ui,
+            tr(
+                "Corners from the inlet point, in units of the section height H: out from the \
+                 side wall, up from r'_z, and the radius that rounds them (0: sharp).",
+            ),
+        );
+    });
     let mut remove = None;
     Grid::new(id)
         .num_columns(5)
@@ -796,7 +800,7 @@ fn internal_editor(
         .and_then(|r| r.neck_width.manual_value())
         .or_else(|| design.map(|d| 0.5 * d.inlet_width));
     let gap = design.and_then(|d| d.side_gap).map(|g| g.required);
-    grid("section_internal").show(ui, |ui| {
+    props(ui, "section_internal", |ui| {
         number_row(
             ui,
             tr("Ellipse ratio"),
@@ -804,10 +808,14 @@ fn internal_editor(
             &mut round.ellipse_ratio,
             0.2..=5.0,
         );
-        ui.label(tr("Open to +z")).on_hover_text(tr(
-            "Toward +z, behind the impeller where its hub disk is; otherwise toward −z, the \
+        label(
+            ui,
+            tr("Open to +z"),
+            tr(
+                "Toward +z, behind the impeller where its hub disk is; otherwise toward −z, the \
              suction side",
-        ));
+            ),
+        );
         ui.checkbox(&mut round.open_to_right, "");
         ui.label("");
         ui.end_row();
@@ -848,7 +856,7 @@ fn internal_editor(
                 "bend_outer",
             ),
         ] {
-            ui.label(label).on_hover_text(hint);
+            crate::widgets::label(ui, label, hint);
             bend_combo(ui, salt, wall);
             ui.label("");
             ui.end_row();
@@ -856,7 +864,9 @@ fn internal_editor(
         number_row(
             ui,
             tr("Bend ratio"),
-            tr("Radial over axial semi-axis of the inner wall of the bend, which spans half the inlet width"),
+            tr(
+                "Radial over axial semi-axis of the inner wall of the bend, which spans half the inlet width",
+            ),
             &mut round.bend_ratio,
             0.2..=5.0,
         );
@@ -871,7 +881,7 @@ fn internal_editor(
 }
 
 fn external_editor(ui: &mut Ui, round: &mut ExternalRound) {
-    grid("section_external").show(ui, |ui| {
+    props(ui, "section_external", |ui| {
         number_row(
             ui,
             tr("Ellipse ratio"),
@@ -883,7 +893,9 @@ fn external_editor(ui: &mut Ui, round: &mut ExternalRound) {
             (
                 &mut round.strictly_external,
                 tr("Strictly external"),
-                tr("Keep the section outside r'_z; otherwise it also grows inward beside the inlet"),
+                tr(
+                    "Keep the section outside r'_z; otherwise it also grows inward beside the inlet",
+                ),
             ),
             (
                 &mut round.open_to_right,
@@ -896,7 +908,7 @@ fn external_editor(ui: &mut Ui, round: &mut ExternalRound) {
                 tr("A square corner on the closed side of the top"),
             ),
         ] {
-            ui.label(label).on_hover_text(hint);
+            crate::widgets::label(ui, label, hint);
             ui.checkbox(value, "");
             ui.label("");
             ui.end_row();

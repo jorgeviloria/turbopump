@@ -1,14 +1,161 @@
-//! Input widgets for quantities with units and for automatic/manual parameters.
+//! Property rows and input widgets for quantities with units and for automatic/manual
+//! parameters.
 //!
-//! Values are stored in SI and shown in the project's display units. The parameter
-//! rows are meant for a three-column [`egui::Grid`]: label, value and "auto" toggle.
+//! Values are stored in SI and shown in the project's display units. Every group of
+//! properties is a [`props`] grid of three columns: the label, with an ⓘ that tells
+//! where the value comes from; the input or the computed value; and the "auto" toggle.
+//! All grids of the panel share the column widths, so the values line up.
 
+use std::hash::Hash;
 use std::ops::RangeInclusive;
 
 use crate::i18n::tr;
-use eframe::egui::{self, DragValue, Ui};
+use crate::theme::{Palette, icon};
+use eframe::egui::{self, Align, DragValue, Layout, RichText, Sense, Ui, vec2};
 use tp_design::Param;
 use tp_units::{DisplayUnits, QuantityKind, decimals_for};
+
+/// Width of the "auto" column.
+const AUTO_WIDTH: f32 = 44.0;
+/// Space between the columns.
+const GAP: f32 = 8.0;
+/// Height of a property row.
+const ROW_HEIGHT: f32 = 22.0;
+
+/// Widths of the label and value columns of the property grids.
+#[derive(Debug, Clone, Copy)]
+struct Columns {
+    label: f32,
+    value: f32,
+}
+
+impl Columns {
+    /// The columns for a panel `width` points wide.
+    fn for_width(width: f32) -> Self {
+        let free = (width - AUTO_WIDTH - 2.0 * GAP).max(160.0);
+        let label = (free * 0.56).clamp(100.0, 260.0);
+        Self {
+            label,
+            value: free - label,
+        }
+    }
+
+    fn id() -> egui::Id {
+        egui::Id::new("tp_property_columns")
+    }
+
+    /// The columns of the grid being drawn.
+    fn of(ui: &Ui) -> Self {
+        ui.data(|d| d.get_temp(Self::id()))
+            .unwrap_or_else(|| Self::for_width(ui.available_width()))
+    }
+}
+
+/// A grid of property rows. Inputs, combo boxes and text fields in it fill the value
+/// column; build the rows with [`label`], [`param_f64`], [`param_u32`] and [`value_row`].
+pub fn props(ui: &mut Ui, id: impl Hash + std::fmt::Debug, add: impl FnOnce(&mut Ui)) {
+    let columns = Columns::for_width(ui.available_width());
+    ui.data_mut(|d| d.insert_temp(Columns::id(), columns));
+    egui::Grid::new(id)
+        .num_columns(3)
+        .spacing([GAP, 4.0])
+        .min_row_height(ROW_HEIGHT)
+        .show(ui, |ui| {
+            // Long texts end in "…" rather than widen their column.
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+            let spacing = ui.spacing_mut();
+            spacing.interact_size.x = columns.value;
+            spacing.combo_width = columns.value;
+            spacing.text_edit_width = columns.value - 2.0 * spacing.button_padding.x;
+            add(ui);
+        });
+}
+
+/// An ⓘ that shows `text` when the pointer rests on it.
+pub fn info(ui: &mut Ui, text: &str) {
+    let p = Palette::of(ui);
+    let response = ui.add(
+        egui::Label::new(RichText::new(icon::INFO).size(13.0).color(p.weak)).sense(Sense::hover()),
+    );
+    if response.hovered() {
+        ui.painter().text(
+            response.rect.center(),
+            egui::Align2::CENTER_CENTER,
+            icon::INFO,
+            egui::FontId::proportional(13.0),
+            p.accent,
+        );
+    }
+    response.on_hover_ui(|ui| {
+        ui.set_max_width(320.0);
+        ui.label(text);
+    });
+}
+
+/// The label cell of a property row, with an ⓘ for `hint` when there is one.
+pub fn label(ui: &mut Ui, text: &str, hint: &str) {
+    let width = Columns::of(ui).label;
+    ui.allocate_ui_with_layout(
+        vec2(width, ROW_HEIGHT),
+        Layout::left_to_right(Align::Center),
+        |ui| {
+            ui.set_min_width(width);
+            ui.spacing_mut().item_spacing.x = 4.0;
+            let room = if hint.is_empty() { 0.0 } else { 18.0 };
+            ui.scope(|ui| {
+                ui.set_max_width(width - room);
+                ui.add(egui::Label::new(text).truncate());
+            });
+            if !hint.is_empty() {
+                info(ui, hint);
+            }
+        },
+    );
+}
+
+/// A one-line text field as wide as the value column, or as the half of it that
+/// [`halves`] left.
+pub fn text_field(ui: &mut Ui, text: &mut String) -> egui::Response {
+    let width = ui.spacing().text_edit_width + 2.0 * ui.spacing().button_padding.x;
+    ui.add_sized([width, ROW_HEIGHT - 2.0], egui::TextEdit::singleline(text))
+}
+
+/// Splits the value column between two controls side by side, in a horizontal
+/// layout inside it.
+pub fn halves(ui: &mut Ui) {
+    let width = Columns::of(ui).value;
+    let half = ((width - ui.spacing().item_spacing.x) / 2.0).floor();
+    let spacing = ui.spacing_mut();
+    spacing.interact_size.x = half;
+    spacing.combo_width = half;
+    spacing.text_edit_width = half - 2.0 * spacing.button_padding.x;
+    // The pair shows its words whole.
+    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+}
+
+/// A computed value in the value column: a flat field, so results read apart from
+/// the inputs but line up with them.
+pub fn value(ui: &mut Ui, text: impl Into<egui::WidgetText>) {
+    let p = Palette::of(ui);
+    let width = Columns::of(ui).value;
+    let fill = if ui.visuals().dark_mode {
+        egui::Color32::from_white_alpha(9)
+    } else {
+        p.strip.gamma_multiply(0.7)
+    };
+    egui::Frame::new()
+        .fill(fill)
+        .corner_radius(3)
+        .inner_margin(egui::Margin::symmetric(6, 2))
+        .show(ui, |ui| {
+            ui.set_width(width - 12.0);
+            ui.set_min_height(ROW_HEIGHT - 4.0);
+            // Centred, like the text of the inputs above and below.
+            ui.with_layout(Layout::top_down(Align::Center), |ui| {
+                ui.add(egui::Label::new(text).truncate());
+            });
+        });
+}
 
 /// Drag value showing `display` (already in display units) with its unit symbol.
 fn drag<'a>(display: &'a mut f64, kind: QuantityKind, units: &DisplayUnits) -> DragValue<'a> {
@@ -74,7 +221,7 @@ pub fn param_f64(
     units: &DisplayUnits,
     range: RangeInclusive<f64>,
 ) -> bool {
-    ui.label(label).on_hover_text(hint);
+    self::label(ui, label, hint);
     let mut changed = false;
     match param {
         Param::Auto => match effective {
@@ -82,9 +229,7 @@ pub fn param_f64(
                 let mut shown = units.to_display(kind, value);
                 ui.add_enabled(false, drag(&mut shown, kind, units));
             }
-            None => {
-                ui.weak("—");
-            }
+            None => value(ui, "—"),
         },
         Param::Manual(value) => {
             changed |= quantity(ui, value, kind, units, range.clone());
@@ -108,16 +253,14 @@ pub fn param_u32(
     effective: Option<u32>,
     range: RangeInclusive<u32>,
 ) -> bool {
-    ui.label(label).on_hover_text(hint);
+    self::label(ui, label, hint);
     let mut changed = false;
     match param {
         Param::Auto => match effective {
             Some(mut value) => {
                 ui.add_enabled(false, DragValue::new(&mut value));
             }
-            None => {
-                ui.weak("—");
-            }
+            None => value(ui, "—"),
         },
         Param::Manual(value) => {
             changed |= ui
@@ -139,16 +282,18 @@ fn auto_toggle<T: Copy>(
     param: &mut Param<T>,
     manual_start: impl FnOnce() -> T,
 ) -> bool {
-    let mut auto = param.is_auto();
-    let response = ui.checkbox(&mut auto, tr("auto")).on_hover_text(tr(
+    let auto = param.is_auto();
+    let chip = egui::Button::selectable(auto, RichText::new(tr("auto")).size(11.5))
+        .min_size(vec2(AUTO_WIDTH, ROW_HEIGHT - 4.0));
+    let response = ui.add(chip).on_hover_text(tr(
         "Automatic: the program proposes the value from a correlation and updates it when \
          earlier inputs change. Clear it to fix your own value.",
     ));
-    if response.changed() {
+    if response.clicked() {
         *param = if auto {
-            Param::Auto
-        } else {
             Param::Manual(manual_start())
+        } else {
+            Param::Auto
         };
         true
     } else {
@@ -157,9 +302,14 @@ fn auto_toggle<T: Copy>(
 }
 
 /// One grid row with a computed value.
-pub fn value_row(ui: &mut Ui, label: &str, value: impl Into<egui::WidgetText>) {
-    ui.label(label);
-    ui.label(value);
+pub fn value_row(ui: &mut Ui, label: &str, text: impl Into<egui::WidgetText>) {
+    value_info(ui, label, "", text);
+}
+
+/// One grid row with a computed value and an ⓘ that tells where it comes from.
+pub fn value_info(ui: &mut Ui, label: &str, hint: &str, text: impl Into<egui::WidgetText>) {
+    self::label(ui, label, hint);
+    value(ui, text);
     ui.end_row();
 }
 

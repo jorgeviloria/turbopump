@@ -9,8 +9,8 @@ use tp_units::QuantityKind;
 
 use crate::app::EditCtx;
 use crate::i18n::{tf, tr};
-use crate::steps::{grid, section};
-use crate::widgets::{param_f64, param_u32, value_row};
+use crate::steps::section;
+use crate::widgets::{label, param_f64, param_u32, props, value_info, value_row};
 
 pub(crate) fn show(
     ui: &mut Ui,
@@ -71,13 +71,8 @@ fn main(
     use QuantityKind::*;
     let units = cx.units();
     let vaned = d.is_none_or(|d| d.vanes.is_some());
-    ui.weak(tr(if vaned {
-        "Vaned diffuser after the impeller (Gülich 2nd ed., Chap. 7.9 and Table 7.7)."
-    } else {
-        "Vaneless ring after the impeller: the flow keeps c_u·r constant and slows down."
-    }));
     section(ui, tr("Main dimensions"));
-    grid("diffuser_main").show(ui, |ui| {
+    props(ui, "diffuser_main", |ui| {
         let flow_factor = input.main.flow_factor.resolve(|| 1.0);
         param_f64(
             ui,
@@ -159,24 +154,22 @@ fn main(
                     ui.end_row();
                 }
             });
-        Grid::new("diffuser_main_results")
-            .num_columns(2)
-            .show(ui, |ui| {
-                value_row(
-                    ui,
-                    tr("d₄/d₂"),
-                    format!("{:.3}", d.outlet_diameter / d.impeller_diameter),
-                );
-                value_row(
-                    ui,
-                    tr("Ideal pressure recovery"),
-                    format!("{:.2}", d.ideal_pressure_recovery),
-                );
-                if d.vanes.is_none() {
-                    value_row(ui, tr("Path wrap angle"), units.show(Angle, d.wrap_angle));
-                    value_row(ui, tr("Path length"), units.show(Length, d.path_length));
-                }
-            });
+        props(ui, "diffuser_main_results", |ui| {
+            value_row(
+                ui,
+                tr("d₄/d₂"),
+                format!("{:.3}", d.outlet_diameter / d.impeller_diameter),
+            );
+            value_row(
+                ui,
+                tr("Ideal pressure recovery"),
+                format!("{:.2}", d.ideal_pressure_recovery),
+            );
+            if d.vanes.is_none() {
+                value_row(ui, tr("Path wrap angle"), units.show(Angle, d.wrap_angle));
+                value_row(ui, tr("Path length"), units.show(Length, d.path_length));
+            }
+        });
     }
     "edit diffuser main dimensions"
 }
@@ -188,9 +181,8 @@ fn contour(
     input: &mut DiffuserInput,
 ) -> &'static str {
     let units = cx.units();
-    ui.weak(tr("The side walls run straight from b₃ at d₃ to b₄ at d₄."));
     section(ui, tr("Side walls"));
-    grid("diffuser_contour").show(ui, |ui| {
+    props(ui, "diffuser_contour", |ui| {
         param_f64(
             ui,
             tr("Outlet width b₄"),
@@ -214,11 +206,8 @@ fn properties(
     use QuantityKind::*;
     let units = cx.units();
     let v = d.and_then(|d| d.vanes.as_ref());
-    ui.weak(tr(
-        "The throat width sets the best efficiency point (Gülich eq. T7.7.10).",
-    ));
     section(ui, tr("Vanes"));
-    grid("diffuser_properties").show(ui, |ui| {
+    props(ui, "diffuser_properties", |ui| {
         param_u32(
             ui,
             tr("Vanes z_Le"),
@@ -251,31 +240,31 @@ fn properties(
     });
     if let Some(v) = v {
         section(ui, tr("Throat"));
-        Grid::new("diffuser_throat").num_columns(2).show(ui, |ui| {
+        props(ui, "diffuser_throat", |ui| {
             value_row(
                 ui,
                 tr("Flow angle α₃'"),
                 units.show(Angle, v.inlet_flow_angle),
             );
             value_row(ui, tr("Vane angle α₃B"), units.show(Angle, v.inlet_angle));
-            value_row(
+            value_info(
                 ui,
-                tr("Throat a₃ (eq. T7.7.10)"),
+                tr("Throat a₃"),
+                tr("Gülich eq. T7.7.10"),
                 units.show(Length, v.throat_target),
             );
             value_row(ui, tr("Throat of the vanes"), units.show(Length, v.throat));
-            value_row(
+            value_info(
                 ui,
-                tr("c₃q/c₂ (B)"),
-                tf(
-                    "{} (0.7 to 0.85)",
-                    &[&format!("{:.2}", v.checks.deceleration)],
-                ),
+                tr("c₃q/c₂"),
+                tr("Criterion B: 0.7 to 0.85 (Gülich Table 7.7)"),
+                format!("{:.2}", v.checks.deceleration),
             );
-            value_row(
+            value_info(
                 ui,
-                tr("b₃/a₃ (D)"),
-                tf("{} (0.8 to 2)", &[&format!("{:.2}", v.checks.aspect_ratio)]),
+                tr("b₃/a₃"),
+                tr("Criterion D: 0.8 to 2 (Gülich Table 7.7)"),
+                format!("{:.2}", v.checks.aspect_ratio),
             );
         });
     }
@@ -291,12 +280,8 @@ fn mean_lines(
     use QuantityKind::*;
     let units = cx.units();
     let v = d.and_then(|d| d.vanes.as_ref());
-    ui.weak(tr(
-        "Conformal mapping dθ = dr/(r·tan α). The vane angle grows from α₃B to α₄B; its law \
-         is shaped to give the throat of the previous step.",
-    ));
     section(ui, tr("Mean lines"));
-    grid("diffuser_mean_lines").show(ui, |ui| {
+    props(ui, "diffuser_mean_lines", |ui| {
         param_f64(
             ui,
             tr("Outlet vane angle α₄B"),
@@ -319,7 +304,7 @@ fn mean_lines(
     if let Some(v) = v {
         let c = &v.checks;
         section(ui, tr("Diffusing channel"));
-        Grid::new("diffuser_channel").num_columns(2).show(ui, |ui| {
+        props(ui, "diffuser_channel", |ui| {
             value_row(
                 ui,
                 tr("Outlet width a₄"),
@@ -331,31 +316,34 @@ fn mean_lines(
                 tr("Wrap angle"),
                 units.show(Angle, v.geometry.wrap_angle),
             );
-            value_row(
+            value_info(
                 ui,
-                tr("Area ratio (A)"),
-                tf(
-                    "{} (optimum {}, c_p,opt {})",
+                tr("Area ratio"),
+                &tf(
+                    "Criterion A: optimum {}, with c_p,opt {} (Gülich Table 7.7)",
                     &[
-                        &format!("{:.2}", c.area_ratio),
                         &format!("{:.2}", c.optimum_area_ratio),
                         &format!("{:.2}", c.optimum_pressure_recovery),
                     ],
                 ),
+                format!("{:.2}", c.area_ratio),
             );
-            value_row(
+            value_info(
                 ui,
-                tr("L₃₋₄/a₃ (C)"),
-                tf("{} (2.5 to 6)", &[&format!("{:.1}", c.length_ratio)]),
+                tr("L₃₋₄/a₃"),
+                tr("Criterion C: 2.5 to 6 (Gülich Table 7.7)"),
+                format!("{:.1}", c.length_ratio),
             );
-            value_row(
+            value_info(
                 ui,
-                tr("c₄²/(2gH) (E)"),
-                tf("{} (0.02 to 0.04)", &[&format!("{:.3}", c.outlet_energy)]),
+                tr("c₄²/(2gH)"),
+                tr("Criterion E: 0.02 to 0.04 (Gülich Table 7.7)"),
+                format!("{:.3}", c.outlet_energy),
             );
-            value_row(
+            value_info(
                 ui,
-                tr("Opening angle (F)"),
+                tr("Opening angle"),
+                tr("Criterion F (Gülich Table 7.7)"),
                 tf(
                     "{} (allowed {})",
                     &[
@@ -377,9 +365,8 @@ fn profiles(
 ) -> &'static str {
     let units = cx.units();
     let v = d.and_then(|d| d.vanes.as_ref());
-    ui.weak(tr("The vane thickness varies linearly from e₃ to e₄."));
     section(ui, tr("Thickness"));
-    grid("diffuser_profiles").show(ui, |ui| {
+    props(ui, "diffuser_profiles", |ui| {
         param_f64(
             ui,
             tr("Trailing-edge thickness e₄"),
@@ -406,28 +393,29 @@ fn edge_shape(ui: &mut Ui, salt: &str, shape: &mut EdgeShape) {
                 *shape = EdgeShape::Cut;
             }
         });
+    ui.end_row();
     if let EdgeShape::Ellipse { ratio } = shape {
+        label(
+            ui,
+            tr("Nose ratio"),
+            tr("Length of the nose over the half thickness (1 = round)"),
+        );
         ui.add(
             DragValue::new(ratio)
                 .range(1.0..=8.0)
                 .speed(0.02)
                 .suffix(" : 1"),
         );
-    } else {
-        ui.label("");
+        ui.end_row();
     }
-    ui.end_row();
 }
 
 fn edges(ui: &mut Ui, input: &mut DiffuserInput) -> &'static str {
-    ui.weak(tr(
-        "An elliptic leading edge makes the vane less sensitive to incidence (Gülich Chap. 7.9.2).",
-    ));
     section(ui, tr("Edge shapes"));
-    grid("diffuser_edges").show(ui, |ui| {
-        ui.label(tr("Leading edge"));
+    props(ui, "diffuser_edges", |ui| {
+        label(ui, tr("Leading edge"), "");
         edge_shape(ui, "diffuser_le", &mut input.edges.leading);
-        ui.label(tr("Trailing edge"));
+        label(ui, tr("Trailing edge"), "");
         edge_shape(ui, "diffuser_te", &mut input.edges.trailing);
     });
     "edit diffuser edges"

@@ -16,8 +16,8 @@ use tp_units::{DisplayUnits, QuantityKind};
 
 use crate::app::EditCtx;
 use crate::i18n::{tf, tr};
-use crate::steps::{grid, section};
-use crate::widgets::{param_f64, param_u32, value_row};
+use crate::steps::{section, section_info};
+use crate::widgets::{label, param_f64, param_u32, props, value_info, value_row};
 
 pub(crate) fn show(
     ui: &mut Ui,
@@ -77,12 +77,8 @@ fn setup(
     let units = cx.units();
     let g = cx.derived.volute(id);
     let d = g.map(|g| &g.design);
-    ui.weak(tr(
-        "The volute collects the flow of the impeller before it: Q, d₂, b₂ and c₂u come from \
-         there. Gülich 2nd ed., Chap. 7.8.",
-    ));
     section(ui, tr("Main dimensions"));
-    grid("volute_setup").show(ui, |ui| {
+    props(ui, "volute_setup", |ui| {
         let flow_factor = g.map(|g| g.design.flow / g.basis.flow);
         param_f64(
             ui,
@@ -126,11 +122,15 @@ fn setup(
         );
     });
     section(ui, tr("Type"));
-    grid("volute_kind").show(ui, |ui| {
-        ui.label(tr("Volute")).on_hover_text(tr(
-            "A double volute splits the spiral with a rib to cut the radial force \
+    props(ui, "volute_kind", |ui| {
+        label(
+            ui,
+            tr("Volute"),
+            tr(
+                "A double volute splits the spiral with a rib to cut the radial force \
              (Gülich Chap. 7.8.1 and Table 9.4)",
-        ));
+            ),
+        );
         let text = |k: VoluteKind| {
             tr(match k {
                 VoluteKind::Single => "single",
@@ -201,57 +201,56 @@ fn setup(
     if let Some(g) = g {
         let d = &g.design;
         section(ui, tr("Results"));
-        Grid::new("volute_setup_results")
-            .num_columns(2)
-            .show(ui, |ui| {
-                value_row(ui, tr("Design flow Q_Le"), units.show(VolumeFlow, d.flow));
-                value_row(
-                    ui,
-                    tr("d_z/d₂"),
-                    tf(
-                        "{} (minimum {}, Table 10.2)",
-                        &[
-                            &format!("{:.3}", d.cutwater_diameter / g.basis.impeller_diameter),
-                            &format!("{:.3}", d.min_cutwater_diameter / g.basis.impeller_diameter),
-                        ],
-                    ),
-                );
-                value_row(
-                    ui,
-                    tr("Stagnation radius r'_z"),
-                    units.show(Length, d.stagnation_radius),
-                );
-                value_row(
-                    ui,
-                    tr("c₂u of the impeller"),
-                    units.show(Velocity, g.basis.cu),
-                );
-                if let Some(rib) = &d.rib {
-                    value_row(ui, tr("Rib nose at"), units.show(Angle, rib.start));
-                    if let Some(r) = &g.rib {
-                        value_row(
-                            ui,
-                            tr("Tip of the rib nose"),
-                            tf(
-                                "{}, {} from the axis",
-                                &[
-                                    &units.show(Angle, r.nose_angle),
-                                    &units.show(Length, r.nose_distance),
-                                ],
-                            ),
-                        );
-                    }
+        props(ui, "volute_setup_results", |ui| {
+            value_row(ui, tr("Design flow Q_Le"), units.show(VolumeFlow, d.flow));
+            value_info(
+                ui,
+                tr("d_z/d₂"),
+                &tf(
+                    "Minimum {} (Gülich Table 10.2)",
+                    &[&format!(
+                        "{:.3}",
+                        d.min_cutwater_diameter / g.basis.impeller_diameter
+                    )],
+                ),
+                format!("{:.3}", d.cutwater_diameter / g.basis.impeller_diameter),
+            );
+            value_row(
+                ui,
+                tr("Stagnation radius r'_z"),
+                units.show(Length, d.stagnation_radius),
+            );
+            value_row(
+                ui,
+                tr("c₂u of the impeller"),
+                units.show(Velocity, g.basis.cu),
+            );
+            if let Some(rib) = &d.rib {
+                value_row(ui, tr("Rib nose at"), units.show(Angle, rib.start));
+                if let Some(r) = &g.rib {
                     value_row(
                         ui,
-                        tr("Throats of the partial volutes"),
-                        format!(
-                            "{} · {}",
-                            units.show(Area, rib.outer_throat.area),
-                            units.show(Area, d.throat.area)
+                        tr("Tip of the rib nose"),
+                        tf(
+                            "{}, {} from the axis",
+                            &[
+                                &units.show(Angle, r.nose_angle),
+                                &units.show(Length, r.nose_distance),
+                            ],
                         ),
                     );
                 }
-            });
+                value_row(
+                    ui,
+                    tr("Throats of the partial volutes"),
+                    format!(
+                        "{} · {}",
+                        units.show(Area, rib.outer_throat.area),
+                        units.show(Area, d.throat.area)
+                    ),
+                );
+            }
+        });
     }
     "edit volute setup"
 }
@@ -266,7 +265,6 @@ fn spiral(
     let units = cx.units();
     let g = cx.derived.volute(id);
     let dev = g.map(|g| &g.design.development);
-    ui.weak(tr("Each section carries the flow the impeller delivers up to its angle. The velocity rules size it for a velocity in the spiral, the geometric rules prescribe its size directly."));
     section(ui, tr("Design rule"));
     let spiral = &mut input.spiral;
     let law = g.map_or(
@@ -276,18 +274,20 @@ fn spiral(
         },
         |g| g.design.law,
     );
-    grid("volute_rule").show(ui, |ui| {
+    props(ui, "volute_rule", |ui| {
         param_f64(
             ui,
             tr("Wrap angle φ_wrap"),
-            tr("From the start of the spiral to the throat. A shorter spiral starts past the cutwater, which becomes the casing between the throat and that start. Automatic: 360°"),
+            tr(
+                "From the start of the spiral to the throat. A shorter spiral starts past the cutwater, which becomes the casing between the throat and that start. Automatic: 360°",
+            ),
             &mut spiral.wrap,
             Angle,
             dev.map(|d| d.wrap),
             &units,
             MIN_WRAP_DEG.to_radians()..=TAU,
         );
-        ui.label(tr("Law"));
+        label(ui, tr("Law"), "");
         let selected = match (spiral.law, g.map(|g| g.design.law)) {
             (AreaLaw::Auto, Some(law)) => tf("automatic: {}", &[&law_name(law)]),
             (law, _) => law_name(law).to_owned(),
@@ -324,12 +324,14 @@ fn spiral(
 
     if law.velocity_based() {
         section(ui, tr("Velocity and flow"));
-        grid("volute_velocity").show(ui, |ui| {
+        props(ui, "volute_velocity", |ui| {
             if law == AreaLaw::AngularMomentum {
                 param_f64(
                     ui,
                     tr("Swirl exponent x"),
-                    tr("c_u·r^x stays constant over every section: 1 conserves the angular momentum (Gülich eq. 7.24), 0 keeps the velocity of the volute inlet. Automatic: 1"),
+                    tr(
+                        "c_u·r^x stays constant over every section: 1 conserves the angular momentum (Gülich eq. 7.24), 0 keeps the velocity of the volute inlet. Automatic: 1",
+                    ),
                     &mut spiral.exponent,
                     Dimensionless,
                     dev.map(|d| d.exponent),
@@ -349,7 +351,7 @@ fn spiral(
                     0.05..=1.0,
                 );
             }
-            let (label, hint) = if law == AreaLaw::Stepanoff {
+            let (velocity_label, hint) = if law == AreaLaw::Stepanoff {
                 (
                     tr("Velocity c₃"),
                     tr("Mean velocity in every section; automatic: K₃·√(2gH)"),
@@ -357,12 +359,14 @@ fn spiral(
             } else {
                 (
                     tr("Reference velocity c_u,4"),
-                    tr("Circumferential velocity at the volute inlet r₄ = r'_z; automatic: c₂u·r₂/r₄ from the impeller"),
+                    tr(
+                        "Circumferential velocity at the volute inlet r₄ = r'_z; automatic: c₂u·r₂/r₄ from the impeller",
+                    ),
                 )
             };
             param_f64(
                 ui,
-                label,
+                velocity_label,
                 hint,
                 &mut spiral.reference_velocity,
                 Velocity,
@@ -383,22 +387,26 @@ fn spiral(
             param_f64(
                 ui,
                 tr("Blind flow Q₀"),
-                tr("Flow already in the spiral at its start; automatic: what the impeller delivers ahead of a spiral shorter than 360°"),
+                tr(
+                    "Flow already in the spiral at its start; automatic: what the impeller delivers ahead of a spiral shorter than 360°",
+                ),
                 &mut spiral.blind_flow,
                 VolumeFlow,
                 dev.map(|d| d.blind_flow),
                 &units,
                 0.0..=100.0,
             );
-            ui.label(tr("Cutwater correction")).on_hover_text(tr(
-                "Enlarge the throat for the blockage of the cutwater (eq. 7.28)",
-            ));
+            label(
+                ui,
+                tr("Cutwater correction"),
+                tr("Enlarge the throat for the blockage of the cutwater (eq. 7.28)"),
+            );
             ui.checkbox(&mut spiral.cutwater_correction, "");
             ui.end_row();
         });
     } else {
         section(ui, tr("End section and progression"));
-        grid("volute_geometry_rule").show(ui, |ui| {
+        props(ui, "volute_geometry_rule", |ui| {
             let hint = tr("At the throat; automatic: that of the throat by angular momentum");
             let end = dev.map(|d| d.end_value);
             match law {
@@ -433,9 +441,13 @@ fn spiral(
                     1e-6..=10.0,
                 ),
             };
-            ui.label(tr("Progression")).on_hover_text(tr(
-                "How the value grows from the start of the spiral to its end value at the throat",
-            ));
+            label(
+                ui,
+                tr("Progression"),
+                tr(
+                    "How the value grows from the start of the spiral to its end value at the throat",
+                ),
+            );
             let bezier = matches!(spiral.progression, Progression::Bezier { .. });
             ComboBox::from_id_salt("volute_progression")
                 .selected_text(if bezier {
@@ -454,24 +466,27 @@ fn spiral(
             ui.end_row();
         });
         if let Progression::Bezier { points } = &mut spiral.progression {
-            grid("volute_progression_points").show(ui, |ui| {
-                for (k, p) in points.iter_mut().enumerate() {
-                    ui.label(tf("Point {}", &[&(k + 1).to_string()]));
-                    ui.add(
-                        DragValue::new(&mut p[0])
-                            .speed(0.005)
-                            .range(0.0..=1.0)
-                            .prefix("φ/φ_wrap "),
-                    );
-                    ui.add(
-                        DragValue::new(&mut p[1])
-                            .speed(0.005)
-                            .range(0.0..=2.0)
-                            .prefix(tr("of the end ")),
-                    );
-                    ui.end_row();
-                }
-            });
+            Grid::new("volute_progression_points")
+                .num_columns(3)
+                .spacing([8.0, 4.0])
+                .show(ui, |ui| {
+                    for (k, p) in points.iter_mut().enumerate() {
+                        ui.label(tf("Point {}", &[&(k + 1).to_string()]));
+                        ui.add(
+                            DragValue::new(&mut p[0])
+                                .speed(0.005)
+                                .range(0.0..=1.0)
+                                .prefix("φ/φ_wrap "),
+                        );
+                        ui.add(
+                            DragValue::new(&mut p[1])
+                                .speed(0.005)
+                                .range(0.0..=2.0)
+                                .prefix(tr("of the end ")),
+                        );
+                        ui.end_row();
+                    }
+                });
             let progression = spiral.progression;
             let curve: PlotPoints = (0..=50)
                 .map(|i| {
@@ -490,10 +505,15 @@ fn spiral(
         }
     }
 
-    section(ui, tr("Cutwater compensation"));
-    ui.weak(tr("Past φ_C the inner radius of the sections rises linearly to r'_z + e at the throat: the end section gains a strip as thick as the cutwater. An alternative to the correction of eq. 7.28, for single external volutes."));
-    grid("volute_compensation").show(ui, |ui| {
-        ui.label(tr("Compensate the cutwater"));
+    section_info(
+        ui,
+        tr("Cutwater compensation"),
+        tr(
+            "Past φ_C the inner radius of the sections rises linearly to r'_z + e at the throat: the end section gains a strip as thick as the cutwater. An alternative to the correction of eq. 7.28, for single external volutes.",
+        ),
+    );
+    props(ui, "volute_compensation", |ui| {
+        label(ui, tr("Compensate the cutwater"), "");
         ui.checkbox(&mut spiral.compensation.enabled, "");
         ui.end_row();
         if spiral.compensation.enabled {
@@ -511,7 +531,9 @@ fn spiral(
             param_f64(
                 ui,
                 tr("Start φ_C"),
-                tr("Wrap angle from the start of the spiral where the inner radius starts to rise; automatic: 270°"),
+                tr(
+                    "Wrap angle from the start of the spiral where the inner radius starts to rise; automatic: 270°",
+                ),
                 &mut spiral.compensation.start,
                 Angle,
                 resolved.map(|c| c.start),
@@ -522,14 +544,18 @@ fn spiral(
     });
 
     section(ui, tr("Circular arcs"));
-    grid("volute_arcs").show(ui, |ui| {
-        ui.label(tr("Approximate by circular arcs")).on_hover_text(tr(
-            "For rectangular and trapezoidal sections: tangent circular arcs take the place of the outer contour, as volutes are laid out on the drawing board. They start at the start of the spiral and end at the throat.",
-        ));
+    props(ui, "volute_arcs", |ui| {
+        label(
+            ui,
+            tr("Approximate by circular arcs"),
+            tr(
+                "For rectangular and trapezoidal sections: tangent circular arcs take the place of the outer contour, as volutes are laid out on the drawing board. They start at the start of the spiral and end at the throat.",
+            ),
+        );
         ui.checkbox(&mut spiral.arcs.enabled, "");
         ui.end_row();
         if spiral.arcs.enabled {
-            ui.label(tr("Number of arcs"));
+            label(ui, tr("Number of arcs"), "");
             ui.add(DragValue::new(&mut spiral.arcs.segments).range(MIN_ARCS..=MAX_ARCS));
             ui.end_row();
             if let Some(arcs) = dev.and_then(|d| d.arcs.as_ref()) {
@@ -575,69 +601,63 @@ fn spiral(
     if let Some(g) = g {
         let d = &g.design;
         section(ui, tr("Throat"));
-        Grid::new("volute_spiral_results")
-            .num_columns(2)
-            .show(ui, |ui| {
-                value_row(ui, tr("Area A₃q"), units.show(Area, d.throat.area));
+        props(ui, "volute_spiral_results", |ui| {
+            value_row(ui, tr("Area A₃q"), units.show(Area, d.throat.area));
+            value_row(
+                ui,
+                tr("Outer radius r_a"),
+                units.show(Length, d.throat.outer_radius),
+            );
+            if d.development.law.velocity_based() {
                 value_row(
                     ui,
-                    tr("Outer radius r_a"),
-                    units.show(Length, d.throat.outer_radius),
+                    tr("Cutwater correction Δa₃"),
+                    units.show(Length, d.throat_correction),
                 );
-                if d.development.law.velocity_based() {
-                    value_row(
-                        ui,
-                        tr("Cutwater correction Δa₃"),
-                        units.show(Length, d.throat_correction),
-                    );
-                }
-                value_row(
-                    ui,
-                    tr("Velocity c₃q"),
-                    units.show(Velocity, d.throat_velocity),
-                );
-                value_row(
-                    ui,
-                    tr("c₃q/c₂"),
-                    tf(
-                        "{} (not much below 0.8, Table 10.2)",
-                        &[&format!("{:.2}", d.deceleration)],
-                    ),
-                );
-                value_row(ui, tr("Spiral starts at"), units.show(Angle, g.start_angle));
-            });
+            }
+            value_row(
+                ui,
+                tr("Velocity c₃q"),
+                units.show(Velocity, d.throat_velocity),
+            );
+            value_info(
+                ui,
+                tr("c₃q/c₂"),
+                tr("Not much below 0.8 (Gülich Table 10.2)"),
+                format!("{:.2}", d.deceleration),
+            );
+            value_row(ui, tr("Spiral starts at"), units.show(Angle, g.start_angle));
+        });
         if let Ok(p) = d.end_section() {
             section(ui, tr("End section"));
-            Grid::new("volute_end_section")
-                .num_columns(2)
-                .show(ui, |ui| {
-                    let height = p.outer_radius - p.inner_radius;
-                    value_row(
-                        ui,
-                        tr("Inner radius r'"),
-                        units.show(Length, p.inner_radius),
-                    );
-                    value_row(ui, tr("Outer radius r"), units.show(Length, p.outer_radius));
-                    value_row(
-                        ui,
-                        tr("Lowest axial coordinate z"),
-                        units.show(Length, p.axial_min),
-                    );
-                    value_row(ui, tr("Height H"), units.show(Length, height));
-                    value_row(ui, tr("Width B"), units.show(Length, p.width));
-                    value_row(ui, tr("Side ratio H/B"), format!("{:.3}", height / p.width));
-                    value_row(
-                        ui,
-                        tr("Equivalent diameter D"),
-                        units.show(Length, (4.0 * p.area / PI).sqrt()),
-                    );
-                    value_row(ui, tr("Area A"), units.show(Area, p.area));
-                    value_row(
-                        ui,
-                        tr("Area over centroid radius A/r_c"),
-                        units.show(Length, p.area / p.centroid_radius),
-                    );
-                });
+            props(ui, "volute_end_section", |ui| {
+                let height = p.outer_radius - p.inner_radius;
+                value_row(
+                    ui,
+                    tr("Inner radius r'"),
+                    units.show(Length, p.inner_radius),
+                );
+                value_row(ui, tr("Outer radius r"), units.show(Length, p.outer_radius));
+                value_row(
+                    ui,
+                    tr("Lowest axial coordinate z"),
+                    units.show(Length, p.axial_min),
+                );
+                value_row(ui, tr("Height H"), units.show(Length, height));
+                value_row(ui, tr("Width B"), units.show(Length, p.width));
+                value_row(ui, tr("Side ratio H/B"), format!("{:.3}", height / p.width));
+                value_row(
+                    ui,
+                    tr("Equivalent diameter D"),
+                    units.show(Length, (4.0 * p.area / PI).sqrt()),
+                );
+                value_row(ui, tr("Area A"), units.show(Area, p.area));
+                value_row(
+                    ui,
+                    tr("Area over centroid radius A/r_c"),
+                    units.show(Length, p.area / p.centroid_radius),
+                );
+            });
         }
         progressions(ui, id, g, &units);
     }
@@ -783,14 +803,17 @@ fn diffuser(
     let units = cx.units();
     let g = cx.derived.volute(id);
     let dif = g.map(|g| &g.design.diffuser);
-    ui.weak(tr("Conical diffuser from the throat to the discharge nozzle, straight or with a bend, checked against the allowable opening angle (Gülich eqs. 1.44, 1.45)."));
     section(ui, tr("Discharge diffuser"));
-    grid("volute_diffuser").show(ui, |ui| {
-        ui.label(tr("Shape")).on_hover_text(tr(
-            "Tangential: straight along the flow at the throat. Radial: a bend turning the \
+    props(ui, "volute_diffuser", |ui| {
+        label(
+            ui,
+            tr("Shape"),
+            tr(
+                "Tangential: straight along the flow at the throat. Radial: a bend turning the \
              flow away from the pump axis; at 0° the outlet stands on the pump centerline \
              (Gülich Fig. 7.42)",
-        ));
+            ),
+        );
         let text = |shape: &DischargeShape| {
             tr(match shape {
                 DischargeShape::Tangential {
@@ -892,9 +915,11 @@ fn diffuser(
             &units,
             0.005..=10.0,
         );
-        ui.label(tr("Nominal size DN")).on_hover_text(tr(
-            "Round the automatic outlet diameter to the nearest nominal size",
-        ));
+        label(
+            ui,
+            tr("Nominal size DN"),
+            tr("Round the automatic outlet diameter to the nearest nominal size"),
+        );
         ui.checkbox(&mut input.diffuser.nominal_size, "");
         ui.end_row();
         param_f64(
@@ -913,49 +938,47 @@ fn diffuser(
     });
     if let Some(d) = dif {
         section(ui, tr("Results"));
-        Grid::new("volute_diffuser_results")
-            .num_columns(2)
-            .show(ui, |ui| {
-                value_row(ui, tr("Area ratio A_R"), format!("{:.2}", d.area_ratio));
-                if let Some(g) = g {
-                    value_row(
-                        ui,
-                        tr("Outlet face from the pump axis"),
-                        units.show(Length, g.outlet_height),
-                    );
-                }
-                if let Some(g) = g
-                    && g.nozzle_bend > 0.0
-                {
-                    value_row(ui, tr("Bend turns"), units.show(Angle, g.nozzle_bend));
-                    value_row(
-                        ui,
-                        tr("Centerline length"),
-                        units.show(Length, g.nozzle_length),
-                    );
-                }
+        props(ui, "volute_diffuser_results", |ui| {
+            value_row(ui, tr("Area ratio A_R"), format!("{:.2}", d.area_ratio));
+            if let Some(g) = g {
                 value_row(
                     ui,
-                    tr("Opening angle ϑ_eq"),
-                    tf(
-                        "{} (allowed {})",
-                        &[
-                            &units.show(Angle, d.opening_angle),
-                            &units.show(Angle, d.allowable_angle),
-                        ],
-                    ),
+                    tr("Outlet face from the pump axis"),
+                    units.show(Length, g.outlet_height),
                 );
+            }
+            if let Some(g) = g
+                && g.nozzle_bend > 0.0
+            {
+                value_row(ui, tr("Bend turns"), units.show(Angle, g.nozzle_bend));
                 value_row(
                     ui,
-                    tr("Outlet velocity"),
-                    units.show(Velocity, d.outlet_velocity),
+                    tr("Centerline length"),
+                    units.show(Length, g.nozzle_length),
                 );
-                value_row(
-                    ui,
-                    tr("Ideal pressure recovery c_p,id"),
-                    format!("{:.2}", d.ideal_pressure_recovery),
-                );
-            });
+            }
+            value_row(
+                ui,
+                tr("Opening angle ϑ_eq"),
+                tf(
+                    "{} (allowed {})",
+                    &[
+                        &units.show(Angle, d.opening_angle),
+                        &units.show(Angle, d.allowable_angle),
+                    ],
+                ),
+            );
+            value_row(
+                ui,
+                tr("Outlet velocity"),
+                units.show(Velocity, d.outlet_velocity),
+            );
+            value_row(
+                ui,
+                tr("Ideal pressure recovery c_p,id"),
+                format!("{:.2}", d.ideal_pressure_recovery),
+            );
+        });
     }
     "edit volute diffuser"
 }
@@ -969,14 +992,17 @@ fn cutwater(
     use QuantityKind::*;
     let units = cx.units();
     let g = cx.derived.volute(id);
-    ui.weak(tr("The cutwater meets the flow leaving the impeller; its camber angle follows the flow angle plus a small incidence (Gülich eqs. T7.7.3 to T7.7.6)."));
     section(ui, tr("Cutwater"));
-    grid("volute_cutwater").show(ui, |ui| {
-        ui.label(tr("Shape")).on_hover_text(tr(
-            "Tangent: the spiral starts where it clears the diffuser. Sharp: the spiral \
+    props(ui, "volute_cutwater", |ui| {
+        label(
+            ui,
+            tr("Shape"),
+            tr(
+                "Tangent: the spiral starts where it clears the diffuser. Sharp: the spiral \
              cuts the diffuser wall. Rounded: a nose of radius ρ on the cutwater circle \
              (Gülich Fig. 7.41b)",
-        ));
+            ),
+        );
         let text = |shape: &CutwaterShape| {
             tr(match shape {
                 CutwaterShape::Tangent => "tangent",
@@ -1032,50 +1058,48 @@ fn cutwater(
     if let Some(g) = g {
         let d = &g.design;
         section(ui, tr("Results"));
-        Grid::new("volute_cutwater_results")
-            .num_columns(2)
-            .show(ui, |ui| {
+        props(ui, "volute_cutwater_results", |ui| {
+            value_row(
+                ui,
+                tr("Flow angle α₃'"),
+                units.show(Angle, d.cutwater_flow_angle),
+            );
+            value_row(
+                ui,
+                tr("Cutwater angle α₃B"),
+                units.show(Angle, d.cutwater_angle),
+            );
+            value_row(
+                ui,
+                tr("Thickness e₃"),
+                units.show(Length, d.cutwater_thickness),
+            );
+            value_row(
+                ui,
+                tr("Diameter d_z"),
+                units.show(Length, d.cutwater_diameter),
+            );
+            let c = &g.cutwater;
+            if !matches!(d.cutwater_shape, CutwaterShape::Tangent) {
                 value_row(
                     ui,
-                    tr("Flow angle α₃'"),
-                    units.show(Angle, d.cutwater_flow_angle),
+                    tr("Tip of the wedge"),
+                    tf(
+                        "{} from the cutwater, {} from the axis",
+                        &[
+                            &units.show(Angle, c.angle),
+                            &units.show(Length, c.tip.truncate().length()),
+                        ],
+                    ),
                 );
-                value_row(
-                    ui,
-                    tr("Cutwater angle α₃B"),
-                    units.show(Angle, d.cutwater_angle),
-                );
-                value_row(
-                    ui,
-                    tr("Thickness e₃"),
-                    units.show(Length, d.cutwater_thickness),
-                );
-                value_row(
-                    ui,
-                    tr("Diameter d_z"),
-                    units.show(Length, d.cutwater_diameter),
-                );
-                let c = &g.cutwater;
-                if !matches!(d.cutwater_shape, CutwaterShape::Tangent) {
-                    value_row(
-                        ui,
-                        tr("Tip of the wedge"),
-                        tf(
-                            "{} from the cutwater, {} from the axis",
-                            &[
-                                &units.show(Angle, c.angle),
-                                &units.show(Length, c.tip.truncate().length()),
-                            ],
-                        ),
-                    );
-                    value_row(ui, tr("Wedge angle"), units.show(Angle, c.wedge));
-                }
-                value_row(
-                    ui,
-                    tr("Effective cutwater diameter"),
-                    units.show(Length, 2.0 * c.nose_distance),
-                );
-            });
+                value_row(ui, tr("Wedge angle"), units.show(Angle, c.wedge));
+            }
+            value_row(
+                ui,
+                tr("Effective cutwater diameter"),
+                units.show(Length, 2.0 * c.nose_distance),
+            );
+        });
     }
     "edit volute cutwater"
 }
@@ -1088,9 +1112,8 @@ fn wall(
 ) -> &'static str {
     let units = cx.units();
     let g = cx.derived.volute(id);
-    ui.weak(tr("Casing wall around the flow domain."));
     section(ui, tr("Wall"));
-    grid("volute_wall").show(ui, |ui| {
+    props(ui, "volute_wall", |ui| {
         param_f64(
             ui,
             tr("Wall thickness"),
@@ -1102,16 +1125,19 @@ fn wall(
             0.0005..=0.2,
         );
     });
-    section(ui, tr("Wall stresses"));
-    ui.weak(tr(
-        "Each section as a thin torus of the same area: an estimate to choose the thickness",
-    ));
+    section_info(
+        ui,
+        tr("Wall stresses"),
+        tr("Each section as a thin torus of the same area: an estimate to choose the thickness"),
+    );
     let w = g.map(|g| g.wall_stress);
-    grid("volute_wall_stress").show(ui, |ui| {
+    props(ui, "volute_wall_stress", |ui| {
         param_f64(
             ui,
             tr("Casing pressure"),
-            tr("Over the suction pressure; automatic: the rise at shut-off (Gülich eqs. 3.26 and 3.28)"),
+            tr(
+                "Over the suction pressure; automatic: the rise at shut-off (Gülich eqs. 3.26 and 3.28)",
+            ),
             &mut input.wall.pressure,
             QuantityKind::Pressure,
             w.map(|w| w.pressure),
@@ -1121,7 +1147,9 @@ fn wall(
         param_f64(
             ui,
             tr("Allowable stress"),
-            tr("Of the casing material; automatic: 50 MPa, about a fifth of a grey cast iron of 250 MPa"),
+            tr(
+                "Of the casing material; automatic: 50 MPa, about a fifth of a grey cast iron of 250 MPa",
+            ),
             &mut input.wall.allowable_stress,
             QuantityKind::Pressure,
             w.map(|w| w.allowable),
@@ -1130,46 +1158,51 @@ fn wall(
         );
     });
     if let Some(w) = w {
-        Grid::new("volute_wall_stress_results")
-            .num_columns(2)
-            .show(ui, |ui| {
-                let place = match w.place {
-                    StressPlace::Spiral { angle } => {
-                        tf("section at {}", &[&units.show(QuantityKind::Angle, angle)])
-                    }
-                    StressPlace::Bend => tr("bend of the discharge").to_owned(),
-                    StressPlace::Straight => tr("straight discharge").to_owned(),
-                };
-                value_row(
-                    ui,
-                    tr("Stress round the section σ₁"),
-                    tf(
-                        "{} at the {}",
-                        &[&units.show(QuantityKind::Pressure, w.hoop), &place],
-                    ),
-                );
-                value_row(
-                    ui,
-                    tr("Stress along σ₂"),
-                    units.show(QuantityKind::Pressure, w.longitudinal),
-                );
-                value_row(
-                    ui,
-                    tr("Wall for the allowable stress"),
-                    units.show(QuantityKind::Length, w.required_thickness),
-                );
-            });
+        props(ui, "volute_wall_stress_results", |ui| {
+            let place = match w.place {
+                StressPlace::Spiral { angle } => {
+                    tf("section at {}", &[&units.show(QuantityKind::Angle, angle)])
+                }
+                StressPlace::Bend => tr("bend of the discharge").to_owned(),
+                StressPlace::Straight => tr("straight discharge").to_owned(),
+            };
+            value_row(
+                ui,
+                tr("Stress round the section σ₁"),
+                tf(
+                    "{} at the {}",
+                    &[&units.show(QuantityKind::Pressure, w.hoop), &place],
+                ),
+            );
+            value_row(
+                ui,
+                tr("Stress along σ₂"),
+                units.show(QuantityKind::Pressure, w.longitudinal),
+            );
+            value_row(
+                ui,
+                tr("Wall for the allowable stress"),
+                units.show(QuantityKind::Length, w.required_thickness),
+            );
+        });
     }
     section(ui, tr("Outlet flange"));
-    ui.checkbox(&mut input.wall.flange.enabled, tr("Flange on the casing"))
-        .on_hover_text(tr(
-            "Automatic sizes from proportions of our own, not a standard: set them to the \
-            standard in use",
-        ));
+    props(ui, "volute_flange_on", |ui| {
+        label(
+            ui,
+            tr("Flange on the casing"),
+            tr(
+                "Automatic sizes from proportions of our own, not a standard: set them to the \
+                standard in use",
+            ),
+        );
+        ui.checkbox(&mut input.wall.flange.enabled, "");
+        ui.end_row();
+    });
     if input.wall.flange.enabled {
         let f = g.and_then(|g| g.design.flange);
         let flange = &mut input.wall.flange;
-        grid("volute_flange").show(ui, |ui| {
+        props(ui, "volute_flange", |ui| {
             let rows: [(&str, &str, &mut Param<f64>, Option<f64>); 4] = [
                 (
                     tr("Outer diameter"),

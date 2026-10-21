@@ -1257,6 +1257,71 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Arrastrar: girar\nArrastrar con el botón derecho o con Mayús: desplazar\nRueda o pellizco: zoom\nDoble clic: encuadrar\nCubo de vistas: clic en una cara, arista o esquina",
     ),
     ("Rear", "Trasera"),
+    // Property rows: sources and recommended ranges behind the ⓘ.
+    ("Gülich eq. T7.7.10", "Gülich ec. T7.7.10"),
+    (
+        "Criterion A: optimum {}, with c_p,opt {} (Gülich Table 7.7)",
+        "Criterio A: óptimo {}, con c_p,opt {} (Gülich tabla 7.7)",
+    ),
+    (
+        "Criterion B: 0.7 to 0.85 (Gülich Table 7.7)",
+        "Criterio B: de 0,7 a 0,85 (Gülich tabla 7.7)",
+    ),
+    (
+        "Criterion C: 2.5 to 6 (Gülich Table 7.7)",
+        "Criterio C: de 2,5 a 6 (Gülich tabla 7.7)",
+    ),
+    (
+        "Criterion D: 0.8 to 2 (Gülich Table 7.7)",
+        "Criterio D: de 0,8 a 2 (Gülich tabla 7.7)",
+    ),
+    (
+        "Criterion E: 0.02 to 0.04 (Gülich Table 7.7)",
+        "Criterio E: de 0,02 a 0,04 (Gülich tabla 7.7)",
+    ),
+    (
+        "Criterion F (Gülich Table 7.7)",
+        "Criterio F (Gülich tabla 7.7)",
+    ),
+    ("Area ratio", "Relación de áreas"),
+    ("Nose ratio", "Relación de la nariz"),
+    (
+        "Not much below 0.8 (Gülich Table 10.2)",
+        "No mucho menos de 0,8 (Gülich tabla 10.2)",
+    ),
+    (
+        "Minimum {} (Gülich Table 10.2)",
+        "Mínimo {} (Gülich tabla 10.2)",
+    ),
+    ("Blade loading", "Carga del álabe"),
+    ("Gülich eqs. 7.1.10–11", "Gülich ecs. 7.1.10–11"),
+    ("Recommended 0.85 to 1.15", "Recomendado de 0,85 a 1,15"),
+    ("c_p,min of the leading edge", "c_p,min del borde de ataque"),
+    (
+        "At shockless entry (Gülich eq. 7.1a)",
+        "Con entrada sin choque (Gülich ec. 7.1a)",
+    ),
+    (
+        "Flat sections with B/H = 2 to 3 lose least (Gülich p. 414)",
+        "Las secciones planas con B/H = 2 a 3 pierden menos (Gülich p. 414)",
+    ),
+    ("Corners", "Esquinas"),
+    (
+        "CAD solid of the volute flow domain, built with Open CASCADE. CFD setup and \
+                 model finishing arrive in phases 8 and 9.",
+        "Sólido CAD del dominio fluido de la voluta, construido con Open CASCADE. La preparación CFD y el acabado del modelo llegan en las fases 8 y 9.",
+    ),
+    (
+        "CAD solids of the diffuser flow domain and vanes, built with Open CASCADE. \
+                 CFD setup and model finishing arrive in phases 8 and 9.",
+        "Sólidos CAD del dominio fluido y los álabes del difusor, construidos con Open CASCADE. La preparación CFD y el acabado del modelo llegan en las fases 8 y 9.",
+    ),
+    (
+        "CAD solids of the impeller and of its flow domain, built with Open CASCADE. \
+                 CFD setup and model finishing (fillets, trimming, balance holes) arrive in \
+                 phases 8 and 9.",
+        "Sólidos CAD del rodete y de su dominio fluido, construidos con Open CASCADE. La preparación CFD y el acabado del modelo (redondeos, recortes, agujeros de equilibrado) llegan en las fases 8 y 9.",
+    ),
     ("Home view", "Vista inicial"),
     ("Turn 90° about the axis", "Girar 90° alrededor del eje"),
     ("Turn 90° the other way", "Girar 90° en sentido contrario"),

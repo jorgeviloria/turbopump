@@ -62,6 +62,14 @@ fn main_window() {
         harness.state_mut().focus_view(View::View3d);
         harness.run();
         save(&mut harness, &format!("home-{suffix}"));
+        // The global setup: rows with a value and its kind side by side.
+        harness
+            .get_all_by_label("Global setup")
+            .next()
+            .unwrap()
+            .click();
+        harness.run();
+        save(&mut harness, &format!("setup-{suffix}"));
     }
 }
 
