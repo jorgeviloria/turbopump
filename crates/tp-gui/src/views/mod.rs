@@ -7,7 +7,7 @@ pub(crate) mod meridional;
 pub(crate) mod performance;
 pub(crate) mod report;
 
-use eframe::egui::{Color32, Id, Ui};
+use eframe::egui::{self, Color32, Id, Stroke, Ui, vec2};
 use egui_plot::PlotTransform;
 
 /// Line colors shared by the plots, tuned for light and dark themes.
@@ -106,4 +106,82 @@ pub(crate) fn unavailable(ui: &mut Ui, reason: &str) {
     ui.centered_and_justified(|ui| {
         ui.colored_label(ui.visuals().warn_fg_color, crate::i18n::message(reason));
     });
+}
+
+/// Symbols of the shared legend.
+#[derive(Clone, Copy)]
+pub(crate) enum Mark {
+    Circle,
+    Diamond,
+    Square,
+    /// A vertical dashed line, as for a marked flow.
+    Dashed,
+    /// A vertical dotted line.
+    Dotted,
+    /// A horizontal solid line, as for a curve.
+    Line,
+    /// A horizontal dashed line.
+    DashedLine,
+}
+
+/// A small drawn symbol and its name, as in a plot legend.
+pub(crate) fn marker(ui: &mut Ui, mark: Mark, color: Color32, text: &str) {
+    let (rect, _) = ui.allocate_exact_size(vec2(14.0, 14.0), egui::Sense::hover());
+    let painter = ui.painter_at(rect);
+    let c = rect.center();
+    match mark {
+        Mark::Circle => {
+            painter.circle_filled(c, 4.5, color);
+        }
+        Mark::Square => {
+            painter.rect_filled(egui::Rect::from_center_size(c, vec2(8.0, 8.0)), 0.0, color);
+        }
+        Mark::Diamond => {
+            painter.add(egui::Shape::convex_polygon(
+                vec![
+                    c + vec2(0.0, -5.5),
+                    c + vec2(5.5, 0.0),
+                    c + vec2(0.0, 5.5),
+                    c + vec2(-5.5, 0.0),
+                ],
+                color,
+                Stroke::NONE,
+            ));
+        }
+        Mark::Dashed | Mark::Dotted => {
+            let (dash, gap) = match mark {
+                Mark::Dashed => (3.0, 2.0),
+                _ => (1.0, 2.0),
+            };
+            let mut y = rect.top() + 1.0;
+            while y < rect.bottom() - 1.0 {
+                let end = (y + dash).min(rect.bottom() - 1.0);
+                painter.line_segment(
+                    [egui::pos2(c.x, y), egui::pos2(c.x, end)],
+                    Stroke::new(1.5, color),
+                );
+                y = end + gap;
+            }
+        }
+        Mark::Line => {
+            painter.line_segment(
+                [egui::pos2(rect.left(), c.y), egui::pos2(rect.right(), c.y)],
+                Stroke::new(2.0, color),
+            );
+        }
+        Mark::DashedLine => {
+            for k in 0..3 {
+                let x = rect.left() + 5.0 * k as f32;
+                painter.line_segment(
+                    [
+                        egui::pos2(x, c.y),
+                        egui::pos2((x + 3.0).min(rect.right()), c.y),
+                    ],
+                    Stroke::new(2.0, color),
+                );
+            }
+        }
+    }
+    ui.label(text);
+    ui.add_space(10.0);
 }

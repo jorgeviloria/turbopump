@@ -663,7 +663,7 @@ impl TurbopumpApp {
                         self.meridional.show(ui, &mut cx, id, stator, volute);
                     }
                     View::CrossSection => self.cross_section.show(ui, &mut cx, volute, cover),
-                    View::Blade => blade::show(ui, cx.derived, id, &units),
+                    View::Blade => blade::show(ui, cx.derived, id, &units, cover),
                     View::FrontView => {
                         front::show(ui, cx.derived, id, stator, volute, &units);
                     }

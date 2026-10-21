@@ -1347,6 +1347,12 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Clic para la vista desde esta esquina",
     ),
     ("span {}", "sección {}"),
+    ("span {} (hub)", "sección {} (cubo)"),
+    ("span {} (shroud)", "sección {} (carcasa)"),
+    (
+        "m\u{304} (0 leading edge, 1 trailing edge)",
+        "m\u{304} (0 borde de ataque, 1 borde de salida)",
+    ),
     (
         "relative meridional length (0 leading edge, 1 trailing edge)",
         "longitud meridional relativa (0 borde de ataque, 1 borde de salida)",

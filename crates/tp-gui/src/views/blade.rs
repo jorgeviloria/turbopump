@@ -1,14 +1,15 @@
 //! Blade plots along the normalized meridional length m̄: blade angle, wrap angle,
-//! thickness and the relative velocity on both faces of every section.
+//! thickness and the relative velocity on both faces of every section, two rows of
+//! two under one legend, like the performance curves.
 
-use eframe::egui::Ui;
-use egui_plot::{Corner, Legend, Line, LineStyle, Plot, PlotPoints};
+use eframe::egui::{self, Ui};
+use egui_plot::{Line, LineStyle, Plot, PlotPoints};
 use tp_design::impeller::blade::BladeSection;
 use tp_design::impeller::loading::blade_velocities;
 use tp_project::ComponentId;
 use tp_units::{DisplayUnits, QuantityKind};
 
-use super::{Palette, unavailable};
+use super::{Mark, Palette, marker, unavailable};
 use crate::derived::Derived;
 use crate::i18n::{tf, tr};
 
@@ -26,7 +27,24 @@ fn along(section: &BladeSection, value: impl Fn(usize) -> f64) -> PlotPoints<'st
         .collect()
 }
 
-pub(crate) fn show(ui: &mut Ui, derived: &Derived, id: ComponentId, units: &DisplayUnits) {
+/// The view, clear of the `cover` px the floating properties panel hides on the
+/// right.
+pub(crate) fn show(
+    ui: &mut Ui,
+    derived: &Derived,
+    id: ComponentId,
+    units: &DisplayUnits,
+    cover: f32,
+) {
+    let area = ui.available_rect_before_wrap();
+    let right = (area.max.x - cover).max(area.min.x + 320.0);
+    let clear = egui::Rect::from_min_max(area.min, egui::pos2(right, area.max.y));
+    ui.scope_builder(egui::UiBuilder::new().max_rect(clear), |ui| {
+        content(ui, derived, id, units);
+    });
+}
+
+fn content(ui: &mut Ui, derived: &Derived, id: ComponentId, units: &DisplayUnits) {
     let Some(g) = derived.geometry(id) else {
         let reason = derived
             .impeller(id)
@@ -43,92 +61,108 @@ pub(crate) fn show(ui: &mut Ui, derived: &Derived, id: ComponentId, units: &Disp
     let n = sections.len();
     let angle = units.get(QuantityKind::Angle).symbol;
     let length = units.get(QuantityKind::Length).symbol;
-    let spacing = ui.spacing().item_spacing.y;
-    let height = ((ui.available_height() - 3.0 * spacing) / 4.0).max(100.0);
+    let ink = ui.visuals().text_color();
 
-    let plots: [(&str, String, Quantity); 3] = [
-        ("blade_beta", format!("β_B [{angle}]"), &|s, i| {
-            units.to_display(QuantityKind::Angle, s.beta[i])
-        }),
-        ("blade_theta", format!("θ [{angle}]"), &|s, i| {
-            units.to_display(QuantityKind::Angle, s.theta[i])
-        }),
-        ("blade_thickness", format!("e [{length}]"), &|s, i| {
-            units.to_display(QuantityKind::Length, s.thickness[i])
-        }),
-    ];
-    for (index, (name, label, value)) in plots.into_iter().enumerate() {
-        let mut plot = Plot::new((name, id.0))
+    // The colors of the sections and the faces, explained once above the plots.
+    ui.horizontal_wrapped(|ui| {
+        for (i, s) in sections.iter().enumerate() {
+            let name = match i {
+                0 => tf("span {} (hub)", &[&format!("{:.2}", s.span)]),
+                i if i + 1 == n => tf("span {} (shroud)", &[&format!("{:.2}", s.span)]),
+                _ => tf("span {}", &[&format!("{:.2}", s.span)]),
+            };
+            marker(ui, Mark::Line, palette.span(i, n), &name);
+        }
+        marker(ui, Mark::Line, ink, tr("suction face"));
+        marker(ui, Mark::DashedLine, ink, tr("pressure face"));
+    });
+
+    // Two rows of two plots, sharing the m̄ axis; it is labelled on the lower row.
+    let spacing = ui.spacing().item_spacing.y;
+    let height = ((ui.available_height() - spacing) / 2.0).max(150.0);
+    let base = |name: &str, label: String, lower: bool| {
+        let plot = Plot::new((name.to_owned(), id.0))
             .height(height)
             .y_axis_label(label)
             .link_axis("blade_plots", [true, false])
             .link_cursor("blade_plots", [true, false])
             .x_grid_spacer(egui_plot::uniform_grid_spacer(super::nice_grid))
             .y_grid_spacer(egui_plot::uniform_grid_spacer(super::nice_grid))
-            .y_axis_min_width(40.0)
+            .y_axis_min_width(44.0)
             .allow_scroll(false);
-        if index == 0 {
-            plot = plot.legend(Legend::default().position(Corner::RightTop));
+        if lower {
+            plot.x_axis_label(tr("m̄ (0 leading edge, 1 trailing edge)"))
+        } else {
+            plot
         }
-
-        let response = plot.show(ui, |plot| {
+    };
+    let section_plot = |ui: &mut Ui, name: &str, label: String, lower: bool, value: Quantity| {
+        let response = base(name, label, lower).show(ui, |plot| {
             for (i, s) in sections.iter().enumerate() {
                 plot.line(
-                    Line::new(
-                        tf("span {}", &[&format!("{:.2}", s.span)]),
-                        along(s, |k| value(s, k)),
-                    )
-                    .color(palette.span(i, n))
-                    .width(1.5),
+                    Line::new(String::new(), along(s, |k| value(s, k)))
+                        .color(palette.span(i, n))
+                        .width(1.5),
                 );
             }
         });
         super::settle(ui, (name, id.0), &response.transform);
-    }
-
-    // Relative velocity on the faces: suction solid, pressure dashed.
-    let velocities = blade_velocities(g);
-    let u2 = velocities.outlet_speed.max(f64::EPSILON);
-    let response = Plot::new(("blade_velocity", id.0))
-        .height(height)
-        .y_axis_label(tr("w/u₂"))
-        .x_axis_label(tr(
-            "relative meridional length (0 leading edge, 1 trailing edge)",
-        ))
-        .link_axis("blade_plots", [true, false])
-        .link_cursor("blade_plots", [true, false])
-        .x_grid_spacer(egui_plot::uniform_grid_spacer(super::nice_grid))
-        .y_grid_spacer(egui_plot::uniform_grid_spacer(super::nice_grid))
-        .include_y(0.0)
-        .y_axis_min_width(40.0)
-        .allow_scroll(false)
-        .legend(Legend::default().position(Corner::LeftBottom))
-        .show(ui, |plot| {
-            for (i, v) in velocities.sections.iter().enumerate() {
-                let color = palette.span(i, n);
-                let face = |values: &[f64]| -> PlotPoints<'static> {
-                    v.position
-                        .iter()
-                        .zip(values)
-                        .map(|(m, w)| [*m, w / u2])
-                        .collect()
-                };
-                let (suction, pressure) = if i == 0 {
-                    (
-                        tr("suction face").to_owned(),
-                        tr("pressure face").to_owned(),
-                    )
-                } else {
-                    (String::new(), String::new())
-                };
-                plot.line(Line::new(suction, face(&v.suction)).color(color).width(1.5));
-                plot.line(
-                    Line::new(pressure, face(&v.pressure))
-                        .color(color)
-                        .width(1.2)
-                        .style(LineStyle::dashed_loose()),
-                );
-            }
-        });
-    super::settle(ui, ("blade_velocity", id.0), &response.transform);
+    };
+    let velocity_plot = |ui: &mut Ui| {
+        // Relative velocity on the faces: suction solid, pressure dashed.
+        let velocities = blade_velocities(g);
+        let u2 = velocities.outlet_speed.max(f64::EPSILON);
+        let response = base("blade_velocity", tr("w/u₂").to_owned(), true)
+            .include_y(0.0)
+            .show(ui, |plot| {
+                for (i, v) in velocities.sections.iter().enumerate() {
+                    let color = palette.span(i, n);
+                    let face = |values: &[f64]| -> PlotPoints<'static> {
+                        v.position
+                            .iter()
+                            .zip(values)
+                            .map(|(m, w)| [*m, w / u2])
+                            .collect()
+                    };
+                    plot.line(
+                        Line::new(String::new(), face(&v.suction))
+                            .color(color)
+                            .width(1.5),
+                    );
+                    plot.line(
+                        Line::new(String::new(), face(&v.pressure))
+                            .color(color)
+                            .width(1.2)
+                            .style(LineStyle::dashed_loose()),
+                    );
+                }
+            });
+        super::settle(ui, ("blade_velocity", id.0), &response.transform);
+    };
+    ui.columns(2, |columns| {
+        section_plot(
+            &mut columns[0],
+            "blade_beta",
+            format!("β_B [{angle}]"),
+            false,
+            &|s, i| units.to_display(QuantityKind::Angle, s.beta[i]),
+        );
+        section_plot(
+            &mut columns[1],
+            "blade_theta",
+            format!("θ [{angle}]"),
+            false,
+            &|s, i| units.to_display(QuantityKind::Angle, s.theta[i]),
+        );
+    });
+    ui.columns(2, |columns| {
+        section_plot(
+            &mut columns[0],
+            "blade_thickness",
+            format!("e [{length}]"),
+            true,
+            &|s, i| units.to_display(QuantityKind::Length, s.thickness[i]),
+        );
+        velocity_plot(&mut columns[1]);
+    });
 }

@@ -2,7 +2,7 @@
 //! required NPSH against flow, with the estimated recirculation range dashed and the
 //! losses of the volute after the impeller.
 
-use eframe::egui::{self, CollapsingHeader, Color32, DragValue, Grid, RichText, Stroke, Ui, vec2};
+use eframe::egui::{self, CollapsingHeader, Color32, DragValue, Grid, RichText, Ui};
 use egui_plot::{
     Corner, HLine, Legend, Line, LineStyle, MarkerShape, Plot, PlotPoints, Points, VLine,
 };
@@ -12,7 +12,7 @@ use tp_design::performance::{Collector, PerformanceInput, PerformancePoint, Pump
 use tp_project::{ComponentId, Project};
 use tp_units::{DisplayUnits, QuantityKind};
 
-use super::{Palette, unavailable};
+use super::{Mark, Palette, marker, unavailable};
 use crate::derived::Derived;
 use crate::i18n::{tf, tr};
 use crate::messages::{self, Severity};
@@ -903,57 +903,3 @@ type Plotted<'a> = (
     &'a dyn Fn(&PerformancePoint) -> f64,
     Color32,
 );
-
-/// Symbols of the shared legend.
-#[derive(Clone, Copy)]
-enum Mark {
-    Circle,
-    Diamond,
-    Square,
-    Dashed,
-    Dotted,
-}
-
-/// A small drawn symbol and its name, as in a plot legend.
-fn marker(ui: &mut Ui, mark: Mark, color: Color32, text: &str) {
-    let (rect, _) = ui.allocate_exact_size(vec2(14.0, 14.0), egui::Sense::hover());
-    let painter = ui.painter_at(rect);
-    let c = rect.center();
-    match mark {
-        Mark::Circle => {
-            painter.circle_filled(c, 4.5, color);
-        }
-        Mark::Square => {
-            painter.rect_filled(egui::Rect::from_center_size(c, vec2(8.0, 8.0)), 0.0, color);
-        }
-        Mark::Diamond => {
-            painter.add(egui::Shape::convex_polygon(
-                vec![
-                    c + vec2(0.0, -5.5),
-                    c + vec2(5.5, 0.0),
-                    c + vec2(0.0, 5.5),
-                    c + vec2(-5.5, 0.0),
-                ],
-                color,
-                Stroke::NONE,
-            ));
-        }
-        Mark::Dashed | Mark::Dotted => {
-            let (dash, gap) = match mark {
-                Mark::Dashed => (3.0, 2.0),
-                _ => (1.0, 2.0),
-            };
-            let mut y = rect.top() + 1.0;
-            while y < rect.bottom() - 1.0 {
-                let end = (y + dash).min(rect.bottom() - 1.0);
-                painter.line_segment(
-                    [egui::pos2(c.x, y), egui::pos2(c.x, end)],
-                    Stroke::new(1.5, color),
-                );
-                y = end + gap;
-            }
-        }
-    }
-    ui.label(text);
-    ui.add_space(10.0);
-}
