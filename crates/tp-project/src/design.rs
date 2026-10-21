@@ -168,13 +168,21 @@ impl Project {
         let volute = |at: usize| -> Result<CollectorData, ProjectError> {
             let id = components[at].id();
             let design = VoluteDesign::new(&self.volute_basis(id)?, &self.volute_input(id)?)?;
-            Ok(CollectorData {
-                throat: Some(CollectorThroat {
+            // A double volute has two throats; their mean stands for both.
+            let throat = match &design.rib {
+                Some(rib) => CollectorThroat {
+                    count: 2,
+                    area: 0.5 * (design.throat.area + rib.outer_throat.area),
+                },
+                None => CollectorThroat {
                     count: 1,
                     area: design.throat.area,
-                }),
+                },
+            };
+            Ok(CollectorData {
+                throat: Some(throat),
                 volute: Some(VoluteLossGeometry::from_design(&design)),
-                double_volute_wrap: None,
+                double_volute_wrap: design.rib.map(|r| r.wrap),
             })
         };
         let kind = |at: usize| components.get(at).map(|c| c.kind());
@@ -951,5 +959,24 @@ mod tests {
             p.compute_main_dimensions(id),
             Err(ProjectError::Fluid(_))
         ));
+    }
+
+    #[test]
+    fn a_double_volute_cuts_the_radial_force_in_the_prediction() {
+        use tp_design::volute::VoluteKind;
+        let (mut p, impeller, volute) = pump_with_volute();
+        let input = p.performance_input(impeller).unwrap();
+        let single = p.compute_performance(impeller, &input).unwrap();
+        let mut v = p.volute_input(volute).unwrap();
+        v.setup.kind = VoluteKind::Double;
+        p.set_volute(volute, v).unwrap();
+        let data = p.collector_data_after(impeller).unwrap();
+        assert_eq!(data.throat.unwrap().count, 2);
+        assert_relative_eq!(data.double_volute_wrap.unwrap(), std::f64::consts::PI);
+        let double = p.compute_performance(impeller, &input).unwrap();
+        let (s, d) = (single.radial.unwrap(), double.radial.unwrap());
+        assert!(d.shutoff_force < s.shutoff_force / 3.0);
+        // The matched spiral changes little: the same impeller, the same head.
+        assert_relative_eq!(double.design.head, single.design.head, max_relative = 0.01);
     }
 }
