@@ -80,7 +80,7 @@ const REFERENCES: &[&str] = &[
 ];
 
 /// The header of a dialog: a pictogram drawn by `glyph`, the title and a subtitle.
-fn header(ui: &mut Ui, glyph: impl FnOnce(&mut Ui), title: &str, subtitle: &str) {
+pub(crate) fn header(ui: &mut Ui, glyph: impl FnOnce(&mut Ui), title: &str, subtitle: &str) {
     let p = Palette::of(ui);
     ui.horizontal(|ui| {
         glyph(ui);
@@ -109,7 +109,7 @@ fn heading(ui: &mut Ui, text: &str) {
 }
 
 /// The main action of a dialog, filled with the accent.
-fn primary(ui: &mut Ui, text: &str) -> bool {
+pub(crate) fn primary(ui: &mut Ui, text: &str) -> bool {
     let p = Palette::of(ui);
     ui.add(
         Button::new(RichText::new(text).color(p.on_accent))
@@ -120,7 +120,7 @@ fn primary(ui: &mut Ui, text: &str) -> bool {
 }
 
 /// A secondary action of a dialog.
-fn secondary(ui: &mut Ui, text: &str) -> bool {
+pub(crate) fn secondary(ui: &mut Ui, text: &str) -> bool {
     ui.add(Button::new(text).min_size(vec2(88.0, 26.0)))
         .clicked()
 }

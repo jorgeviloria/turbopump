@@ -1306,6 +1306,84 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Las secciones planas con B/H = 2 a 3 pierden menos (Gülich p. 414)",
     ),
     ("Corners", "Esquinas"),
+    // New project assistant.
+    ("Machine type", "Tipo de máquina"),
+    ("Pump", "Bomba"),
+    (
+        "Centrifugal pump: impeller, diffuser and volute",
+        "Bomba centrífuga: rodete, difusor y voluta",
+    ),
+    ("Fan", "Ventilador"),
+    ("Planned for phase 6", "Prevista para la fase 6"),
+    ("Compressor", "Compresor"),
+    ("Gas turbine", "Turbina de gas"),
+    ("Hydro turbine", "Turbina hidráulica"),
+    ("coming later", "más adelante"),
+    ("Description", "Descripción"),
+    (
+        "Optional: what the project is for",
+        "Opcional: para qué es el proyecto",
+    ),
+    (
+        "A CoolProp name; water also works without CoolProp",
+        "Un nombre de CoolProp; el agua funciona también sin CoolProp",
+    ),
+    ("Values", "Valores"),
+    (
+        "Usual for nq below about 70",
+        "Habitual con nq por debajo de unos 70",
+    ),
+    ("mixed flow", "semiaxial"),
+    (
+        "Usual for nq from about 70 to 160",
+        "Habitual con nq de unos 70 a 160",
+    ),
+    ("axial", "axial"),
+    (
+        "Usual for nq above about 160",
+        "Habitual con nq por encima de unos 160",
+    ),
+    (
+        "n·√Q / H^¾ with n in rpm, Q in m³/s and H in m",
+        "n·√Q / H^¾ con n en rpm, Q en m³/s y H en m",
+    ),
+    ("Impeller shape", "Forma del rodete"),
+    ("Specific energy Y", "Energía específica Y"),
+    ("Hydraulic power", "Potencia hidráulica"),
+    (
+        "ρ·g·Q·H, the power the impeller gives the liquid",
+        "ρ·g·Q·H, la potencia que el rodete da al líquido",
+    ),
+    (
+        "The design code works out radial impellers; above nq 70 check the results with care.",
+        "El código de diseño calcula rodetes radiales; por encima de nq 70 revisa los resultados con cuidado.",
+    ),
+    (
+        "The project starts with these components, in the order the flow meets them. More can be added later from the toolbar.",
+        "El proyecto empieza con estos componentes, en el orden en que los encuentra el flujo. Puedes añadir más después desde la barra.",
+    ),
+    ("Every pump starts with one", "Toda bomba empieza con uno"),
+    ("included", "incluido"),
+    (
+        "Between the impeller and the volute",
+        "Entre el rodete y la voluta",
+    ),
+    (
+        "Spiral casing that collects the flow",
+        "Carcasa en espiral que recoge el flujo",
+    ),
+    (
+        "Next: the impeller's main dimensions",
+        "Siguiente: las dimensiones principales del rodete",
+    ),
+    (
+        "After creating the project, its steps open one after another in the tree.",
+        "Al crear el proyecto, sus pasos se abren uno tras otro en el árbol.",
+    ),
+    ("Step {} of {} · {}", "Paso {} de {} · {}"),
+    ("none", "ninguno"),
+    ("vaneless", "sin álabes"),
+    ("vaned", "con álabes"),
     // About and the confirmation before discarding changes.
     (
         "and the Turbopump contributors",

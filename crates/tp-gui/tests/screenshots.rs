@@ -467,6 +467,21 @@ fn dialogs() {
         harness.run();
         harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::N);
         harness.run();
+        // The three steps of the assistant.
+        for step in ["machine", "setup", "components"] {
+            harness.remove_cursor();
+            harness.run();
+            save(&mut harness, &format!("new-{step}-{suffix}"));
+            if step != "components" {
+                // The panel behind has a "Next" too; the dialog is drawn last.
+                harness
+                    .get_all_by_label_contains("Next")
+                    .last()
+                    .unwrap()
+                    .click();
+                harness.run();
+            }
+        }
         harness.get_by_label("Create").click();
         harness.run();
         harness.remove_cursor();

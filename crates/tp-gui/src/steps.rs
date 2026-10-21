@@ -383,7 +383,8 @@ pub(crate) fn accept(cx: &mut EditCtx<'_>, id: ComponentId, step: DesignStep) {
 // ---------------------------------------------------------------------------------------
 // Global setup
 
-const COMMON_FLUIDS: &[&str] = &[
+/// Fluids offered in the lists; any other CoolProp name can be typed.
+pub(crate) const COMMON_FLUIDS: &[&str] = &[
     "Water",
     "HeavyWater",
     "Ethanol",

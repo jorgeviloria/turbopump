@@ -15,6 +15,7 @@ mod export;
 mod i18n;
 mod icons;
 mod messages;
+mod new_project;
 mod ribbon;
 mod section_editor;
 mod settings;

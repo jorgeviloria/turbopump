@@ -3,21 +3,19 @@
 use std::path::{Path, PathBuf};
 
 use eframe::egui::{
-    self, Button, CentralPanel, Frame, Key, KeyboardShortcut, Margin, Modal, Modifiers, Panel,
-    RichText, ThemePreference, Ui, ViewportCommand,
+    self, Button, CentralPanel, Frame, Key, KeyboardShortcut, Margin, Modifiers, Panel, RichText,
+    ThemePreference, Ui, ViewportCommand,
 };
 use eframe::egui_wgpu::RenderState;
-use tp_project::{
-    ComponentId, ComponentKind, DesignPoint, DesignStep, Document, EnergyTransfer, FlowRate,
-    GlobalSetup, MachineType, Project, ProjectError,
-};
-use tp_units::{DisplayUnits, QuantityKind};
+use tp_project::{ComponentId, ComponentKind, DesignStep, Document, Project, ProjectError};
+use tp_units::DisplayUnits;
 
 use crate::derived::Derived;
 use crate::dialogs::{self, Choice};
 use crate::export::{self, Exports};
 use crate::i18n::{self, Language, message, project_name, tf, tr};
 use crate::messages::{self, Message};
+use crate::new_project::{NewProjectForm, Outcome};
 use crate::ribbon::{Command, Ribbon, RibbonCx};
 use crate::settings::{self, Section, SettingsCx};
 use crate::steps::AcceptState;
@@ -27,7 +25,7 @@ use crate::viewer::Viewer;
 use crate::views::cross_section::CrossSectionView;
 use crate::views::performance::PerformanceView;
 use crate::views::{blade, front, meridional::MeridionalView, report};
-use crate::{default_project, steps, tree, widgets};
+use crate::{default_project, steps, tree};
 
 /// What the step panel shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -279,50 +277,6 @@ enum Pending {
     New(Box<Project>),
     Open(PathBuf),
     Quit,
-}
-
-/// Inputs of the "New project" dialog, in SI.
-#[derive(Debug, Clone)]
-struct NewProjectForm {
-    name: String,
-    flow: f64,
-    head: f64,
-    speed: f64,
-    fluid: String,
-    volute: bool,
-}
-
-impl Default for NewProjectForm {
-    fn default() -> Self {
-        Self {
-            name: tr("Untitled").into(),
-            flow: 100.0 / 3600.0,
-            head: 32.0,
-            speed: 2900.0 * std::f64::consts::PI / 30.0,
-            fluid: "Water".into(),
-            volute: true,
-        }
-    }
-}
-
-impl NewProjectForm {
-    fn build(&self) -> Result<Project, ProjectError> {
-        let mut setup = GlobalSetup::new(
-            MachineType::Pump,
-            DesignPoint {
-                flow: FlowRate::Volume(self.flow),
-                energy: EnergyTransfer::Head(self.head),
-                speed: self.speed,
-            },
-        );
-        setup.fluid = self.fluid.trim().to_owned();
-        let mut project = Project::new(self.name.trim(), MachineType::Pump, setup)?;
-        project.add_component(ComponentKind::Impeller, None)?;
-        if self.volute {
-            project.add_component(ComponentKind::Volute, None)?;
-        }
-        Ok(project)
-    }
 }
 
 #[derive(Debug)]
@@ -1314,75 +1268,18 @@ impl TurbopumpApp {
         let units = self.doc.project().display_units.clone();
         let keep = match dialog {
             Dialog::NewProject(mut form) => {
-                let mut create = false;
-                let mut cancel = false;
-                let response = Modal::new(egui::Id::new("new_project")).show(ctx, |ui| {
-                    ui.heading(tr("New pump project"));
-                    ui.add_space(6.0);
-                    egui::Grid::new("new_project_grid")
-                        .num_columns(2)
-                        .spacing([12.0, 6.0])
-                        .show(ui, |ui| {
-                            ui.label(tr("Name"));
-                            ui.text_edit_singleline(&mut form.name);
-                            ui.end_row();
-                            ui.label(tr("Flow rate Q"));
-                            widgets::quantity(
-                                ui,
-                                &mut form.flow,
-                                QuantityKind::VolumeFlow,
-                                &units,
-                                1e-5..=100.0,
-                            );
-                            ui.end_row();
-                            ui.label(tr("Head H"));
-                            widgets::quantity(
-                                ui,
-                                &mut form.head,
-                                QuantityKind::Head,
-                                &units,
-                                0.1..=5000.0,
-                            );
-                            ui.end_row();
-                            ui.label(tr("Speed n"));
-                            widgets::quantity(
-                                ui,
-                                &mut form.speed,
-                                QuantityKind::RotationalSpeed,
-                                &units,
-                                1.0..=10_000.0,
-                            );
-                            ui.end_row();
-                            ui.label(tr("Fluid"));
-                            ui.text_edit_singleline(&mut form.fluid);
-                            ui.end_row();
-                            ui.label(tr("Casing"));
-                            ui.checkbox(&mut form.volute, tr("volute after the impeller"));
-                            ui.end_row();
-                        });
-                    ui.add_space(4.0);
-                    ui.weak(tr("Other machine types arrive in phase 6."));
-                    ui.add_space(8.0);
-                    ui.horizontal(|ui| {
-                        create = ui.button(tr("Create")).clicked();
-                        cancel = ui.button(tr("Cancel")).clicked();
-                    });
-                });
-                if create {
-                    match form.build() {
-                        Ok(project) => {
-                            self.request(Pending::New(Box::new(project)));
-                            None
-                        }
-                        Err(e) => {
-                            self.error(tf("Invalid project: {}", &[&message(&e.to_string())]));
-                            Some(Dialog::NewProject(form))
-                        }
+                let mut failure = None;
+                let outcome = form.show(ctx, &units, &mut |e| failure = Some(e));
+                if let Some(e) = failure {
+                    self.error(e);
+                }
+                match outcome {
+                    Outcome::Open => Some(Dialog::NewProject(form)),
+                    Outcome::Cancel => None,
+                    Outcome::Create(project) => {
+                        self.request(Pending::New(project));
+                        None
                     }
-                } else if cancel || response.should_close() {
-                    None
-                } else {
-                    Some(Dialog::NewProject(form))
                 }
             }
             Dialog::ConfirmDiscard(pending) => {
@@ -1454,6 +1351,7 @@ mod tests {
     use egui_kittest::Harness;
     use egui_plot::PlotPoint;
     use tp_design::impeller::meridian::DEFAULT_TANGENT;
+    use tp_units::QuantityKind;
 
     /// Screen position of a meridional handle in the last frame.
     fn handle_on_screen(app: &TurbopumpApp, handle: Handle) -> egui::Pos2 {
