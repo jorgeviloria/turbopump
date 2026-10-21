@@ -483,9 +483,14 @@ fn performance_predicts_the_characteristic() {
     let text = stdout(&out);
     // With 10.1 m available, NPSH₃ passes it near the end of the curve: a warning.
     assert_eq!(out.status.code(), Some(1), "{text}");
-    // The automatic volute is 99 % matched: 0.03 m short of the design head.
+    // The seals leak less than the statistics assume, so the impeller gives a little
+    // more head; the loss analysis puts η above the statistics.
     assert!(
-        text.contains("Design     Q 100.0 m³/h   H 31.97 m"),
+        text.contains("Design     Q 100.0 m³/h   H 32.23 m"),
+        "{text}"
+    );
+    assert!(
+        text.contains("Losses     η 0.854 by losses (statistics 0.814"),
         "{text}"
     );
     assert!(text.contains("Shut-off   H"), "{text}");
@@ -493,7 +498,7 @@ fn performance_predicts_the_characteristic() {
         text.contains("Axial      ") && text.contains("at design toward the suction side"),
         "{text}"
     );
-    assert!(text.contains("operating point Q 99.97 m³/h"), "{text}");
+    assert!(text.contains("operating point Q 100.3 m³/h"), "{text}");
     assert!(text.contains("NPSH3      "), "{text}");
     assert!(text.contains("Volute     loses"), "{text}");
     assert!(text.contains("Radial     "), "{text}");

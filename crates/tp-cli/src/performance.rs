@@ -33,7 +33,9 @@ pub(crate) struct PerformanceArgs {
     /// static (static head of the system), system_flow and system_head (a point of the
     /// system curve; default the design point), speed, d2 (trimmed impeller
     /// diameter), trim_exponent (m of the trimming law), continuous (η/η_max that bounds
-    /// continuous operation).
+    /// continuous operation), losses (analysis or statistics: how leakage, disk friction
+    /// and mechanical losses are found), seal_clearance, seal_length, seal_roughness and
+    /// axial_gap (of the loss analysis).
     #[arg(long = "set", value_name = "KEY=VALUE")]
     settings: Vec<String>,
     /// Write the curve as CSV in SI units to this file (one impeller only).
@@ -144,6 +146,21 @@ fn apply(input: &mut PerformanceInput, units: &DisplayUnits, setting: &str) -> R
         "continuous" => {
             input.operation.continuous_efficiency = number(QuantityKind::Dimensionless)?
         }
+        "losses" => {
+            input.losses.statistics = match value.to_ascii_lowercase().as_str() {
+                "analysis" | "auto" => false,
+                "statistics" => true,
+                _ => {
+                    return Err(format!(
+                        "losses must be analysis or statistics, got {value:?}"
+                    ));
+                }
+            }
+        }
+        "seal_clearance" => input.losses.seal_clearance = number(QuantityKind::Length)?,
+        "seal_length" => input.losses.seal_length = number(QuantityKind::Length)?,
+        "seal_roughness" => input.losses.seal_roughness = number(QuantityKind::Length)?,
+        "axial_gap" => input.losses.axial_gap = number(QuantityKind::Length)?,
         "points" => {
             input.points = value
                 .parse()
@@ -154,7 +171,8 @@ fn apply(input: &mut PerformanceInput, units: &DisplayUnits, setting: &str) -> R
                 "unknown key {key:?}; valid keys: collector, onset, psi0, p0, max, points, \
                  npsh_inlet, npsh_blade, npsh_exponent, clearances, seal, shaft_seal, \
                  balance, rear_seal, k0, static, system_flow, system_head, speed, d2, \
-                 trim_exponent, continuous"
+                 trim_exponent, continuous, losses, seal_clearance, seal_length, \
+                 seal_roughness, axial_gap"
             ));
         }
     }
@@ -199,6 +217,34 @@ fn print_report(
         s(Power, c.best.power),
         c.best.efficiency
     );
+    match &c.losses {
+        Some(l) => {
+            println!(
+                "Losses     η {:.3} by losses (statistics {:.3} ± {:.3}, Gülich Table 3.9)   η_v {:.3}",
+                c.design.efficiency,
+                c.statistical_efficiency,
+                c.efficiency_tolerance,
+                l.volumetric_efficiency
+            );
+            println!(
+                "           seal d_sp {} s {} L {}: ΔH {} k {:.2} λ {:.3} → leakage {}; disk friction {} + {}; mechanical {}; Gülich Chap. 3.6",
+                s(Length, l.seal.diameter),
+                s(Length, l.seal.clearance),
+                s(Length, l.seal.length),
+                s(Head, l.seal_head),
+                l.seal_rotation,
+                l.seal_flow.friction,
+                s(VolumeFlow, l.leakage),
+                s(Power, l.front_friction),
+                s(Power, l.rear_friction),
+                s(Power, l.mechanical)
+            );
+        }
+        None => println!(
+            "Losses     from the statistics of the design: η {:.3} (Gülich Table 3.9)",
+            c.statistical_efficiency
+        ),
+    }
     println!(
         "Shut-off   H {} (ψ0 {:.3}, Gülich eqs. 3.27–3.28)   P {} (estimate)",
         s(Head, c.shutoff_head),
@@ -467,6 +513,11 @@ mod tests {
         apply(&mut input, &units, "static=10 m").unwrap();
         apply(&mut input, &units, "d2=160 mm").unwrap();
         apply(&mut input, &units, "speed=1450 rpm").unwrap();
+        apply(&mut input, &units, "losses=statistics").unwrap();
+        apply(&mut input, &units, "seal_clearance=0.3 mm").unwrap();
+        assert!(input.losses.statistics);
+        assert_eq!(input.losses.seal_clearance, Param::Manual(0.3e-3));
+        assert!(apply(&mut input, &units, "losses=guess").is_err());
         assert_eq!(input.operation.static_head, Param::Manual(10.0));
         assert_eq!(input.operation.trimmed_diameter, Param::Manual(0.16));
         assert!(matches!(input.operation.speed, Param::Manual(w) if (w - 151.84).abs() < 0.01));
