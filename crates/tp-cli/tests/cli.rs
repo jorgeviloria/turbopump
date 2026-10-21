@@ -358,6 +358,22 @@ fn volute_designs_and_exports() {
         "--dry-run",
     ]));
     assert!(manual.contains("circular; constant velocity"), "{manual}");
+    // A double volute with an elliptic rib nose, exported with its rib.
+    let double_dir = dir.join("double");
+    let double = stdout(&turbopump(&[
+        "volute",
+        file_arg,
+        "--set",
+        "type=double",
+        "--set",
+        "rib_nose=2",
+        "--dry-run",
+        "--export",
+        double_dir.to_str().unwrap(),
+    ]));
+    assert!(double.contains("elliptic 2.00:1 nose and tail"), "{double}");
+    let points = std::fs::read_to_string(double_dir.join("volute.txt")).unwrap();
+    assert!(points.contains("[rib outline thickness="), "{points}");
     let bad = turbopump(&["volute", file_arg, "--set", "shape=hexagon"]);
     assert_eq!(bad.status.code(), Some(2));
     std::fs::remove_dir_all(&dir).unwrap();

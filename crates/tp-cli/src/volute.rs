@@ -26,8 +26,9 @@ pub(crate) struct VoluteArgs {
     /// (rectangle, circle or trapezoid:DEGREES), law (auto, momentum or velocity),
     /// sections, correction (on or off), length and outlet (discharge diffuser),
     /// incidence (cutwater), wall, type (single or double), rib_wrap (wrap of the inner
-    /// volute of a double volute), rib (rib thickness), channel_ratio (outlet over
-    /// inlet area of the outer channel), discharge (tangential, tangential:inner,
+    /// volute of a double volute), rib (rib thickness), rib_nose (length over thickness
+    /// of the elliptic nose and tail of the rib, 1 for a semicircle), channel_ratio
+    /// (outlet area of the outer channel over the first throat), discharge (tangential, tangential:inner,
     /// tangential:centered, tangential:outer, radial or radial:DEGREES from the line
     /// through the pump axis), bend (bend radius of a radial discharge), cutwater
     /// (tangent, sharp or rounded), nose (radius of a rounded cutwater).
@@ -214,6 +215,7 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
         }
         "rib_wrap" => input.setup.rib_wrap = quantity(Angle)?,
         "rib" => input.setup.rib_thickness = quantity(Length)?,
+        "rib_nose" => input.setup.rib_nose_ratio = quantity(Dimensionless)?,
         "channel_ratio" => input.setup.channel_area_ratio = quantity(Dimensionless)?,
         "discharge" => input.diffuser.shape = parse_discharge(value)?,
         "bend" => input.diffuser.bend_radius = quantity(Length)?,
@@ -243,7 +245,7 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
             return Err(format!(
                 "unknown key {key:?}; valid keys: flow-factor, dz, b3, e3, shape, law, \
                  sections, correction, length, outlet, incidence, wall, type, rib_wrap, rib, \
-                 channel_ratio, discharge, bend, cutwater, nose"
+                 rib_nose, channel_ratio, discharge, bend, cutwater, nose"
             ));
         }
     }
@@ -330,6 +332,19 @@ fn print_report(name: &str, id: ComponentId, g: &VoluteGeometry, units: &Display
             s(Area, rib.channel_inlet_area),
             s(Area, rib.channel_outlet_area)
         );
+        if let Some(r) = &g.rib {
+            println!(
+                "           {} nose and tail (length {}): tip at {}   nearest to the axis {}",
+                if rib.nose_ratio > 1.0 {
+                    format!("elliptic {:.2}:1", rib.nose_ratio)
+                } else {
+                    "semicircular".to_string()
+                },
+                s(Length, rib.nose_length()),
+                s(Angle, r.nose_angle),
+                s(Length, r.nose_distance)
+            );
+        }
     }
     println!(
         "           c3q {}   c3q/c2 {:.2} (not much below 0.8, Table 10.2)   B/H {:.2} (2 to 3)",
