@@ -52,18 +52,21 @@ impl Camera {
         self.pitch = pitch.clamp(-MAX_PITCH, MAX_PITCH);
     }
 
-    /// Looks at the target from `direction` (from the target toward the eye).
-    pub fn look_along(&mut self, direction: Vec3) {
+    /// The yaw and pitch that look at the target from `direction` (from the target
+    /// toward the eye). Straight along the axis the yaw is free, so the current one is
+    /// kept.
+    pub fn orientation_along(&self, direction: Vec3) -> Option<(f32, f32)> {
         let d = direction.normalize_or_zero();
         if d == Vec3::ZERO {
-            return;
+            return None;
         }
-        let pitch = (-d.z).clamp(-1.0, 1.0).asin();
-        // Straight along the axis the yaw is free: keep it.
-        if d.x.hypot(d.y) > 1e-4 {
-            self.yaw = d.y.atan2(d.x);
-        }
-        self.pitch = pitch.clamp(-MAX_PITCH, MAX_PITCH);
+        let pitch = (-d.z).clamp(-1.0, 1.0).asin().clamp(-MAX_PITCH, MAX_PITCH);
+        let yaw = if d.x.hypot(d.y) > 1e-4 {
+            d.y.atan2(d.x)
+        } else {
+            self.yaw
+        };
+        Some((yaw, pitch))
     }
 
     /// Size of one point of the view at the target, in model units, for a view
@@ -181,13 +184,17 @@ mod tests {
     #[test]
     fn looking_along_a_direction_puts_the_eye_there() {
         let mut camera = Camera::fit(Vec3::ZERO, 0.1, 1.0);
+        let look_along = |camera: &mut Camera, d: Vec3| {
+            let (yaw, pitch) = camera.orientation_along(d).unwrap();
+            camera.look_from(yaw, pitch);
+        };
         for d in [Vec3::X, Vec3::NEG_Y, Vec3::new(1.0, 1.0, -1.0)] {
-            camera.look_along(d);
+            look_along(&mut camera, d);
             let eye = (camera.eye() - camera.target).normalize();
             assert!(eye.distance(d.normalize()) < 1e-4, "{d:?}: {eye:?}");
         }
         // Along the axis the pitch stops just short of the pole.
-        camera.look_along(Vec3::NEG_Z);
+        look_along(&mut camera, Vec3::NEG_Z);
         assert!((camera.pitch - MAX_PITCH).abs() < 1e-6);
     }
 

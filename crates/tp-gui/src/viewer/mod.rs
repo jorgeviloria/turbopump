@@ -47,11 +47,25 @@ pub(crate) enum CameraView {
     Side,
 }
 
+/// A camera turn in progress, from one yaw and pitch to another.
+#[derive(Debug, Clone, Copy)]
+struct Turn {
+    from: (f32, f32),
+    to: (f32, f32),
+    /// Seconds since the turn began.
+    elapsed: f32,
+}
+
+/// How long a camera turn takes, s.
+const TURN_TIME: f32 = 0.35;
+
 /// State of the 3D view between frames.
 #[derive(Debug, Default)]
 pub(crate) struct Viewer {
     pub options: ViewOptions,
     camera: Option<Camera>,
+    /// The camera turning toward a standard view.
+    turn: Option<Turn>,
     gpu: Option<Gpu>,
     /// What the uploaded mesh was built from.
     mesh_key: Option<MeshKey>,
@@ -67,7 +81,7 @@ pub(crate) struct Viewer {
     moved: bool,
 }
 
-/// Faces of the view cube: outward normal and label.
+/// Labels of the faces of the view cube, by outward normal.
 const FACES: [(Vec3, &str); 6] = [
     (Vec3::X, "+X"),
     (Vec3::NEG_X, "−X"),
@@ -78,10 +92,20 @@ const FACES: [(Vec3, &str); 6] = [
 ];
 
 /// Half the edge of the view cube, in points.
-const CUBE_HALF: f32 = 27.0;
-/// Where the band of a face's edges and corners starts, as a fraction of its half
-/// edge: the middle picks the face, the band its edges and corners.
-const CUBE_BAND: f32 = 0.62;
+const CUBE_HALF: f32 = 28.0;
+/// Width of the bevels on the cube's edges and corners, as a fraction of its half edge.
+const CUBE_BEVEL: f32 = 0.26;
+
+/// What a click on the view cube asks for.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum CubeAction {
+    /// Look from this direction: a face, an edge or a corner.
+    Look(Vec3),
+    /// Turn about the model axis by this angle, rad.
+    Turn(f32),
+    /// Back to the oblique view.
+    Home,
+}
 
 impl Viewer {
     /// Moves the camera to a standard view.
@@ -97,10 +121,24 @@ impl Viewer {
                     self.moved = false;
                 }
             }
-            CameraView::Iso => camera.look_from(-0.9, 0.55),
-            CameraView::Inlet => camera.look_from(-FRAC_PI_2, FRAC_PI_2),
-            CameraView::Side => camera.look_from(-FRAC_PI_2, 0.0),
+            CameraView::Iso => self.turn_to((-0.9, 0.55)),
+            CameraView::Inlet => self.turn_to((-FRAC_PI_2, FRAC_PI_2)),
+            CameraView::Side => self.turn_to((-FRAC_PI_2, 0.0)),
         }
+    }
+
+    /// Starts turning the camera to `yaw` and `pitch`, the short way round.
+    fn turn_to(&mut self, (yaw, pitch): (f32, f32)) {
+        let Some(camera) = self.camera.as_ref() else {
+            return;
+        };
+        let from = (camera.yaw, camera.pitch);
+        let yaw = from.0 + wrap_angle(yaw - from.0);
+        self.turn = Some(Turn {
+            from,
+            to: (yaw, pitch),
+            elapsed: 0.0,
+        });
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -171,6 +209,14 @@ impl Viewer {
             self.framed_aspect = self.free_aspect;
         }
 
+        // Dragging takes the camera over from a turn in progress.
+        if response.dragged() {
+            self.turn = None;
+        }
+        let dt = ui.input(|i| i.stable_dt).min(0.25);
+        if step_turn(&mut self.turn, camera, dt) {
+            ui.ctx().request_repaint();
+        }
         if response.dragged_by(egui::PointerButton::Primary) && !ui.input(|i| i.modifiers.shift) {
             let d = response.drag_delta();
             camera.orbit(d.x, d.y);
@@ -218,10 +264,15 @@ impl Viewer {
         let camera = *camera;
         axes(ui, free, &camera);
         scale_bar(ui, free, &camera, units);
-        if let Some(direction) = view_cube(ui, free, &camera)
-            && let Some(c) = self.camera.as_mut()
-        {
-            c.look_along(direction);
+        match view_cube(ui, free, &camera) {
+            Some(CubeAction::Look(direction)) => {
+                if let Some(target) = camera.orientation_along(direction) {
+                    self.turn_to(target);
+                }
+            }
+            Some(CubeAction::Turn(angle)) => self.turn_to((camera.yaw + angle, camera.pitch)),
+            Some(CubeAction::Home) => self.apply(CameraView::Iso),
+            None => {}
         }
         if let Some(view) = self.toolbar(ui, free) {
             self.apply(view);
@@ -422,128 +473,264 @@ fn scale_bar(ui: &Ui, rect: Rect, camera: &Camera, units: &DisplayUnits) {
     label(right, length, &format!(" {}", unit.symbol));
 }
 
-/// The view cube in the top-right corner. Returns the direction to look from when a
-/// face, an edge or a corner was clicked.
-fn view_cube(ui: &mut Ui, rect: Rect, camera: &Camera) -> Option<Vec3> {
+/// The view cube in the top-right corner: a bevelled cube whose faces, edges and
+/// corners each pick a view, with a home button and two buttons that turn the model.
+fn view_cube(ui: &mut Ui, rect: Rect, camera: &Camera) -> Option<CubeAction> {
     let p = Palette::of(ui);
     let dark = ui.visuals().dark_mode;
-    let center = rect.right_top() + vec2(-58.0, 78.0);
-    let area = Rect::from_center_size(center, Vec2::splat(CUBE_HALF * 3.6));
+    let center = rect.right_top() + vec2(-62.0, 82.0);
+    let area = Rect::from_center_size(center, Vec2::splat(CUBE_HALF * 3.4));
     let response = ui.interact(area, ui.id().with("view_cube"), Sense::click());
     let pointer = response.hover_pos();
     let to_screen = |q: Vec3| center + on_screen(camera, q, CUBE_HALF).0;
+    let to_view = |d: Vec3| camera.view().transform_vector3(d.normalize());
 
-    // The visible faces, farthest first, with their in-plane axes.
-    let mut faces: Vec<(Vec3, &str, Vec3, Vec3, f32)> = FACES
-        .iter()
-        .filter_map(|&(normal, label)| {
-            let (_, facing) = on_screen(camera, normal, 1.0);
-            (facing > 0.02).then(|| {
-                let (a, b) = face_axes(normal);
-                (normal, label, a, b, facing)
-            })
+    // The pieces that face the viewer: on a convex body they never overlap.
+    let pieces: Vec<(Vec3, Vec<Pos2>, Vec3)> = cube_directions()
+        .filter_map(|d| {
+            let n = to_view(d);
+            (n.z > 0.01).then(|| (d, cube_piece(d).into_iter().map(to_screen).collect(), n))
         })
         .collect();
-    faces.sort_by(|x, y| x.4.total_cmp(&y.4));
-
-    // The face, edge or corner under the pointer, as the direction it looks from.
     let hovered = pointer.and_then(|pt| {
-        faces.iter().rev().find_map(|&(normal, _, a, b, _)| {
-            CUBE_REGIONS.iter().find_map(|&(i, j)| {
-                let quad = region_quad(normal, a, b, i, j).map(to_screen);
-                inside(&quad, pt).then(|| normal + a * i + b * j)
-            })
-        })
+        pieces
+            .iter()
+            .find(|(_, polygon, _)| inside(polygon, pt))
+            .map(|(d, _, _)| *d)
     });
 
-    let (face_light, face_dark, edge, text) = if dark {
+    let (lit, unlit, line, ink) = if dark {
         (
-            Color32::from_rgb(92, 99, 110),
-            Color32::from_rgb(52, 57, 65),
-            Color32::from_rgb(24, 26, 30),
-            Color32::from_rgb(228, 232, 238),
+            Color32::from_rgb(122, 130, 142),
+            Color32::from_rgb(46, 51, 59),
+            Color32::from_rgb(20, 22, 26),
+            Color32::from_rgb(238, 241, 245),
         )
     } else {
         (
-            Color32::from_rgb(252, 252, 253),
-            Color32::from_rgb(200, 205, 213),
-            Color32::from_rgb(120, 128, 140),
-            Color32::from_rgb(52, 58, 68),
+            Color32::from_rgb(253, 253, 254),
+            Color32::from_rgb(178, 186, 197),
+            Color32::from_rgb(112, 121, 134),
+            Color32::from_rgb(48, 55, 66),
         )
     };
     let painter = ui.painter();
-    // A soft round backdrop sets the cube apart from the model behind it.
-    painter.circle_filled(
-        center,
-        CUBE_HALF * 1.75,
-        if dark {
-            Color32::from_white_alpha(6)
-        } else {
-            Color32::from_black_alpha(6)
-        },
-    );
-    for &(normal, label, a, b, facing) in &faces {
-        let corners = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)]
-            .map(|(s, t)| to_screen(normal + a * s + b * t));
-        // Light from above the viewer and a little to the left, in camera space.
-        let n = camera.view().transform_vector3(normal);
-        let shade = n
-            .dot(Vec3::new(-0.3, 0.75, 0.6).normalize())
-            .clamp(0.0, 1.0);
-        let fill = lerp_color(face_dark, face_light, shade);
-        painter.add(Shape::convex_polygon(corners.to_vec(), fill, Stroke::NONE));
-        // The regions that look from the hovered direction light up, on every face.
-        if let Some(direction) = hovered {
-            for &(i, j) in &CUBE_REGIONS {
-                if (normal + a * i + b * j - direction).length_squared() < 1e-4 {
-                    let quad = region_quad(normal, a, b, i, j).map(to_screen);
-                    painter.add(Shape::convex_polygon(
-                        quad.to_vec(),
-                        p.accent.gamma_multiply(if dark { 0.55 } else { 0.35 }),
-                        Stroke::NONE,
-                    ));
-                }
-            }
-        }
-        if facing > 0.25 {
-            let alpha = ((facing - 0.25) / 0.35).clamp(0.0, 1.0);
-            face_label(ui, tr(label), &corners, text.gamma_multiply(alpha));
-        }
-        painter.add(Shape::closed_line(corners.to_vec(), Stroke::new(1.0, edge)));
+    // A soft shadow under the cube.
+    for (grow, alpha) in [(1.0, 10u8), (0.8, 12), (0.6, 14)] {
+        painter.add(egui::epaint::EllipseShape::filled(
+            center + vec2(0.0, CUBE_HALF * 1.45),
+            vec2(CUBE_HALF * 1.25 * grow, CUBE_HALF * 0.3 * grow),
+            Color32::from_black_alpha(if dark { alpha * 2 } else { alpha }),
+        ));
     }
-    if let Some(direction) = hovered {
-        let hint = match direction
-            .abs()
-            .cmpgt(Vec3::splat(0.5))
-            .bitmask()
-            .count_ones()
+    let light = Vec3::new(-0.35, 0.8, 0.5).normalize();
+    for (d, polygon, n) in &pieces {
+        let shade = n.dot(light).clamp(0.0, 1.0).powf(1.2);
+        let mut fill = lerp_color(unlit, lit, 0.15 + 0.85 * shade);
+        if hovered == Some(*d) {
+            fill = lerp_color(fill, p.accent, if dark { 0.6 } else { 0.45 });
+        }
+        painter.add(Shape::convex_polygon(
+            polygon.clone(),
+            fill,
+            Stroke::new(0.6, line.gamma_multiply(0.35)),
+        ));
+        // The faces carry their names.
+        if let Some((normal, label)) = FACES.iter().find(|(normal, _)| *normal == *d)
+            && n.z > 0.3
         {
+            let (a, b) = face_axes(*normal);
+            let c = 1.0 - CUBE_BEVEL;
+            let corners = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)]
+                .map(|(s, t)| to_screen(*normal + (a * s + b * t) * c));
+            let alpha = ((n.z - 0.3) / 0.3).clamp(0.0, 1.0);
+            let color = if hovered == Some(*d) {
+                Color32::WHITE
+            } else {
+                ink
+            };
+            face_label(ui, tr(label), &corners, color.gamma_multiply(alpha));
+        }
+    }
+    // A crisp outline round the whole cube.
+    let outline: Vec<Pos2> = pieces
+        .iter()
+        .flat_map(|(_, polygon, _)| polygon.iter().copied())
+        .collect();
+    painter.add(Shape::closed_line(
+        convex_hull(outline),
+        Stroke::new(1.0, line),
+    ));
+
+    let mut action = None;
+    if let Some(d) = hovered {
+        let hint = match d.abs().cmpgt(Vec3::splat(0.5)).bitmask().count_ones() {
             1 => tr("Click to look at this face"),
             2 => tr("Click to look along this edge"),
             _ => tr("Click for the view from this corner"),
         };
-        let clicked = response.clicked();
+        if response.clicked() {
+            action = Some(CubeAction::Look(d));
+        }
         response.on_hover_text(hint);
-        if clicked {
-            return Some(direction);
+    }
+
+    // Home and the turns show while the pointer is near the cube.
+    let near = ui.rect_contains_pointer(area.expand(16.0));
+    let buttons = [
+        (
+            icon::HOUSE,
+            vec2(-1.75, -1.75),
+            tr("Home view"),
+            CubeAction::Home,
+            true,
+        ),
+        (
+            icon::ARROW_COUNTER_CLOCKWISE,
+            vec2(-1.75, 1.6),
+            tr("Turn 90° about the axis"),
+            CubeAction::Turn(FRAC_PI_2),
+            near,
+        ),
+        (
+            icon::ARROW_CLOCKWISE,
+            vec2(1.75, 1.6),
+            tr("Turn 90° the other way"),
+            CubeAction::Turn(-FRAC_PI_2),
+            near,
+        ),
+    ];
+    for (glyph, offset, tip, button_action, shown) in buttons {
+        if !shown {
+            continue;
+        }
+        let at = Rect::from_center_size(center + offset * CUBE_HALF, Vec2::splat(22.0));
+        let response = ui
+            .interact(at, ui.id().with(("cube_button", glyph)), Sense::click())
+            .on_hover_text(tip);
+        let painter = ui.painter();
+        if response.hovered() {
+            painter.circle_filled(at.center(), 11.0, p.hover);
+        }
+        painter.text(
+            at.center(),
+            Align2::CENTER_CENTER,
+            glyph,
+            FontId::proportional(14.0),
+            if response.hovered() { p.accent } else { p.weak },
+        );
+        if response.clicked() {
+            action = Some(button_action);
         }
     }
-    None
+    action
 }
 
-/// Regions of a face, by their offsets toward its in-plane axes: the middle, four
-/// edges and four corners.
-const CUBE_REGIONS: [(f32, f32); 9] = [
-    (0.0, 0.0),
-    (1.0, 0.0),
-    (-1.0, 0.0),
-    (0.0, 1.0),
-    (0.0, -1.0),
-    (1.0, 1.0),
-    (1.0, -1.0),
-    (-1.0, 1.0),
-    (-1.0, -1.0),
-];
+/// The 26 directions a piece of the bevelled cube looks along: six faces, twelve
+/// edges and eight corners.
+fn cube_directions() -> impl Iterator<Item = Vec3> {
+    (0..27)
+        .map(|i| {
+            Vec3::new(
+                (i % 3) as f32 - 1.0,
+                (i / 3 % 3) as f32 - 1.0,
+                (i / 9) as f32 - 1.0,
+            )
+        })
+        .filter(|d| *d != Vec3::ZERO)
+}
+
+/// The polygon of the bevelled unit cube that faces `d`, its corners in order round
+/// it: a square for a face, a strip for an edge, a triangle for a corner.
+fn cube_piece(d: Vec3) -> Vec<Vec3> {
+    let c = 1.0 - CUBE_BEVEL;
+    let axes: Vec<usize> = (0..3).filter(|&k| d[k] != 0.0).collect();
+    let point = |values: [(usize, f32); 3]| {
+        let mut v = Vec3::ZERO;
+        for (k, value) in values {
+            v[k] = value;
+        }
+        v
+    };
+    match axes[..] {
+        [k] => {
+            let (i, j) = ((k + 1) % 3, (k + 2) % 3);
+            [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)]
+                .map(|(s, t)| point([(k, d[k]), (i, s * c), (j, t * c)]))
+                .to_vec()
+        }
+        [i, j] => {
+            let k = 3 - i - j;
+            let (si, sj) = (d[i], d[j]);
+            vec![
+                point([(i, si), (j, sj * c), (k, -c)]),
+                point([(i, si), (j, sj * c), (k, c)]),
+                point([(i, si * c), (j, sj), (k, c)]),
+                point([(i, si * c), (j, sj), (k, -c)]),
+            ]
+        }
+        _ => (0..3)
+            .map(|k| {
+                Vec3::from_array(std::array::from_fn(
+                    |m| if m == k { d[m] } else { d[m] * c },
+                ))
+            })
+            .collect(),
+    }
+}
+
+/// The convex hull of `points`, in order round it.
+fn convex_hull(mut points: Vec<Pos2>) -> Vec<Pos2> {
+    points.sort_by(|a, b| a.x.total_cmp(&b.x).then(a.y.total_cmp(&b.y)));
+    points.dedup_by(|a, b| (*a - *b).length_sq() < 1e-6);
+    if points.len() < 3 {
+        return points;
+    }
+    let cross = |o: Pos2, a: Pos2, b: Pos2| (a - o).x * (b - o).y - (a - o).y * (b - o).x;
+    let mut hull: Vec<Pos2> = Vec::with_capacity(points.len() * 2);
+    for pass in 0..2 {
+        let start = hull.len();
+        let ordered: Box<dyn Iterator<Item = &Pos2>> = if pass == 0 {
+            Box::new(points.iter())
+        } else {
+            Box::new(points.iter().rev())
+        };
+        for &q in ordered {
+            while hull.len() >= start + 2
+                && cross(hull[hull.len() - 2], hull[hull.len() - 1], q) <= 0.0
+            {
+                hull.pop();
+            }
+            hull.push(q);
+        }
+        hull.pop();
+    }
+    hull
+}
+
+/// Moves a turn in progress on by `dt` seconds. Returns whether it goes on.
+fn step_turn(turn: &mut Option<Turn>, camera: &mut Camera, dt: f32) -> bool {
+    let Some(t) = turn.as_mut() else {
+        return false;
+    };
+    t.elapsed += dt;
+    let x = (t.elapsed / TURN_TIME).clamp(0.0, 1.0);
+    // Smooth start and stop.
+    let e = x * x * (3.0 - 2.0 * x);
+    let lerp = |a: f32, b: f32| a + (b - a) * e;
+    camera.look_from(lerp(t.from.0, t.to.0), lerp(t.from.1, t.to.1));
+    if x >= 1.0 {
+        *turn = None;
+    }
+    turn.is_some()
+}
+
+/// An angle brought into (−π, π].
+fn wrap_angle(angle: f32) -> f32 {
+    use std::f32::consts::{PI, TAU};
+    let a = (angle + PI).rem_euclid(TAU) - PI;
+    if a <= -PI { a + TAU } else { a }
+}
 
 /// Two axes in the plane of the face with outward `normal`, so that a label drawn
 /// along them reads upright from outside.
@@ -556,17 +743,6 @@ fn face_axes(normal: Vec3) -> (Vec3, Vec3) {
     };
     let right = up.cross(normal);
     (right, -up)
-}
-
-/// The corners of a region of a face, in model units of the unit cube.
-fn region_quad(normal: Vec3, a: Vec3, b: Vec3, i: f32, j: f32) -> [Vec3; 4] {
-    let span = |k: f32| match k {
-        0.0 => (-CUBE_BAND, CUBE_BAND),
-        k if k > 0.0 => (CUBE_BAND, 1.0),
-        _ => (-1.0, -CUBE_BAND),
-    };
-    let ((s0, s1), (t0, t1)) = (span(i), span(j));
-    [(s0, t0), (s1, t0), (s1, t1), (s0, t1)].map(|(s, t)| normal + a * s + b * t)
 }
 
 /// Draws `text` on a face, mapped onto its plane so it turns with the cube, and
@@ -583,7 +759,7 @@ fn face_label(ui: &Ui, text: &str, corners: &[Pos2; 4], color: Color32) {
     }
     // Face coordinates: the galley's centre at the face's centre, a fraction of the
     // face wide at most.
-    let scale = (1.3 / size.x).min(0.75 / size.y);
+    let scale = (1.5 / size.x).min(0.9 / size.y);
     let origin = corners[0];
     let (u, v) = ((corners[1] - origin) / 2.0, (corners[3] - origin) / 2.0);
     let map = |q: Pos2| {
@@ -664,17 +840,67 @@ mod tests {
         }
     }
 
+    /// Seen from a corner, the bevelled cube shows three faces, the three edges and
+    /// the corner between them, and, at the outline, the three corners beside it.
     #[test]
-    fn cube_regions_tile_each_face() {
-        let (a, b) = face_axes(Vec3::NEG_Z);
-        let area: f32 = CUBE_REGIONS
-            .iter()
-            .map(|&(i, j)| {
-                let q = region_quad(Vec3::NEG_Z, a, b, i, j);
-                (q[1] - q[0]).length() * (q[3] - q[0]).length()
-            })
-            .sum();
-        assert!((area - 4.0).abs() < 1e-5);
+    fn a_corner_view_shows_ten_pieces() {
+        let mut camera = Camera::fit(Vec3::ZERO, 1.0, 1.0);
+        let (yaw, pitch) = camera
+            .orientation_along(Vec3::new(1.0, -1.0, -1.0))
+            .unwrap();
+        camera.look_from(yaw, pitch);
+        let mut counts = [0; 3];
+        for d in cube_directions() {
+            if camera.view().transform_vector3(d.normalize()).z > 0.01 {
+                counts[d.abs().cmpgt(Vec3::splat(0.5)).bitmask().count_ones() as usize - 1] += 1;
+            }
+        }
+        assert_eq!(counts, [3, 3, 4]);
+    }
+
+    /// Each piece lies in the plane square to its direction, so it faces that way.
+    #[test]
+    fn cube_pieces_face_their_direction() {
+        assert_eq!(cube_directions().count(), 26);
+        for d in cube_directions() {
+            let piece = cube_piece(d);
+            let n = d.normalize();
+            let level = piece[0].dot(n);
+            assert!(piece.iter().all(|q| (q.dot(n) - level).abs() < 1e-5), "{d}");
+        }
+    }
+
+    /// A turn ends on its target, the short way round, and then stops.
+    #[test]
+    fn camera_turns_end_on_their_target() {
+        let mut viewer = Viewer {
+            camera: Some(Camera::fit(Vec3::ZERO, 1.0, 1.0)),
+            ..Viewer::default()
+        };
+        viewer.camera.as_mut().unwrap().look_from(3.0, 0.0);
+        viewer.turn_to((-3.0, 0.5));
+        let mut turn = viewer.turn;
+        let camera = viewer.camera.as_mut().unwrap();
+        assert!(step_turn(&mut turn, camera, TURN_TIME / 2.0));
+        // Halfway the yaw has gone up through π, not down through zero.
+        assert!(camera.yaw > 3.0);
+        assert!(!step_turn(&mut turn, camera, TURN_TIME));
+        assert!((wrap_angle(camera.yaw + 3.0)).abs() < 1e-5);
+        assert!((camera.pitch - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn hull_and_angles() {
+        let hull = convex_hull(vec![
+            pos2(0.0, 0.0),
+            pos2(2.0, 0.0),
+            pos2(1.0, 1.0),
+            pos2(2.0, 2.0),
+            pos2(0.0, 2.0),
+        ]);
+        assert_eq!(hull.len(), 4);
+        assert!((wrap_angle(3.0 * std::f32::consts::PI) - std::f32::consts::PI).abs() < 1e-5);
+        assert!((wrap_angle(-0.5) + 0.5).abs() < 1e-6);
     }
 
     #[test]

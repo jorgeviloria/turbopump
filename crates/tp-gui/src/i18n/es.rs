@@ -1257,6 +1257,9 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Arrastrar: girar\nArrastrar con el botón derecho o con Mayús: desplazar\nRueda o pellizco: zoom\nDoble clic: encuadrar\nCubo de vistas: clic en una cara, arista o esquina",
     ),
     ("Rear", "Trasera"),
+    ("Home view", "Vista inicial"),
+    ("Turn 90° about the axis", "Girar 90° alrededor del eje"),
+    ("Turn 90° the other way", "Girar 90° en sentido contrario"),
     (
         "Click to look at this face",
         "Clic para mirar esta cara de frente",
