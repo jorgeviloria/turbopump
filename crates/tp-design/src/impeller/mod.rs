@@ -278,7 +278,7 @@ pub fn build(
         basis,
         &contour,
         &channel,
-        input.properties.shape,
+        &input.properties,
         &input.mean_lines,
         &input.profiles,
         &input.edges,

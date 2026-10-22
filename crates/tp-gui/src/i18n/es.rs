@@ -2603,11 +2603,32 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("potential (2D)", "potencial (2D)"),
     ("quasi-1D", "cuasi-1D"),
     (
-        "Common: every section wraps the same angle, so the leading edge has no tangential sweep; each keeps its edge angles and a bump in its β distribution takes it there. Free: each wraps what its β distribution gives",
-        "Común: todas las secciones envuelven el mismo ángulo, así que el borde de ataque no queda barrido; cada una conserva sus ángulos en los bordes y una joroba en su distribución de β la lleva hasta él. Libre: cada una envuelve lo que da su distribución de β",
+        "Common: every section wraps the same angle, so the leading edge has no tangential sweep; each keeps its edge angles and a bump in its β distribution takes it there. Linear: from the hub wrap to the shroud wrap with the flow fraction. Free: each wraps what its β distribution gives",
+        "Común: todas las secciones envuelven el mismo ángulo, así que el borde de ataque no queda barrido; cada una conserva sus ángulos en los bordes y una joroba en su distribución de β la lleva hasta él. Lineal: del envolvimiento del cubo al de la carcasa según la fracción del caudal. Libre: cada una envuelve lo que da su distribución de β",
     ),
     ("common wrap", "envolvimiento común"),
+    ("linear hub to shroud", "lineal de cubo a carcasa"),
     ("each its own", "cada una el suyo"),
+    ("Hub wrap φ_hub", "Envolvimiento en el cubo φ_cubo"),
+    (
+        "Shroud wrap φ_shroud",
+        "Envolvimiento en la carcasa φ_carcasa",
+    ),
+    (
+        "Automatic: what the hub section's own β distribution gives",
+        "Automático: lo que da la distribución de β de la sección del cubo",
+    ),
+    (
+        "Automatic: what the shroud section's own β distribution gives",
+        "Automático: lo que da la distribución de β de la sección de la carcasa",
+    ),
+    ("Inlet velocity", "Velocidad de entrada"),
+    (
+        "The c_m the leading-edge angles are designed with. Local: each section's own, from the meridional flow. Uniform: the eye value c1m = Q_La/A1 at every section, as Gülich designs the inlet angles (eq. T7.1.7)",
+        "La c_m con la que se diseñan los ángulos del borde de ataque. Local: la de cada sección, del flujo meridional. Uniforme: la del ojo, c1m = Q_La/A1, en todas las secciones, como diseña Gülich los ángulos de entrada (ec. T7.1.7)",
+    ),
+    ("local", "local"),
+    ("uniform c1m", "c1m uniforme"),
     (
         "Shared by every section; automatic: the mean of the wraps their own β distributions give",
         "Común a todas las secciones; automático: la media de los envolvimientos que da a cada una su distribución de β",
@@ -3467,7 +3488,7 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
         "el flujo potencial falló ({}); los álabes usan el flujo cuasi-unidimensional",
     ),
     (
-        "the common wrap of {}° is out of reach at span {}: the section wraps {}°",
-        "el envolvimiento común de {}° no se alcanza en la sección {}: envuelve {}°",
+        "the wrap of {}° is out of reach at span {}: the section wraps {}°",
+        "el envolvimiento de {}° no se alcanza en la sección {}: envuelve {}°",
     ),
 ];

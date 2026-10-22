@@ -3,8 +3,8 @@
 use eframe::egui::{self, ComboBox, DragValue, Grid, RichText, Ui};
 use tp_design::MainDimensionsInput;
 use tp_design::impeller::blade::{
-    BetaDistribution, BladeShape, DEFAULT_POINTS, DEFAULT_SPANS, EdgeShape, MeridionalFlow,
-    WrapMode,
+    BetaDistribution, BladeShape, DEFAULT_POINTS, DEFAULT_SPANS, EdgeShape, InletVelocity,
+    MeridionalFlow, WrapMode,
 };
 use tp_design::impeller::meridian::{
     DEFAULT_LEADING_EDGE_HUB, DEFAULT_LEADING_EDGE_SHROUD, DEFAULT_TANGENT,
@@ -1386,6 +1386,29 @@ fn blade_properties(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Co
         ui.end_row();
         label(
             ui,
+            tr("Inlet velocity"),
+            tr(
+                "The c_m the leading-edge angles are designed with. Local: each section's own, from the meridional flow. Uniform: the eye value c1m = Q_La/A1 at every section, as Gülich designs the inlet angles (eq. T7.1.7)",
+            ),
+        );
+        ComboBox::from_id_salt("inlet_velocity")
+            .selected_text(match input.properties.inlet_velocity {
+                InletVelocity::Local => tr("local"),
+                InletVelocity::Uniform => tr("uniform c1m"),
+            })
+            .show_ui(ui, |ui| {
+                for (velocity, text) in [
+                    (InletVelocity::Local, tr("local")),
+                    (InletVelocity::Uniform, tr("uniform c1m")),
+                ] {
+                    changed |= ui
+                        .selectable_value(&mut input.properties.inlet_velocity, velocity, text)
+                        .changed();
+                }
+            });
+        ui.end_row();
+        label(
+            ui,
             tr("Blade shape"),
             tr(
                 "Cylindrical (2D) blades share one plan view swept along the axis: no lean, a one-piece core, the leading edge parallel to the axis. They suit nq below about 20 (Lobanoff & Ross ch. 3; Gülich Chap. 7.3)",
@@ -1510,17 +1533,19 @@ fn mean_lines(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                 ui,
                 tr("Sections"),
                 tr(
-                    "Common: every section wraps the same angle, so the leading edge has no tangential sweep; each keeps its edge angles and a bump in its β distribution takes it there. Free: each wraps what its β distribution gives",
+                    "Common: every section wraps the same angle, so the leading edge has no tangential sweep; each keeps its edge angles and a bump in its β distribution takes it there. Linear: from the hub wrap to the shroud wrap with the flow fraction. Free: each wraps what its β distribution gives",
                 ),
             );
             ComboBox::from_id_salt("wrap_mode")
                 .selected_text(match input.mean_lines.wrap {
                     WrapMode::Common => tr("common wrap"),
+                    WrapMode::Linear => tr("linear hub to shroud"),
                     WrapMode::Free => tr("each its own"),
                 })
                 .show_ui(ui, |ui| {
                     for (mode, text) in [
                         (WrapMode::Common, tr("common wrap")),
+                        (WrapMode::Linear, tr("linear hub to shroud")),
                         (WrapMode::Free, tr("each its own")),
                     ] {
                         changed |= ui
@@ -1539,6 +1564,29 @@ fn mean_lines(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                     &mut input.mean_lines.wrap_angle,
                     QuantityKind::Angle,
                     g.map(|g| g.blade.sections[0].wrap_angle()),
+                    &units,
+                    20f64.to_radians()..=360f64.to_radians(),
+                );
+            }
+            if input.mean_lines.wrap == WrapMode::Linear {
+                changed |= param_f64(
+                    ui,
+                    tr("Hub wrap φ_hub"),
+                    tr("Automatic: what the hub section's own β distribution gives"),
+                    &mut input.mean_lines.wrap_angle,
+                    QuantityKind::Angle,
+                    g.map(|g| g.blade.sections[0].wrap_angle()),
+                    &units,
+                    20f64.to_radians()..=360f64.to_radians(),
+                );
+                changed |= param_f64(
+                    ui,
+                    tr("Shroud wrap φ_shroud"),
+                    tr("Automatic: what the shroud section's own β distribution gives"),
+                    &mut input.mean_lines.wrap_angle_shroud,
+                    QuantityKind::Angle,
+                    g.and_then(|g| g.blade.sections.last())
+                        .map(|s| s.wrap_angle()),
                     &units,
                     20f64.to_radians()..=360f64.to_radians(),
                 );

@@ -30,6 +30,24 @@ pub struct BladePropertiesInput {
     pub shape: BladeShape,
     /// Which meridional flow places the sections and gives their meridional velocity.
     pub meridional_flow: MeridionalFlow,
+    /// Which meridional velocity sets the leading-edge angles.
+    pub inlet_velocity: InletVelocity,
+}
+
+/// The meridional velocity the leading-edge triangles are designed with.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InletVelocity {
+    /// Each section's own c_m where its stream line meets the leading edge, from the
+    /// chosen meridional flow.
+    #[default]
+    Local,
+    /// The same c₁m = Q_La/(π/4·(d₁² − d_n²)) at every section: Gülich (2nd ed.,
+    /// Table 7.1, eq. T7.1.7) designs the inlet blade angles "with constant c1m", and
+    /// draws the stream surfaces of equal part flows "frequently with the assumption
+    /// cm = constant" (Chap. 7.2.2.2, step 1). The stream surfaces and the c_m along
+    /// the blade still come from the meridional flow.
+    Uniform,
 }
 
 /// The meridional flow the blade sections are built on.
@@ -181,8 +199,12 @@ pub struct MeanLineInput {
     pub points: Param<u32>,
     pub wrap: WrapMode,
     /// Wrap angle every free-form section shares with [`WrapMode::Common`], rad;
-    /// automatic: the mean of the wraps their own β distributions give them.
+    /// automatic: the mean of the wraps their own β distributions give them. With
+    /// [`WrapMode::Linear`], the wrap at the hub; automatic: the hub section's own.
     pub wrap_angle: Param<f64>,
+    /// Wrap at the shroud with [`WrapMode::Linear`], rad; automatic: the shroud
+    /// section's own.
+    pub wrap_angle_shroud: Param<f64>,
 }
 
 /// How the wrap angles of the sections relate.
@@ -197,6 +219,10 @@ pub enum WrapMode {
     Common,
     /// Each section wraps what its own β distribution gives.
     Free,
+    /// The wrap goes linearly with the flow fraction of the section from the hub value
+    /// to the shroud value (our construction), with the same bump as the common wrap.
+    /// Gülich (2nd ed., Chap. 7.2.2.2, step 7) gives 120°–140° for six blades.
+    Linear,
 }
 
 /// Blade angles the wrap bump may reach, rad.
@@ -575,6 +601,8 @@ struct SectionSettings {
     thickness_leading: f64,
     thickness_trailing: f64,
     edges: (EdgeShape, EdgeShape),
+    /// c_m of every leading edge with [`InletVelocity::Uniform`].
+    inlet_cm: Option<f64>,
 }
 
 fn leading_edge(basis: &ImpellerBasis, position: DVec2, cm: f64, thickness: f64) -> LeadingEdge {
@@ -702,7 +730,7 @@ fn frame<'a>(
     let le = leading_edge(
         basis,
         le_position,
-        span.cm_at(t_le),
+        settings.inlet_cm.unwrap_or_else(|| span.cm_at(t_le)),
         settings.thickness_leading,
     );
     if !le.blockage.is_finite() {
@@ -869,7 +897,7 @@ fn span_leading_edge(
     contour: &MeridionalContour,
     channel: &Channel,
     index: usize,
-    thickness: f64,
+    settings: &SectionSettings,
 ) -> (LeadingEdge, f64) {
     let span = &channel.spans[index];
     let line = Polyline::new(span.points.clone()).expect("channel spans have points");
@@ -877,7 +905,12 @@ fn span_leading_edge(
     let s = length_at(&line, t_le);
     let position = line.point_at_length(s);
     (
-        leading_edge(basis, position, span.cm_at(t_le), thickness),
+        leading_edge(
+            basis,
+            position,
+            settings.inlet_cm.unwrap_or_else(|| span.cm_at(t_le)),
+            settings.thickness_leading,
+        ),
         radial_slope(&line, s),
     )
 }
@@ -892,7 +925,7 @@ fn plan_view(
     settings: &SectionSettings,
 ) -> Result<PlanView, DesignError> {
     let edges: Vec<(LeadingEdge, f64)> = (0..channel.spans.len())
-        .map(|j| span_leading_edge(basis, contour, channel, j, settings.thickness_leading))
+        .map(|j| span_leading_edge(basis, contour, channel, j, settings))
         .collect();
     let (middle, slope) = edges
         .iter()
@@ -939,7 +972,7 @@ impl Blade {
         basis: &ImpellerBasis,
         contour: &MeridionalContour,
         channel: &Channel,
-        shape: BladeShape,
+        properties: &BladePropertiesInput,
         mean_lines: &MeanLineInput,
         profiles: &ProfileInput,
         edges: &EdgeInput,
@@ -991,7 +1024,15 @@ impl Blade {
                     .resolve(|| basis.blade_thickness),
             )?,
             edges: (edges.leading, edges.trailing),
+            inlet_cm: match properties.inlet_velocity {
+                InletVelocity::Local => None,
+                InletVelocity::Uniform => {
+                    let (d1, dn) = (basis.inlet_diameter, basis.hub_diameter);
+                    Some(basis.flow / (PI / 4.0 * (d1 * d1 - dn * dn)))
+                }
+            },
         };
+        let shape = properties.shape;
         if shape.is_cylindrical() && basis.is_semi_axial() {
             return Err(DesignError::InvalidInput(
                 "cylindrical blades need a radial outlet; a semi-axial impeller takes the \
@@ -1008,36 +1049,54 @@ impl Blade {
             .map(|j| frame(basis, contour, channel, j, &settings))
             .collect::<Result<Vec<_>, _>>()?;
         let mut warnings = Vec::new();
-        // A common wrap: each free-form section gets the bump that takes it there.
-        let bumps: Vec<f64> = match mean_lines.wrap {
+        // A common or linear wrap: each free-form section gets the bump that takes it
+        // to its target.
+        let own = |f: &SpanFrame| f.wrap(settings.beta, 0.0);
+        let targets: Option<Vec<f64>> = match mean_lines.wrap {
             WrapMode::Common if plan.is_none() => {
                 let target = match mean_lines.wrap_angle {
                     Param::Manual(w) => positive("wrap angle", w)?,
-                    Param::Auto => {
-                        frames
-                            .iter()
-                            .map(|f| f.wrap(settings.beta, 0.0))
-                            .sum::<f64>()
-                            / frames.len() as f64
-                    }
+                    Param::Auto => frames.iter().map(own).sum::<f64>() / frames.len() as f64,
                 };
-                frames
-                    .iter()
-                    .map(|f| {
-                        f.bump_for(settings.beta, target).unwrap_or_else(|nearest| {
-                            warnings.push(format!(
-                                "the common wrap of {:.0}° is out of reach at span {:.2}: the \
-                                 section wraps {:.0}°",
-                                target.to_degrees(),
-                                f.span.fraction,
-                                f.wrap(settings.beta, nearest).to_degrees()
-                            ));
-                            nearest
-                        })
-                    })
-                    .collect()
+                Some(vec![target; frames.len()])
             }
-            _ => vec![0.0; frames.len()],
+            WrapMode::Linear if plan.is_none() => {
+                let (first, last) = (&frames[0], &frames[frames.len() - 1]);
+                let hub = match mean_lines.wrap_angle {
+                    Param::Manual(w) => positive("hub wrap angle", w)?,
+                    Param::Auto => own(first),
+                };
+                let shroud = match mean_lines.wrap_angle_shroud {
+                    Param::Manual(w) => positive("shroud wrap angle", w)?,
+                    Param::Auto => own(last),
+                };
+                Some(
+                    frames
+                        .iter()
+                        .map(|f| hub + (shroud - hub) * f.span.fraction)
+                        .collect(),
+                )
+            }
+            _ => None,
+        };
+        let bumps: Vec<f64> = match targets {
+            Some(targets) => frames
+                .iter()
+                .zip(targets)
+                .map(|(f, target)| {
+                    f.bump_for(settings.beta, target).unwrap_or_else(|nearest| {
+                        warnings.push(format!(
+                            "the wrap of {:.0}° is out of reach at span {:.2}: the \
+                                 section wraps {:.0}°",
+                            target.to_degrees(),
+                            f.span.fraction,
+                            f.wrap(settings.beta, nearest).to_degrees()
+                        ));
+                        nearest
+                    })
+                })
+                .collect(),
+            None => vec![0.0; frames.len()],
         };
         let sections = frames
             .iter()
@@ -1069,7 +1128,7 @@ mod tests {
             &b,
             &contour,
             &channel,
-            BladeShape::FreeForm,
+            &BladePropertiesInput::default(),
             &mean_lines,
             &ProfileInput::default(),
             &edges,
@@ -1255,6 +1314,90 @@ mod tests {
     }
 
     #[test]
+    fn a_linear_wrap_goes_from_hub_to_shroud() {
+        let free = blade_with(
+            MeanLineInput {
+                wrap: WrapMode::Free,
+                ..Default::default()
+            },
+            EdgeInput::default(),
+        );
+        let linear = |hub: Param<f64>, shroud: Param<f64>| {
+            blade_with(
+                MeanLineInput {
+                    wrap: WrapMode::Linear,
+                    wrap_angle: hub,
+                    wrap_angle_shroud: shroud,
+                    ..Default::default()
+                },
+                EdgeInput::default(),
+            )
+        };
+        let (hub, shroud) = (120f64.to_radians(), 125f64.to_radians());
+        let blade = linear(Param::Manual(hub), Param::Manual(shroud));
+        assert!(blade.warnings.is_empty(), "{:?}", blade.warnings);
+        for (s, f) in blade.sections.iter().zip(&free.sections) {
+            let expected = hub + (shroud - hub) * s.span;
+            assert_relative_eq!(s.wrap_angle(), expected, max_relative = 1e-6);
+            // The edge angles stay those of the section.
+            assert_relative_eq!(s.beta[0], f.beta[0], epsilon = 1e-12);
+        }
+        // Automatic ends keep the hub and shroud sections as they are.
+        let own = linear(Param::Auto, Param::Auto);
+        let (first, last) = (&free.sections[0], free.sections.last().unwrap());
+        assert_relative_eq!(
+            own.sections[0].wrap_angle(),
+            first.wrap_angle(),
+            max_relative = 1e-6
+        );
+        assert_relative_eq!(
+            own.sections.last().unwrap().wrap_angle(),
+            last.wrap_angle(),
+            max_relative = 1e-6
+        );
+    }
+
+    #[test]
+    fn a_uniform_inlet_velocity_sets_every_leading_edge_with_the_eye_velocity() {
+        let b = basis();
+        let contour = MeridionalContour::build(&b, &MeridionalInput::default()).unwrap();
+        let channel = Channel::build(&contour, b.flow, 61, 5);
+        let blade = Blade::build(
+            &b,
+            &contour,
+            &channel,
+            &BladePropertiesInput {
+                inlet_velocity: InletVelocity::Uniform,
+                ..Default::default()
+            },
+            &MeanLineInput::default(),
+            &ProfileInput::default(),
+            &EdgeInput::default(),
+        )
+        .unwrap();
+        let eye = PI / 4.0 * (b.inlet_diameter.powi(2) - b.hub_diameter.powi(2));
+        for s in &blade.sections {
+            let le = &s.leading_edge;
+            assert_relative_eq!(le.cm, b.flow / eye, max_relative = 1e-12);
+            // Gülich eq. T7.1.7: tan β1B = τ1·c1m/u1 with incidence 0.
+            let u = b.omega * le.position.y;
+            assert_relative_eq!(
+                le.blade_angle.tan(),
+                le.blockage * le.cm / u,
+                max_relative = 1e-9
+            );
+        }
+        // With constant c1m and τ1 the angles follow r·tan β1B ≈ constant (eq. T7.1.7):
+        // the hub angle is the steepest.
+        let angles: Vec<f64> = blade
+            .sections
+            .iter()
+            .map(|s| s.leading_edge.blade_angle)
+            .collect();
+        assert!(angles.windows(2).all(|w| w[0] >= w[1]), "{angles:?}");
+    }
+
+    #[test]
     fn a_common_wrap_lines_up_the_leading_edge() {
         let free = blade_with(
             MeanLineInput {
@@ -1321,7 +1464,7 @@ mod tests {
             &b,
             &contour,
             &channel,
-            BladeShape::FreeForm,
+            &BladePropertiesInput::default(),
             &MeanLineInput::default(),
             &profiles,
             &EdgeInput::default(),

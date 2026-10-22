@@ -105,7 +105,22 @@ carcasa. Entre esos dos puntos tiene una de tres formas:
   (construcción propia).
 
 Con la recta o la Bézier, cada línea de corriente toma el borde de ataque donde corta la
-curva; si no la corta, se vuelve a la interpolación según el canal. Al pasar a Bézier, la
+curva; si no la corta, se vuelve a la interpolación según el canal.
+
+**Borde de ataque por puntos** (`--set le-points=Z,R;Z,R;…`, de cubo a carcasa). Es una
+construcción propia:
+
+- El primer y el último punto se llevan al punto más cercano del cubo y de la carcasa, y
+  fijan sus fracciones.
+- Los puntos intermedios dan la forma:
+  - ninguno: una recta;
+  - uno: la parábola que pasa por él, escrita como Bézier cúbica sin cambiar su forma;
+  - dos o más: la cúbica más cercana por mínimos cuadrados.
+- Cada punto empieza con el parámetro de su posición a lo largo del polígono, por
+  longitud de cuerda. Después el ajuste alterna con la corrección de parámetros de
+  Hoschek: cada parámetro se mueve al punto de la curva más cercano a su punto (Piegl y
+  Tiller, *The NURBS Book*, 2.ª ed., §9.4.1).
+- Con dos puntos intermedios, la curva pasa exactamente por ellos. Al pasar a Bézier, la
 curva nueva pasa por el borde actual en sus tercios, con
 $P_1 = (-5P_0 + 18A - 9B + 2P_3)/6$ y $P_2 = (2P_0 - 9A + 18B - 5P_3)/6$, de modo que el
 borde no salta.
@@ -200,6 +215,20 @@ cubierta y de 53° a 44° en el cubo: el álabe se tuerce menos en el borde de a
 cubierta queda más corta (127 → 116 mm), y el criterio de carga de Gülich sube de 1,11 a
 1,17, justo por encima de su banda.
 
+**Velocidad de entrada.** Por defecto, cada sección usa la $c_m$ local de su línea de
+corriente en el borde de ataque. Con `--set inlet-velocity=uniform`, todas usan la misma
+velocidad del ojo, $c_{1m} = Q_{La}/(\pi/4\,(d_1^2 - d_n^2))$, como diseña Gülich los
+ángulos de entrada «con $c_{1m}$ constante» (tabla 7.1, ec. T7.1.7). También son de $c_m$
+constante sus superficies de corriente de caudales parciales iguales (cap. 7.2.2.2,
+paso 1). Las superficies de corriente y la $c_m$ a lo largo del álabe siguen saliendo del
+flujo meridional elegido.
+
+La diferencia importa cuando el borde de ataque del cubo cae en un codo cóncavo. Allí el
+flujo potencial frena mucho el cubo. Con un meridiano que tiene el borde de ataque del
+cubo justo donde éste empieza a subir, el flujo potencial da $c_m$ = 2,0 m/s, y lo mismo
+en mallas de 81×21 a 321×61, así que no es un error numérico. Eso deja $\beta_{1B}$ = 24,5°
+en el cubo. Con $c_{1m}$ uniforme sale 41,9°.
+
 **Ángulo de salida.** $\beta_{2B}$ es el mismo en todos los spans, porque la salida es
 radial con $u_2$ y $c_{m2}$ uniformes.
 
@@ -269,6 +298,13 @@ envolvimiento baja al crecer $a$. $\beta$ se mantiene entre 5° y 90°; si así 
 alcanza el objetivo, se avisa. En la referencia todas las secciones envuelven 119,7°, el
 álabe forma al menos 59° con las paredes y la carga de Gülich vuelve a 0,99. Con
 "cada una el suyo" se recupera el comportamiento anterior.
+
+**Envolvimiento lineal** (`--set wrap=linear:CUBO,CARCASA`, construcción propia). El
+objetivo de cada sección va del valor del cubo al de la carcasa según su fracción del
+caudal, y cada sección lo alcanza con la misma joroba que el envolvimiento común. En
+automático, cada extremo conserva lo que da su propia distribución de β. Gülich (cap.
+7.2.2.2, paso 7) da envolvimientos de 130°–160° con 5 álabes, 120°–140° con 6 y
+100°–130° con 7.
 
 **Comprobación de la integración.** Una línea radial con β constante debe dar la espiral
 logarítmica $\theta = \ln(r_2/r_1)/\tan\beta$.
@@ -400,6 +436,7 @@ Valores automáticos, con $d_1 = 77{,}2$ mm por el factor $f_{d1}$ de la tabla 7
 - No hay álabes partidos (splitters) ni álabes de superficie reglada. Los álabes 2D son
   cilíndricos (paralelos al eje); faltan los 2D de los rodetes axiales.
 - El borde de ataque es una sola curva (recta o Bézier cúbica): no se divide en tramos.
+  Con más de dos puntos intermedios, la curva no pasa por todos: se ajusta.
 - Las paredes por tramos solo admiten Béziers y rectas; faltan los arcos con rectas
   tangentes, las B-splines y la continuidad de curvatura en las uniones.
 - No se modelan holguras ni redondeos.

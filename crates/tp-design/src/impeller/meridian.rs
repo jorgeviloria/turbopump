@@ -73,6 +73,172 @@ impl LeadingEdgeShape {
             ],
         }
     }
+
+    /// The edge from `hub` to `shroud` through the points `inner` between them, in
+    /// order from the hub (our construction):
+    /// - none: a straight line;
+    /// - one: the quadratic through it, raised to a cubic, which keeps its shape;
+    /// - two or more: the cubic nearest to them in least squares.
+    ///
+    /// Each point starts at the parameter of its chord-length position along the
+    /// polygon hub → points → shroud. With more than one point the fit then alternates
+    /// with moving each parameter to the curve point nearest to its point (Hoschek's
+    /// parameter correction, as in Piegl and Tiller, *The NURBS Book*, 2nd ed., §9.4.1).
+    /// Two points are met exactly.
+    pub fn through_points(hub: DVec2, inner: &[DVec2], shroud: DVec2) -> Self {
+        let polygon: Vec<DVec2> = std::iter::once(hub)
+            .chain(inner.iter().copied())
+            .chain(std::iter::once(shroud))
+            .collect();
+        let mut walked = vec![0.0];
+        for w in polygon.windows(2) {
+            walked.push(walked.last().copied().unwrap_or(0.0) + w[0].distance(w[1]));
+        }
+        let total = walked.last().copied().unwrap_or(0.0);
+        if inner.is_empty() || total <= 0.0 {
+            return Self::Line;
+        }
+        let mut ts: Vec<f64> = walked[1..walked.len() - 1]
+            .iter()
+            .map(|s| (s / total).clamp(1e-6, 1.0 - 1e-6))
+            .collect();
+        let (c1, c2) = if let [m] = inner {
+            // Quadratic hub, q, shroud through m at t, then its exact cubic form.
+            let t = ts[0];
+            let q = (*m - hub * (1.0 - t).powi(2) - shroud * t * t) / (2.0 * t * (1.0 - t));
+            (
+                hub + (q - hub) * (2.0 / 3.0),
+                shroud + (q - shroud) * (2.0 / 3.0),
+            )
+        } else {
+            let mut controls = None;
+            for _ in 0..PARAMETER_CORRECTIONS {
+                let Some((c1, c2)) = cubic_fit(hub, shroud, inner, &ts) else {
+                    break;
+                };
+                controls = Some((c1, c2));
+                let curve = [hub, c1, c2, shroud];
+                for (t, p) in ts.iter_mut().zip(inner) {
+                    *t = nearest_parameter(&curve, *p, *t);
+                }
+            }
+            match controls {
+                Some(c) => c,
+                None => return Self::Line,
+            }
+        };
+        Self::Bezier {
+            controls: [
+                chord_coordinates(hub, shroud, c1),
+                chord_coordinates(hub, shroud, c2),
+            ],
+        }
+    }
+}
+
+/// Fits and parameter corrections of [`LeadingEdgeShape::through_points`].
+const PARAMETER_CORRECTIONS: usize = 50;
+
+/// Inner control points of the cubic from `hub` to `shroud` nearest in least squares to
+/// `points` at parameters `ts`: the normal equations of
+/// Σ|b1·c1 + b2·c2 − (p − b0·hub − b3·shroud)|². `None` if they are singular.
+fn cubic_fit(hub: DVec2, shroud: DVec2, points: &[DVec2], ts: &[f64]) -> Option<(DVec2, DVec2)> {
+    let (mut a11, mut a12, mut a22) = (0.0, 0.0, 0.0);
+    let (mut r1, mut r2) = (DVec2::ZERO, DVec2::ZERO);
+    for (p, &t) in points.iter().zip(ts) {
+        let s = 1.0 - t;
+        let (b0, b1, b2, b3) = (s * s * s, 3.0 * s * s * t, 3.0 * s * t * t, t * t * t);
+        let rest = *p - hub * b0 - shroud * b3;
+        a11 += b1 * b1;
+        a12 += b1 * b2;
+        a22 += b2 * b2;
+        r1 += rest * b1;
+        r2 += rest * b2;
+    }
+    let det = a11 * a22 - a12 * a12;
+    (det.abs() > 1e-12).then(|| ((r1 * a22 - r2 * a12) / det, (r2 * a11 - r1 * a12) / det))
+}
+
+/// Parameter of the point of the cubic Bézier `c` nearest to `p`, by Newton steps on
+/// (B(t) − p)·B'(t) = 0 from `t`.
+fn nearest_parameter(c: &[DVec2; 4], p: DVec2, mut t: f64) -> f64 {
+    for _ in 0..8 {
+        let s = 1.0 - t;
+        let b = c[0] * (s * s * s)
+            + c[1] * (3.0 * s * s * t)
+            + c[2] * (3.0 * s * t * t)
+            + c[3] * (t * t * t);
+        let d1 = (c[1] - c[0]) * (3.0 * s * s)
+            + (c[2] - c[1]) * (6.0 * s * t)
+            + (c[3] - c[2]) * (3.0 * t * t);
+        let d2 = (c[2] - c[1] * 2.0 + c[0]) * (6.0 * s) + (c[3] - c[2] * 2.0 + c[1]) * (6.0 * t);
+        let e = b - p;
+        let denominator = d1.dot(d1) + e.dot(d2);
+        if denominator.abs() < 1e-30 {
+            break;
+        }
+        t = (t - e.dot(d1) / denominator).clamp(1e-6, 1.0 - 1e-6);
+    }
+    t
+}
+
+impl MeridionalInput {
+    /// Places the leading edge through `points` (z, r), m, given from the hub to the
+    /// shroud. The first and last points go to the nearest points of the hub and shroud
+    /// of `contour`. They set the leading-edge fractions on those walls, and the points
+    /// between them set the shape ([`LeadingEdgeShape::through_points`]). Returns how
+    /// far the end points lie from the walls, m.
+    pub fn set_leading_edge_points(
+        &mut self,
+        contour: &MeridionalContour,
+        points: &[DVec2],
+    ) -> Result<f64, DesignError> {
+        let (Some(&first), Some(&last)) = (points.first(), points.last()) else {
+            return Err(DesignError::InvalidInput(
+                "the leading edge needs at least its hub and shroud points".into(),
+            ));
+        };
+        if points.len() < 2 || points.iter().any(|p| !p.is_finite()) {
+            return Err(DesignError::InvalidInput(
+                "the leading edge needs at least its hub and shroud points".into(),
+            ));
+        }
+        let (hub_t, hub_off) = nearest_fraction(&contour.hub_line, first);
+        let (shroud_t, shroud_off) = nearest_fraction(&contour.shroud_line, last);
+        if hub_t >= 1.0 || shroud_t >= 1.0 {
+            return Err(DesignError::InvalidInput(
+                "the leading edge must lie upstream of the outlet".into(),
+            ));
+        }
+        let hub = contour.hub_at(hub_t);
+        let shroud = contour.shroud_at(shroud_t);
+        self.leading_edge_hub = Param::Manual(hub_t);
+        self.leading_edge_shroud = Param::Manual(shroud_t);
+        self.leading_edge_shape =
+            LeadingEdgeShape::through_points(hub, &points[1..points.len() - 1], shroud);
+        Ok(hub_off.max(shroud_off))
+    }
+}
+
+/// Fraction of the length of `line` at its point nearest to `p`, and the distance.
+fn nearest_fraction(line: &Polyline<DVec2>, p: DVec2) -> (f64, f64) {
+    let points = line.points();
+    let lengths = line.cumulative_lengths();
+    let mut best = (0.0, f64::INFINITY);
+    for (i, w) in points.windows(2).enumerate() {
+        let d = w[1] - w[0];
+        let l2 = d.length_squared();
+        let t = if l2 > 0.0 {
+            ((p - w[0]).dot(d) / l2).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let distance = (w[0] + d * t).distance(p);
+        if distance < best.1 {
+            best = (lengths[i] + t * (lengths[i + 1] - lengths[i]), distance);
+        }
+    }
+    (best.0 / line.length(), best.1)
 }
 
 /// (along, across) coordinates of `p` on the chord from `a` to `b`, in chord lengths.
@@ -689,6 +855,112 @@ pub(crate) mod tests {
         );
         let p = DVec2::new(0.013, 0.031);
         assert!(chord_point(hub, shroud, chord_coordinates(hub, shroud, p)).distance(p) < 1e-15);
+    }
+
+    /// The Bézier a leading-edge shape stands for, between `hub` and `shroud`.
+    fn edge_curve(shape: LeadingEdgeShape, hub: DVec2, shroud: DVec2) -> Bezier<DVec2> {
+        match shape {
+            LeadingEdgeShape::Bezier { controls } => Bezier::new(vec![
+                hub,
+                chord_point(hub, shroud, controls[0]),
+                chord_point(hub, shroud, controls[1]),
+                shroud,
+            ])
+            .unwrap(),
+            LeadingEdgeShape::Line => Bezier::line(hub, shroud),
+            LeadingEdgeShape::Channel => panic!("not a curve"),
+        }
+    }
+
+    /// Smallest distance from `p` to `curve`.
+    fn distance_to(curve: &Bezier<DVec2>, p: DVec2) -> f64 {
+        curve
+            .sample(20_001)
+            .iter()
+            .map(|q| q.distance(p))
+            .fold(f64::INFINITY, f64::min)
+    }
+
+    #[test]
+    fn a_leading_edge_through_points_meets_them() {
+        let (hub, shroud) = (DVec2::new(0.038, 0.034), DVec2::new(0.004, 0.071));
+        assert_eq!(
+            LeadingEdgeShape::through_points(hub, &[], shroud),
+            LeadingEdgeShape::Line
+        );
+        // One point: met exactly (within the 3 µm sampling of `distance_to`).
+        let mid = DVec2::new(0.019, 0.051);
+        let one = edge_curve(
+            LeadingEdgeShape::through_points(hub, &[mid], shroud),
+            hub,
+            shroud,
+        );
+        assert!(distance_to(&one, mid) < 5e-6, "{}", distance_to(&one, mid));
+        // Two points: met exactly.
+        // A smooth edge bulging toward the outlet, as leading edges usually are.
+        let cubic = Bezier::new(vec![
+            hub,
+            DVec2::new(0.028, 0.044),
+            DVec2::new(0.016, 0.058),
+            shroud,
+        ])
+        .unwrap();
+        let (a, b) = (cubic.eval(0.3), cubic.eval(0.7));
+        let two = edge_curve(
+            LeadingEdgeShape::through_points(hub, &[a, b], shroud),
+            hub,
+            shroud,
+        );
+        assert!(distance_to(&two, a) < 5e-6 && distance_to(&two, b) < 5e-6);
+        // More: a least-squares fit that stays close to points of a smooth curve.
+        let many: Vec<DVec2> = (1..8).map(|i| cubic.eval(i as f64 / 8.0)).collect();
+        let fit = edge_curve(
+            LeadingEdgeShape::through_points(hub, &many, shroud),
+            hub,
+            shroud,
+        );
+        for p in &many {
+            assert!(
+                distance_to(&fit, *p) < 2e-4,
+                "{p}: {}",
+                distance_to(&fit, *p)
+            );
+        }
+    }
+
+    #[test]
+    fn leading_edge_points_set_the_wall_fractions() {
+        let b = basis();
+        let contour = MeridionalContour::build(&b, &MeridionalInput::default()).unwrap();
+        let (hub, shroud) = (contour.hub_at(0.3), contour.shroud_at(0.1));
+        let mid = (hub + shroud) * 0.5 + DVec2::new(0.002, 0.0);
+        let mut input = MeridionalInput::default();
+        // Points slightly off the walls land on them.
+        let off = input
+            .set_leading_edge_points(
+                &contour,
+                &[
+                    hub + DVec2::new(0.0, -1e-4),
+                    mid,
+                    shroud + DVec2::new(0.0, 1e-4),
+                ],
+            )
+            .unwrap();
+        assert!(off < 1.1e-4, "{off}");
+        assert_relative_eq!(
+            input.leading_edge_hub.manual_value().unwrap(),
+            0.3,
+            epsilon = 2e-3
+        );
+        assert_relative_eq!(
+            input.leading_edge_shroud.manual_value().unwrap(),
+            0.1,
+            epsilon = 2e-3
+        );
+        let built = MeridionalContour::build(&b, &input).unwrap();
+        let curve = built.leading_edge_curve().unwrap();
+        assert!(distance_to(&curve, mid) < 1e-5);
+        assert!(input.set_leading_edge_points(&contour, &[hub]).is_err());
     }
 
     #[test]
