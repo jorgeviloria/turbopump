@@ -1256,6 +1256,39 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
     });
     section(ui, tr("Leading edge"));
     props(ui, "leading_edge", |ui| {
+        use tp_design::impeller::meridian::LeadingEdgeShape;
+        let name = |shape: &LeadingEdgeShape| {
+            tr(match shape {
+                LeadingEdgeShape::Channel => "Along the channel",
+                LeadingEdgeShape::Line => "Straight line",
+                LeadingEdgeShape::Bezier { .. } => "Bézier",
+            })
+        };
+        label(
+            ui,
+            tr("Shape"),
+            tr(
+                "Between its hub and shroud points: following the channel, straight, or a \
+                Bézier whose control points are dragged in the meridional view",
+            ),
+        );
+        let before = std::mem::discriminant(&m.leading_edge_shape);
+        ComboBox::from_id_salt("leading_edge_shape")
+            .selected_text(name(&m.leading_edge_shape))
+            .show_ui(ui, |ui| {
+                for shape in [LeadingEdgeShape::Channel, LeadingEdgeShape::Line] {
+                    let text = name(&shape);
+                    ui.selectable_value(&mut m.leading_edge_shape, shape, text);
+                }
+                let bezier = matches!(m.leading_edge_shape, LeadingEdgeShape::Bezier { .. });
+                if ui.selectable_label(bezier, tr("Bézier")).clicked() && !bezier {
+                    m.leading_edge_shape = g.map_or(LeadingEdgeShape::Line, |g| {
+                        crate::views::meridional::bezier_along_edge(g)
+                    });
+                }
+            });
+        ui.end_row();
+        changed |= std::mem::discriminant(&m.leading_edge_shape) != before;
         changed |= param_f64(
             ui,
             tr("On the hub"),

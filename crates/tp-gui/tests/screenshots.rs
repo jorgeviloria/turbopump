@@ -556,6 +556,13 @@ fn meridional_segments() {
     };
     let moved = shroud.point(at).unwrap() + tp_math::DVec2::new(-0.004, 0.006);
     input.meridional.shroud_segments = Some(wall::move_point(&shroud, at, moved));
+    // A leading edge bowed upstream.
+    input.meridional.leading_edge_shape = tp_design::impeller::meridian::LeadingEdgeShape::Bezier {
+        controls: [
+            tp_math::DVec2::new(0.33, 0.12),
+            tp_math::DVec2::new(0.67, 0.12),
+        ],
+    };
     project.set_impeller_geometry(id, input).unwrap();
     let path = std::env::temp_dir().join("turbopump-meridional-segments.tpj");
     project.save(&path).unwrap();

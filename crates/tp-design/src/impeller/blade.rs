@@ -418,9 +418,8 @@ fn section(
 ) -> Result<BladeSection, DesignError> {
     let span = &channel.spans[span_index];
     let line = Polyline::new(span.points.clone()).expect("channel spans have points");
-    // Leading-edge channel position, interpolated between hub and shroud.
-    let (le_hub, le_shroud) = contour.leading_edge;
-    let t_le = le_hub + span.fraction * (le_shroud - le_hub);
+    // Leading-edge channel position on this stream line.
+    let t_le = contour.leading_edge_on(span.fraction, &span.points);
     let s_le = length_at(&line, t_le);
     let s_te = line.length();
     let meridional_length = s_te - s_le;
@@ -554,8 +553,7 @@ fn span_leading_edge(
 ) -> (LeadingEdge, f64) {
     let span = &channel.spans[index];
     let line = Polyline::new(span.points.clone()).expect("channel spans have points");
-    let (le_hub, le_shroud) = contour.leading_edge;
-    let t_le = le_hub + span.fraction * (le_shroud - le_hub);
+    let t_le = contour.leading_edge_on(span.fraction, &span.points);
     let s = length_at(&line, t_le);
     let position = line.point_at_length(s);
     (

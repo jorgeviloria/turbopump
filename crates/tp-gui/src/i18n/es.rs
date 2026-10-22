@@ -6,11 +6,21 @@
 
 /// English text → Spanish text.
 pub(super) static TEXTS: &[(&str, &str)] = &[
+    (
+        "leading edge control point",
+        "punto de control del borde de ataque",
+    ),
+    ("edit leading edge", "editar borde de ataque"),
+    ("Along the channel", "Según el canal"),
+    (
+        "Between its hub and shroud points: following the channel, straight, or a Bézier whose control points are dragged in the meridional view",
+        "Entre sus puntos del cubo y de la carcasa: según el canal, recto o una Bézier cuyos puntos de control se arrastran en la vista meridional",
+    ),
     ("{} segments", "{} tramos"),
     ("hub joint", "unión del cubo"),
     ("hub control point", "punto de control del cubo"),
-    ("shroud joint", "unión de la cubierta"),
-    ("shroud control point", "punto de control de la cubierta"),
+    ("shroud joint", "unión de la carcasa"),
+    ("shroud control point", "punto de control de la carcasa"),
     ("Position along the wall", "Posición a lo largo de la pared"),
     ("This point no longer exists.", "Este punto ya no existe."),
     (
@@ -42,7 +52,7 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Arrastra los puntos para dar forma al contorno; con el clic derecho sobre un punto o una pared escribes valores exactos, divides la pared en tramos o los unes. Arrastra el fondo para desplazar, usa la rueda para acercar y haz doble clic para encuadrar.",
     ),
     ("Hub drawn by segments", "Cubo dibujado por tramos"),
-    ("Shroud drawn by segments", "Cubierta dibujada por tramos"),
+    ("Shroud drawn by segments", "Carcasa dibujada por tramos"),
     (
         "Drawn segment by segment in the meridional view; its tangent lengths do not apply",
         "Dibujada tramo a tramo en la vista meridional; sus longitudes de tangente no se aplican",

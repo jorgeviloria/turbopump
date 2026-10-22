@@ -3,13 +3,15 @@
 //! two-dimensional potential flow: its stream lines and the meridional velocity along
 //! hub and shroud.
 
-use eframe::egui::{CursorIcon, DragValue, Sense, Ui};
+use eframe::egui::{self, CursorIcon, DragValue, Sense, Ui};
 use egui_plot::{
     Corner, Legend, Line, LineStyle, MarkerShape, Plot, PlotPoint, PlotPoints, PlotTransform,
     Points,
 };
 use tp_design::Param;
-use tp_design::impeller::meridian::{MeridionalContour, MeridionalInput};
+use tp_design::impeller::meridian::{
+    LeadingEdgeShape, MeridionalContour, MeridionalInput, chord_coordinates,
+};
 use tp_design::impeller::potential::{self, PotentialFlow, PotentialMesh};
 use tp_design::impeller::wall::{self, SegmentInput, SegmentKind, Wall, WallPoint};
 use tp_design::impeller::{ImpellerBasis, ImpellerGeometry, ImpellerGeometryInput};
@@ -63,6 +65,8 @@ pub(crate) enum Handle {
     Point(Side, WallPoint),
     LeadingEdgeHub,
     LeadingEdgeShroud,
+    /// Inner control point of a Bézier leading edge.
+    LeadingEdgeControl(usize),
     AxialLength,
 }
 
@@ -79,6 +83,7 @@ impl Handle {
             Handle::Point(Side::Shroud, WallPoint::Control { .. }) => "shroud control point",
             Handle::LeadingEdgeHub => "leading edge on the hub",
             Handle::LeadingEdgeShroud => "leading edge on the shroud",
+            Handle::LeadingEdgeControl(_) => "leading edge control point",
             Handle::AxialLength => "axial length",
         })
     }
@@ -112,11 +117,11 @@ pub(crate) fn handles(contour: &MeridionalContour, input: &MeridionalInput) -> V
             handles.extend(automatic);
         }
     }
-    handles.extend([
-        Handle::LeadingEdgeHub,
-        Handle::LeadingEdgeShroud,
-        Handle::AxialLength,
-    ]);
+    handles.extend([Handle::LeadingEdgeHub, Handle::LeadingEdgeShroud]);
+    if matches!(contour.leading_edge_shape, LeadingEdgeShape::Bezier { .. }) {
+        handles.extend([Handle::LeadingEdgeControl(0), Handle::LeadingEdgeControl(1)]);
+    }
+    handles.push(Handle::AxialLength);
     handles
 }
 
@@ -126,12 +131,31 @@ pub(crate) fn handle_position(handle: Handle, contour: &MeridionalContour) -> DV
         Handle::LeadingEdgeHub => contour.hub_at(contour.leading_edge.0),
         Handle::LeadingEdgeShroud => contour.shroud_at(contour.leading_edge.1),
         Handle::AxialLength => contour.hub.end(),
+        Handle::LeadingEdgeControl(i) => contour
+            .leading_edge_curve()
+            .and_then(|c| c.control_points().get(i + 1).copied())
+            .unwrap_or_else(|| contour.hub_at(contour.leading_edge.0)),
         _ => {
             let (side, at) = handle.wall_point().expect("other handles are wall points");
             side.wall(contour)
                 .point(at)
                 .unwrap_or_else(|| side.wall(contour).end())
         }
+    }
+}
+
+/// Moves inner control point `index` of a Bézier leading edge to `to`.
+fn place_edge_control(
+    index: usize,
+    to: DVec2,
+    contour: &MeridionalContour,
+    input: &mut MeridionalInput,
+) {
+    if let LeadingEdgeShape::Bezier { mut controls } = contour.leading_edge_shape {
+        let hub = contour.hub_at(contour.leading_edge.0);
+        let shroud = contour.shroud_at(contour.leading_edge.1);
+        controls[index] = chord_coordinates(hub, shroud, to);
+        input.leading_edge_shape = LeadingEdgeShape::Bezier { controls };
     }
 }
 
@@ -174,9 +198,10 @@ pub(crate) fn apply_drag(
     basis: &ImpellerBasis,
     input: &mut MeridionalInput,
 ) {
-    if let Handle::Point(side, at) = handle {
-        place(side, at, pointer, contour, input);
-        return;
+    match handle {
+        Handle::Point(side, at) => return place(side, at, pointer, contour, input),
+        Handle::LeadingEdgeControl(i) => return place_edge_control(i, pointer, contour, input),
+        _ => {}
     }
     let hub = contour.hub.segments()[0].control_points();
     let shroud = contour.shroud.segments()[0].control_points();
@@ -220,7 +245,7 @@ pub(crate) fn apply_drag(
             let max = basis.outlet_diameter * 2.0;
             input.axial_length = Param::Manual(pointer.x.clamp(min, max));
         }
-        Handle::Point(..) => {}
+        Handle::Point(..) | Handle::LeadingEdgeControl(_) => {}
     }
 }
 
@@ -444,6 +469,17 @@ impl MeridionalView {
                         }
                     }
                 }
+                if let Some(curve) = g.contour.leading_edge_curve().filter(|c| c.degree() > 1) {
+                    let p = curve.control_points();
+                    for pair in [[p[0], p[1]], [p[2], p[3]]] {
+                        plot.line(
+                            Line::new("", line(pair, scale))
+                                .color(palette.handle)
+                                .style(LineStyle::dashed_dense())
+                                .width(1.0),
+                        );
+                    }
+                }
                 if let Some(d) = stator {
                     // Side walls from the impeller outlet to d₄, and the vane edges.
                     let (r2, r3, r4) = (
@@ -561,8 +597,14 @@ impl MeridionalView {
             plot_response.clone().on_hover_text(handle.label());
         }
         if plot_response.secondary_clicked() {
+            let edge: Vec<DVec2> = sections.iter().map(|s| s.meridional[0]).collect();
+            let on_edge = ui
+                .ctx()
+                .pointer_latest_pos()
+                .is_some_and(|at| near_line(&edge, at, &response.transform, scale));
             self.menu = Some(match hovered {
                 Some(handle) => MenuTarget::Handle(handle),
+                None if on_edge => MenuTarget::LeadingEdge,
                 None => response
                     .inner
                     .and_then(|pointer| {
@@ -611,6 +653,7 @@ impl MeridionalView {
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum MenuTarget {
     Handle(Handle),
+    LeadingEdge,
     /// Segment `.1` of a wall, at curve parameter `.2`.
     Segment(Side, usize, f64),
     Empty,
@@ -620,6 +663,7 @@ impl MenuTarget {
     fn edit_label(self) -> &'static str {
         match self {
             MenuTarget::Handle(_) => "edit point",
+            MenuTarget::LeadingEdge => "edit leading edge",
             MenuTarget::Segment(..) | MenuTarget::Empty => "edit wall segments",
         }
     }
@@ -646,6 +690,63 @@ fn wall_under(
         .filter(|&(.., d)| d < 8.0)
         .min_by(|a, b| a.3.total_cmp(&b.3))
         .map(|(side, segment, t, _)| (side, segment, t))
+}
+
+/// Whether `at` (screen) is within reach of the polyline `points` ((z, r) in m).
+fn near_line(points: &[DVec2], at: egui::Pos2, transform: &PlotTransform, scale: f64) -> bool {
+    let screen: Vec<egui::Pos2> = points
+        .iter()
+        .map(|p| transform.position_from_point(&PlotPoint::new(p.x * scale, p.y * scale)))
+        .collect();
+    screen.windows(2).any(|s| {
+        let (a, b) = (s[0], s[1]);
+        let ab = b - a;
+        let t = ((at - a).dot(ab) / ab.length_sq().max(1e-6)).clamp(0.0, 1.0);
+        (a + ab * t).distance(at) < 8.0
+    })
+}
+
+/// A Bézier leading edge through the current one at its thirds, so the edge keeps its
+/// place when it turns into a curve.
+pub(crate) fn bezier_along_edge(g: &ImpellerGeometry) -> LeadingEdgeShape {
+    let contour = &g.contour;
+    let edge: Vec<DVec2> = g.blade.sections.iter().map(|s| s.meridional[0]).collect();
+    match tp_math::Polyline::new(edge) {
+        Ok(line) => LeadingEdgeShape::bezier_through(
+            contour.hub_at(contour.leading_edge.0),
+            line.point_at_fraction(1.0 / 3.0),
+            line.point_at_fraction(2.0 / 3.0),
+            contour.shroud_at(contour.leading_edge.1),
+        ),
+        Err(_) => LeadingEdgeShape::Line,
+    }
+}
+
+/// The shape choice of the leading edge.
+fn leading_edge_shape(ui: &mut Ui, g: &ImpellerGeometry, m: &mut MeridionalInput) {
+    let contour = &g.contour;
+    let current = contour.leading_edge_shape;
+    let mut kind = std::mem::discriminant(&current);
+    let options = [
+        (LeadingEdgeShape::Channel, tr("Along the channel")),
+        (LeadingEdgeShape::Line, tr("Straight line")),
+        (
+            LeadingEdgeShape::Bezier {
+                controls: [DVec2::ZERO; 2],
+            },
+            tr("Bézier"),
+        ),
+    ];
+    for (shape, label) in options {
+        let d = std::mem::discriminant(&shape);
+        if ui.radio(kind == d, label).clicked() && kind != d {
+            kind = d;
+            m.leading_edge_shape = match shape {
+                LeadingEdgeShape::Bezier { .. } => bezier_along_edge(g),
+                other => other,
+            };
+        }
+    }
 }
 
 /// A length typed in display units; true when it changed.
@@ -691,6 +792,21 @@ fn context_menu(
                 m.axial_length = Param::Manual(length.max(g.basis.outlet_width * 1.01));
             }
         }
+        MenuTarget::LeadingEdge => {
+            ui.strong(tr("Leading edge"));
+            leading_edge_shape(ui, g, m);
+        }
+        MenuTarget::Handle(Handle::LeadingEdgeControl(index)) => {
+            ui.strong(Handle::LeadingEdgeControl(index).label());
+            let mut p = handle_position(Handle::LeadingEdgeControl(index), contour);
+            let z = length_field(ui, "z", &mut p.x, units);
+            let r = length_field(ui, "r", &mut p.y, units);
+            if z || r {
+                place_edge_control(index, p, contour, m);
+            }
+            ui.separator();
+            leading_edge_shape(ui, g, m);
+        }
         MenuTarget::Handle(handle @ (Handle::LeadingEdgeHub | Handle::LeadingEdgeShroud)) => {
             ui.strong(handle.label());
             let (param, value) = if handle == Handle::LeadingEdgeHub {
@@ -715,6 +831,8 @@ fn context_menu(
             if changed {
                 *param = Param::Manual(percent / 100.0);
             }
+            ui.separator();
+            leading_edge_shape(ui, g, m);
         }
         MenuTarget::Handle(handle) => {
             let (side, at) = handle.wall_point()?;

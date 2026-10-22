@@ -1486,4 +1486,64 @@ mod tests {
         harness.state_mut().undo();
         assert_eq!(segments(harness.state()), None);
     }
+
+    #[test]
+    fn the_leading_edge_turns_into_a_bezier_from_its_menu() {
+        use tp_design::impeller::meridian::LeadingEdgeShape;
+        let mut harness = Harness::builder()
+            .with_size([1440.0, 900.0])
+            .build_eframe(|cc| TurbopumpApp::new(cc, None));
+        harness.run();
+        harness.state_mut().focus_view(View::Meridional);
+        harness.run();
+        let id = harness.state().active_impeller().unwrap();
+        let shape = |app: &TurbopumpApp| {
+            app.doc
+                .project()
+                .impeller_geometry_input(id)
+                .unwrap()
+                .meridional
+                .leading_edge_shape
+        };
+        // The middle of the leading edge, away from its end handles.
+        let app = harness.state();
+        let g = app.derived.geometry(id).unwrap();
+        let middle = g.blade.sections[g.blade.sections.len() / 2].meridional[0];
+        let scale = app
+            .doc
+            .project()
+            .display_units
+            .to_display(QuantityKind::Length, 1.0);
+        let at = app
+            .meridional
+            .transform()
+            .unwrap()
+            .position_from_point(&PlotPoint::new(middle.x * scale, middle.y * scale));
+
+        right_click(&mut harness, at);
+        harness.get_by_label("Bézier").click();
+        harness.run();
+        assert!(matches!(
+            shape(harness.state()),
+            LeadingEdgeShape::Bezier { .. }
+        ));
+        // The edge keeps its place: the middle span still starts where it did.
+        let g = harness.state().derived.geometry(id).unwrap();
+        let moved = g.blade.sections[g.blade.sections.len() / 2].meridional[0];
+        assert!(moved.distance(middle) < 2e-4, "{moved} vs {middle}");
+        let handles = crate::views::meridional::handles(
+            &g.contour,
+            &harness
+                .state()
+                .doc
+                .project()
+                .impeller_geometry_input(id)
+                .unwrap()
+                .meridional,
+        );
+        assert!(handles.contains(&Handle::LeadingEdgeControl(1)));
+
+        harness.state_mut().undo();
+        assert_eq!(shape(harness.state()), LeadingEdgeShape::Channel);
+    }
 }

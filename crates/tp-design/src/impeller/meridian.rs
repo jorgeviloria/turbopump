@@ -33,12 +33,60 @@ pub struct MeridionalInput {
     pub leading_edge_hub: Param<f64>,
     /// Leading-edge position on the shroud, as a fraction (0–1) of the shroud length.
     pub leading_edge_shroud: Param<f64>,
+    /// Shape of the leading edge between its hub and shroud points.
+    pub leading_edge_shape: LeadingEdgeShape,
     /// Hub drawn segment by segment; `None` keeps the automatic Bézier and its tangents.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hub_segments: Option<Vec<SegmentInput>>,
     /// Shroud drawn segment by segment; `None` keeps the automatic Bézier.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shroud_segments: Option<Vec<SegmentInput>>,
+}
+
+/// Shape of the leading edge in the meridional plane, from its hub point to its shroud
+/// point.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub enum LeadingEdgeShape {
+    /// Each stream line meets it at the same fraction of the way between the hub and
+    /// shroud positions, measured along the channel.
+    #[default]
+    Channel,
+    /// A straight line.
+    Line,
+    /// A cubic Bézier. Its inner control points are (along, across) the hub→shroud
+    /// chord, in fractions of the chord length, so the curve keeps its shape when its
+    /// ends slide along the walls.
+    Bezier { controls: [DVec2; 2] },
+}
+
+impl LeadingEdgeShape {
+    /// The Bézier from `hub` to `shroud` that passes through `a` and `b` at a third and
+    /// two thirds of its parameter.
+    pub fn bezier_through(hub: DVec2, a: DVec2, b: DVec2, shroud: DVec2) -> Self {
+        // B(1/3) = a and B(2/3) = b solved for the two inner control points.
+        let c1 = (hub * -5.0 + a * 18.0 - b * 9.0 + shroud * 2.0) / 6.0;
+        let c2 = (hub * 2.0 - a * 9.0 + b * 18.0 - shroud * 5.0) / 6.0;
+        Self::Bezier {
+            controls: [
+                chord_coordinates(hub, shroud, c1),
+                chord_coordinates(hub, shroud, c2),
+            ],
+        }
+    }
+}
+
+/// (along, across) coordinates of `p` on the chord from `a` to `b`, in chord lengths.
+pub fn chord_coordinates(a: DVec2, b: DVec2, p: DVec2) -> DVec2 {
+    let chord = b - a;
+    let d = p - a;
+    let l2 = chord.length_squared();
+    DVec2::new(d.dot(chord) / l2, d.dot(chord.perp()) / l2)
+}
+
+/// The point at chord coordinates `uv` on the chord from `a` to `b`.
+pub fn chord_point(a: DVec2, b: DVec2, uv: DVec2) -> DVec2 {
+    let chord = b - a;
+    a + chord * uv.x + chord.perp() * uv.y
 }
 
 /// Default tangent fraction: close to the 0.552 that makes a cubic Bézier match a
@@ -81,6 +129,8 @@ pub struct MeridionalContour {
     pub axial_length: f64,
     /// Leading edge on the hub and on the shroud, as fractions of each contour length.
     pub leading_edge: (f64, f64),
+    /// The leading edge as a curve, unless it follows the channel.
+    pub leading_edge_shape: LeadingEdgeShape,
     hub_line: Polyline<DVec2>,
     shroud_line: Polyline<DVec2>,
 }
@@ -181,7 +231,49 @@ impl MeridionalContour {
             shroud,
             axial_length: length,
             leading_edge,
+            leading_edge_shape: input.leading_edge_shape,
         })
+    }
+
+    /// The leading edge as a curve from the hub to the shroud, unless it follows the
+    /// channel.
+    pub fn leading_edge_curve(&self) -> Option<Bezier<DVec2>> {
+        let hub = self.hub_at(self.leading_edge.0);
+        let shroud = self.shroud_at(self.leading_edge.1);
+        match self.leading_edge_shape {
+            LeadingEdgeShape::Channel => None,
+            LeadingEdgeShape::Line => Some(Bezier::line(hub, shroud)),
+            LeadingEdgeShape::Bezier { controls } => Bezier::new(vec![
+                hub,
+                chord_point(hub, shroud, controls[0]),
+                chord_point(hub, shroud, controls[1]),
+                shroud,
+            ])
+            .ok(),
+        }
+    }
+
+    /// Channel position (0–1) of the leading edge on the stream line at `fraction` of
+    /// the flow from hub to shroud, given by one point per quasi-orthogonal. A curved
+    /// edge is met where the stream line crosses it; where it does not, and along the
+    /// channel, the hub and shroud positions are interpolated.
+    pub fn leading_edge_on(&self, fraction: f64, points: &[DVec2]) -> f64 {
+        let (hub, shroud) = self.leading_edge;
+        let along = hub + fraction * (shroud - hub);
+        let curve = match self.leading_edge_curve() {
+            Some(c) if fraction > 0.0 && fraction < 1.0 && points.len() > 1 => c,
+            _ => return along,
+        };
+        let edge = curve.sample(LEADING_EDGE_SAMPLES);
+        let last = (points.len() - 1) as f64;
+        for (i, pair) in points.windows(2).enumerate() {
+            for e in edge.windows(2) {
+                if let Some(w) = crossing(pair[0], pair[1], e[0], e[1]) {
+                    return (i as f64 + w) / last;
+                }
+            }
+        }
+        along
     }
 
     /// Leading edge parallel to the axis, as cylindrical blades are usually laid out:
@@ -223,6 +315,21 @@ impl MeridionalContour {
     pub fn shroud_length(&self) -> f64 {
         self.shroud_line.length()
     }
+}
+
+/// Points that turn a curved leading edge into segments to meet the stream lines.
+const LEADING_EDGE_SAMPLES: usize = 200;
+
+/// Where segment a→b crosses segment c→d, as a fraction of a→b.
+fn crossing(a: DVec2, b: DVec2, c: DVec2, d: DVec2) -> Option<f64> {
+    let (r, q) = (b - a, d - c);
+    let det = r.perp_dot(q);
+    if det.abs() < 1e-30 {
+        return None;
+    }
+    let w = (c - a).perp_dot(q) / det;
+    let v = (c - a).perp_dot(r) / det;
+    ((0.0..=1.0).contains(&w) && (0.0..=1.0).contains(&v)).then_some(w)
 }
 
 /// A straight line across the channel from hub to shroud.
@@ -482,6 +589,74 @@ pub(crate) mod tests {
                 .unwrap()
                 .contains("segments")
         );
+    }
+
+    #[test]
+    fn a_straight_leading_edge_meets_every_stream_line_on_the_line() {
+        let b = basis();
+        let input = MeridionalInput {
+            leading_edge_shape: LeadingEdgeShape::Line,
+            ..MeridionalInput::default()
+        };
+        let contour = MeridionalContour::build(&b, &input).unwrap();
+        let channel = Channel::build(&contour, b.flow, 41, 7);
+        let (hub, shroud) = (
+            contour.hub_at(contour.leading_edge.0),
+            contour.shroud_at(contour.leading_edge.1),
+        );
+        let line = Polyline::new(vec![hub, shroud]).unwrap();
+        for span in &channel.spans {
+            let t = contour.leading_edge_on(span.fraction, &span.points);
+            let x = t * (span.points.len() - 1) as f64;
+            let i = (x.floor() as usize).min(span.points.len() - 2);
+            let p = span.points[i].lerp(span.points[i + 1], x - i as f64);
+            let off = (p - hub).perp_dot((shroud - hub).normalize()).abs();
+            assert!(off < 1e-9, "span {}: {off} m off the line", span.fraction);
+            assert!(line.length() > 0.0);
+        }
+        // Following the channel keeps the old interpolation.
+        let channel_edge = MeridionalContour::build(&b, &MeridionalInput::default()).unwrap();
+        let (h, s) = channel_edge.leading_edge;
+        assert_relative_eq!(
+            channel_edge.leading_edge_on(0.5, &channel.spans[3].points),
+            h + 0.5 * (s - h)
+        );
+    }
+
+    #[test]
+    fn a_bezier_leading_edge_passes_through_its_points_and_follows_its_ends() {
+        let (hub, shroud) = (DVec2::new(0.01, 0.02), DVec2::new(0.0, 0.04));
+        let (a, b) = (DVec2::new(0.012, 0.027), DVec2::new(0.009, 0.034));
+        let LeadingEdgeShape::Bezier { controls } =
+            LeadingEdgeShape::bezier_through(hub, a, b, shroud)
+        else {
+            panic!("a Bézier");
+        };
+        let curve = |hub: DVec2, shroud: DVec2| {
+            Bezier::new(vec![
+                hub,
+                chord_point(hub, shroud, controls[0]),
+                chord_point(hub, shroud, controls[1]),
+                shroud,
+            ])
+            .unwrap()
+        };
+        let c = curve(hub, shroud);
+        assert!(c.eval(1.0 / 3.0).distance(a) < 1e-15);
+        assert!(c.eval(2.0 / 3.0).distance(b) < 1e-15);
+        // Moving and turning the chord carries the curve with it.
+        let moved = curve(
+            hub + DVec2::new(0.002, 0.001),
+            shroud + DVec2::new(0.002, 0.001),
+        );
+        assert!(
+            moved
+                .eval(0.5)
+                .distance(c.eval(0.5) + DVec2::new(0.002, 0.001))
+                < 1e-15
+        );
+        let p = DVec2::new(0.013, 0.031);
+        assert!(chord_point(hub, shroud, chord_coordinates(hub, shroud, p)).distance(p) < 1e-15);
     }
 
     #[test]
