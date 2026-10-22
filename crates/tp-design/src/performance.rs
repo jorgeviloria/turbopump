@@ -226,6 +226,9 @@ pub struct PumpPerformance {
     /// Hydraulic losses of the loss analysis for water, when a volute follows the
     /// impeller; `None` when the statistical η_h stands for them.
     pub hydraulic: Option<HydraulicLosses>,
+    /// The overall efficiency of the design point for water as a product of its parts;
+    /// `None` when the statistics of the design stand for the losses.
+    pub breakdown: Option<EfficiencyBreakdown>,
     /// The correction from the water characteristic to the liquid of the project
     /// (Gülich Chap. 13.1); all factors 1 for cold water.
     pub viscous: ViscousCorrection,
@@ -258,6 +261,53 @@ pub struct HydraulicLosses {
 impl HydraulicLosses {
     pub fn total(&self) -> f64 {
         self.impeller.total() + self.outlet_shock + self.volute_friction + self.volute
+    }
+}
+
+/// The overall efficiency of one operating point as a product,
+/// η = η_h·η_v·η_RR·η_m.
+///
+/// Gülich (2nd ed., Table 3.5) gives the power balance P = ρgHQ/(η_v·η_h) + ΣP_RR + P_m
+/// (eq. T3.5.1), the mechanical efficiency η_m = 1 − P_m/P (eq. T3.5.6) and the inner
+/// efficiency η_i = η/η_m on the inner power P_i = P − P_m (eqs. T3.5.4 and T3.5.5). The
+/// book has no separate disk-friction efficiency. We define η_RR = 1 − ΣP_RR/P_i. It is
+/// the share of the inner power that reaches the fluid in the channels, so the product
+/// is exact. The interstage-seal and balance-device terms of eq. T3.5.1 are not
+/// modelled.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct EfficiencyBreakdown {
+    /// η_h = H/H_th.
+    pub hydraulic: f64,
+    /// η_v = Q/(Q + Q_sp) (eq. T3.5.9), from the power balance.
+    pub volumetric: f64,
+    /// η_RR = 1 − ΣP_RR/P_i, disk friction (our definition).
+    pub disk_friction: f64,
+    /// η_m = 1 − P_m/P (eq. T3.5.6).
+    pub mechanical: f64,
+    /// η_i = η/η_m (eq. T3.5.5).
+    pub inner: f64,
+    /// η = ρgHQ/P (eq. T3.5.3).
+    pub overall: f64,
+}
+
+impl EfficiencyBreakdown {
+    /// The parts of the efficiency of `point`, whose power holds the disk friction
+    /// `disk_friction` and the mechanical losses `mechanical` (W).
+    pub fn new(point: &PerformancePoint, disk_friction: f64, mechanical: f64) -> Self {
+        let mechanical_efficiency = 1.0 - mechanical / point.power;
+        let inner_power = point.power - mechanical;
+        let disk = 1.0 - disk_friction / inner_power;
+        // The rest of eq. T3.5.1, ρ·g·H_th·(Q + Q_sp) = η_RR·P_i, gives η_v.
+        let volumetric =
+            point.efficiency / (point.hydraulic_efficiency * disk * mechanical_efficiency);
+        Self {
+            hydraulic: point.hydraulic_efficiency,
+            volumetric,
+            disk_friction: disk,
+            mechanical: mechanical_efficiency,
+            inner: point.efficiency / mechanical_efficiency,
+            overall: point.efficiency,
+        }
     }
 }
 
@@ -967,6 +1017,13 @@ pub fn predict(
         radial,
         axial,
         operation,
+        breakdown: losses.map(|l| {
+            EfficiencyBreakdown::new(
+                &water_design,
+                l.front_friction + l.rear_friction,
+                l.mechanical,
+            )
+        }),
         losses,
         hydraulic,
         viscous,
@@ -1678,6 +1735,40 @@ mod tests {
         // The leakage falls toward shut-off as the head across the seal changes little
         // and grows with it.
         assert!(l.leakage_at(1.2 * p.design.head, p.design.theoretical_head) > l.leakage);
+    }
+
+    #[test]
+    fn the_efficiency_is_the_product_of_its_parts() {
+        let (_, p) = performance(&PerformanceInput::default());
+        let b = p.breakdown.unwrap();
+        let l = p.losses.unwrap();
+        assert_relative_eq!(
+            b.hydraulic * b.volumetric * b.disk_friction * b.mechanical,
+            p.design.efficiency,
+            max_relative = 1e-12
+        );
+        assert_relative_eq!(b.overall, p.design.efficiency);
+        assert_relative_eq!(b.inner * b.mechanical, b.overall, max_relative = 1e-12);
+        // η_v is Q/(Q + Q_sp) with the leakage at the head of the design point.
+        let leakage = l.leakage_at(p.design.head, p.design.theoretical_head);
+        assert_relative_eq!(
+            b.volumetric,
+            duty().flow / (duty().flow + leakage),
+            max_relative = 1e-9
+        );
+        assert_relative_eq!(b.mechanical, 1.0 - l.mechanical / p.design.power);
+        let inner_power = p.design.power - l.mechanical;
+        let disk = l.front_friction + l.rear_friction;
+        assert_relative_eq!(b.disk_friction, 1.0 - disk / inner_power);
+        // With the statistics there are no separate losses to split.
+        let statistics = PerformanceInput {
+            losses: LossInput {
+                statistics: true,
+                ..LossInput::default()
+            },
+            ..PerformanceInput::default()
+        };
+        assert!(performance(&statistics).1.breakdown.is_none());
     }
 
     #[test]

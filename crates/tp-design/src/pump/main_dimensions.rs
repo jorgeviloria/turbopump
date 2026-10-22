@@ -216,6 +216,19 @@ pub struct CentrifugalPumpDesign {
     pub warnings: Vec<String>,
 }
 
+impl CentrifugalPumpDesign {
+    /// `triangle` with the meridional velocity of the pump flow Q = η_v·Q_La instead of
+    /// the impeller flow Q_La, for comparison with references that size the triangles
+    /// with Q. The design itself keeps Q_La, which is what passes the impeller.
+    pub fn at_pump_flow(&self, triangle: &VelocityTriangle) -> VelocityTriangle {
+        VelocityTriangle::new(
+            triangle.u,
+            triangle.cm * self.efficiencies.volumetric,
+            triangle.cu,
+        )
+    }
+}
+
 const MIN_BLADES: u32 = 3;
 
 /// Outlet of the impeller for one blade number.
@@ -933,6 +946,19 @@ mod tests {
             inlet_total_pressure: 101_325.0,
             kinematic_viscosity: 1.0e-6,
         }
+    }
+
+    #[test]
+    fn triangles_with_the_pump_flow_satisfy_continuity_with_q() {
+        let d = design(&duty(), &CentrifugalPumpInput::default()).unwrap();
+        let outlet = d.at_pump_flow(&d.outlet.triangle);
+        let area = PI * d.outlet_mean_diameter * d.outlet_width;
+        assert_relative_eq!(outlet.cm * area, duty().flow, max_relative = 1e-12);
+        assert_relative_eq!(outlet.cu, d.outlet.triangle.cu);
+        assert_relative_eq!(outlet.u, d.outlet.triangle.u);
+        let inlet = d.at_pump_flow(&d.inlet_mean.triangle);
+        let eye = PI / 4.0 * (d.inlet_diameter.powi(2) - d.hub_diameter.powi(2));
+        assert_relative_eq!(inlet.cm * eye, duty().flow, max_relative = 1e-12);
     }
 
     #[test]

@@ -253,6 +253,20 @@ pub(crate) fn show(
                 value_row(ui, tr("β₂B (blade)"), s(Angle, o.blade_angle));
                 value_row(ui, "α₂", s(Angle, t.alpha()));
                 value_row(ui, tr("Slip factor γ"), format!("{:.3}", o.slip_factor));
+                let (q1, q2) = (d.at_pump_flow(&d.inlet_mean.triangle), d.at_pump_flow(t));
+                value_row(
+                    ui,
+                    tr("With the pump flow Q"),
+                    tf(
+                        "c_m1 {}, c_m2 {}, w₂ {}, β₂ {} (Q = η_v·Q_La instead of Q_La)",
+                        &[
+                            &s(Velocity, q1.cm),
+                            &s(Velocity, q2.cm),
+                            &s(Velocity, q2.w()),
+                            &s(Angle, q2.beta()),
+                        ],
+                    ),
+                );
             });
 
         heading(ui, tr("Checks"));
@@ -590,6 +604,23 @@ pub(crate) fn show(
                                         ],
                                     ),
                                 );
+                                if let Some(b) = &c.breakdown {
+                                    value_row(
+                                        ui,
+                                        tr("Efficiency breakdown"),
+                                        tf(
+                                            "η {} = η_h {} · η_v {} · η_RR {} (disk) · η_m {}, inner η_i {} (water, Gülich Table 3.5)",
+                                            &[
+                                                &format!("{:.3}", b.overall),
+                                                &format!("{:.3}", b.hydraulic),
+                                                &format!("{:.3}", b.volumetric),
+                                                &format!("{:.3}", b.disk_friction),
+                                                &format!("{:.3}", b.mechanical),
+                                                &format!("{:.3}", b.inner),
+                                            ],
+                                        ),
+                                    );
+                                }
                                 if let Some(h) = &c.hydraulic {
                                     value_row(
                                         ui,

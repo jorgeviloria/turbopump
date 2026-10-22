@@ -274,6 +274,12 @@ fn print_report(
                     s(Head, h.volute)
                 );
             }
+            if let Some(b) = &c.breakdown {
+                println!(
+                    "           η {:.3} = η_h {:.3} · η_v {:.3} · η_RR {:.3} (disk) · η_m {:.3}   inner η_i {:.3}; for water, Gülich Table 3.5",
+                    b.overall, b.hydraulic, b.volumetric, b.disk_friction, b.mechanical, b.inner
+                );
+            }
         }
         None => println!(
             "Losses     from the statistics of the design: η {:.3} (Gülich Table 3.9)",

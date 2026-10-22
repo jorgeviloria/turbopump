@@ -67,10 +67,17 @@ $\Delta\eta = \pm 0{,}2\,(1 - \eta)$ (ec. 3.9.10).
 
 **Rendimientos derivados:**
 
-- $\eta_v = 0{,}97$ es un valor típico. Más adelante se calculará con las fugas por los
-  anillos de desgaste (cap. 3.6).
-- $\eta_m = \eta / (\eta_h \eta_v)$ incluye el rozamiento de disco.
+- $\eta_v = 0{,}97$ es un valor típico. El análisis de pérdidas de la curva
+  característica la calcula con las fugas de los anillos (cap. 3.6).
+- $\eta_m = \eta / (\eta_h \eta_v)$ incluye el rozamiento de disco. El análisis de
+  pérdidas lo separa en $\eta_{RR}\,\eta_m$ ([prestaciones.md](prestaciones.md),
+  sección 9).
 - El caudal por el rodete es $Q_{La} = Q/\eta_v$ y la altura teórica, $H_{th} = H/\eta_h$.
+- Los triángulos de velocidad usan $Q_{La}$, que es lo que pasa por el rodete. Algunas
+  referencias los dan con el caudal de la bomba $Q$. Por eso el informe muestra también
+  $c_{m1}$, $\beta_1$, $c_{m2}$, $w_2$ y $\beta_2$ con $Q = \eta_v Q_{La}$, sin cambiar el
+  diseño. En la bomba de referencia, $c_{m2}$ pasa de 3,035 a 2,944 m/s y $\beta_2$ de
+  13,22° a 12,84°.
 
 ## 3. Eje (ec. 7.1.2)
 

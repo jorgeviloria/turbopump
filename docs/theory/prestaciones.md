@@ -747,6 +747,33 @@ La suma queda a 0,2 puntos de la estadística en esta bomba. Una garganta de vol
 pierden 1,34 m y la espiral 1,54 m, y $\eta_h$ baja a 0,886: Gülich advierte de las
 pérdidas añadidas del canal exterior (cap. 7.8.1).
 
+**Desglose del rendimiento.** Con el análisis de pérdidas, el rendimiento del diseño
+(con agua) se da también como producto:
+
+$$\eta = \eta_h\,\eta_v\,\eta_{RR}\,\eta_m$$
+
+| Factor | Definición | Fuente |
+|---|---|---|
+| $\eta_h$ | $H/H_{th}$ | — |
+| $\eta_v$ | $Q/(Q + Q_{sp})$, con la fuga a la altura del punto | ec. T3.5.9 |
+| $\eta_{RR}$ | $1 - \sum P_{RR}/P_i$, el rozamiento de disco | propia |
+| $\eta_m$ | $1 - P_m/P$ | ec. T3.5.6 |
+| $\eta_i$ | $\eta/\eta_m$, el rendimiento interno, con $P_i = P - P_m$ | ecs. T3.5.4 y T3.5.5 |
+
+Gülich no define un rendimiento del rozamiento de disco. El nuestro es la parte de la
+potencia interna que llega al fluido en los canales. Sale del balance de la ec. T3.5.1,
+$\rho g H_{th}(Q + Q_{sp}) = \eta_{RR}\,P_i$, así que el producto es exacto. Otros
+programas definen ese factor de otra forma, así que conviene comparar $\eta_v$ y $\eta_m$,
+que son las de Gülich. Las fugas entre etapas y del dispositivo de equilibrado de la
+ec. T3.5.1 no se modelan.
+
+Con las estadísticas (`losses=statistics`) no hay desglose. $\eta_m = \eta/(\eta_h\eta_v)$
+de las dimensiones principales incluye entonces el rozamiento de disco.
+
+En la bomba de referencia:
+
+$$0{,}856 = 0{,}909 \cdot 0{,}982 \cdot 0{,}975 \cdot 0{,}984, \qquad \eta_i = 0{,}870$$
+
 **Claves:** `--set losses=`, `seal_clearance=`, `seal_length=`, `seal_roughness=` y
 `axial_gap=`.
 

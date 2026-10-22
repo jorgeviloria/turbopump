@@ -2257,6 +2257,16 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "front {}, rear {}, mechanical {} (Gülich eqs. T3.6.2, T3.6.3, T3.5.6a)",
         "delantero {}, trasero {}, mecánicas {} (Gülich ecs. T3.6.2, T3.6.3, T3.5.6a)",
     ),
+    ("Efficiency breakdown", "Desglose del rendimiento"),
+    (
+        "η {} = η_h {} · η_v {} · η_RR {} (disk) · η_m {}, inner η_i {} (water, Gülich Table 3.5)",
+        "η {} = η_h {} · η_v {} · η_RR {} (disco) · η_m {}, interno η_i {} (agua, Gülich tabla 3.5)",
+    ),
+    ("With the pump flow Q", "Con el caudal de la bomba Q"),
+    (
+        "c_m1 {}, c_m2 {}, w₂ {}, β₂ {} (Q = η_v·Q_La instead of Q_La)",
+        "c_m1 {}, c_m2 {}, w₂ {}, β₂ {} (Q = η_v·Q_La en lugar de Q_La)",
+    ),
     ("System curve", "Curva de la instalación"),
     (
         "H = {} + R·Q² through {} at {} (Gülich eqs. 11.1–11.3)",
