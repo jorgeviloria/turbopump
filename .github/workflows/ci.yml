@@ -23,7 +23,7 @@ jobs:
   test:
     name: Tests (${{ matrix.os }})
     # The first build compiles Open CASCADE from source.
-    timeout-minutes: 90
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -39,7 +39,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: target/OCCT
-          key: occt-7.8.1-${{ runner.os }}-${{ hashFiles('crates/tp-cad/build.rs') }}
+          key: occt-7.8.1-${{ runner.os }}-${{ hashFiles('crates/tp-cad/build.rs', '.cargo/config.toml') }}
       - run: cargo clippy --workspace --all-targets
       - run: cargo test --workspace
       - name: Tests sin CoolProp
@@ -62,5 +62,5 @@ jobs:
         uses: actions/cache@v4
         with:
           path: target/OCCT
-          key: occt-7.8.1-${{ runner.os }}-${{ hashFiles('crates/tp-cad/build.rs') }}
+          key: occt-7.8.1-${{ runner.os }}-${{ hashFiles('crates/tp-cad/build.rs', '.cargo/config.toml') }}
       - run: cargo check --workspace --all-targets

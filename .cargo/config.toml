@@ -2,3 +2,12 @@
 # OCCT 7.8 declares cmake_minimum_required(VERSION 3.1); CMake 4 refuses that unless a
 # minimum policy version is set. Harmless for older CMake.
 CMAKE_POLICY_VERSION_MINIMUM = "3.5"
+
+# With the Visual Studio generator, cmake-rs replaces CMAKE_<LANG>_FLAGS_RELEASE with the
+# flags of the cc crate, which carry no optimisation in the dev profile, so OCCT ended up
+# unoptimised on Windows and the CAD tests ran five times slower there. cc reads these
+# target-specific variables, so the other platforms are untouched.
+CFLAGS_x86_64_pc_windows_msvc = "/O2 /DNDEBUG"
+CXXFLAGS_x86_64_pc_windows_msvc = "/O2 /DNDEBUG"
+CFLAGS_aarch64_pc_windows_msvc = "/O2 /DNDEBUG"
+CXXFLAGS_aarch64_pc_windows_msvc = "/O2 /DNDEBUG"
