@@ -29,19 +29,43 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      # Windows runs the CAD tests many times slower; there everything is built with
+      # optimisation, the same for clippy and the tests so OCCT is compiled once.
+      CARGO_PROFILE_DEV_OPT_LEVEL: ${{ matrix.os == 'windows-latest' && '1' || '0' }}
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+      # OCCT is restored, built and saved before the tests, so a cancelled test step
+      # does not throw the build away.
       - name: Caché de OCCT (se compila desde el código fuente la primera vez)
-        uses: actions/cache@v4
+        id: occt
+        uses: actions/cache/restore@v4
         with:
           path: target/OCCT
-          key: occt-7.8.1-${{ runner.os }}-${{ hashFiles('crates/tp-cad/build.rs', '.cargo/config.toml') }}
+          key: occt-7.8.1-v2-${{ runner.os }}-${{ hashFiles('crates/tp-cad/build.rs', '.cargo/config.toml') }}
+      - name: Compilar OCCT
+        run: cargo build -p tp-cad
+      - name: Guardar la caché de OCCT
+        if: steps.occt.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: target/OCCT
+          key: ${{ steps.occt.outputs.cache-primary-key }}
       - run: cargo clippy --workspace --all-targets
-      - run: cargo test --workspace
+      - name: Tests
+        if: runner.os != 'Windows'
+        run: cargo test --workspace
+      - name: Tests sin CAD
+        if: runner.os == 'Windows'
+        run: cargo test --workspace --exclude tp-cad
+      # OCCT's parallel booleans contend badly when many CAD tests run at once.
+      - name: Tests de CAD, uno a uno
+        if: runner.os == 'Windows'
+        run: cargo test -p tp-cad -- --test-threads=1
       - name: Tests sin CoolProp
         run: cargo test -p tp-fluids --no-default-features
       - name: CLI sin CAD
@@ -62,5 +86,5 @@ jobs:
         uses: actions/cache@v4
         with:
           path: target/OCCT
-          key: occt-7.8.1-${{ runner.os }}-${{ hashFiles('crates/tp-cad/build.rs', '.cargo/config.toml') }}
+          key: occt-7.8.1-v2-${{ runner.os }}-${{ hashFiles('crates/tp-cad/build.rs', '.cargo/config.toml') }}
       - run: cargo check --workspace --all-targets
