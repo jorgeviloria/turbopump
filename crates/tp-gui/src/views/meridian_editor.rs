@@ -5,6 +5,7 @@
 use eframe::egui::{self, ComboBox, DragValue, Grid, RichText, ScrollArea, Ui};
 use egui_plot::{Corner, Legend, Line, Plot, PlotPoints};
 use tp_design::Param;
+use tp_design::impeller::guide;
 use tp_design::impeller::meridian::{DEFAULT_TANGENT, LeadingEdgeShape};
 use tp_design::impeller::wall::{self, SegmentKind, WallPoint};
 use tp_design::impeller::{ImpellerGeometry, ImpellerGeometryInput};
@@ -13,8 +14,8 @@ use tp_project::ComponentId;
 use tp_units::{DisplayUnits, QuantityKind};
 
 use super::meridional::{
-    Fit, Handle, MeridionalView, Scene, Side, handle_position, leading_edge_shape, place,
-    place_edge_control,
+    Fit, Handle, MeridionalView, Reference, Scene, Side, handle_position, leading_edge_shape,
+    parse_points, place, place_edge_control,
 };
 use super::{Palette, unavailable};
 use crate::app::EditCtx;
@@ -96,6 +97,35 @@ impl MeridionalView {
                 {
                     self.fit = Some(Fit::All);
                 }
+                ui.separator();
+                // Grid steps in display units; dragged points snap to them.
+                let scale = units.to_display(QuantityKind::Length, 1.0);
+                let unit = units.get(QuantityKind::Length).symbol;
+                let step = self.editor.snap * scale;
+                let name = |step: f64| {
+                    if step > 0.0 {
+                        format!("{step} {unit}")
+                    } else {
+                        tr("free").to_owned()
+                    }
+                };
+                ui.label(tr("grid"))
+                    .on_hover_text(tr("Dragged points snap to this grid"));
+                ComboBox::from_id_salt("meridian_grid")
+                    .width(70.0)
+                    .selected_text(name(step))
+                    .show_ui(ui, |ui| {
+                        for option in [0.0, 0.01, 0.1, 0.5, 1.0] {
+                            if ui
+                                .selectable_label((step - option).abs() < 1e-12, name(option))
+                                .clicked()
+                            {
+                                self.editor.snap = option / scale;
+                            }
+                        }
+                    });
+                ui.weak(icon::RULER)
+                    .on_hover_text(tr("Hold Alt and drag on the diagram to measure a distance"));
                 if let Some(p) = self.pointer {
                     ui.separator();
                     ui.monospace(format!(
@@ -140,12 +170,163 @@ impl MeridionalView {
                     .id_salt(("meridian_points", id.0))
                     .max_height(room.y)
                     .show(ui, |ui| {
+                        guide_panel(ui, g, &units);
+                        ui.separator();
                         if let Some((input, label)) = points_panel(ui, g, &current, &units) {
                             cx.edit(label, |p| p.set_impeller_geometry(id, input));
                         }
+                        ui.separator();
+                        references_panel(
+                            ui,
+                            &mut self.references,
+                            &mut self.reference_text,
+                            &units,
+                        );
                     });
             });
         });
+    }
+}
+
+/// The meridian against Gülich's recommendations for radial impellers.
+fn guide_panel(ui: &mut Ui, g: &ImpellerGeometry, units: &DisplayUnits) {
+    let check = guide::guide(&g.contour, &g.basis);
+    let palette = Palette::of(ui);
+    let length = |v: f64| units.show(QuantityKind::Length, v);
+    let mark = |ui: &mut Ui, ok: bool| {
+        if ok {
+            ui.colored_label(palette.handle, icon::CHECK_CIRCLE);
+        } else {
+            ui.colored_label(ui.visuals().warn_fg_color, icon::WARNING);
+        }
+    };
+    ui.label(RichText::new(tr("Check against Gülich")).strong())
+        .on_hover_text(tr(
+            "Recommendations for the meridional section of radial impellers: Gülich, \
+             Centrifugal Pumps, chap. 7.2.2.1 and eq. 7.2",
+        ));
+    // Ranges with the unit once: "17.37–23.16 mm".
+    let scale = units.to_display(QuantityKind::Length, 1.0);
+    let unit = units.get(QuantityKind::Length).symbol;
+    let span = |a: f64, b: f64| format!("{:.2}–{:.2} {unit}", a * scale, b * scale);
+    Grid::new("meridian_guide")
+        .num_columns(3)
+        .striped(true)
+        .show(ui, |ui| {
+            ui.weak("");
+            ui.weak(tr("actual"));
+            ui.weak(tr("recommended"));
+            ui.end_row();
+            let rows = [
+                (
+                    "z_E",
+                    tr("Axial extension to the shroud end: (d₂ₐ − d₁)(n_q/74)^1.07, eq. 7.2"),
+                    check.axial_extension,
+                    false,
+                ),
+                (
+                    "R_Ds",
+                    tr("Smallest radius of curvature of the shroud: (0.6 to 0.8)·b₁"),
+                    check.shroud_radius,
+                    true,
+                ),
+                (
+                    "g₁",
+                    tr(
+                        "Nearly axial run of the shroud from the inlet, up to a 10° turn: \
+                         (0.2 to 0.3)·b₁",
+                    ),
+                    check.inlet_run,
+                    true,
+                ),
+            ];
+            for (name, hint, c, range) in rows {
+                ui.horizontal(|ui| {
+                    mark(ui, c.ok);
+                    ui.label(name)
+                })
+                .inner
+                .on_hover_text(hint);
+                ui.label(length(c.actual));
+                ui.label(if range {
+                    span(c.recommended.0, c.recommended.1)
+                } else {
+                    length(c.recommended.0)
+                });
+                ui.end_row();
+            }
+            ui.horizontal(|ui| {
+                mark(ui, check.leading_edge_before_bend);
+                ui.label(tr("leading edge"))
+            })
+            .inner
+            .on_hover_text(tr(
+                "On the shroud it should sit before the front shroud curves, not where \
+                 the curvature is high",
+            ));
+            ui.label(if check.leading_edge_before_bend {
+                tr("before the bend")
+            } else {
+                tr("in the bend")
+            });
+            ui.label(tr("before the bend"));
+            ui.end_row();
+            ui.label("     ε_Ds").on_hover_text(tr(
+                "Shroud angle at the outlet from the radial direction. Often 0 below \
+                 n_q = 20, about 15–20° for radial impellers of higher n_q",
+            ));
+            ui.label(format!("{:.1}°", check.shroud_outlet_angle.to_degrees()));
+            ui.label(if g.basis.nq < 20.0 { "0°" } else { "0–20°" });
+            ui.end_row();
+        });
+}
+
+/// Curves to compare with: pasted points, or copies kept from the wall menu.
+fn references_panel(
+    ui: &mut Ui,
+    references: &mut Vec<Reference>,
+    text: &mut String,
+    units: &DisplayUnits,
+) {
+    let unit = units.get(QuantityKind::Length).symbol;
+    ui.label(RichText::new(tr("Reference curves")).strong())
+        .on_hover_text(tr(
+            "Dashed curves to compare with: points pasted here, or a copy of a wall kept \
+             from its right-click menu",
+        ));
+    let mut remove = None;
+    for (i, reference) in references.iter().enumerate() {
+        ui.horizontal(|ui| {
+            if ui
+                .small_button(icon::X)
+                .on_hover_text(tr("Remove this curve"))
+                .clicked()
+            {
+                remove = Some(i);
+            }
+            ui.label(&reference.name);
+            ui.weak(tf("{} points", &[&reference.points.len()]));
+        });
+    }
+    if let Some(i) = remove {
+        references.remove(i);
+    }
+    ui.add(
+        egui::TextEdit::multiline(text)
+            .desired_rows(3)
+            .desired_width(f32::INFINITY)
+            .hint_text(tf("z r per line, in {}", &[&unit])),
+    );
+    let points = parse_points(text, units);
+    if ui
+        .add_enabled(points.len() >= 2, egui::Button::new(tr("Add as a curve")))
+        .clicked()
+    {
+        references.push(Reference {
+            name: tf("curve {}", &[&(references.len() + 1)]),
+            points,
+        });
+        text.clear();
     }
 }
 

@@ -252,7 +252,7 @@ pub(crate) fn apply_drag(
 }
 
 /// What the meridional diagram draws.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Display {
     pub stream_lines: bool,
     pub quasi_orthogonals: bool,
@@ -267,6 +267,8 @@ pub(crate) struct Display {
     /// The diffuser or volute that follows.
     pub adjacent: bool,
     pub legend: bool,
+    /// Grid that dragged points snap to, m; 0 leaves them free.
+    pub snap: f64,
 }
 
 impl Display {
@@ -279,6 +281,7 @@ impl Display {
         area_circles: false,
         adjacent: true,
         legend: true,
+        snap: 0.0,
     };
     pub(crate) const EDITOR: Display = Display {
         stream_lines: false,
@@ -289,6 +292,7 @@ impl Display {
         area_circles: false,
         adjacent: false,
         legend: false,
+        snap: 0.0,
     };
 }
 
@@ -467,6 +471,38 @@ fn set_dimension(
     input
 }
 
+/// The distance being measured: a line between the two points and its length with
+/// the axial and radial parts.
+fn paint_measure(
+    ui: &Ui,
+    transform: &PlotTransform,
+    a: DVec2,
+    b: DVec2,
+    scale: f64,
+    units: &DisplayUnits,
+) {
+    let painter = ui.painter_at(*transform.frame());
+    let color = Palette::of(ui).handle_active;
+    let screen =
+        |p: DVec2| transform.position_from_point(&PlotPoint::new(p.x * scale, p.y * scale));
+    let (sa, sb) = (screen(a), screen(b));
+    painter.line_segment([sa, sb], egui::Stroke::new(1.5, color));
+    for p in [sa, sb] {
+        painter.circle_stroke(p, 3.0, egui::Stroke::new(1.5, color));
+    }
+    let length = |v: f64| units.show(QuantityKind::Length, v);
+    let text = format!(
+        "{}\nΔz {}   Δr {}",
+        length(a.distance(b)),
+        length(b.x - a.x),
+        length(b.y - a.y)
+    );
+    let galley = painter.layout(text, egui::FontId::proportional(12.0), color, f32::INFINITY);
+    let rect = egui::Rect::from_min_size(sb + egui::vec2(10.0, 6.0), galley.size()).expand(3.0);
+    painter.rect_filled(rect, 3.0, ui.visuals().extreme_bg_color);
+    painter.galley(rect.min + egui::vec2(3.0, 3.0), galley, color);
+}
+
 /// Where the value of a dimension line from `a` to `b` (screen) goes: in the middle,
 /// or past the end when it does not fit between the arrows.
 fn value_rect(a: egui::Pos2, b: egui::Pos2, text: egui::Vec2) -> egui::Rect {
@@ -537,6 +573,60 @@ fn paint_dimensions(
     }
 }
 
+/// A curve drawn for comparison.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Reference {
+    pub name: String,
+    /// (z, r) in m.
+    pub points: Vec<DVec2>,
+}
+
+/// `p` on the grid of step `step` (m); unchanged when the step is 0.
+fn snap(p: DVec2, step: f64) -> DVec2 {
+    if step > 0.0 {
+        (p / step).round() * step
+    } else {
+        p
+    }
+}
+
+/// The points of a wall as text, one "z<TAB>r" line each in display units, to paste
+/// into a spreadsheet or another program.
+pub(crate) fn points_text(wall: &Wall, units: &DisplayUnits) -> String {
+    let scale = units.to_display(QuantityKind::Length, 1.0);
+    let unit = units.get(QuantityKind::Length).symbol;
+    let mut text = format!("# z [{unit}]\tr [{unit}]\n");
+    for p in wall.sample(100) {
+        text.push_str(&format!("{:.6}\t{:.6}\n", p.x * scale, p.y * scale));
+    }
+    text
+}
+
+/// Points typed or pasted as text: one "z r" pair a line in display units, separated
+/// by spaces, tabs or semicolons, or by a comma when the numbers use a decimal point.
+/// A decimal comma works with the other separators. Lines starting with # are notes.
+pub(crate) fn parse_points(text: &str, units: &DisplayUnits) -> Vec<DVec2> {
+    let scale = units.to_display(QuantityKind::Length, 1.0);
+    text.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .filter_map(|line| {
+            let mut fields: Vec<&str> = line
+                .split(|c: char| c.is_whitespace() || c == ';')
+                .filter(|f| !f.is_empty())
+                .collect();
+            if fields.len() == 1 {
+                fields = line.split(',').collect();
+            }
+            let [z, r] = fields[..] else {
+                return None;
+            };
+            let number = |f: &str| f.trim().replace(',', ".").parse::<f64>().ok();
+            Some(DVec2::new(number(z)? / scale, number(r)? / scale))
+        })
+        .collect()
+}
+
 /// Points of a circle.
 fn circle(center: DVec2, radius: f64) -> Vec<DVec2> {
     (0..=48)
@@ -566,6 +656,12 @@ pub(crate) struct MeridionalView {
     pub(crate) pointer: Option<DVec2>,
     /// Whether the editor has framed the meridian since it was last opened.
     pub(crate) framed: bool,
+    /// The distance being measured with Alt and a drag, from and to (z, r) in m.
+    measure: Option<(DVec2, DVec2)>,
+    /// Curves drawn for comparison: pasted points or copies of a wall.
+    pub(crate) references: Vec<Reference>,
+    /// Points typed or pasted for a new reference curve.
+    pub(crate) reference_text: String,
     /// Potential flow of the last geometry it was solved for.
     potential: Option<((u64, ComponentId), Result<PotentialFlow, String>)>,
 }
@@ -582,6 +678,9 @@ impl Default for MeridionalView {
             dimension_edit: None,
             pointer: None,
             framed: false,
+            measure: None,
+            references: Vec::new(),
+            reference_text: String::new(),
             potential: None,
         }
     }
@@ -611,6 +710,12 @@ impl MeridionalView {
     #[cfg(test)]
     pub(crate) fn transform(&self) -> Option<&PlotTransform> {
         self.transform.as_ref()
+    }
+
+    /// The distance being measured.
+    #[cfg(test)]
+    pub(crate) fn measured(&self) -> Option<(DVec2, DVec2)> {
+        self.measure
     }
 
     /// The potential flow of `g`, solved again only when the geometry changes.
@@ -815,18 +920,32 @@ impl MeridionalView {
         let meridian_bounds = extent(&outline);
 
         let sections = &g.blade.sections;
+        // Alt and a drag measure a distance instead of panning.
+        let measuring = ui.input(|i| i.modifiers.alt);
         let mut plot = Plot::new(("meridional", id.0))
             .width(size.x)
             .height(size.y)
             .data_aspect(1.0)
-            .allow_drag(active.is_none())
+            .allow_drag(active.is_none() && !measuring)
             .sense(Sense::click_and_drag())
             .x_axis_label(format!("z [{unit}]"))
             .y_axis_label(format!("r [{unit}]"));
         if display.legend {
             plot = plot.legend(Legend::default().position(Corner::RightBottom));
         }
+        let references = self.references.clone();
         let response = plot.show(ui, |plot| {
+            for reference in &references {
+                plot.line(
+                    Line::new(
+                        reference.name.clone(),
+                        line(reference.points.iter().copied(), scale),
+                    )
+                    .color(palette.guide)
+                    .style(LineStyle::dashed_loose())
+                    .width(1.5),
+                );
+            }
             if let Some(bounds) = frozen {
                 plot.set_plot_bounds(bounds);
             }
@@ -1111,6 +1230,19 @@ impl MeridionalView {
         self.transform = Some(response.transform);
         self.pointer = response.inner.map(|p| DVec2::new(p.x / scale, p.y / scale));
         let plot_response = &response.response;
+        if measuring && hovered.is_none() && plot_response.drag_started() {
+            self.measure = self.pointer.map(|p| (p, p));
+        } else if let (Some((_, end)), Some(p)) = (&mut self.measure, self.pointer)
+            && measuring
+            && plot_response.dragged()
+        {
+            *end = p;
+        } else if !measuring && ui.input(|i| i.pointer.primary_pressed()) {
+            self.measure = None;
+        }
+        if let Some((a, b)) = self.measure {
+            paint_measure(ui, &response.transform, a, b, scale, &units);
+        }
         if plot_response.drag_started() && hovered.is_some() {
             self.dragging = hovered;
         }
@@ -1163,7 +1295,9 @@ impl MeridionalView {
         }
         if let Some(target) = self.menu {
             plot_response.context_menu(|ui| {
-                if let Some(input) = context_menu(ui, target, g, current, &units) {
+                if let Some(input) =
+                    context_menu(ui, target, g, current, &units, &mut self.references)
+                {
                     let label = target.edit_label();
                     cx.edit(label, |p| p.set_impeller_geometry(id, input));
                 }
@@ -1172,7 +1306,10 @@ impl MeridionalView {
         if let (Some(handle), Some(pointer)) = (self.dragging, response.inner)
             && plot_response.dragged()
         {
-            let pointer = DVec2::new(pointer.x / scale, pointer.y / scale);
+            let pointer = snap(
+                DVec2::new(pointer.x / scale, pointer.y / scale),
+                display.snap,
+            );
             let mut input = current.clone();
             apply_drag(handle, pointer, &g.contour, &g.basis, &mut input.meridional);
             if input != *current {
@@ -1457,6 +1594,7 @@ fn context_menu(
     g: &ImpellerGeometry,
     current: &ImpellerGeometryInput,
     units: &DisplayUnits,
+    references: &mut Vec<Reference>,
 ) -> Option<ImpellerGeometryInput> {
     let contour = &g.contour;
     let mut input = current.clone();
@@ -1527,6 +1665,14 @@ fn context_menu(
             if !side.drawn(&current.meridional) {
                 ui.weak(tr("Typing a value turns this wall into drawn segments."));
             }
+            if let WallPoint::Control { segment, index } = at
+                && side.drawn(&current.meridional)
+                && wall.segments()[segment].control_points().len() > 3
+                && ui.button(tr("Remove control point")).clicked()
+            {
+                *side.segments(m) = Some(wall::remove_control(wall, segment, index));
+                ui.close();
+            }
             if let WallPoint::Joint { segment } = at {
                 ui.separator();
                 let mut smooth = wall.smooth()[segment];
@@ -1568,6 +1714,42 @@ fn context_menu(
             });
             if kind != before {
                 *side.segments(m) = Some(wall::set_kind(wall, segment, kind));
+            }
+            if ui
+                .button(tr("Add control point"))
+                .on_hover_text(tr("One more control point; the curve keeps its shape"))
+                .clicked()
+            {
+                *side.segments(m) = Some(wall::add_control(wall, segment));
+                ui.close();
+            }
+            ui.separator();
+            if ui
+                .button(tr("Keep a copy to compare"))
+                .on_hover_text(tr(
+                    "Draws the wall as it is now, dashed, to compare changes",
+                ))
+                .clicked()
+            {
+                let name = match side {
+                    Side::Hub => tr("hub copy"),
+                    Side::Shroud => tr("shroud copy"),
+                };
+                references.push(Reference {
+                    name: name.to_owned(),
+                    points: wall.sample(200),
+                });
+                ui.close();
+            }
+            if ui
+                .button(tr("Copy the wall points"))
+                .on_hover_text(tr(
+                    "100 lines of z and r, tab separated, to paste elsewhere",
+                ))
+                .clicked()
+            {
+                ui.ctx().copy_text(points_text(wall, units));
+                ui.close();
             }
             if side.drawn(&current.meridional) {
                 ui.separator();
@@ -1750,6 +1932,45 @@ mod tests {
         assert!((b2.to - contour.hub.end()).perp_dot(along).abs() < 1e-9);
         // The ends themselves are further apart than b₂.
         assert!(contour.hub.end().distance(contour.shroud.end()) > basis.outlet_width * 1.01);
+    }
+
+    #[test]
+    fn pasted_points_are_read_in_any_common_layout() {
+        let units = DisplayUnits::default();
+        let mm = 1.0 / units.to_display(QuantityKind::Length, 1.0);
+        let expect = [
+            DVec2::new(1.5 * mm, 20.0 * mm),
+            DVec2::new(3.0 * mm, 22.25 * mm),
+        ];
+        for text in [
+            "1.5 20\n3 22.25",
+            "# z r\n1.5\t20\n\n3\t22.25\n",
+            "1,5;20\n3;22,25",
+            "1.5,20\n3,22.25",
+            "1,5 20\n3 22,25",
+        ] {
+            let points = parse_points(text, &units);
+            assert_eq!(points.len(), 2, "{text:?}");
+            for (p, q) in points.iter().zip(expect) {
+                assert!(p.distance(q) < 1e-15, "{text:?}: {p} vs {q}");
+            }
+        }
+        assert!(parse_points("abc\n1 2 3", &units).is_empty());
+        // What is copied from a wall reads back as the same points.
+        let g = geometry();
+        let back = parse_points(&points_text(&g.contour.hub, &units), &units);
+        assert_eq!(back.len(), 100);
+        for (p, q) in back.iter().zip(g.contour.hub.sample(100)) {
+            assert!(p.distance(q) < 1e-8);
+        }
+    }
+
+    #[test]
+    fn dragged_points_snap_to_the_grid() {
+        let p = DVec2::new(0.012_34, 0.056_78);
+        assert_eq!(snap(p, 0.0), p);
+        let q = snap(p, 0.001);
+        assert!((q.x - 0.012).abs() < 1e-15 && (q.y - 0.057).abs() < 1e-15);
     }
 
     #[test]

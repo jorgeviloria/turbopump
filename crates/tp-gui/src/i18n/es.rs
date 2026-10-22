@@ -6,6 +6,74 @@
 
 /// English text → Spanish text.
 pub(super) static TEXTS: &[(&str, &str)] = &[
+    ("Remove control point", "Quitar el punto de control"),
+    ("Add control point", "Añadir un punto de control"),
+    (
+        "One more control point; the curve keeps its shape",
+        "Un punto de control más; la curva conserva su forma",
+    ),
+    ("Keep a copy to compare", "Guardar una copia para comparar"),
+    (
+        "Draws the wall as it is now, dashed, to compare changes",
+        "Dibuja la pared tal como está ahora, a trazos, para comparar los cambios",
+    ),
+    ("hub copy", "copia del cubo"),
+    ("shroud copy", "copia de la carcasa"),
+    ("Copy the wall points", "Copiar los puntos de la pared"),
+    (
+        "100 lines of z and r, tab separated, to paste elsewhere",
+        "100 líneas de z y r separadas por tabuladores, para pegarlas en otro programa",
+    ),
+    ("free", "libre"),
+    ("grid", "rejilla"),
+    (
+        "Dragged points snap to this grid",
+        "Los puntos arrastrados se ajustan a esta rejilla",
+    ),
+    (
+        "Hold Alt and drag on the diagram to measure a distance",
+        "Mantén Alt y arrastra sobre el diagrama para medir una distancia",
+    ),
+    ("Check against Gülich", "Comprobación con Gülich"),
+    (
+        "Recommendations for the meridional section of radial impellers: Gülich, Centrifugal Pumps, chap. 7.2.2.1 and eq. 7.2",
+        "Recomendaciones para la sección meridional de rodetes radiales: Gülich, Centrifugal Pumps, cap. 7.2.2.1 y ec. 7.2",
+    ),
+    ("actual", "actual"),
+    ("recommended", "recomendado"),
+    (
+        "Axial extension to the shroud end: (d₂ₐ − d₁)(n_q/74)^1.07, eq. 7.2",
+        "Extensión axial hasta el extremo de la carcasa: (d₂ₐ − d₁)(n_q/74)^1,07, ec. 7.2",
+    ),
+    (
+        "Smallest radius of curvature of the shroud: (0.6 to 0.8)·b₁",
+        "Menor radio de curvatura de la carcasa: (0,6 a 0,8)·b₁",
+    ),
+    (
+        "Nearly axial run of the shroud from the inlet, up to a 10° turn: (0.2 to 0.3)·b₁",
+        "Tramo casi axial de la carcasa desde la entrada, hasta que gira 10°: (0,2 a 0,3)·b₁",
+    ),
+    ("leading edge", "borde de ataque"),
+    (
+        "On the shroud it should sit before the front shroud curves, not where the curvature is high",
+        "En la carcasa debe quedar antes de que esta se curve, no donde la curvatura es alta",
+    ),
+    ("before the bend", "antes de la curva"),
+    ("in the bend", "en la curva"),
+    (
+        "Shroud angle at the outlet from the radial direction. Often 0 below n_q = 20, about 15–20° for radial impellers of higher n_q",
+        "Ángulo de la carcasa a la salida respecto a la dirección radial. A menudo 0 por debajo de n_q = 20; unos 15–20° en rodetes radiales de n_q mayor",
+    ),
+    ("Reference curves", "Curvas de referencia"),
+    (
+        "Dashed curves to compare with: points pasted here, or a copy of a wall kept from its right-click menu",
+        "Curvas a trazos para comparar: puntos pegados aquí, o la copia de una pared guardada desde su menú del clic derecho",
+    ),
+    ("Remove this curve", "Quitar esta curva"),
+    ("{} points", "{} puntos"),
+    ("z r per line, in {}", "z r por línea, en {}"),
+    ("Add as a curve", "Añadir como curva"),
+    ("curve {}", "curva {}"),
     (
         "Hub and shroud as one Bézier each; undo brings them back",
         "El cubo y la carcasa como una Bézier cada uno; deshacer los recupera",

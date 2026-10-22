@@ -1615,6 +1615,91 @@ mod tests {
     }
 
     #[test]
+    fn the_wall_menu_adds_points_keeps_copies_and_alt_measures() {
+        let mut harness = Harness::builder()
+            .with_size([1440.0, 900.0])
+            .build_eframe(|cc| TurbopumpApp::new(cc, None));
+        harness.run();
+        harness.state_mut().focus_view(View::MeridianEditor);
+        harness.run();
+        let id = harness.state().active_impeller().unwrap();
+        let on_screen = |app: &TurbopumpApp, p: tp_math::DVec2| {
+            let scale = app
+                .doc
+                .project()
+                .display_units
+                .to_display(QuantityKind::Length, 1.0);
+            app.meridional
+                .transform()
+                .unwrap()
+                .position_from_point(&PlotPoint::new(p.x * scale, p.y * scale))
+        };
+        let app = harness.state();
+        let g = app.derived.geometry(id).unwrap();
+        let at = on_screen(app, g.contour.shroud_at(0.6));
+
+        right_click(&mut harness, at);
+        harness.get_by_label("Keep a copy to compare").click();
+        harness.run();
+        assert_eq!(harness.state().meridional.references.len(), 1);
+
+        right_click(&mut harness, at);
+        harness.get_by_label("Add control point").click();
+        harness.run();
+        let segments = harness
+            .state()
+            .doc
+            .project()
+            .impeller_geometry_input(id)
+            .unwrap()
+            .meridional
+            .shroud_segments
+            .unwrap();
+        assert_eq!(segments[0].controls.len(), 3);
+
+        // Alt and a drag on the background measure instead of panning.
+        let app = harness.state();
+        let g = app.derived.geometry(id).unwrap();
+        let a = g.contour.hub.start() + tp_math::DVec2::new(0.01, -0.02);
+        let (from, to) = (
+            on_screen(app, a),
+            on_screen(app, a + tp_math::DVec2::new(0.02, 0.0)),
+        );
+        let bounds = *app.meridional.transform().unwrap().bounds();
+        harness
+            .input_mut()
+            .events
+            .push(egui::Event::ModifiersChanged(egui::Modifiers::ALT));
+        harness.hover_at(from);
+        harness.run();
+        harness.drag_at(from);
+        harness.run();
+        for step in 1..=5 {
+            harness.hover_at(from + (to - from) * (step as f32 / 5.0));
+            harness.run_steps(2);
+        }
+        let measured = harness.state().meridional.measured();
+        harness.drop_at(to);
+        harness.run();
+        harness
+            .input_mut()
+            .events
+            .push(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+        let (m0, m1) = measured.expect("a measurement");
+        assert!((m1.distance(m0) - 0.02).abs() < 0.002, "{m0} {m1}");
+        // No panning: the view keeps its centre.
+        let after = *harness.state().meridional.transform().unwrap().bounds();
+        let centre = |b: &egui_plot::PlotBounds| {
+            [
+                (b.min()[0] + b.max()[0]) / 2.0,
+                (b.min()[1] + b.max()[1]) / 2.0,
+            ]
+        };
+        let (c0, c1) = (centre(&bounds), centre(&after));
+        assert!((c0[0] - c1[0]).abs() < 1e-6 && (c0[1] - c1[1]).abs() < 1e-6);
+    }
+
+    #[test]
     fn the_leading_edge_turns_into_a_bezier_from_its_menu() {
         use tp_design::impeller::meridian::LeadingEdgeShape;
         let mut harness = Harness::builder()
