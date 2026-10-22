@@ -1,5 +1,7 @@
 # Casos de validación
 
+El resumen de lo comparado está en [docs/validation/](../../docs/validation/).
+
 Cada carpeta es un caso de referencia con dos archivos:
 
 - `caso.tpj`: el proyecto de Turbopump con las entradas del caso;

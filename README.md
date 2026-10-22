@@ -250,6 +250,16 @@ cargo run -p tp-cli -- analysis bomba.tpj
 
 El método y sus límites están en [docs/theory/prestaciones.md](docs/theory/prestaciones.md).
 
+Comparar un proyecto con los valores de referencia de un caso de validación. Cada
+magnitud se juzga contra su tolerancia; el comando termina con código 2 si alguna queda
+fuera, y `--list` muestra las magnitudes disponibles. Los casos están en
+[tests/benchmarks/](tests/benchmarks/), y el resumen de lo comparado, con sus límites, en
+[docs/validation/](docs/validation/):
+
+```bash
+cargo run -p tp-cli -- validate tests/benchmarks/japikse-7.5/caso.tpj tests/benchmarks/japikse-7.5/targets.json
+```
+
 Propiedades de un líquido:
 
 ```bash
