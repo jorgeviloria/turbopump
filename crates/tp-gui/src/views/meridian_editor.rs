@@ -43,7 +43,7 @@ impl MeridionalView {
         let g = match &results.geometry {
             Ok(g) => g,
             Err(e) => {
-                unavailable(ui, e);
+                recover(ui, cx, id, e);
                 return;
             }
         };
@@ -147,6 +147,39 @@ impl MeridionalView {
             });
         });
     }
+}
+
+/// The reason there is no geometry and, when a drawn wall may be the cause, a way back
+/// to the automatic contour; undo works too.
+fn recover(ui: &mut Ui, cx: &mut EditCtx<'_>, id: ComponentId, reason: &str) {
+    let current = cx
+        .doc
+        .project()
+        .impeller_geometry_input(id)
+        .unwrap_or_default();
+    let m = &current.meridional;
+    if m.hub_segments.is_none() && m.shroud_segments.is_none() {
+        unavailable(ui, reason);
+        return;
+    }
+    ui.vertical_centered(|ui| {
+        ui.add_space(ui.available_height() * 0.35);
+        ui.colored_label(ui.visuals().warn_fg_color, crate::i18n::message(reason));
+        ui.add_space(8.0);
+        if ui
+            .button(tr("Back to the automatic contour"))
+            .on_hover_text(tr(
+                "Hub and shroud as one Bézier each; undo brings them back",
+            ))
+            .clicked()
+        {
+            let mut input = current.clone();
+            input.meridional.hub_segments = None;
+            input.meridional.shroud_segments = None;
+            cx.edit("edit wall segments", |p| p.set_impeller_geometry(id, input));
+        }
+        ui.weak(tr("Or undo the last change."));
+    });
 }
 
 /// Cross-section area along the channel and curvature along the walls.

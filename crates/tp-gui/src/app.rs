@@ -1534,11 +1534,84 @@ mod tests {
             .transform()
             .unwrap()
             .position_from_point(&PlotPoint::new(middle.x * scale, middle.y * scale));
+        let length = |app: &TurbopumpApp| {
+            app.doc
+                .project()
+                .impeller_geometry_input(id)
+                .unwrap()
+                .meridional
+                .axial_length
+        };
+        let type_text = |harness: &mut Harness<'_, TurbopumpApp>, text: &str| {
+            harness
+                .input_mut()
+                .events
+                .push(egui::Event::Text(text.into()));
+            harness.run();
+            harness.key_press(egui::Key::Enter);
+            harness.run();
+        };
         click_with(&mut harness, at, egui::PointerButton::Primary);
-        // The box names the dimension and closes with its button.
-        harness.get_by_label("OK").click();
+        // Not a number: the box stays open with the text selected, and nothing changes
+        // until a number replaces it.
+        type_text(&mut harness, "abc");
+        assert!(harness.query_by_label("OK").is_some());
+        assert!(length(harness.state()).is_auto());
+        type_text(&mut harness, "48");
+        assert!(harness.query_by_label("OK").is_none());
+        assert_eq!(length(harness.state()).manual_value(), Some(0.048));
+        harness.state_mut().undo();
+        assert!(length(harness.state()).is_auto());
+
+        // Escape closes the box without applying, and leaves the properties panel.
+        click_with(&mut harness, at, egui::PointerButton::Primary);
+        type_text(&mut harness, "abc");
+        harness.key_press(egui::Key::Escape);
         harness.run();
         assert!(harness.query_by_label("OK").is_none());
+        assert!(harness.state().sidebar_open);
+
+        // The box opens with the value selected: typing replaces it, with a decimal
+        // comma too, and Enter applies and closes.
+        click_with(&mut harness, at, egui::PointerButton::Primary);
+        type_text(&mut harness, "52,5");
+        let l = length(harness.state());
+        assert!(
+            l.manual_value().is_some_and(|v| (v - 0.0525).abs() < 1e-12),
+            "{l:?}"
+        );
+        assert!(harness.query_by_label("OK").is_none());
+        // One undo step brings L back.
+        harness.state_mut().undo();
+        assert!(length(harness.state()).is_auto());
+    }
+
+    #[test]
+    fn the_meridian_editor_offers_a_way_back_from_a_broken_wall() {
+        let mut harness = Harness::builder()
+            .with_size([1440.0, 900.0])
+            .build_eframe(|cc| TurbopumpApp::new(cc, None));
+        harness.run();
+        harness.state_mut().focus_view(View::MeridianEditor);
+        harness.run();
+        let id = harness.state().active_impeller().unwrap();
+        // A hub control point below the axis leaves no geometry.
+        let app = harness.state_mut();
+        let g = app.derived.geometry(id).unwrap();
+        let mut segments = g.contour.hub.to_input();
+        segments[0].controls[0].y = -0.01;
+        let mut input = app.doc.project().impeller_geometry_input(id).unwrap();
+        input.meridional.hub_segments = Some(segments);
+        app.doc
+            .edit_gesture("break", |p| p.set_impeller_geometry(id, input))
+            .unwrap();
+        harness.run();
+        assert!(harness.state().derived.geometry(id).is_none());
+        harness
+            .get_by_label("Back to the automatic contour")
+            .click();
+        harness.run();
+        assert!(harness.state().derived.geometry(id).is_some());
     }
 
     #[test]

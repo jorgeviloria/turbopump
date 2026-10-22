@@ -344,12 +344,6 @@ pub(crate) struct DimensionLine {
     pub value: f64,
 }
 
-impl DimensionLine {
-    fn middle(&self) -> DVec2 {
-        self.from.lerp(self.to, 0.5)
-    }
-}
-
 /// The dimensions to draw: with `permanent`, L, b₂ and the joints of drawn walls; and
 /// the axial position and radius of the `hovered` point. Axial dimensions stack under
 /// the axis, radii to the right of the impeller (our own layout).
@@ -399,14 +393,19 @@ pub(crate) fn dimension_lines(
     let mut points: Vec<Handle> = Vec::new();
     if permanent {
         axial(&mut lines, Dimension::AxialLength, hub.end());
-        let offset = hub.end_direction() * gap;
-        let (a, b) = (hub.end() + offset, shroud.end() + offset);
+        // b₂ normal to the outlet direction ε_s: on a semi-axial impeller the two ends
+        // are offset along that direction too, so their distance is not b₂.
+        let eps = basis.outlet_inclination;
+        let along = DVec2::new(eps.sin(), eps.cos());
+        let across = DVec2::new(eps.cos(), -eps.sin());
+        let a = shroud.end() + along * gap;
+        let b = a + across * basis.outlet_width;
         lines.push(DimensionLine {
             dimension: Dimension::OutletWidth,
             from: a,
             to: b,
-            extensions: vec![[hub.end(), a], [shroud.end(), b]],
-            value: hub.end().distance(shroud.end()),
+            extensions: vec![[shroud.end(), a], [hub.end(), b]],
+            value: basis.outlet_width,
         });
         for side in [Side::Hub, Side::Shroud] {
             if side.drawn(input) {
@@ -468,6 +467,21 @@ fn set_dimension(
     input
 }
 
+/// Where the value of a dimension line from `a` to `b` (screen) goes: in the middle,
+/// or past the end when it does not fit between the arrows.
+fn value_rect(a: egui::Pos2, b: egui::Pos2, text: egui::Vec2) -> egui::Rect {
+    let size = text + egui::vec2(6.0, 2.0);
+    let along = (b - a).normalized();
+    // How far the value reaches along the line.
+    let extent = size.x * along.x.abs() + size.y * along.y.abs();
+    let center = if extent + 16.0 < (b - a).length() {
+        a + (b - a) * 0.5
+    } else {
+        b + along * (extent / 2.0 + 4.0)
+    };
+    egui::Rect::from_center_size(center, size)
+}
+
 /// Dimensions over the plot: extension lines, the dimension line with an arrow at each
 /// end and the value on a background, green when it can be typed.
 fn paint_dimensions(
@@ -509,8 +523,7 @@ fn paint_dimensions(
             visuals.text_color()
         };
         let galley = painter.layout_no_wrap(text.clone(), egui::FontId::proportional(12.0), color);
-        let rect =
-            egui::Rect::from_center_size(a + (b - a) * 0.5, galley.size() + egui::vec2(6.0, 2.0));
+        let rect = value_rect(a, b, galley.size());
         painter.rect_filled(rect, 2.0, visuals.extreme_bg_color);
         if hovered == Some(d.dimension) {
             painter.rect_stroke(
@@ -547,8 +560,8 @@ pub(crate) struct MeridionalView {
     pub(crate) editor: Display,
     /// Framing asked for the next frame.
     pub(crate) fit: Option<Fit>,
-    /// The dimension being typed, where its box opens, and whether it has been shown.
-    dimension_edit: Option<(Dimension, egui::Pos2, bool)>,
+    /// The dimension being typed.
+    dimension_edit: Option<DimensionEdit>,
     /// Pointer position in the diagram, (z, r) in m.
     pub(crate) pointer: Option<DVec2>,
     /// Whether the editor has framed the meridian since it was last opened.
@@ -638,6 +651,10 @@ impl MeridionalView {
             }
         };
         let units = cx.units();
+        // Back from the editor, whose framing includes its dimensions.
+        if self.framed {
+            self.fit = Some(Fit::All);
+        }
         self.framed = false;
 
         ui.horizontal_wrapped(|ui| {
@@ -754,12 +771,12 @@ impl MeridionalView {
             .map(|d| units.show(QuantityKind::Length, d.value))
             .collect();
         let label_rect = |t: &PlotTransform, d: &DimensionLine, text: &str| {
-            let m = d.middle();
-            let center = t.position_from_point(&PlotPoint::new(m.x * scale, m.y * scale));
+            let screen =
+                |p: DVec2| t.position_from_point(&PlotPoint::new(p.x * scale, p.y * scale));
             let galley = ui
                 .painter()
                 .layout_no_wrap(text.to_owned(), font.clone(), Color32::WHITE);
-            egui::Rect::from_center_size(center, galley.size() + egui::vec2(6.0, 2.0))
+            value_rect(screen(d.from), screen(d.to), galley.size())
         };
         let hovered_dimension = match (pointer_pos, &self.transform, hovered) {
             (Some(pos), Some(t), None) => dimensions
@@ -1115,7 +1132,13 @@ impl MeridionalView {
             if plot_response.clicked()
                 && let Some(pos) = pointer_pos
             {
-                self.dimension_edit = Some((dimension, pos, false));
+                self.dimension_edit = Some(DimensionEdit {
+                    dimension,
+                    at: pos,
+                    text: None,
+                    invalid: false,
+                    select: true,
+                });
             }
         }
         if plot_response.secondary_clicked() {
@@ -1163,8 +1186,9 @@ impl MeridionalView {
         self.dimension_box(ui, cx, id, g, current, &dimensions);
     }
 
-    /// The box in which a clicked dimension is typed. It closes with Enter, Escape or a
-    /// click elsewhere.
+    /// The box in which a clicked dimension is typed. It opens with the value selected,
+    /// so typing replaces it; Enter or OK applies it, Escape or a click elsewhere closes
+    /// the box without applying.
     fn dimension_box(
         &mut self,
         ui: &mut Ui,
@@ -1174,54 +1198,131 @@ impl MeridionalView {
         current: &ImpellerGeometryInput,
         dimensions: &[DimensionLine],
     ) {
-        let Some((dimension, pos, shown)) = self.dimension_edit else {
+        let Some(mut edit) = self.dimension_edit.take() else {
             return;
         };
-        let Some(line) = dimensions.iter().find(|d| d.dimension == dimension) else {
-            // The point it measured is gone.
-            self.dimension_edit = None;
+        // The point it measured may be gone.
+        let Some(line) = dimensions.iter().find(|d| d.dimension == edit.dimension) else {
             return;
         };
         let units = cx.units();
         let scale = units.to_display(QuantityKind::Length, 1.0);
         let unit = units.get(QuantityKind::Length).symbol;
-        let mut shown_value = line.value * scale;
-        let mut close = false;
+        let opening = edit.text.is_none();
+        let select = std::mem::take(&mut edit.select);
+        let text = edit
+            .text
+            .get_or_insert_with(|| format_value(line.value * scale));
+        let field = egui::Id::new(("dimension_edit_field", id.0));
+        let (mut apply, mut cancel) = (false, false);
         let area = egui::Area::new(egui::Id::new(("dimension_edit", id.0)))
             .order(egui::Order::Foreground)
-            .fixed_pos(pos + egui::vec2(8.0, 8.0))
+            .fixed_pos(edit.at + egui::vec2(8.0, 8.0))
             .show(ui.ctx(), |ui| {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.label(RichText::new(dimension.label()).strong());
+                    ui.label(RichText::new(edit.dimension.label()).strong());
+                    if converts_wall(edit.dimension, current) {
+                        ui.weak(tr("Typing a value turns this wall into drawn segments."));
+                    }
                     ui.horizontal(|ui| {
-                        let response = ui.add(
-                            DragValue::new(&mut shown_value)
-                                .speed(0.1)
-                                .max_decimals(4)
-                                .suffix(format!(" {unit}")),
-                        );
-                        if !shown {
-                            response.request_focus();
+                        let mut box_ = egui::TextEdit::singleline(text)
+                            .id(field)
+                            .desired_width(80.0);
+                        if edit.invalid {
+                            box_ = box_.text_color(ui.visuals().error_fg_color);
                         }
-                        if response.changed() {
-                            let input = set_dimension(dimension, shown_value / scale, g, current);
-                            if input != *current {
-                                cx.edit("edit dimension", |p| p.set_impeller_geometry(id, input));
+                        let response = ui.add(box_);
+                        ui.label(unit);
+                        if select {
+                            response.request_focus();
+                            // Select the whole value so the first key replaces it.
+                            if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), field) {
+                                let all = egui::text::CCursorRange::two(
+                                    egui::text::CCursor::new(0),
+                                    egui::text::CCursor::new(text.chars().count()),
+                                );
+                                state.cursor.set_char_range(Some(all));
+                                state.store(ui.ctx(), field);
                             }
                         }
-                        close |= ui.button(tr("OK")).clicked();
+                        apply |=
+                            response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                        apply |= ui.button(tr("OK")).clicked();
                     });
                 });
             });
-        close |= ui.input(|i| i.key_pressed(egui::Key::Escape) || i.key_pressed(egui::Key::Enter));
-        let clicked_outside = ui.input(|i| {
-            i.pointer.any_pressed()
-                && i.pointer
-                    .interact_pos()
-                    .is_some_and(|p| !area.response.rect.contains(p))
-        });
-        close |= shown && clicked_outside;
-        self.dimension_edit = (!close).then_some((dimension, pos, true));
+        // Consumed, so Escape does not also fold the properties panel.
+        cancel |= ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+        cancel |= !opening
+            && ui.input(|i| {
+                i.pointer.any_pressed()
+                    && i.pointer
+                        .interact_pos()
+                        .is_some_and(|p| !area.response.rect.contains(p))
+            });
+        if apply {
+            match parse_value(text) {
+                Some(value) => {
+                    let input = set_dimension(edit.dimension, value / scale, g, current);
+                    if input != *current {
+                        cx.edit("edit dimension", |p| p.set_impeller_geometry(id, input));
+                    }
+                    return;
+                }
+                None => {
+                    // Back into the field, selected, to correct it.
+                    edit.invalid = true;
+                    edit.select = true;
+                }
+            }
+        }
+        if !cancel {
+            self.dimension_edit = Some(edit);
+        }
+    }
+}
+
+/// A dimension being typed.
+#[derive(Debug, Clone)]
+struct DimensionEdit {
+    dimension: Dimension,
+    /// Where the box opens.
+    at: egui::Pos2,
+    /// The text typed so far; none until the box is first shown.
+    text: Option<String>,
+    /// Whether the last text applied was not a number.
+    invalid: bool,
+    /// Whether the field takes the focus with its text selected on the next frame.
+    select: bool,
+}
+
+/// A value for the dimension box: up to four decimals, without trailing zeros.
+fn format_value(value: f64) -> String {
+    let text = format!("{value:.4}");
+    text.trim_end_matches('0').trim_end_matches('.').to_owned()
+}
+
+/// A typed number; a decimal comma is read as a point.
+fn parse_value(text: &str) -> Option<f64> {
+    text.trim()
+        .replace(',', ".")
+        .parse::<f64>()
+        .ok()
+        .filter(|v| v.is_finite())
+}
+
+/// Whether typing `dimension` turns an automatic wall into drawn segments.
+fn converts_wall(dimension: Dimension, current: &ImpellerGeometryInput) -> bool {
+    match dimension {
+        Dimension::Z(h) | Dimension::R(h) => {
+            matches!(
+                h,
+                Handle::HubInlet | Handle::HubOutlet | Handle::ShroudInlet | Handle::ShroudOutlet
+            ) && h
+                .wall_point()
+                .is_some_and(|(side, _)| !side.drawn(&current.meridional))
+        }
+        _ => false,
     }
 }
 
@@ -1627,6 +1728,28 @@ mod tests {
             set_dimension(Dimension::OutletWidth, 0.1, &drawn, &input),
             input
         );
+    }
+
+    #[test]
+    fn the_outlet_width_is_dimensioned_across_an_inclined_outlet() {
+        let g = geometry();
+        let mut basis = g.basis;
+        basis.outlet_inclination = 25f64.to_radians();
+        basis.outlet_hub_diameter = basis.outlet_diameter * 0.8;
+        let input = MeridionalInput::default();
+        let contour = MeridionalContour::build(&basis, &input).unwrap();
+        let lines = dimension_lines(&contour, &input, &basis, true, None);
+        let b2 = lines
+            .iter()
+            .find(|l| l.dimension == Dimension::OutletWidth)
+            .unwrap();
+        assert_eq!(b2.value, basis.outlet_width);
+        assert!((b2.from.distance(b2.to) - basis.outlet_width).abs() < 1e-12);
+        // The far end lines up with the hub end along the outlet direction.
+        let along = contour.hub.end_direction();
+        assert!((b2.to - contour.hub.end()).perp_dot(along).abs() < 1e-9);
+        // The ends themselves are further apart than b₂.
+        assert!(contour.hub.end().distance(contour.shroud.end()) > basis.outlet_width * 1.01);
     }
 
     #[test]

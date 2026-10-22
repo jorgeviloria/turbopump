@@ -6,12 +6,17 @@
 
 /// English text → Spanish text.
 pub(super) static TEXTS: &[(&str, &str)] = &[
+    (
+        "Hub and shroud as one Bézier each; undo brings them back",
+        "El cubo y la carcasa como una Bézier cada uno; deshacer los recupera",
+    ),
+    ("Or undo the last change.", "O deshaz el último cambio."),
     ("Meridian editor", "Editor del meridiano"),
     ("Editor", "Editor"),
     ("edit dimension", "editar cota"),
     ("z of the {}", "{}: z"),
     ("r of the {}", "{}: r"),
-    ("{}: click to type it", "{}: haz clic para escribirla"),
+    ("{}: click to type it", "{} (haz clic para escribirla)"),
     (
         "L, b₂ and the joints of the drawn walls, with guide lines at d_n, d₁ and d₂. Click a value to type it.",
         "L, b₂ y las uniones de las paredes dibujadas, con líneas guía en d_n, d₁ y d₂. Haz clic en un valor para escribirlo.",
