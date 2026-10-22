@@ -33,10 +33,6 @@ jobs:
       # Windows runs the CAD tests many times slower; there everything is built with
       # optimisation, the same for clippy and the tests so OCCT is compiled once.
       CARGO_PROFILE_DEV_OPT_LEVEL: ${{ matrix.os == 'windows-latest' && '1' || '0' }}
-      # On the Windows runners OCCT's parallel booleans took about 30 times longer than
-      # on macOS (38 min for the reference impeller), the threads waiting on each other;
-      # there they run on one thread, which costs some 20 % on macOS.
-      TP_CAD_SERIAL: ${{ matrix.os == 'windows-latest' && '1' || '' }}
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -62,21 +58,25 @@ jobs:
       - run: cargo clippy --workspace --all-targets
       # A limit per step, so that a hang fails here instead of using up the job.
       - name: Tests
+        if: runner.os != 'Windows'
         timeout-minutes: 75
         run: cargo test --workspace
-      # Parallel against one-thread booleans on a short CAD test, to see what the
-      # Windows runners make of OCCT's threads (informational).
-      - name: Diagnóstico de OCCT, booleanas en paralelo y en una hebra
-        if: runner.os == 'Windows' && !cancelled()
-        continue-on-error: true
-        timeout-minutes: 20
-        shell: bash
-        run: |
-          for serial in 0 1; do
-            start=$(date +%s)
-            TP_CAD_SERIAL=$serial cargo test -p tp-cad diffuser::tests::diffuser_solids_are_valid -- --exact
-            echo "TP_CAD_SERIAL=$serial: $(( $(date +%s) - start )) s"
-          done
+      # On the Windows runners OCCT ran 3 to 16 times slower than on macOS depending on
+      # the operation (diffuser 20 s, reference impeller 9 min, internal volute 28 min,
+      # one test at a time), with the parallel booleans still faster than one thread.
+      # The heaviest CAD tests, which Linux and macOS run with the same OCCT code, stay
+      # out there; the rest of the CAD tests check that OCCT builds and works on Windows.
+      - name: Tests (sin las pruebas de CAD más pesadas)
+        if: runner.os == 'Windows'
+        timeout-minutes: 75
+        run: >-
+          cargo test --workspace --
+          --skip reference_impeller_solids
+          --skip an_internal_volute_is_one_solid_with_its_bend
+          --skip the_casing_wraps_the_flow_domain_in_one_solid
+          --skip volute_channel_and_fluid_domain_are_valid_solids
+          --skip cad_exports_impeller_and_flow_domain
+          --skip cad_export_writes_both_solids
       - name: Tests sin CoolProp
         run: cargo test -p tp-fluids --no-default-features
       - name: CLI sin CAD
