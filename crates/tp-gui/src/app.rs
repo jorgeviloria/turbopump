@@ -1395,9 +1395,12 @@ mod tests {
         harness.run();
         harness.drag_at(start);
         harness.run();
+        // A drag repaints while the geometry follows the pointer; under load egui may
+        // start it a frame later, so step a fixed number of frames instead of waiting
+        // for the UI to settle.
         for step in 1..=6 {
             harness.hover_at(start + egui::vec2(8.0 * step as f32, 0.0));
-            harness.run();
+            harness.run_steps(3);
         }
         harness.drop_at(start + egui::vec2(48.0, 0.0));
         harness.run();
