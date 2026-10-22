@@ -5,6 +5,11 @@
 //! integrated by conformal mapping, dθ = dm / (r·tan β). θ is measured from the
 //! trailing edge in the direction of rotation, so all sections share θ = 0 at the
 //! trailing edge (an axial trailing edge) and the wrap angle is θ at the leading edge.
+//!
+//! The thickness is laid off normal to the mean line on the stream surface, in the
+//! conformal plane (m̄ = ∫dm/r, θ), which keeps angles and scales lengths by 1/r. A
+//! rounded edge is then a symmetric nose about the mean line, and a blunt edge is cut on
+//! the meridional edge.
 
 use std::f64::consts::{FRAC_PI_2, PI};
 
@@ -247,6 +252,20 @@ pub struct BladeSection {
     /// Normal thickness, m.
     pub thickness: Vec<f64>,
     pub leading_edge: LeadingEdge,
+    /// The face toward the direction of rotation.
+    pub pressure: Face,
+    /// The face turned away from the direction of rotation.
+    pub suction: Face,
+}
+
+/// One face of a blade section, from the leading to the trailing edge: as many points as
+/// the mean line, but at their own meridional positions.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Face {
+    /// (z, r) of each point.
+    pub meridional: Vec<DVec2>,
+    /// Angular position, rad, as the mean line's θ.
+    pub theta: Vec<f64>,
 }
 
 impl BladeSection {
@@ -264,36 +283,166 @@ impl BladeSection {
             .sum()
     }
 
-    /// Angular half-thickness offset of each station: (e/2) / (r·sin β).
-    fn half_angle(&self, k: usize) -> f64 {
-        0.5 * self.thickness[k] / (self.meridional[k].y * self.beta[k].sin())
-    }
-
-    fn to_cartesian(&self, sign: f64, offset: impl Fn(usize) -> f64) -> Vec<DVec3> {
-        (0..self.m.len())
-            .map(|k| {
-                let p = self.meridional[k];
-                let phi = sign * (self.theta[k] + offset(k));
-                DVec3::new(p.y * phi.cos(), p.y * phi.sin(), p.x)
-            })
-            .collect()
-    }
-
     /// Mean line in Cartesian coordinates (x, y, z), z along the axis. `sign` is +1
     /// when the impeller turns in the positive sense about +z.
     pub fn mean_line(&self, sign: f64) -> Vec<DVec3> {
-        self.to_cartesian(sign, |_| 0.0)
+        cartesian(&self.meridional, &self.theta, sign)
     }
 
     /// Pressure side: the blade face that faces the direction of rotation.
     pub fn pressure_side(&self, sign: f64) -> Vec<DVec3> {
-        self.to_cartesian(sign, |k| self.half_angle(k))
+        cartesian(&self.pressure.meridional, &self.pressure.theta, sign)
     }
 
     /// Suction side: the face turned away from the direction of rotation.
     pub fn suction_side(&self, sign: f64) -> Vec<DVec3> {
-        self.to_cartesian(sign, |k| -self.half_angle(k))
+        cartesian(&self.suction.meridional, &self.suction.theta, sign)
     }
+}
+
+/// Points (z, r) at angles θ as Cartesian (x, y, z), turned by `sign`.
+fn cartesian(points: &[DVec2], theta: &[f64], sign: f64) -> Vec<DVec3> {
+    points
+        .iter()
+        .zip(theta)
+        .map(|(p, &t)| {
+            let phi = sign * t;
+            DVec3::new(p.y * phi.cos(), p.y * phi.sin(), p.x)
+        })
+        .collect()
+}
+
+/// Conformal meridional coordinate m̄(s) = ∫ds/r along a stream line, on a fine grid of
+/// its arc length, and its inverse.
+struct ConformalLine {
+    step: f64,
+    mbar: Vec<f64>,
+}
+
+impl ConformalLine {
+    fn new(line: &Polyline<DVec2>) -> Self {
+        let n = INTEGRATION_STEPS;
+        let step = line.length() / n as f64;
+        let mut mbar = vec![0.0; n + 1];
+        let mut r_prev = line.point_at_length(0.0).y;
+        for i in 1..=n {
+            let r = line.point_at_length(i as f64 * step).y;
+            mbar[i] = mbar[i - 1] + step * 0.5 * (1.0 / r_prev + 1.0 / r);
+            r_prev = r;
+        }
+        Self { step, mbar }
+    }
+
+    /// m̄ at arc length `s`, extended linearly past the ends.
+    fn at(&self, s: f64) -> f64 {
+        let n = self.mbar.len() - 1;
+        let x = s / self.step;
+        let i = (x.floor().max(0.0) as usize).min(n - 1);
+        self.mbar[i] + (x - i as f64) * (self.mbar[i + 1] - self.mbar[i])
+    }
+
+    /// Arc length at conformal coordinate `mbar`, extended linearly past the ends.
+    fn arc_length(&self, mbar: f64) -> f64 {
+        let n = self.mbar.len() - 1;
+        let i = self.mbar.partition_point(|&v| v < mbar).clamp(1, n) - 1;
+        let w = (mbar - self.mbar[i]) / (self.mbar[i + 1] - self.mbar[i]);
+        (i as f64 + w) * self.step
+    }
+}
+
+/// Value of the piecewise-linear `values` at fractional index `p`, extended along the end
+/// segments.
+fn at_index(values: &[f64], p: f64) -> f64 {
+    let n = values.len() - 1;
+    let i = (p.floor().max(0.0) as usize).min(n - 1);
+    values[i] + (p - i as f64) * (values[i + 1] - values[i])
+}
+
+/// Fractional index where the increasing `values` reach `target`, searched from the
+/// start (or from the end), extended along the end segments; `None` if they do not
+/// reach it within the half of the line on that side.
+fn index_of(values: &[f64], target: f64, from_start: bool) -> Option<f64> {
+    let n = values.len() - 1;
+    let solve = |i: usize| {
+        let d = values[i + 1] - values[i];
+        (d.abs() > f64::EPSILON).then(|| i as f64 + (target - values[i]) / d)
+    };
+    if from_start {
+        if values[0] >= target {
+            return solve(0);
+        }
+        (0..n.div_ceil(2))
+            .find(|&i| values[i + 1] >= target)
+            .and_then(solve)
+    } else {
+        if values[n] <= target {
+            return solve(n - 1);
+        }
+        (n / 2..n)
+            .rev()
+            .find(|&i| values[i] <= target)
+            .and_then(solve)
+    }
+}
+
+/// One face of a section: the mean line offset by half the thickness along its normal in
+/// the conformal plane, toward +θ for `side` = +1 (pressure) and −θ for −1 (suction).
+/// A blunt edge is cut on the meridional edge, where the face is trimmed or carried on
+/// along its end segment; only the quarter of the points next to a cut edge moves, so
+/// a rounded nose keeps one face point beside each mean-line point.
+#[allow(clippy::too_many_arguments)]
+fn face(
+    line: &Polyline<DVec2>,
+    conformal: &ConformalLine,
+    s_le: f64,
+    m: &[f64],
+    beta: &[f64],
+    theta: &[f64],
+    thickness: &[f64],
+    edges: (EdgeShape, EdgeShape),
+    side: f64,
+) -> Face {
+    let n = m.len();
+    let (mut x, mut y) = (Vec::with_capacity(n), Vec::with_capacity(n));
+    for k in 0..n {
+        let s = s_le + m[k];
+        let h = 0.5 * thickness[k] / line.point_at_length(s).y;
+        x.push(conformal.at(s) + side * h * beta[k].cos());
+        y.push(theta[k] + side * h * beta[k].sin());
+    }
+    let start = match edges.0 {
+        EdgeShape::Cut => index_of(&x, conformal.at(s_le), true).unwrap_or(0.0),
+        EdgeShape::Ellipse { .. } => 0.0,
+    };
+    let last = (n - 1) as f64;
+    let end = match edges.1 {
+        EdgeShape::Cut => index_of(&x, conformal.at(s_le + m[n - 1]), false).unwrap_or(last),
+        EdgeShape::Ellipse { .. } => last,
+    };
+    // The first and last quarter of the points stretch to the cut edges.
+    let (head, tail) = (
+        (n / 4).max(1) as f64,
+        (last - (n / 4).max(1) as f64).max(1.0),
+    );
+    let index = |j: f64| {
+        if j < head {
+            start + (head - start) * j / head
+        } else if j > tail {
+            tail + (end - tail) * (j - tail) / (last - tail)
+        } else {
+            j
+        }
+    };
+    let (meridional, theta) = (0..n)
+        .map(|j| {
+            let p = index(j as f64);
+            let s = conformal
+                .arc_length(at_index(&x, p))
+                .clamp(0.0, line.length());
+            (line.point_at_length(s), at_index(&y, p))
+        })
+        .unzip();
+    Face { meridional, theta }
 }
 
 /// All blade sections of one blade; the other blades are copies rotated by 2π/z.
@@ -513,6 +662,22 @@ fn section(
         })
         .collect();
 
+    let conformal = ConformalLine::new(&line);
+    let faces = [1.0, -1.0].map(|side| {
+        face(
+            &line,
+            &conformal,
+            s_le,
+            &m,
+            &betas,
+            &theta,
+            &thickness,
+            settings.edges,
+            side,
+        )
+    });
+    let [pressure, suction] = faces;
+
     let pitch = 2.0 * PI / f64::from(basis.blade_count);
     for k in 0..m.len() {
         let occupied = thickness[k] / (meridional[k].y * betas[k].sin());
@@ -532,6 +697,8 @@ fn section(
         theta,
         thickness,
         leading_edge: le,
+        pressure,
+        suction,
     })
 }
 
@@ -774,21 +941,87 @@ mod tests {
 
     #[test]
     fn sides_are_one_normal_thickness_apart() {
-        let blade = reference();
-        let s = &blade.sections[2];
-        let k = s.m.len() / 2;
-        let ps = s.pressure_side(1.0)[k];
-        let ss = s.suction_side(1.0)[k];
-        // Circumferential distance times sin β is the normal thickness.
-        let r = s.meridional[k].y;
-        let arc = r * (ps.y.atan2(ps.x) - ss.y.atan2(ss.x));
-        assert_relative_eq!(
-            arc * s.beta[k].sin(),
-            basis().blade_thickness,
-            max_relative = 1e-9
+        // Many points, so that the chords of the faces stay close to the curves.
+        let blade = blade_with(
+            MeanLineInput {
+                points: Param::Manual(161),
+                ..Default::default()
+            },
+            EdgeInput::default(),
         );
-        // Pressure side ahead in the direction of rotation.
-        assert!(arc > 0.0);
+        let e = basis().blade_thickness;
+        for s in &blade.sections {
+            let (ps, ss) = (s.pressure_side(1.0), s.suction_side(1.0));
+            // Away from the edges the faces are parallel curves one thickness apart.
+            let n = ps.len();
+            for &p in &ps[n / 4..3 * n / 4] {
+                let gap = ss
+                    .windows(2)
+                    .map(|w| distance_to_segment(p, w[0], w[1]))
+                    .fold(f64::INFINITY, f64::min);
+                assert_relative_eq!(gap, e, max_relative = 0.02);
+            }
+            // The pressure face is ahead in the direction of rotation.
+            let k = n / 2;
+            let angle = |p: DVec3| p.y.atan2(p.x);
+            assert!(angle(ps[k]) > angle(s.mean_line(1.0)[k]));
+            assert!(angle(ss[k]) < angle(s.mean_line(1.0)[k]));
+        }
+    }
+
+    fn distance_to_segment(p: DVec3, a: DVec3, b: DVec3) -> f64 {
+        let ab = b - a;
+        let t = ((p - a).dot(ab) / ab.length_squared()).clamp(0.0, 1.0);
+        p.distance(a + ab * t)
+    }
+
+    #[test]
+    fn a_rounded_leading_edge_is_a_symmetric_nose() {
+        let blade = reference();
+        for s in &blade.sections {
+            let mean = s.mean_line(1.0);
+            let (ps, ss) = (s.pressure_side(1.0), s.suction_side(1.0));
+            // Both faces close on the leading-edge point.
+            assert!(ps[0].distance(mean[0]) < 1e-9 && ss[0].distance(mean[0]) < 1e-9);
+            // Each pair of face points straddles its mean-line point, half the local
+            // thickness to either side, and neither face reaches ahead of the edge.
+            let along = (mean[1] - mean[0]).normalize();
+            for k in 1..s.m.len() / 4 {
+                let half = 0.5 * s.thickness[k];
+                assert_relative_eq!(ps[k].distance(mean[k]), half, max_relative = 0.02);
+                assert_relative_eq!(ss[k].distance(mean[k]), half, max_relative = 0.02);
+                for p in [ps[k], ss[k]] {
+                    assert!((p - mean[0]).dot(along) > -0.02 * basis().blade_thickness);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_blunt_edge_is_cut_on_the_meridional_edge() {
+        let blade = blade_with(
+            MeanLineInput::default(),
+            EdgeInput {
+                leading: EdgeShape::Cut,
+                trailing: EdgeShape::Cut,
+            },
+        );
+        let r2 = basis().outlet_diameter / 2.0;
+        for s in &blade.sections {
+            for face in [&s.pressure, &s.suction] {
+                // Trailing edge on the outlet radius, leading edge on the meridional edge.
+                assert_relative_eq!(face.meridional.last().unwrap().y, r2, max_relative = 1e-6);
+                assert!(face.meridional[0].distance(s.meridional[0]) < 1e-6);
+            }
+            // The cut spans the thickness across the face: e/sin β along the circumference.
+            let n = s.m.len();
+            let arc = r2 * (s.pressure.theta[n - 1] - s.suction.theta[n - 1]);
+            assert_relative_eq!(
+                arc * s.beta[n - 1].sin(),
+                basis().blade_thickness,
+                max_relative = 0.02
+            );
+        }
     }
 
     #[test]

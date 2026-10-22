@@ -212,12 +212,25 @@ logarítmica $\theta = \ln(r_2/r_1)/\tan\beta$.
 **Espesor normal.** Varía linealmente entre $e_{LE}$ y $e_{TE}$. Por defecto, ambos valen
 el espesor de las dimensiones principales.
 
-**Caras del álabe.** Se aplica el espesor en dirección circunferencial sobre la superficie
-de corriente:
+**Caras del álabe.** El espesor se aplica perpendicular a la línea media sobre la
+superficie de corriente, como recomienda la práctica de los programas comerciales. Se
+trabaja en el plano conforme $(\bar m, \theta)$, con $\bar m = \int dm/r$, que conserva
+los ángulos y escala las longitudes por $1/r$:
 
-$$\theta_{ps/ss} = \theta \pm \frac{e/2}{r \sin\beta}$$
+$$\bar m_{ps/ss} = \bar m \pm \frac{e}{2r}\cos\beta, \qquad
+\theta_{ps/ss} = \theta \pm \frac{e}{2r}\sin\beta$$
 
-Esto da exactamente el espesor normal $e$ y mantiene ambas caras sobre el mismo span.
+Lejos de los bordes da las mismas caras que aplicarlo en dirección circunferencial,
+$\theta \pm (e/2)/(r\sin\beta)$, pero cada cara queda en su propia posición meridional.
+Junto a un borde redondeado la diferencia importa: con el desplazamiento circunferencial
+la nariz salía torcida, y una cara asomaba hasta un 15-20 % del espesor por delante del
+borde. Ahora la nariz es simétrica respecto a la línea media y el $c_{p,min}$ de la
+ec. 7.1a corresponde a la pieza.
+
+Un borde cortado se corta sobre el borde meridional: cada cara se recorta, o se prolonga
+por su último tramo, hasta $\bar m$ del borde. Solo se reajusta el cuarto de los puntos
+junto a ese borde; el resto conserva un punto de cada cara frente a cada punto de la
+línea media.
 
 - La **cara de presión** es la que mira en el sentido de giro.
 - **Interferencia.** Se comprueba que el espesor circunferencial no llegue al paso
