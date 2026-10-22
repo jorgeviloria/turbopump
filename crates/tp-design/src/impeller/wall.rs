@@ -240,6 +240,37 @@ impl Wall {
         joints.chain(controls).collect()
     }
 
+    /// Curvature along the wall: `per_segment` samples of each segment, as (arc length
+    /// from the inlet in m, curvature κ in 1/m, point). Lines have none; a corner at a
+    /// joint shows as two samples at the same length.
+    pub fn curvature(&self, per_segment: usize) -> Vec<(f64, f64, DVec2)> {
+        let n = per_segment.max(2);
+        let mut out = Vec::with_capacity(n * self.segments.len());
+        let mut length = 0.0;
+        for segment in &self.segments {
+            let d1 = segment.derivative();
+            let d2 = (segment.degree() >= 2).then(|| d1.derivative());
+            let mut previous = segment.start();
+            for k in 0..n {
+                let t = k as f64 / (n - 1) as f64;
+                let p = segment.eval(t);
+                length += p.distance(previous);
+                previous = p;
+                let kappa = d2.as_ref().map_or(0.0, |d2| {
+                    let (v, a) = (d1.eval(t), d2.eval(t));
+                    let speed = v.length();
+                    if speed > 0.0 {
+                        v.perp_dot(a).abs() / speed.powi(3)
+                    } else {
+                        0.0
+                    }
+                });
+                out.push((length, kappa, p));
+            }
+        }
+        out
+    }
+
     /// Segment and curve parameter of the wall point nearest to `pointer`.
     pub fn nearest(&self, pointer: DVec2) -> (usize, f64) {
         const SAMPLES: usize = 200;
@@ -527,6 +558,28 @@ mod tests {
         let joint = two.segments()[0].end();
         assert!(points.iter().any(|p| p.distance(joint) < 1e-15));
         assert_eq!(two.sample(2).len(), 3);
+    }
+
+    #[test]
+    fn curvature_matches_a_circle_and_is_zero_on_lines() {
+        // A cubic quarter circle of radius 0.05 m: the radius is within 0.03 %, but
+        // its curvature swings by about 2 %.
+        let k = 0.5523 * 0.05;
+        let arc = Bezier::new(vec![
+            DVec2::new(0.0, 0.05),
+            DVec2::new(k, 0.05),
+            DVec2::new(0.05, k),
+            DVec2::new(0.05, 0.0),
+        ])
+        .unwrap();
+        let profile = Wall::single(arc).curvature(50);
+        for &(_, kappa, _) in &profile {
+            assert!((kappa * 0.05 - 1.0).abs() < 0.03, "κR = {}", kappa * 0.05);
+        }
+        let length = profile.last().unwrap().0;
+        assert!((length - 0.05 * std::f64::consts::FRAC_PI_2).abs() < 1e-4);
+        let line = Wall::single(Bezier::line(DVec2::ZERO, DVec2::new(0.01, 0.02)));
+        assert!(line.curvature(10).iter().all(|&(_, k, _)| k == 0.0));
     }
 
     #[test]
