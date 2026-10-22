@@ -2,6 +2,7 @@
 // exceptions (Standard_Failure, which is not a std::exception) reach Rust as errors
 // instead of terminating the process.
 
+#include <cstdlib>
 #include "tp-cad/cpp/tp_cad.hxx"
 #include "tp-cad/src/bridge.rs.h"
 
@@ -289,6 +290,16 @@ std::unique_ptr<Shape> fix_shape(const Shape &shape) {
   });
 }
 
+// Booleans run on every core unless TP_CAD_SERIAL is set to something other than 0,
+// to compare where threads contend (the Windows CI runners).
+static bool parallel_booleans() {
+  static const bool parallel = [] {
+    const char *value = std::getenv("TP_CAD_SERIAL");
+    return value == nullptr || value[0] == '\0' || value[0] == '0';
+  }();
+  return parallel;
+}
+
 // `fuzzy` is the gap in model units below which faces and edges count as touching
 // (0: the exact algorithm).
 std::unique_ptr<Shape> boolean_op(const Shape &a, const Shape &b, std::uint8_t op,
@@ -306,7 +317,7 @@ std::unique_ptr<Shape> boolean_op(const Shape &a, const Shape &b, std::uint8_t o
       // Oriented bounding boxes skip far pairs of faces sooner; the intersections run
       // on every core.
       algo.SetUseOBB(Standard_True);
-      algo.SetRunParallel(Standard_True);
+      algo.SetRunParallel(parallel_booleans() ? Standard_True : Standard_False);
       algo.Build();
       if (!algo.IsDone() || algo.HasErrors()) {
         fail(what, "failed");

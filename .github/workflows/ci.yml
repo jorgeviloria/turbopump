@@ -33,6 +33,10 @@ jobs:
       # Windows runs the CAD tests many times slower; there everything is built with
       # optimisation, the same for clippy and the tests so OCCT is compiled once.
       CARGO_PROFILE_DEV_OPT_LEVEL: ${{ matrix.os == 'windows-latest' && '1' || '0' }}
+      # On the Windows runners OCCT's parallel booleans took about 30 times longer than
+      # on macOS (38 min for the reference impeller), the threads waiting on each other;
+      # there they run on one thread, which costs some 20 % on macOS.
+      TP_CAD_SERIAL: ${{ matrix.os == 'windows-latest' && '1' || '' }}
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -56,16 +60,23 @@ jobs:
           path: target/OCCT
           key: ${{ steps.occt.outputs.cache-primary-key }}
       - run: cargo clippy --workspace --all-targets
+      # A limit per step, so that a hang fails here instead of using up the job.
       - name: Tests
-        if: runner.os != 'Windows'
+        timeout-minutes: 75
         run: cargo test --workspace
-      - name: Tests sin CAD
-        if: runner.os == 'Windows'
-        run: cargo test --workspace --exclude tp-cad
-      # OCCT's parallel booleans contend badly when many CAD tests run at once.
-      - name: Tests de CAD, uno a uno
-        if: runner.os == 'Windows'
-        run: cargo test -p tp-cad -- --test-threads=1
+      # Parallel against one-thread booleans on a short CAD test, to see what the
+      # Windows runners make of OCCT's threads (informational).
+      - name: Diagnóstico de OCCT, booleanas en paralelo y en una hebra
+        if: runner.os == 'Windows' && !cancelled()
+        continue-on-error: true
+        timeout-minutes: 20
+        shell: bash
+        run: |
+          for serial in 0 1; do
+            start=$(date +%s)
+            TP_CAD_SERIAL=$serial cargo test -p tp-cad diffuser::tests::diffuser_solids_are_valid -- --exact
+            echo "TP_CAD_SERIAL=$serial: $(( $(date +%s) - start )) s"
+          done
       - name: Tests sin CoolProp
         run: cargo test -p tp-fluids --no-default-features
       - name: CLI sin CAD
