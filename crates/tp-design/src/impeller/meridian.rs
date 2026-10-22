@@ -351,6 +351,18 @@ pub struct SpanLine {
     /// Fraction of the flow between the hub and this line (0 hub, 1 shroud).
     pub fraction: f64,
     pub points: Vec<DVec2>,
+    /// Meridional velocity at each point, m/s.
+    pub cm: Vec<f64>,
+}
+
+impl SpanLine {
+    /// Meridional velocity at channel position `t` (its points are evenly spaced in t).
+    pub fn cm_at(&self, t: f64) -> f64 {
+        let n = self.cm.len() - 1;
+        let x = t.clamp(0.0, 1.0) * n as f64;
+        let i = (x.floor() as usize).min(n - 1);
+        self.cm[i] + (x - i as f64) * (self.cm[i + 1] - self.cm[i])
+    }
 }
 
 /// Quasi-one-dimensional meridional flow: uniform meridional velocity along each
@@ -378,6 +390,21 @@ pub fn equal_area_position(r_hub: f64, r_shroud: f64, fraction: f64) -> f64 {
 }
 
 impl Channel {
+    /// The same quasi-orthogonals with other stream surfaces, such as those of the
+    /// potential flow, one point per quasi-orthogonal.
+    ///
+    /// # Panics
+    /// If a span has not one point and one velocity per quasi-orthogonal: the channel
+    /// position t of a span point is its index.
+    pub fn with_spans(self, spans: Vec<SpanLine>) -> Self {
+        let n = self.quasi_orthogonals.len();
+        assert!(
+            spans.iter().all(|s| s.points.len() == n && s.cm.len() == n),
+            "stream surfaces need one point per quasi-orthogonal"
+        );
+        Self { spans, ..self }
+    }
+
     /// `quasi_orthogonals` lines along the channel and `spans` streamlines (≥ 2).
     pub fn build(
         contour: &MeridionalContour,
@@ -422,7 +449,12 @@ impl Channel {
                         q.hub.lerp(q.shroud, lambda)
                     })
                     .collect();
-                SpanLine { fraction, points }
+                let cm = qos.iter().map(|q| q.cm).collect();
+                SpanLine {
+                    fraction,
+                    points,
+                    cm,
+                }
             })
             .collect();
         Self {

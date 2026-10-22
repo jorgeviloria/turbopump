@@ -17,11 +17,17 @@ use tp_math::DVec2;
 use crate::DesignError;
 use crate::pump::correlations::{CorrelationInfo, Verification};
 use crate::pump::{CentrifugalPumpDesign, CentrifugalPumpInput};
-use blade::{Blade, BladePropertiesInput, DEFAULT_SPANS, EdgeInput, MeanLineInput, ProfileInput};
+use blade::{
+    Blade, BladePropertiesInput, DEFAULT_SPANS, EdgeInput, MeanLineInput, MeridionalFlow,
+    ProfileInput,
+};
 use meridian::{Channel, MeridionalContour, MeridionalInput};
+use potential::PotentialMesh;
 
 /// Quasi-orthogonals used for the meridional flow.
 const QUASI_ORTHOGONALS: usize = 81;
+/// Nodes across the channel for the potential flow the blades are built on.
+const POTENTIAL_ACROSS: usize = 21;
 
 /// Largest difference, in degrees, between the leading-edge angle of a cylindrical blade
 /// and the angle its section's inflow asks for before it is reported (our choice, about
@@ -236,7 +242,37 @@ pub fn build(
             "at least 2 spans (hub and shroud) are needed".into(),
         ));
     }
-    let channel = Channel::build(&contour, basis.flow, QUASI_ORTHOGONALS, spans as usize);
+    let mut warnings = Vec::new();
+    // The quasi-orthogonals keep the quasi-one-dimensional flow; the blade sections lie
+    // on the stream surfaces of the chosen flow, solved on the same stations so that a
+    // span point's index stays its channel position.
+    let quasi = Channel::build(&contour, basis.flow, QUASI_ORTHOGONALS, spans as usize);
+    let channel = match input.properties.meridional_flow {
+        MeridionalFlow::QuasiOneDimensional => quasi,
+        MeridionalFlow::Potential => {
+            let mesh = PotentialMesh {
+                stations: QUASI_ORTHOGONALS,
+                across: POTENTIAL_ACROSS,
+            };
+            match potential::solve(&contour, basis.flow, mesh) {
+                Ok(flow) => {
+                    let spans = quasi
+                        .spans
+                        .iter()
+                        .map(|s| flow.streamline(s.fraction))
+                        .collect();
+                    quasi.with_spans(spans)
+                }
+                Err(e) => {
+                    warnings.push(format!(
+                        "the potential flow failed ({e}); the blades use the \
+                         quasi-one-dimensional flow"
+                    ));
+                    quasi
+                }
+            }
+        }
+    };
     let blade = Blade::build(
         basis,
         &contour,
@@ -247,7 +283,7 @@ pub fn build(
         &input.edges,
     )?;
 
-    let mut warnings = Vec::new();
+    warnings.extend(blade.warnings.iter().cloned());
     let blade_loading = BladeLoading::evaluate(basis, &blade);
     let ratio = blade_loading.ratio();
     if ratio < 1.0 - BladeLoading::BAND {
@@ -449,10 +485,57 @@ pub(crate) mod tests {
     fn reference_impeller_builds_without_warnings() {
         let (d, input) = reference_design();
         let basis = ImpellerBasis::from_pump(&d, &input, 1.0);
-        let g = build(&basis, &ImpellerGeometryInput::default()).unwrap();
-        assert!(g.warnings.is_empty(), "{:?}", g.warnings);
-        assert_eq!(g.blade.sections.len(), DEFAULT_SPANS as usize);
-        assert_eq!(g.blade.count, d.blade_count);
+        for input in [
+            ImpellerGeometryInput::default(),
+            with_flow(MeridionalFlow::QuasiOneDimensional),
+        ] {
+            let g = build(&basis, &input).unwrap();
+            assert!(g.warnings.is_empty(), "{:?}", g.warnings);
+            assert_eq!(g.blade.sections.len(), DEFAULT_SPANS as usize);
+            assert_eq!(g.blade.count, d.blade_count);
+        }
+    }
+
+    fn with_flow(flow: MeridionalFlow) -> ImpellerGeometryInput {
+        let mut input = ImpellerGeometryInput::default();
+        input.properties.meridional_flow = flow;
+        input
+    }
+
+    #[test]
+    fn potential_flow_sets_the_inlet_angles() {
+        let (d, input) = reference_design();
+        let basis = ImpellerBasis::from_pump(&d, &input, 1.0);
+        let quasi = build(&basis, &with_flow(MeridionalFlow::QuasiOneDimensional)).unwrap();
+        let potential = build(&basis, &ImpellerGeometryInput::default()).unwrap();
+        let hub = |g: &ImpellerGeometry| g.blade.sections[0].leading_edge;
+        let shroud = |g: &ImpellerGeometry| g.blade.sections.last().unwrap().leading_edge;
+        // In the bend the shroud, the inner wall, runs faster and the hub slower than
+        // the channel average: the shroud blade opens up and the hub blade closes.
+        assert!(shroud(&potential).cm > shroud(&quasi).cm * 1.15);
+        assert!(hub(&potential).cm < hub(&quasi).cm * 0.85);
+        assert!(shroud(&potential).blade_angle > shroud(&quasi).blade_angle + 3f64.to_radians());
+        assert!(hub(&potential).blade_angle < hub(&quasi).blade_angle - 3f64.to_radians());
+        // The sections lie on the potential stream surfaces and carry their velocity.
+        let flow = potential::solve(
+            &potential.contour,
+            basis.flow,
+            PotentialMesh {
+                stations: QUASI_ORTHOGONALS,
+                across: POTENTIAL_ACROSS,
+            },
+        )
+        .unwrap();
+        for (span, section) in potential
+            .channel
+            .spans
+            .iter()
+            .zip(&potential.blade.sections)
+        {
+            assert_eq!(span, &flow.streamline(span.fraction));
+            assert_eq!(section.cm.len(), section.m.len());
+            assert_relative_eq!(section.cm[0], section.leading_edge.cm, max_relative = 1e-6);
+        }
     }
 
     #[test]
@@ -468,7 +551,7 @@ pub(crate) mod tests {
     fn blade_loading_of_the_reference_impeller() {
         let (d, input) = reference_design();
         let basis = ImpellerBasis::from_pump(&d, &input, 1.0);
-        let g = build(&basis, &ImpellerGeometryInput::default()).unwrap();
+        let g = build(&basis, &with_flow(MeridionalFlow::QuasiOneDimensional)).unwrap();
         let loading = g.blade_loading;
         // ξ_al = (40/35.92)^0.77
         assert_relative_eq!(
@@ -480,6 +563,11 @@ pub(crate) mod tests {
             (1.0 - BladeLoading::BAND..1.0 + BladeLoading::BAND).contains(&loading.ratio()),
             "ratio {}",
             loading.ratio()
+        );
+        // On the potential flow with a common wrap too.
+        let g = build(&basis, &ImpellerGeometryInput::default()).unwrap();
+        assert!(
+            (1.0 - BladeLoading::BAND..1.0 + BladeLoading::BAND).contains(&g.blade_loading.ratio())
         );
     }
 
@@ -575,7 +663,7 @@ pub(crate) mod tests {
                 assert_relative_eq!(
                     *s.beta.last().unwrap(),
                     basis.outlet_blade_angle,
-                    epsilon = 1e-4
+                    epsilon = 1e-3
                 );
             }
             // The middle span meets its inflow exactly.

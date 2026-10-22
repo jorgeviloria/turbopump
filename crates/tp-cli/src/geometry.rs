@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 use clap::Args;
 use tp_design::Param;
 use tp_design::impeller::ImpellerGeometryInput;
-use tp_design::impeller::blade::{BetaDistribution, BladeShape, EdgeShape};
+use tp_design::impeller::blade::{
+    BetaDistribution, BladeShape, EdgeShape, MeridionalFlow, WrapMode,
+};
 use tp_design::impeller::{BladeLoading, ImpellerGeometry};
 use tp_io::dwg::{self, DwgVersion};
 use tp_project::{ComponentId, ComponentKind, Project};
@@ -24,7 +26,9 @@ pub(crate) struct GeometryArgs {
     component: Option<u32>,
     /// Fix an input as KEY=VALUE, or KEY=auto. Keys: axial-length, hub-in, hub-out,
     /// shroud-in, shroud-out (Bézier tangent fractions), le-hub, le-shroud (leading-edge
-    /// position as a fraction of the contour), spans, shape (free-form, cylindrical,
+    /// position as a fraction of the contour), spans, flow (potential or quasi-1d: the
+    /// meridional flow the sections are built on), wrap (auto or an angle: the wrap every
+    /// section shares; free: each its own), shape (free-form, cylindrical,
     /// circular-arc or straight), points, beta (linear, or smooth:IN,OUT), le and te
     /// (cut, round or ellipse:RATIO), e-le, e-te (thickness).
     #[arg(long = "set", value_name = "KEY=VALUE")]
@@ -198,6 +202,20 @@ fn apply(
         "le-hub" => m.leading_edge_hub = quantity(Dimensionless)?,
         "le-shroud" => m.leading_edge_shroud = quantity(Dimensionless)?,
         "spans" => input.properties.spans = count()?,
+        "wrap" => match value {
+            "free" => input.mean_lines.wrap = WrapMode::Free,
+            _ => {
+                input.mean_lines.wrap = WrapMode::Common;
+                input.mean_lines.wrap_angle = quantity(QuantityKind::Angle)?;
+            }
+        },
+        "flow" => {
+            input.properties.meridional_flow = match value {
+                "potential" | "auto" => MeridionalFlow::Potential,
+                "quasi-1d" => MeridionalFlow::QuasiOneDimensional,
+                _ => return Err(format!("flow must be potential or quasi-1d, got {value:?}")),
+            }
+        }
         "shape" => {
             input.properties.shape = match value {
                 "free-form" | "auto" => BladeShape::FreeForm,
@@ -221,7 +239,7 @@ fn apply(
         _ => {
             return Err(format!(
                 "unknown key {key:?}; valid keys: axial-length, hub-in, hub-out, shroud-in, \
-                 shroud-out, le-hub, le-shroud, spans, shape, points, beta, e-le, e-te, le, te"
+                 shroud-out, le-hub, le-shroud, spans, flow, wrap, shape, points, beta, e-le, e-te, le, te"
             ));
         }
     }

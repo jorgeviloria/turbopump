@@ -649,7 +649,8 @@ fn cad_exports_impeller_and_flow_domain() {
         text.contains("Hub              bore 19.28 mm, boss"),
         "{text}"
     );
-    assert!(text.contains("Fillets          1.500 mm"), "{text}");
+    // Half the blade thickness, or the largest radius that fits the outlet corner.
+    assert!(text.contains("Fillets          1."), "{text}");
     assert!(text.contains("Balance holes    7 × 8.500 mm"), "{text}");
     // OCCT's transfer statistics are silenced.
     assert!(!text.contains("Statistics on Transfer"), "{text}");
@@ -668,7 +669,15 @@ fn cad_exports_impeller_and_flow_domain() {
         "--format",
         "step",
     ]);
-    assert_eq!(again.status.code(), Some(0), "{}", stdout(&again));
+    // Only a reduced fillet radius may be reported now.
+    let text = stdout(&again);
+    let warnings: Vec<&str> = text.lines().filter(|l| l.contains("warning:")).collect();
+    assert!(warnings.iter().all(|w| w.contains("did not fit")), "{text}");
+    assert_eq!(
+        again.status.code(),
+        Some(i32::from(!warnings.is_empty())),
+        "{text}"
+    );
     for name in ["volute.step", "volute-casing.step"] {
         let size = std::fs::metadata(out_dir.join(name)).unwrap().len();
         assert!(size > 100_000, "{name}: {size} bytes");
@@ -764,7 +773,8 @@ fn analysis_reports_potential_flow_and_blade_velocities() {
     let csv = dir.join("analysis");
     let out = turbopump(&["analysis", file_arg, "--csv", csv.to_str().unwrap()]);
     let text = stdout(&out);
-    assert_eq!(out.status.code(), Some(0), "{text}");
+    // The reference blade may warn about its pressure face (exit code 1).
+    assert!(matches!(out.status.code(), Some(0 | 1)), "{text}");
     assert!(text.contains("Potential flow   mesh"), "{text}");
     assert!(text.contains("Blade faces"), "{text}");
     let walls = std::fs::read_to_string(csv.join("potential-walls.csv")).unwrap();

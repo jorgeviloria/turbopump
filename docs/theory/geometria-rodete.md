@@ -139,15 +139,30 @@ Se resuelve sin cancelación numérica.
 **Aviso.** Si $c_m$ sube más de un 5 % respecto a su mínimo aguas arriba, el contorno
 acelera el flujo localmente y conviene suavizarlo.
 
-> El método potencial 2D (función de corriente) que corrige $c_m$ por la curvatura del
-> canal queda para la Fase 7.
+**Flujo sobre el que se construyen los álabes.** Las cuasi-ortogonales conservan el
+cálculo cuasi-1D (vistas y aviso de arriba). Las secciones del álabe, en cambio, se
+colocan por defecto sobre las superficies de corriente del **flujo potencial 2D**
+([prestaciones.md](prestaciones.md), sección 2), como hacen los programas comerciales con
+su cálculo meridional. Se resuelve en las mismas 81 estaciones, así que el índice de un
+punto sigue siendo su posición $t$ en el canal, y cada línea de corriente lleva su $c_m$
+punto a punto. En el codo de axial a radial la cubierta es la pared interior: allí el
+flujo va más rápido que la media y en el cubo más lento. En el rodete de referencia,
+$c_m$ en el borde de ataque pasa de 6,5 a 8,5 m/s en la cubierta y de 5,9 a 4,1 m/s en el
+cubo. Se puede volver al cálculo cuasi-1D; si el flujo potencial falla, se usa el
+cuasi-1D y se avisa.
 
 ## 3. Propiedades del álabe
 
-**Velocidades en el borde de ataque.** En cada span se toman el radio y la $c_m$ reales
-del borde de ataque, con entrada sin prerrotación:
+**Velocidades en el borde de ataque.** En cada span se toman el radio del borde de
+ataque y la $c_m$ de su línea de corriente en ese punto (del flujo potencial, por
+defecto), con entrada sin prerrotación:
 
 $$u_1 = \omega r_{LE}, \qquad \beta_1 = \arctan(c_m/u_1), \qquad \beta_{1B} = \arctan(\tau_1 c_m/u_1) + i$$
+
+Con el flujo potencial, en el rodete de referencia $\beta_{1B}$ pasa de 33° a 40° en la
+cubierta y de 53° a 44° en el cubo: el álabe se tuerce menos en el borde de ataque. La
+cubierta queda más corta (127 → 116 mm), y el criterio de carga de Gülich sube de 1,11 a
+1,17, justo por encima de su banda.
 
 **Ángulo de salida.** $\beta_{2B}$ es el mismo en todos los spans, porque la salida es
 radial con $u_2$ y $c_{m2}$ uniformes.
@@ -201,6 +216,23 @@ La integral se calcula con trapecios sobre 2000 pasos.
 
 **Apilado.** Todas las secciones tienen $\theta = 0$ en la salida, así que el borde de
 salida es una recta axial. El ángulo de envolvimiento es $\theta$ en el borde de ataque.
+
+**Envolvimiento común (por defecto).** Si cada sección envolviera lo que da su propia
+distribución de β, el borde de ataque quedaría barrido en dirección tangencial. Sobre el
+flujo potencial, en el rodete de referencia, el cubo envuelve 145° y la cubierta 97°. Eso
+inclina el álabe hasta 36° respecto a la cubierta y alarga la nariz del redondeo. Como
+hacen los programas comerciales con su "envolvimiento medio", todas las secciones toman el
+mismo envolvimiento: la media de los que darían por sí solas, o uno fijado a mano. Cada
+sección conserva $\beta_{1B}$, $\beta_{2B}$ y sus pendientes en los bordes; a su
+distribución de β se le suma
+
+$$\Delta\beta = a\,\bigl(4\bar m(1-\bar m)\bigr)^2$$
+
+y $a$ se busca con el método de Brent para que $\theta_{LE}$ sea el común. El
+envolvimiento baja al crecer $a$. $\beta$ se mantiene entre 5° y 90°; si así no se
+alcanza el objetivo, se avisa. En la referencia todas las secciones envuelven 119,7°, el
+álabe forma al menos 59° con las paredes y la carga de Gülich vuelve a 0,99. Con
+"cada una el suyo" se recupera el comportamiento anterior.
 
 **Comprobación de la integración.** Una línea radial con β constante debe dar la espiral
 logarítmica $\theta = \ln(r_2/r_1)/\tan\beta$.

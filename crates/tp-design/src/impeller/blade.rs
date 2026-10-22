@@ -14,10 +14,10 @@
 use std::f64::consts::{FRAC_PI_2, PI};
 
 use serde::{Deserialize, Serialize};
-use tp_math::{Bezier, DVec2, DVec3, Polyline};
+use tp_math::{Bezier, DVec2, DVec3, Polyline, roots};
 
 use super::ImpellerBasis;
-use super::meridian::{Channel, MeridionalContour};
+use super::meridian::{Channel, MeridionalContour, SpanLine};
 use crate::triangle::blockage_factor;
 use crate::{DesignError, Param};
 
@@ -28,6 +28,20 @@ pub struct BladePropertiesInput {
     /// Number of blade sections from hub to shroud (≥ 2).
     pub spans: Param<u32>,
     pub shape: BladeShape,
+    /// Which meridional flow places the sections and gives their meridional velocity.
+    pub meridional_flow: MeridionalFlow,
+}
+
+/// The meridional flow the blade sections are built on.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MeridionalFlow {
+    /// Stream surfaces and meridional velocity of the two-dimensional potential flow:
+    /// faster on the inside of the bend (the shroud), slower at the hub.
+    #[default]
+    Potential,
+    /// Equal-area stream surfaces with c_m uniform along each quasi-orthogonal.
+    QuasiOneDimensional,
 }
 
 /// Shape of the blade surface.
@@ -165,7 +179,28 @@ pub struct MeanLineInput {
     pub beta: BetaDistribution,
     /// Points per section from leading to trailing edge.
     pub points: Param<u32>,
+    pub wrap: WrapMode,
+    /// Wrap angle every free-form section shares with [`WrapMode::Common`], rad;
+    /// automatic: the mean of the wraps their own β distributions give them.
+    pub wrap_angle: Param<f64>,
 }
+
+/// How the wrap angles of the sections relate.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WrapMode {
+    /// Every section wraps the same angle, so the leading edge has no tangential sweep:
+    /// each section keeps its edge angles and their gradients, and a bump
+    /// a·16m̄²(1 − m̄)² added to its β distribution takes it to the common wrap (as commercial programs set an average
+    /// wrap angle by moving the inner points of their mean lines).
+    #[default]
+    Common,
+    /// Each section wraps what its own β distribution gives.
+    Free,
+}
+
+/// Blade angles the wrap bump may reach, rad.
+const BUMP_BETA_RANGE: (f64, f64) = (5.0 * PI / 180.0, FRAC_PI_2);
 
 /// Inputs of the blade-profile step: normal blade thickness, varying linearly from
 /// leading to trailing edge before the edges are shaped. Default: the thickness of the
@@ -251,6 +286,8 @@ pub struct BladeSection {
     pub theta: Vec<f64>,
     /// Normal thickness, m.
     pub thickness: Vec<f64>,
+    /// Meridional velocity of the stream surface at each station, m/s.
+    pub cm: Vec<f64>,
     pub leading_edge: LeadingEdge,
     /// The face toward the direction of rotation.
     pub pressure: Face,
@@ -454,6 +491,7 @@ pub struct Blade {
     pub rotation_sign: f64,
     pub outlet_blade_angle: f64,
     pub sections: Vec<BladeSection>,
+    pub warnings: Vec<String>,
 }
 
 /// Normalized station positions m̄ ∈ [0, 1], clustered at both edges.
@@ -507,6 +545,21 @@ fn length_at(line: &Polyline<DVec2>, t: f64) -> f64 {
     cumulative[i] + w * (cumulative[i + 1] - cumulative[i])
 }
 
+/// Channel position t of arc length `s` along a span polyline (the inverse of
+/// [`length_at`]).
+fn position_at(line: &Polyline<DVec2>, s: f64) -> f64 {
+    let cumulative = line.cumulative_lengths();
+    let n = cumulative.len() - 1;
+    let i = cumulative.partition_point(|&c| c < s).clamp(1, n) - 1;
+    let step = cumulative[i + 1] - cumulative[i];
+    let w = if step > 0.0 {
+        ((s - cumulative[i]) / step).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    (i as f64 + w) / n as f64
+}
+
 /// Smallest dr/dm at the reference leading edge of a cylindrical blade: below it the
 /// plan-view angle would have to be nearly tangential.
 const MIN_CYLINDRICAL_SLOPE: f64 = 0.2;
@@ -557,14 +610,86 @@ fn leading_edge(basis: &ImpellerBasis, position: DVec2, cm: f64, thickness: f64)
     }
 }
 
-fn section(
+/// What a section's mean line rests on before its wrap is chosen: the stream line, the
+/// edges and their angles, and the radius on a fine grid of m̄.
+struct SpanFrame<'a> {
+    span: &'a SpanLine,
+    line: Polyline<DVec2>,
+    s_le: f64,
+    meridional_length: f64,
+    le: LeadingEdge,
+    beta1: f64,
+    beta2: f64,
+    radius: Vec<f64>,
+}
+
+/// The shape of the wrap bump: 0 at both edges, with zero slope there so that the β
+/// gradients at the edges stay as the distribution gives them, and 1 halfway.
+fn bump_shape(mbar: f64) -> f64 {
+    let q = 4.0 * mbar * (1.0 - mbar);
+    q * q
+}
+
+impl SpanFrame<'_> {
+    /// Blade angle at m̄ with the wrap bump `bump`.
+    fn beta(&self, distribution: BetaDistribution, bump: f64, mbar: f64) -> f64 {
+        beta_at(distribution, self.beta1, self.beta2, mbar) + bump * bump_shape(mbar)
+    }
+
+    /// θ on the fine grid from the trailing edge back, θ = ∫ dm/(r·tan β).
+    fn theta_fine(&self, distribution: BetaDistribution, bump: f64) -> Vec<f64> {
+        let n = INTEGRATION_STEPS;
+        let f: Vec<f64> = (0..=n)
+            .map(|i| {
+                let mbar = i as f64 / n as f64;
+                1.0 / (self.radius[i] * self.beta(distribution, bump, mbar).tan())
+            })
+            .collect();
+        let dm = self.meridional_length / n as f64;
+        let mut theta = vec![0.0; n + 1];
+        for i in (0..n).rev() {
+            theta[i] = theta[i + 1] + 0.5 * dm * (f[i] + f[i + 1]);
+        }
+        theta
+    }
+
+    fn wrap(&self, distribution: BetaDistribution, bump: f64) -> f64 {
+        self.theta_fine(distribution, bump)[0]
+    }
+
+    /// The bump that gives the section the wrap `target`, within the blade angles of
+    /// [`BUMP_BETA_RANGE`]; `Err` with the nearest bump when the target is out of reach.
+    fn bump_for(&self, distribution: BetaDistribution, target: f64) -> Result<f64, f64> {
+        let n = INTEGRATION_STEPS;
+        let (lo_beta, hi_beta) = BUMP_BETA_RANGE;
+        let (mut lo, mut hi) = (f64::NEG_INFINITY, f64::INFINITY);
+        for i in 1..n {
+            let mbar = i as f64 / n as f64;
+            let q = bump_shape(mbar);
+            let base = beta_at(distribution, self.beta1, self.beta2, mbar);
+            lo = lo.max((lo_beta - base) / q);
+            hi = hi.min((hi_beta - base) / q);
+        }
+        let (lo, hi) = (lo.min(0.0), hi.max(0.0));
+        // More angle, less wrap.
+        let excess = |a: f64| self.wrap(distribution, a) - target;
+        if excess(lo) < 0.0 {
+            return Err(lo);
+        }
+        if excess(hi) > 0.0 {
+            return Err(hi);
+        }
+        roots::brent(excess, lo, hi, 1e-10).map_err(|_| 0.0)
+    }
+}
+
+fn frame<'a>(
     basis: &ImpellerBasis,
     contour: &MeridionalContour,
-    channel: &Channel,
+    channel: &'a Channel,
     span_index: usize,
     settings: &SectionSettings,
-    plan: Option<&PlanView>,
-) -> Result<BladeSection, DesignError> {
+) -> Result<SpanFrame<'a>, DesignError> {
     let span = &channel.spans[span_index];
     let line = Polyline::new(span.points.clone()).expect("channel spans have points");
     // Leading-edge channel position on this stream line.
@@ -577,7 +702,7 @@ fn section(
     let le = leading_edge(
         basis,
         le_position,
-        channel.cm_at(t_le),
+        span.cm_at(t_le),
         settings.thickness_leading,
     );
     if !le.blockage.is_finite() {
@@ -587,22 +712,45 @@ fn section(
         )));
     }
     let beta2 = basis.outlet_blade_angle_at(line.point_at_length(s_te).y)?;
-    let (beta1, beta2) = (le.blade_angle, beta2);
-    let beta = |mbar: f64| beta_at(settings.beta, beta1, beta2, mbar);
-
-    // Conformal mapping on a fine grid: θ(m) = ∫ dm / (r tan β), from the TE backwards.
-    let fine: Vec<(f64, f64)> = (0..=INTEGRATION_STEPS)
+    let radius = (0..=INTEGRATION_STEPS)
         .map(|i| {
             let mbar = i as f64 / INTEGRATION_STEPS as f64;
-            let r = line.point_at_length(s_le + mbar * meridional_length).y;
-            (mbar, 1.0 / (r * beta(mbar).tan()))
+            line.point_at_length(s_le + mbar * meridional_length).y
         })
         .collect();
-    let mut theta_fine = vec![0.0; fine.len()];
-    let dm = meridional_length / INTEGRATION_STEPS as f64;
-    for i in (0..INTEGRATION_STEPS).rev() {
-        theta_fine[i] = theta_fine[i + 1] + 0.5 * dm * (fine[i].1 + fine[i + 1].1);
-    }
+    Ok(SpanFrame {
+        span,
+        beta1: le.blade_angle,
+        beta2,
+        line,
+        s_le,
+        meridional_length,
+        le,
+        radius,
+    })
+}
+
+/// One section on its frame, its β distribution raised by the wrap bump `bump`.
+fn section(
+    frame: &SpanFrame<'_>,
+    basis: &ImpellerBasis,
+    settings: &SectionSettings,
+    plan: Option<&PlanView>,
+    bump: f64,
+) -> Result<BladeSection, DesignError> {
+    let SpanFrame {
+        span,
+        line,
+        s_le,
+        meridional_length,
+        le,
+        ..
+    } = frame;
+    let (s_le, meridional_length, le) = (*s_le, *meridional_length, *le);
+    let beta = |mbar: f64| frame.beta(settings.beta, bump, mbar);
+
+    // Conformal mapping on a fine grid: θ(m) = ∫ dm / (r tan β), from the TE backwards.
+    let theta_fine = frame.theta_fine(settings.beta, bump);
     let theta_at = |mbar: f64| {
         let x = mbar * INTEGRATION_STEPS as f64;
         let i = (x.floor() as usize).min(INTEGRATION_STEPS - 1);
@@ -616,6 +764,10 @@ fn section(
         .iter()
         .map(|&mm| line.point_at_length(s_le + mm))
         .collect();
+    let cm: Vec<f64> = m
+        .iter()
+        .map(|&mm| span.cm_at(position_at(line, s_le + mm)))
+        .collect();
     let (betas, theta): (Vec<f64>, Vec<f64>) = match plan {
         None => (
             mbars.iter().map(|&x| beta(x)).collect(),
@@ -627,7 +779,7 @@ fn section(
             .iter()
             .zip(&meridional)
             .map(|(&mm, p)| {
-                let dr_dm = radial_slope(&line, s_le + mm);
+                let dr_dm = radial_slope(line, s_le + mm);
                 if dr_dm < -1e-3 {
                     return Err(DesignError::Infeasible(format!(
                         "a cylindrical blade needs the radius to grow along each section, \
@@ -662,10 +814,10 @@ fn section(
         })
         .collect();
 
-    let conformal = ConformalLine::new(&line);
+    let conformal = ConformalLine::new(line);
     let faces = [1.0, -1.0].map(|side| {
         face(
-            &line,
+            line,
             &conformal,
             s_le,
             &m,
@@ -696,6 +848,7 @@ fn section(
         beta: betas,
         theta,
         thickness,
+        cm,
         leading_edge: le,
         pressure,
         suction,
@@ -724,7 +877,7 @@ fn span_leading_edge(
     let s = length_at(&line, t_le);
     let position = line.point_at_length(s);
     (
-        leading_edge(basis, position, channel.cm_at(t_le), thickness),
+        leading_edge(basis, position, span.cm_at(t_le), thickness),
         radial_slope(&line, s),
     )
 }
@@ -851,14 +1004,52 @@ impl Blade {
         } else {
             None
         };
-        let sections = (0..channel.spans.len())
-            .map(|j| section(basis, contour, channel, j, &settings, plan.as_ref()))
+        let frames = (0..channel.spans.len())
+            .map(|j| frame(basis, contour, channel, j, &settings))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut warnings = Vec::new();
+        // A common wrap: each free-form section gets the bump that takes it there.
+        let bumps: Vec<f64> = match mean_lines.wrap {
+            WrapMode::Common if plan.is_none() => {
+                let target = match mean_lines.wrap_angle {
+                    Param::Manual(w) => positive("wrap angle", w)?,
+                    Param::Auto => {
+                        frames
+                            .iter()
+                            .map(|f| f.wrap(settings.beta, 0.0))
+                            .sum::<f64>()
+                            / frames.len() as f64
+                    }
+                };
+                frames
+                    .iter()
+                    .map(|f| {
+                        f.bump_for(settings.beta, target).unwrap_or_else(|nearest| {
+                            warnings.push(format!(
+                                "the common wrap of {:.0}° is out of reach at span {:.2}: the \
+                                 section wraps {:.0}°",
+                                target.to_degrees(),
+                                f.span.fraction,
+                                f.wrap(settings.beta, nearest).to_degrees()
+                            ));
+                            nearest
+                        })
+                    })
+                    .collect()
+            }
+            _ => vec![0.0; frames.len()],
+        };
+        let sections = frames
+            .iter()
+            .zip(bumps)
+            .map(|(f, bump)| section(f, basis, &settings, plan.as_ref(), bump))
             .collect::<Result<_, _>>()?;
         Ok(Self {
             count: basis.blade_count,
             rotation_sign: basis.rotation_sign,
             outlet_blade_angle: basis.outlet_blade_angle,
             sections,
+            warnings,
         })
     }
 }
@@ -1050,6 +1241,7 @@ mod tests {
                     inlet: 0.3,
                     outlet: 0.3,
                 },
+                wrap: WrapMode::Free,
                 ..Default::default()
             },
             EdgeInput::default(),
@@ -1060,6 +1252,49 @@ mod tests {
         // Monotone between the edge values.
         let (lo, hi) = (22f64.to_radians(), s.beta[0]);
         assert!(s.beta.iter().all(|&b| b >= lo - 1e-9 && b <= hi + 1e-9));
+    }
+
+    #[test]
+    fn a_common_wrap_lines_up_the_leading_edge() {
+        let free = blade_with(
+            MeanLineInput {
+                wrap: WrapMode::Free,
+                ..Default::default()
+            },
+            EdgeInput::default(),
+        );
+        let common = reference();
+        let wraps: Vec<f64> = free.sections.iter().map(BladeSection::wrap_angle).collect();
+        let mean = wraps.iter().sum::<f64>() / wraps.len() as f64;
+        assert!(wraps.iter().any(|w| (w - mean).abs() > 1f64.to_radians()));
+        for (c, f) in common.sections.iter().zip(&free.sections) {
+            // The mean of the free wraps, on every section, with the edge angles kept.
+            assert_relative_eq!(c.wrap_angle(), mean, max_relative = 1e-6);
+            assert_relative_eq!(c.beta[0], f.beta[0], epsilon = 1e-12);
+            assert_relative_eq!(
+                *c.beta.last().unwrap(),
+                *f.beta.last().unwrap(),
+                epsilon = 1e-12
+            );
+        }
+        assert!(common.warnings.is_empty());
+        // A manual wrap is met too, and one out of reach is reported.
+        let wrapped = |angle: f64| {
+            blade_with(
+                MeanLineInput {
+                    wrap_angle: Param::Manual(angle.to_radians()),
+                    ..Default::default()
+                },
+                EdgeInput::default(),
+            )
+        };
+        let b = wrapped(150.0);
+        for s in &b.sections {
+            assert_relative_eq!(s.wrap_angle().to_degrees(), 150.0, max_relative = 1e-6);
+        }
+        assert!(b.warnings.is_empty());
+        let far = wrapped(5.0);
+        assert!(far.warnings.iter().any(|w| w.contains("out of reach")));
     }
 
     #[test]

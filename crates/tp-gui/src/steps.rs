@@ -3,7 +3,8 @@
 use eframe::egui::{self, ComboBox, DragValue, Grid, RichText, Ui};
 use tp_design::MainDimensionsInput;
 use tp_design::impeller::blade::{
-    BetaDistribution, BladeShape, DEFAULT_POINTS, DEFAULT_SPANS, EdgeShape,
+    BetaDistribution, BladeShape, DEFAULT_POINTS, DEFAULT_SPANS, EdgeShape, MeridionalFlow,
+    WrapMode,
 };
 use tp_design::impeller::meridian::{
     DEFAULT_LEADING_EDGE_HUB, DEFAULT_LEADING_EDGE_SHROUD, DEFAULT_TANGENT,
@@ -1362,6 +1363,29 @@ fn blade_properties(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Co
         );
         label(
             ui,
+            tr("Meridional flow"),
+            tr(
+                "Stream surfaces and c_m the sections are built on. The potential flow is faster on the shroud and slower at the hub in the bend, which sets the inlet angle of each section; the quasi-1D flow keeps c_m uniform across the channel",
+            ),
+        );
+        ComboBox::from_id_salt("meridional_flow")
+            .selected_text(match input.properties.meridional_flow {
+                MeridionalFlow::Potential => tr("potential (2D)"),
+                MeridionalFlow::QuasiOneDimensional => tr("quasi-1D"),
+            })
+            .show_ui(ui, |ui| {
+                for (flow, text) in [
+                    (MeridionalFlow::Potential, tr("potential (2D)")),
+                    (MeridionalFlow::QuasiOneDimensional, tr("quasi-1D")),
+                ] {
+                    changed |= ui
+                        .selectable_value(&mut input.properties.meridional_flow, flow, text)
+                        .changed();
+                }
+            });
+        ui.end_row();
+        label(
+            ui,
             tr("Blade shape"),
             tr(
                 "Cylindrical (2D) blades share one plan view swept along the axis: no lean, a one-piece core, the leading edge parallel to the axis. They suit nq below about 20 (Lobanoff & Ross ch. 3; Gülich Chap. 7.3)",
@@ -1479,6 +1503,48 @@ fn mean_lines(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
             ui.end_row();
         }
     });
+    if input.properties.shape == BladeShape::FreeForm {
+        section(ui, tr("Wrap angle"));
+        props(ui, "wrap", |ui| {
+            label(
+                ui,
+                tr("Sections"),
+                tr(
+                    "Common: every section wraps the same angle, so the leading edge has no tangential sweep; each keeps its edge angles and a bump in its β distribution takes it there. Free: each wraps what its β distribution gives",
+                ),
+            );
+            ComboBox::from_id_salt("wrap_mode")
+                .selected_text(match input.mean_lines.wrap {
+                    WrapMode::Common => tr("common wrap"),
+                    WrapMode::Free => tr("each its own"),
+                })
+                .show_ui(ui, |ui| {
+                    for (mode, text) in [
+                        (WrapMode::Common, tr("common wrap")),
+                        (WrapMode::Free, tr("each its own")),
+                    ] {
+                        changed |= ui
+                            .selectable_value(&mut input.mean_lines.wrap, mode, text)
+                            .changed();
+                    }
+                });
+            ui.end_row();
+            if input.mean_lines.wrap == WrapMode::Common {
+                changed |= param_f64(
+                    ui,
+                    tr("Wrap angle φ"),
+                    tr(
+                        "Shared by every section; automatic: the mean of the wraps their own β distributions give",
+                    ),
+                    &mut input.mean_lines.wrap_angle,
+                    QuantityKind::Angle,
+                    g.map(|g| g.blade.sections[0].wrap_angle()),
+                    &units,
+                    20f64.to_radians()..=360f64.to_radians(),
+                );
+            }
+        });
+    }
     section(ui, tr("Resolution"));
     props(ui, "points", |ui| {
         changed |= param_u32(

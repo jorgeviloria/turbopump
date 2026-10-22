@@ -49,6 +49,11 @@ impl SectionVelocities {
     }
 }
 
+/// Fraction of the meridional blade length from the leading edge beyond which a
+/// negative pressure-face velocity is not reported: the last part of the blade, where
+/// the flow already slips (our choice).
+pub const TRAILING_EDGE_SLIP: f64 = 0.95;
+
 /// Velocities on every blade section.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct BladeVelocities {
@@ -130,7 +135,7 @@ pub fn blade_velocities(g: &ImpellerGeometry) -> BladeVelocities {
                 let beta = s.beta[k];
                 let tau = blockage_factor(z, s.thickness[k], 2.0 * r, beta, FRAC_PI_2);
                 let tau = if tau.is_finite() { tau } else { 1.0 };
-                let c_m = meridional_velocity(&g.channel, p);
+                let c_m = s.cm[k];
                 // The swirl follows the camber: the thickness, which grows from zero at
                 // a rounded edge, speeds the flow up but does not turn it.
                 let c_u = omega * r - c_m / beta.tan();
@@ -161,7 +166,13 @@ pub fn blade_velocities(g: &ImpellerGeometry) -> BladeVelocities {
                 .zip(&loading)
                 .map(|(w, l)| w - l / 2.0)
                 .collect();
-            if let Some(k) = pressure.iter().position(|&w| w < 0.0) {
+            // Close to the trailing edge the flow leaves the blade with slip (Gülich
+            // Chap. 3.3); the estimate, which keeps it on the blade, means little there.
+            if let Some(k) = pressure
+                .iter()
+                .zip(&s.m)
+                .position(|(&w, &m)| w < 0.0 && m / total < TRAILING_EDGE_SLIP)
+            {
                 warnings.push(format!(
                     "the relative velocity on the pressure face turns negative at m̄ = {:.2} \
                      on span {:.2}: the flow may separate there",

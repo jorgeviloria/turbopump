@@ -9,7 +9,8 @@
 //! is 2π times the difference of ψ. The equation is solved with linear triangles on a
 //! structured mesh: ψ = 0 on the hub, ψ = Q/2π on the shroud, and flow normal to the
 //! inlet and outlet lines. For an impeller, a straight annulus ahead of the eye and a
-//! radial ring after the outlet keep those boundaries away from the blades. Unlike the
+//! ring after the outlet, along the walls' outflow direction, keep those boundaries
+//! away from the blades. Unlike the
 //! quasi-one-dimensional flow of the meridional step, the meridional velocity varies
 //! across the channel: it is higher on the inside of a bend (see
 //! `docs/theory/prestaciones.md`).
@@ -68,9 +69,9 @@ impl PotentialFlow {
     }
 
     /// The stream surface enclosing `fraction` of the flow from the hub, through the
-    /// channel proper.
+    /// channel proper, with the meridional velocity along it.
     pub fn streamline(&self, fraction: f64) -> SpanLine {
-        let points = (self.channel.0..=self.channel.1)
+        let (points, cm) = (self.channel.0..=self.channel.1)
             .map(|i| {
                 let psi = |j| self.psi[self.index(i, j)];
                 let node = |j| self.nodes[self.index(i, j)];
@@ -83,10 +84,18 @@ impl PotentialFlow {
                 } else {
                     0.0
                 };
-                node(j) + (node(j + 1) - node(j)) * t
+                let cm = |j| self.cm[self.index(i, j)];
+                (
+                    node(j) + (node(j + 1) - node(j)) * t,
+                    cm(j) + (cm(j + 1) - cm(j)) * t,
+                )
             })
-            .collect();
-        SpanLine { fraction, points }
+            .unzip();
+        SpanLine {
+            fraction,
+            points,
+            cm,
+        }
     }
 
     /// Meridional velocity along a wall (`j` = 0 hub, `across − 1` shroud) against

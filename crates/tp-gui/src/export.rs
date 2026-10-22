@@ -845,7 +845,12 @@ mod cad {
             for file in &report.files {
                 assert!(std::fs::metadata(file).unwrap().len() > 1000);
             }
-            assert!(report.problems.is_empty(), "{:?}", report.problems);
+            // Only a fillet radius reduced to fit the outlet corner may be reported.
+            assert!(
+                report.problems.iter().all(|p| p.contains("did not fit")),
+                "{:?}",
+                report.problems
+            );
             assert!(report.impeller_volume > 0.0 && report.fluid_volume > 0.0);
             std::fs::remove_dir_all(&folder).unwrap();
         }

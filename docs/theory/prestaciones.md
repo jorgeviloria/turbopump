@@ -229,8 +229,9 @@ media coincide con la continuidad.
 ## 3. Velocidades en las caras del álabe
 
 **Velocidad media:** en cada sección se supone que el flujo sigue a los álabes, sin
-deslizamiento. $c_m$ se toma del flujo meridional del diseño, interpolada entre las dos
-cuasi-ortogonales que rodean cada punto. La velocidad relativa media es
+deslizamiento. $c_m$ es la de la línea de corriente de la sección en cada estación: la
+del flujo potencial por defecto, o la uniforme de las cuasi-ortogonales con el cálculo
+cuasi-1D. La velocidad relativa media es
 $w = c_m\,\tau / \sin\beta_B$, con el bloqueo local $\tau$ del espesor.
 
 **Diferencia entre caras (derivación propia):** un tramo de álabe de longitud $ds$, sobre
@@ -249,15 +250,24 @@ desvía; meterlo en $c_u$ daría una carga falsa en el borde de ataque.
 cambio de $r c_u$ entre bordes.
 
 **Aviso:** el programa avisa si la cara de presión llega a velocidad negativa, porque el
-flujo se despegaría allí.
+flujo se despegaría allí. No se avisa en el último 5 % del álabe: junto al borde de
+salida el flujo ya se separa del álabe con deslizamiento (cap. 3.3), y la estimación, que
+lo mantiene pegado, no vale ahí (elección propia). Sobre el flujo potencial, $c_m$ cae
+deprisa en la cubierta al llegar a la salida y daría allí un pico de carga ficticio.
 
-**Bomba de referencia:** $u_2 = 26{,}15$ m/s.
+**Bomba de referencia:** $u_2 = 26{,}15$ m/s, flujo potencial y envolvimiento común
+(valores por defecto).
 
 | Span | $w_{SS,max}/u_2$ | $w_{PS,min}/u_2$ | $w$ medio en el borde de ataque | $w$ medio en el de salida |
 |---|---|---|---|---|
-| 0 (cubo) | 0,585 | 0,043 | 0,283 | 0,345 |
-| 0,5 | 0,626 | 0,065 | 0,377 | 0,345 |
-| 1 (carcasa) | 0,661 | 0,034 | 0,454 | 0,345 |
+| 0 (cubo) | 0,590 | −0,062 | 0,226 | 0,329 |
+| 0,5 | 0,666 | 0,019 | 0,396 | 0,342 |
+| 1 (carcasa) | 0,795 | −0,017 (en el último 1 %) | 0,508 | 0,361 |
+
+En el cubo la cara de presión baja de cero hacia la mitad del álabe ($\bar m$ = 0,42), y
+se avisa. Lo provoca el envolvimiento común: el cubo, que por sí solo envolvería 145°,
+sube β a mitad del álabe para quedarse en 120°, y gira el flujo más deprisa. Con el
+cálculo cuasi-1D y cada sección con su envolvimiento, el mínimo era +0,043.
 
 ## 4. NPSH₃ frente al caudal
 

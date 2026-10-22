@@ -2459,6 +2459,22 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Angle of the outer streamline at the outlet to a normal to the axis: 0° radial, 90° axial (Gülich eq. 7.12, ±5° in executed pumps)",
         "Ángulo de la línea de corriente exterior a la salida respecto a una normal al eje: 0° radial, 90° axial (Gülich, ec. 7.12; ±5° en bombas construidas)",
     ),
+    (
+        "Stream surfaces and c_m the sections are built on. The potential flow is faster on the shroud and slower at the hub in the bend, which sets the inlet angle of each section; the quasi-1D flow keeps c_m uniform across the channel",
+        "Superficies de corriente y c_m sobre las que se construyen las secciones. En el codo, el flujo potencial va más rápido en la cubierta y más lento en el cubo, y eso fija el ángulo de entrada de cada sección; el flujo cuasi-1D mantiene c_m uniforme a lo ancho del canal",
+    ),
+    ("potential (2D)", "potencial (2D)"),
+    ("quasi-1D", "cuasi-1D"),
+    (
+        "Common: every section wraps the same angle, so the leading edge has no tangential sweep; each keeps its edge angles and a bump in its β distribution takes it there. Free: each wraps what its β distribution gives",
+        "Común: todas las secciones envuelven el mismo ángulo, así que el borde de ataque no queda barrido; cada una conserva sus ángulos en los bordes y una joroba en su distribución de β la lleva hasta él. Libre: cada una envuelve lo que da su distribución de β",
+    ),
+    ("common wrap", "envolvimiento común"),
+    ("each its own", "cada una el suyo"),
+    (
+        "Shared by every section; automatic: the mean of the wraps their own β distributions give",
+        "Común a todas las secciones; automático: la media de los envolvimientos que da a cada una su distribución de β",
+    ),
 ];
 
 /// Messages of the design code, most specific first.
@@ -3308,5 +3324,13 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
     (
         "cylindrical blades need a radial outlet; a semi-axial impeller takes the free-form shape",
         "los álabes cilíndricos necesitan una salida radial; un rodete semiaxial lleva la forma libre",
+    ),
+    (
+        "the potential flow failed ({}); the blades use the quasi-one-dimensional flow",
+        "el flujo potencial falló ({}); los álabes usan el flujo cuasi-unidimensional",
+    ),
+    (
+        "the common wrap of {}° is out of reach at span {}: the section wraps {}°",
+        "el envolvimiento común de {}° no se alcanza en la sección {}: envuelve {}°",
     ),
 ];
