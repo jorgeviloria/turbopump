@@ -115,6 +115,24 @@ semiaxial, la recta de $d_{2i}$ a $d_{2a}$. En el semiaxial cada sección termin
 $\beta_{2B}$ del vórtice libre ([dimensiones-principales.md](dimensiones-principales.md)).
 Los álabes cilíndricos (2D) solo se admiten con salida radial.
 
+**Editor del meridiano.** Es una vista propia para trabajar el meridiano con medidas:
+
+- **Cotas:** de $L$, de $b_2$ y de la $z$ y la $r$ de cada unión de las paredes dibujadas,
+  más las del punto bajo el puntero. Las axiales se apilan bajo el eje y los radios a la
+  derecha del rodete. Al hacer clic en el valor de una cota se escribe; la de $b_2$ solo
+  se lee, porque viene de las dimensiones principales.
+- **Líneas guía** en $d_n$, $d_1$ y $d_2$.
+- **Curvatura máxima de cada pared**, con su radio $R = 1/\kappa_{máx}$. La curvatura de
+  cada tramo Bézier sale de sus derivadas,
+  $\kappa = |x'y'' - y'x''| / (x'^2 + y'^2)^{3/2}$; la de una recta es nula.
+- **Círculos de área:** en algunas cuasi-ortogonales, un círculo de diámetro igual al
+  ancho normal al flujo, $b_n = A / (\pi (r_h + r_s))$.
+- **Tabla con todos los puntos** del cubo, la carcasa y el borde de ataque, editables.
+- **Dos progresiones:** el área de paso $A/A_1$ a lo largo del canal y la curvatura
+  $\kappa$ de cada pared a lo largo de su longitud. Son los criterios de comprobación de
+  Gülich (cap. 7.2.2.1): la curvatura de las líneas de corriente exterior e interior y el
+  área $A = 2\pi r b$ deben variar de forma continua a lo largo de la línea media.
+
 ## 2. Flujo meridional (cuasi-1D)
 
 **Cuasi-ortogonales.** Son segmentos rectos que unen puntos del cubo y de la carcasa
