@@ -188,6 +188,8 @@ pub struct CentrifugalPumpDesign {
     pub outlet: OutletSection,
     /// m
     pub npsh_required: f64,
+    /// NPSH₃ at the design point by several published methods.
+    pub npsh_band: crate::npsh::NpshBand,
     /// m
     pub npsh_available: f64,
     /// Correlation set used for the automatic efficiencies.
@@ -874,6 +876,14 @@ pub fn design(
     let n_rpm = omega * 30.0 / PI;
     let npsh_required = (n_rpm * q_eye.sqrt() / nss).powf(4.0 / 3.0);
     let npsh_available = (duty.inlet_total_pressure - duty.vapor_pressure) / (rho * G);
+    let shroud = &inlet_shroud.triangle;
+    let npsh_band = crate::npsh::npsh3_band(
+        omega,
+        q_eye,
+        shroud.cm,
+        shroud.w(),
+        crate::npsh::suction_specific_speed_band(layout, input.inlet_design, shroud.u),
+    );
     if npsh_available < npsh_required {
         warnings.push(format!(
             "NPSH available {npsh_available:.2} m is below the estimated NPSH3 \
@@ -912,6 +922,7 @@ pub fn design(
         inlet_shroud,
         outlet,
         npsh_required,
+        npsh_band,
         npsh_available,
         layout,
         efficiency_tolerance: corr::efficiency_tolerance(eta),

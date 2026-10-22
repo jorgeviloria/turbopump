@@ -261,6 +261,36 @@ $$NPSH_3 \approx \left(\frac{n\sqrt{Q/f_q}}{n_{ss}}\right)^{4/3}, \qquad NPSH_d 
 $n_{ss} = 200$ por defecto: es un valor típico de rodetes convencionales. Se avisa si
 $NPSH_d < NPSH_3$, y también si el margen es menor del 30 %.
 
+**Banda de métodos publicados.** El informe da además el $NPSH_3$ del punto óptimo por
+cinco métodos, cada uno con su intervalo, y la banda que forman. Son estimaciones de
+diseño preliminar con mucha dispersión entre sí. El $NPSH_3$ (caída de altura del 3 %) es
+un resultado de ensayo.
+
+Todos se evalúan con el caudal por boca $Q/f_q$:
+
+| Método | Fórmula | Intervalo | Fuente |
+|---|---|---|---|
+| Coeficientes de entrada | $\lambda_c\,c_{1m}^2/2g + \lambda_w\,w_1^2/2g$, en el diámetro del ojo | $\lambda_c$ 1,1–1,35; $\lambda_w$ 0,1–0,3 | Gülich ec. 6.10, cap. 6.3.2 y tabla D6.3; coeficientes de Pfleiderer |
+| Velocidad específica de aspiración | $(n\sqrt{Q}/n_{ss})^{4/3}$, $n$ en rpm | $n_{ss}$ según el rodete (abajo) | Gülich ec. 6.7 y tabla D6.1 |
+| Stepanoff | $(N\sqrt{gpm}/S)^{4/3}$ ft | $S$ = 7900 (11 200 para doble aspiración con el caudal total) | Stepanoff, 2.ª ed., ecs. 12.16 y 12.18, p. 254 |
+| Petermann | $(n\sqrt{Q}/S_q)^{4/3}/g$, $n$ en 1/s | $S_q$ 0,4–0,45 | Pfleiderer y Petermann, *Strömungsmaschinen* |
+| Europump | $(0{,}3 \text{ a } 0{,}5)\,n\sqrt{Q}$, $n$ en 1/s, $Q$ en m³/s, resultado en m | — | Europump, *NPSH for Rotodynamic Pumps*, 1999 |
+
+El valor de Stepanoff equivale a la cifra de Thoma $\sigma = 1{,}22\cdot10^{-3}\,n_q^{4/3}$,
+con una diferencia de un 0,3 %.
+
+Intervalo de $n_{ss}$ (Gülich, tabla D6.1):
+
+| Rodete | $n_{ss}$ |
+|---|---|
+| Normal, de entrada axial o entre cojinetes | 160–220 |
+| De aspiración, de entrada axial | 220–280 |
+| De aspiración, entre cojinetes (simple o doble entrada) | 180–240 |
+| Normal con $u_1$ > 50 m/s (alta presión) | 160–190 |
+
+**Método que no se implementa.** El de Lobanoff y Ross (cap. 8, ec. 8-2) da un NPSHR sin
+cavitación, no el $NPSH_3$, con coeficientes $K_1$ y $K_2$ que solo existen como gráficas.
+
 ## 9. Bomba de referencia
 
 Datos: 100 m³/h, 32 m, 2900 rpm, agua a 20 °C, todos los valores automáticos.

@@ -368,6 +368,20 @@ fn print_report(
         tag(&input.suction_specific_speed),
         s(Head, d.npsh_available)
     );
+    let band = &d.npsh_band;
+    println!(
+        "            NPSH3 band {} to {} by the published methods (estimates; NPSH3 is a test result)",
+        s(Head, band.low),
+        s(Head, band.high)
+    );
+    for e in &band.estimates {
+        let value = if (e.high - e.low).abs() < 1e-9 {
+            s(Head, e.low)
+        } else {
+            format!("{} to {}", s(Head, e.low), s(Head, e.high))
+        };
+        println!("              {:<28} {value}", e.method.name());
+    }
 
     if !d.warnings.is_empty() {
         println!();

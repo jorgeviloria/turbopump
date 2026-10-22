@@ -289,6 +289,23 @@ pub(crate) fn show(
                     format!("{:.2} (≥ {})", d.de_haller, corr::DE_HALLER_LIMIT),
                 );
                 value_row(ui, tr("NPSH3 (estimate)"), s(Head, d.npsh_required));
+                let band = &d.npsh_band;
+                value_row(
+                    ui,
+                    tr("NPSH3 band of the published methods"),
+                    tf(
+                        "{} to {} (estimates; NPSH3 is a test result)",
+                        &[&s(Head, band.low), &s(Head, band.high)],
+                    ),
+                );
+                for e in &band.estimates {
+                    let value = if (e.high - e.low).abs() < 1e-9 {
+                        s(Head, e.low)
+                    } else {
+                        tf("{} to {}", &[&s(Head, e.low), &s(Head, e.high)])
+                    };
+                    value_row(ui, &format!("  {}", tr(e.method.name())), value);
+                }
                 value_row(ui, tr("NPSH available"), s(Head, d.npsh_available));
             });
         warnings(ui, &d.warnings);

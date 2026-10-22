@@ -1769,6 +1769,23 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Deviation δ₂ = β₂B − β₂", "Desviación δ₂ = β₂B − β₂"),
     ("De Haller w₂/w₁", "De Haller w₂/w₁"),
     ("NPSH3 (estimate)", "NPSH3 (estimación)"),
+    (
+        "NPSH3 band of the published methods",
+        "Banda de NPSH3 de los métodos publicados",
+    ),
+    (
+        "{} to {} (estimates; NPSH3 is a test result)",
+        "{} a {} (estimaciones; el NPSH3 es un resultado de ensayo)",
+    ),
+    ("{} to {}", "{} a {}"),
+    (
+        "inlet coefficients λc, λw",
+        "coeficientes de entrada λc, λw",
+    ),
+    (
+        "suction specific speed nss",
+        "velocidad específica de aspiración nss",
+    ),
     ("Geometry", "Geometría"),
     ("Area inlet / outlet", "Área de entrada / salida"),
     ("Blade loading ξ_eff / ξ_al", "Carga del álabe ξ_eff / ξ_al"),
