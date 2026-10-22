@@ -576,4 +576,7 @@ fn meridional_segments() {
     harness.state_mut().focus_view(View::Meridional);
     harness.run();
     save(&mut harness, "meridional-segments");
+    harness.state_mut().focus_view(View::MeridianEditor);
+    harness.run();
+    save(&mut harness, "meridian-editor");
 }

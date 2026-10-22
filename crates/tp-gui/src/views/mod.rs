@@ -3,6 +3,7 @@
 pub(crate) mod blade;
 pub(crate) mod cross_section;
 pub(crate) mod front;
+pub(crate) mod meridian_editor;
 pub(crate) mod meridional;
 pub(crate) mod performance;
 pub(crate) mod report;

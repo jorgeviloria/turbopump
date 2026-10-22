@@ -6,6 +6,60 @@
 
 /// English text → Spanish text.
 pub(super) static TEXTS: &[(&str, &str)] = &[
+    ("Meridian editor", "Editor del meridiano"),
+    ("Editor", "Editor"),
+    ("edit dimension", "editar cota"),
+    ("z of the {}", "{}: z"),
+    ("r of the {}", "{}: r"),
+    ("{}: click to type it", "{}: haz clic para escribirla"),
+    (
+        "L, b₂ and the joints of the drawn walls, with guide lines at d_n, d₁ and d₂. Click a value to type it.",
+        "L, b₂ y las uniones de las paredes dibujadas, con líneas guía en d_n, d₁ y d₂. Haz clic en un valor para escribirlo.",
+    ),
+    ("curvature maximum", "curvatura máxima"),
+    (
+        "Point of smallest radius of curvature of hub and shroud",
+        "Punto de menor radio de curvatura del cubo y de la carcasa",
+    ),
+    ("area circles", "círculos de área"),
+    (
+        "Circles as wide as the channel normal to the flow",
+        "Círculos tan anchos como el canal en dirección normal al flujo",
+    ),
+    ("adjacent components", "componentes vecinos"),
+    ("Fit meridian", "Encajar el meridiano"),
+    ("Fit all", "Encajar todo"),
+    (
+        "position along the channel",
+        "posición a lo largo del canal",
+    ),
+    ("cross-section area", "área de paso"),
+    (
+        "fraction of the wall length",
+        "fracción de la longitud de la pared",
+    ),
+    ("Points of the meridian", "Puntos del meridiano"),
+    (
+        "Coordinates in {}: z from the inlet plane, r from the axis.",
+        "Coordenadas en {}: z desde el plano de entrada, r desde el eje.",
+    ),
+    (
+        "Automatic: one Bézier from the main dimensions.",
+        "Automática: una Bézier a partir de las dimensiones principales.",
+    ),
+    ("inlet tangent", "tangente de entrada"),
+    ("outlet tangent", "tangente de salida"),
+    ("Draw by segments", "Dibujar por tramos"),
+    (
+        "Turn this wall into segments you can split, join and type point by point",
+        "Convierte esta pared en tramos que puedes dividir, unir y escribir punto a punto",
+    ),
+    ("segment {}", "tramo {}"),
+    ("Split this segment in two", "Dividir este tramo en dos"),
+    ("control point", "punto de control"),
+    ("joint {}", "unión {}"),
+    ("on the hub", "en el cubo"),
+    ("on the shroud", "en la carcasa"),
     (
         "leading edge control point",
         "punto de control del borde de ataque",

@@ -100,6 +100,7 @@ impl EditCtx<'_> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum View {
     Meridional,
+    MeridianEditor,
     CrossSection,
     Blade,
     FrontView,
@@ -109,8 +110,9 @@ pub enum View {
 }
 
 impl View {
-    pub const ALL: [View; 7] = [
+    pub const ALL: [View; 8] = [
         View::Meridional,
+        View::MeridianEditor,
         View::CrossSection,
         View::Blade,
         View::FrontView,
@@ -122,6 +124,7 @@ impl View {
     pub fn title(self) -> &'static str {
         tr(match self {
             View::Meridional => "Meridional view",
+            View::MeridianEditor => "Meridian editor",
             View::CrossSection => "Volute cross sections",
             View::Blade => "Blade",
             View::FrontView => "Front view",
@@ -135,6 +138,7 @@ impl View {
     pub fn short_title(self) -> &'static str {
         tr(match self {
             View::Meridional => "Meridional",
+            View::MeridianEditor => "Editor",
             View::CrossSection => "Section",
             View::Blade => "Blade",
             View::FrontView => "Front",
@@ -147,6 +151,7 @@ impl View {
     pub fn icon(self) -> &'static str {
         match self {
             View::Meridional => icon::BEZIER_CURVE,
+            View::MeridianEditor => icon::PENCIL_RULER,
             View::CrossSection => icon::CIRCLE_HALF,
             View::Blade => icon::WAVE_SINE,
             View::FrontView => icon::FAN,
@@ -613,6 +618,10 @@ impl TurbopumpApp {
                 match self.view {
                     View::Meridional => {
                         self.meridional.show(ui, &mut cx, id, stator, volute);
+                    }
+                    View::MeridianEditor => {
+                        self.meridional
+                            .show_editor(ui, &mut cx, id, stator, volute, cover);
                     }
                     View::CrossSection => self.cross_section.show(ui, &mut cx, volute, cover),
                     View::Blade => blade::show(ui, cx.derived, id, &units, cover),
@@ -1415,19 +1424,28 @@ mod tests {
         assert!(!harness.state().doc.history().can_undo());
     }
 
-    /// Clicks the secondary button at `at`.
-    fn right_click(harness: &mut Harness<'_, TurbopumpApp>, at: egui::Pos2) {
+    /// Clicks `button` at `at`.
+    fn click_with(
+        harness: &mut Harness<'_, TurbopumpApp>,
+        at: egui::Pos2,
+        button: egui::PointerButton,
+    ) {
         harness.hover_at(at);
         harness.run();
         for pressed in [true, false] {
             harness.input_mut().events.push(egui::Event::PointerButton {
                 pos: at,
-                button: egui::PointerButton::Secondary,
+                button,
                 pressed,
                 modifiers: egui::Modifiers::NONE,
             });
             harness.run();
         }
+    }
+
+    /// Clicks the secondary button at `at`.
+    fn right_click(harness: &mut Harness<'_, TurbopumpApp>, at: egui::Pos2) {
+        click_with(harness, at, egui::PointerButton::Secondary);
     }
 
     #[test]
@@ -1485,6 +1503,42 @@ mod tests {
         harness.state_mut().undo();
         harness.state_mut().undo();
         assert_eq!(segments(harness.state()), None);
+    }
+
+    #[test]
+    fn a_dimension_of_the_meridian_editor_is_typed_in_place() {
+        use crate::views::meridional::{Dimension, dimension_lines};
+        let mut harness = Harness::builder()
+            .with_size([1440.0, 900.0])
+            .build_eframe(|cc| TurbopumpApp::new(cc, None));
+        harness.run();
+        harness.state_mut().focus_view(View::MeridianEditor);
+        harness.run();
+        let id = harness.state().active_impeller().unwrap();
+        let app = harness.state();
+        let g = app.derived.geometry(id).unwrap();
+        let input = app.doc.project().impeller_geometry_input(id).unwrap();
+        let lines = dimension_lines(&g.contour, &input.meridional, &g.basis, true, None);
+        let length = lines
+            .iter()
+            .find(|l| l.dimension == Dimension::AxialLength)
+            .unwrap();
+        let middle = length.from.lerp(length.to, 0.5);
+        let scale = app
+            .doc
+            .project()
+            .display_units
+            .to_display(QuantityKind::Length, 1.0);
+        let at = app
+            .meridional
+            .transform()
+            .unwrap()
+            .position_from_point(&PlotPoint::new(middle.x * scale, middle.y * scale));
+        click_with(&mut harness, at, egui::PointerButton::Primary);
+        // The box names the dimension and closes with its button.
+        harness.get_by_label("OK").click();
+        harness.run();
+        assert!(harness.query_by_label("OK").is_none());
     }
 
     #[test]
