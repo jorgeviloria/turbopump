@@ -1307,6 +1307,33 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ),
     ("Corners", "Esquinas"),
     // New project assistant.
+    (
+        "The name and the kind of machine.",
+        "El nombre y el tipo de máquina.",
+    ),
+    (
+        "The duty the pump is designed for, shared by every component.",
+        "El punto de servicio para el que se diseña la bomba, común a todos los componentes.",
+    ),
+    (
+        "The liquid and its state at the pump inlet.",
+        "El líquido y su estado a la entrada de la bomba.",
+    ),
+    (
+        "What the project starts with, in the order of the flow.",
+        "Con qué empieza el proyecto, en el orden del flujo.",
+    ),
+    ("Identification", "Identificación"),
+    (
+        "Fans, compressors and turbines arrive in phase 6",
+        "Ventiladores, compresores y turbinas llegan en la fase 6",
+    ),
+    ("Centrifugal pump", "Bomba centrífuga"),
+    ("Duty", "Servicio"),
+    ("Derived values", "Valores derivados"),
+    ("Properties at the inlet", "Propiedades a la entrada"),
+    ("Summary", "Resumen"),
+    ("Step {} of {}", "Paso {} de {}"),
     ("Machine type", "Tipo de máquina"),
     ("Pump", "Bomba"),
     (

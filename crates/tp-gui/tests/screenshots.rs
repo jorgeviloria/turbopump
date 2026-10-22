@@ -467,8 +467,8 @@ fn dialogs() {
         harness.run();
         harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::N);
         harness.run();
-        // The three steps of the assistant.
-        for step in ["machine", "setup", "components"] {
+        // The pages of the assistant.
+        for step in ["project", "point", "fluid", "components"] {
             harness.remove_cursor();
             harness.run();
             save(&mut harness, &format!("new-{step}-{suffix}"));
