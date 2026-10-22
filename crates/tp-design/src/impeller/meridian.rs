@@ -40,10 +40,30 @@ pub const DEFAULT_TANGENT: f64 = 0.55;
 pub const DEFAULT_LEADING_EDGE_HUB: f64 = 0.25;
 pub const DEFAULT_LEADING_EDGE_SHROUD: f64 = 0.05;
 
-/// Default axial length L = b₂ + (d₁ − d_n)/2: the outlet width plus the radial height
-/// of the eye, which gives a channel of roughly constant curvature.
+/// Default axial length L = b₂ + (d₁ − d_n)/2 of a radial impeller: the outlet width
+/// plus the radial height of the eye, which gives a channel of roughly constant
+/// curvature. A semi-axial impeller keeps the shroud's axial run (d₁ − d_n)/2 before it
+/// turns and then rises at ε_s to d₂a; L adds the offset of the hub end of the outlet
+/// edge (our construction).
 pub fn default_axial_length(basis: &ImpellerBasis) -> f64 {
-    basis.outlet_width + (basis.inlet_diameter - basis.hub_diameter) / 2.0
+    let eps = basis.outlet_inclination;
+    let shroud_outlet = (basis.inlet_diameter - basis.hub_diameter) / 2.0
+        + (basis.outlet_diameter - basis.inlet_diameter) / 2.0 * eps.tan();
+    shroud_outlet + outlet_edge(basis).x
+}
+
+/// Hub end of the outlet edge relative to its shroud end, (Δz, Δr). The walls leave the
+/// outlet in the direction ε_s from a normal to the axis, b₂ apart; the hub end lies on
+/// the hub wall at d₂i/2. Radial impellers: (b₂, 0).
+pub fn outlet_edge(basis: &ImpellerBasis) -> DVec2 {
+    let eps = basis.outlet_inclination;
+    let along = DVec2::new(eps.sin(), eps.cos());
+    let across = DVec2::new(eps.cos(), -eps.sin());
+    let b2 = basis.outlet_width;
+    let r2 = basis.outlet_diameter / 2.0;
+    let r2i = basis.outlet_hub_diameter / 2.0;
+    let s = (r2i - r2 + b2 * eps.sin()) / eps.cos();
+    across * b2 + along * s
 }
 
 /// Hub and shroud contours with the leading-edge position.
@@ -86,23 +106,32 @@ impl MeridionalContour {
         let r2 = basis.outlet_diameter / 2.0;
         let b2 = basis.outlet_width;
         let length = input.axial_length.resolve(|| default_axial_length(basis));
-        if !(length.is_finite() && length > b2) {
+        // Both walls run axially from the inlet, turn at a corner and leave the outlet at
+        // ε_s; each corner sits where the axial line meets the outlet direction.
+        let edge = outlet_edge(basis);
+        let hub_end = DVec2::new(length, basis.outlet_hub_diameter / 2.0);
+        let shroud_end = DVec2::new(length - edge.x, r2);
+        let eps = basis.outlet_inclination;
+        let corner = |end: DVec2, r: f64| DVec2::new(end.x - (end.y - r) * eps.tan(), r);
+        let (hub_corner, shroud_corner) = (corner(hub_end, rn), corner(shroud_end, r1));
+        if !(length.is_finite() && length > b2 && hub_corner.x > 0.0 && shroud_corner.x > 0.0) {
             return Err(DesignError::InvalidInput(format!(
-                "axial length {length:.4} m must exceed the outlet width {b2:.4} m"
+                "axial length {length:.4} m is too short for the outlet: the hub and shroud \
+                 must run axially before they turn"
             )));
         }
         let tangent = |name, p: &Param<f64>| fraction(name, p.resolve(|| DEFAULT_TANGENT));
         let hub = corner_curve(
             DVec2::new(0.0, rn),
-            DVec2::new(length, rn),
-            DVec2::new(length, r2),
+            hub_corner,
+            hub_end,
             tangent("hub inlet tangent", &input.hub_inlet_tangent)?,
             tangent("hub outlet tangent", &input.hub_outlet_tangent)?,
         );
         let shroud = corner_curve(
             DVec2::new(0.0, r1),
-            DVec2::new(length - b2, r1),
-            DVec2::new(length - b2, r2),
+            shroud_corner,
+            shroud_end,
             tangent("shroud inlet tangent", &input.shroud_inlet_tangent)?,
             tangent("shroud outlet tangent", &input.shroud_outlet_tangent)?,
         );
@@ -322,6 +351,11 @@ pub(crate) mod tests {
             hydraulic_efficiency: 0.9065,
             nq: 35.92,
             outlet_relative_velocity: 13.27,
+            outlet_hub_diameter: 0.1722,
+            outlet_inclination: 0.0,
+            slip_factor: 0.826,
+            outlet_swirl: 13.0,
+            outlet_meridional_velocity: 3.0,
         }
     }
 

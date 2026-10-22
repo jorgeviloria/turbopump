@@ -10,7 +10,7 @@ use tp_design::impeller::meridian::{
 };
 use tp_design::impeller::{ImpellerGeometryInput, meridian::MeridionalInput};
 use tp_design::pump::correlations as corr;
-use tp_design::pump::{CentrifugalPumpInput, InletDesign, Suction};
+use tp_design::pump::{CentrifugalPumpInput, ImpellerType, InletDesign, Suction};
 use tp_project::{
     ComponentId, ComponentKind, DesignStep, EnergyTransfer, FlowRate, Param, Project, Rotation,
     StepStatus, VANED_STEPS, VANELESS_STEPS, VOLUTE_STEPS,
@@ -849,6 +849,33 @@ fn main_dimensions(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Com
 
     section(ui, tr("Impeller type"));
     props(ui, "impeller_type", |ui| {
+        label(
+            ui,
+            tr("Outlet"),
+            tr(
+                "Automatic: semi-axial above nq = 60, where it beats a radial outlet (Gülich Chap. 7.5)",
+            ),
+        );
+        let semi = d.is_some_and(|d| d.semi_axial);
+        ComboBox::from_id_salt("impeller_kind")
+            .selected_text(match input.impeller_type {
+                ImpellerType::Auto if semi => tr("automatic: semi-axial"),
+                ImpellerType::Auto => tr("automatic: radial"),
+                ImpellerType::Radial => tr("radial"),
+                ImpellerType::SemiAxial => tr("semi-axial (mixed flow)"),
+            })
+            .show_ui(ui, |ui| {
+                for (kind, text) in [
+                    (ImpellerType::Auto, tr("automatic")),
+                    (ImpellerType::Radial, tr("radial")),
+                    (ImpellerType::SemiAxial, tr("semi-axial (mixed flow)")),
+                ] {
+                    changed |= ui
+                        .selectable_value(&mut input.impeller_type, kind, text)
+                        .changed();
+                }
+            });
+        ui.end_row();
         label(ui, tr("Suction"), "");
         ComboBox::from_id_salt("suction")
             .selected_text(tr(match input.suction {
@@ -955,6 +982,30 @@ fn main_dimensions(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Com
             &units,
             0.0005..=1.0,
         );
+        if d.is_some_and(|d| d.semi_axial) {
+            changed |= param_f64(
+                ui,
+                tr("Outlet hub diameter d₂i"),
+                tr("Hub end of the outlet edge; d₂ is the shroud end d₂a (Gülich eqs. 7.13–7.14)"),
+                &mut input.outlet_hub_diameter,
+                Length,
+                d.map(|d| d.outlet_hub_diameter),
+                &units,
+                0.005..=5.0,
+            );
+            changed |= param_f64(
+                ui,
+                tr("Outlet inclination ε_s"),
+                tr(
+                    "Angle of the outer streamline at the outlet to a normal to the axis: 0° radial, 90° axial (Gülich eq. 7.12, ±5° in executed pumps)",
+                ),
+                &mut input.outlet_inclination,
+                Angle,
+                d.map(|d| d.outlet_inclination),
+                &units,
+                1f64.to_radians()..=80f64.to_radians(),
+            );
+        }
         let factor = match input.inlet_diameter_factor {
             Param::Manual(v) => Some(v),
             Param::Auto => d.map(|d| corr::inlet_diameter_factor(input.inlet_design, d.nq)),

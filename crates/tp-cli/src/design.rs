@@ -4,7 +4,8 @@ use std::path::PathBuf;
 
 use clap::Args;
 use tp_design::pump::{
-    CentrifugalPumpDesign, CentrifugalPumpInput, InletDesign, InletSection, Suction, correlations,
+    CentrifugalPumpDesign, CentrifugalPumpInput, ImpellerType, InletDesign, InletSection, Suction,
+    correlations,
 };
 use tp_design::{MainDimensionsInput, Param};
 use tp_project::{ComponentId, ComponentKind, Project, ProjectError};
@@ -12,7 +13,7 @@ use tp_units::{DisplayUnits, QuantityKind, parse_quantity_or};
 
 use crate::{CliResult, Outcome, show};
 
-const KEYS: &str = "suction, inlet, eta-h, eta-v, eta, psi, d2, b2, d1, d1-factor, z, \
+const KEYS: &str = "type, eps, d2i, suction, inlet, eta-h, eta-v, eta, psi, d2, b2, d1, d1-factor, z, \
                     head-rise, beta2, e, shaft-stress, d-shaft, d-hub, incidence, nss";
 
 #[derive(Args)]
@@ -23,7 +24,8 @@ pub(crate) struct DesignArgs {
     #[arg(long)]
     component: Option<u32>,
     /// Fix an input as KEY=VALUE, or KEY=auto to return to the automatic value.
-    /// Keys: suction (single|double), inlet (normal|suction impeller), eta-h, eta-v, eta,
+    /// Keys: type (auto|radial|semi-axial), eps (outlet inclination of a semi-axial
+    /// impeller), d2i (its outlet hub diameter), suction (single|double), inlet (normal|suction impeller), eta-h, eta-v, eta,
     /// psi, d2, b2, d1, d1-factor, z, head-rise (fraction, e.g. 0.2: picks z and β2B),
     /// beta2 (outlet blade angle: d2, or b2 when d2 is fixed, then follows from the head),
     /// e, shaft-stress, d-shaft, d-hub, incidence, nss.
@@ -104,6 +106,20 @@ fn apply(
     };
     use QuantityKind::*;
     match key {
+        "type" => {
+            input.impeller_type = match value {
+                "auto" => ImpellerType::Auto,
+                "radial" => ImpellerType::Radial,
+                "semi-axial" | "mixed-flow" => ImpellerType::SemiAxial,
+                _ => {
+                    return Err(format!(
+                        "type must be auto, radial or semi-axial, got {value:?}"
+                    ));
+                }
+            }
+        }
+        "eps" => input.outlet_inclination = quantity(Angle)?,
+        "d2i" => input.outlet_hub_diameter = quantity(Length)?,
         "inlet" => {
             input.inlet_design = match value {
                 "normal" => InletDesign::Normal,
@@ -268,6 +284,16 @@ fn print_report(
     ];
     for (label, value, manual) in rows {
         println!("  {label:<20} {value}{manual}");
+    }
+    if d.semi_axial {
+        println!(
+            "  Semi-axial outlet    d2i {}{}   d2m {}   ε_s {}{}",
+            s(Length, d.outlet_hub_diameter),
+            tag(&input.outlet_hub_diameter),
+            s(Length, d.outlet_mean_diameter),
+            s(Angle, d.outlet_inclination),
+            tag(&input.outlet_inclination)
+        );
     }
     println!();
 

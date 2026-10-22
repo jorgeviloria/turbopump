@@ -44,14 +44,16 @@ pub const CORRELATIONS: &[CorrelationInfo] = &[
     },
     CorrelationInfo {
         id: "pump.hydraulic_efficiency",
-        description: "best hydraulic efficiency: single-stage and multistage radial pumps",
-        reference: "Gülich 2nd ed., Table 3.9, eqs. 3.9.6 and 3.9.8",
+        description: "best hydraulic efficiency: single-stage and multistage radial pumps, \
+                      semi-axial pumps",
+        reference: "Gülich 2nd ed., Table 3.9, eqs. 3.9.6, 3.9.7 and 3.9.8",
         verification: Verification::Verified,
     },
     CorrelationInfo {
         id: "pump.overall_efficiency",
-        description: "best overall efficiency: single-stage, multistage and double-entry pumps",
-        reference: "Gülich 2nd ed., Table 3.9, eqs. 3.9.1, 3.9.2 and 3.9.4",
+        description: "best overall efficiency: single-stage, multistage, double-entry and \
+                      semi-axial pumps",
+        reference: "Gülich 2nd ed., Table 3.9, eqs. 3.9.1–3.9.4",
         verification: Verification::Verified,
     },
     CorrelationInfo {
@@ -99,6 +101,34 @@ pub const CORRELATIONS: &[CorrelationInfo] = &[
                       outside that range; a prescribed head rise picks 3–8",
         reference: "Pfleiderer 1961; range from Gülich 2nd ed., pp. 342–343",
         verification: Verification::Standard,
+    },
+    CorrelationInfo {
+        id: "pump.semi_axial_type",
+        description: "semi-axial impeller chosen automatically above nq = 60; at its best for \
+                      nq 40–160",
+        reference: "Gülich 2nd ed., Chap. 7.5",
+        verification: Verification::Verified,
+    },
+    CorrelationInfo {
+        id: "pump.outlet_inclination",
+        description: "outer streamline at the outlet inclined ε_s = 90°·(nq/200)^0.74 to a \
+                      normal to the axis, ±5° in executed pumps",
+        reference: "Gülich 2nd ed., eq. 7.12",
+        verification: Verification::Verified,
+    },
+    CorrelationInfo {
+        id: "pump.outlet_diameters",
+        description: "d₂m/d₂a = exp(−0.04·(nq/30 − 1)), d₂i/d₂a = √(2·(d₂m/d₂a)² − 1); \
+                      A₂ = π·d₂m·b₂ and the slip factor with f₁ = 1.02 + 1.2·10⁻³·(nq − 50)",
+        reference: "Gülich 2nd ed., eqs. 7.13, 7.14, 3.2.2 and 3.2.6",
+        verification: Verification::Verified,
+    },
+    CorrelationInfo {
+        id: "pump.semi_axial_blades",
+        description: "free vortex c_u·r = const at the outlet, so every streamline does the \
+                      same work; minimum outer blade length L/d₂a ≥ 1.1·(β₂B,a/25°)·(nq/200)^0.4",
+        reference: "Gülich 2nd ed., Chap. 7.5 item 7 (Table D7.2, case A) and eq. 7.17",
+        verification: Verification::Verified,
     },
     CorrelationInfo {
         id: "pump.head_rise",
@@ -202,6 +232,8 @@ pub enum PumpLayout {
     Multistage,
     /// Single-stage pump with a double-entry impeller: Q of the whole pump, nq per eye.
     DoubleEntry,
+    /// Semi-axial (mixed-flow) impeller, valid from nq = 45.
+    SemiAxial,
 }
 
 impl PumpLayout {
@@ -211,6 +243,7 @@ impl PumpLayout {
             PumpLayout::SingleStage => 100.0,
             PumpLayout::Multistage => 60.0,
             PumpLayout::DoubleEntry => 50.0,
+            PumpLayout::SemiAxial => 400.0,
         }
     }
 
@@ -219,6 +252,7 @@ impl PumpLayout {
             PumpLayout::SingleStage => "single-stage",
             PumpLayout::Multistage => "multistage",
             PumpLayout::DoubleEntry => "double-entry",
+            PumpLayout::SemiAxial => "semi-axial",
         }
     }
 }
@@ -245,6 +279,7 @@ pub fn overall_efficiency(layout: PumpLayout, q: f64, nq: f64) -> f64 {
         PumpLayout::DoubleEntry => {
             1.0 - 0.095 * r.powf(m) - 0.35 * (0.35 - (nq / 17.7).log10()).powi(2) * r.powf(0.05)
         }
+        PumpLayout::SemiAxial => 1.0 - 0.095 * r.powf(m) - 0.09 * (nq / 45.0).log10().powf(2.5),
     }
 }
 
@@ -263,6 +298,7 @@ pub fn hydraulic_efficiency(layout: PumpLayout, q: f64, nq: f64) -> f64 {
         PumpLayout::Multistage => {
             1.0 - 0.065 * r.powf(m) - 0.23 * (0.3 - (nq / 23.0).log10()).powi(2) * r.powf(0.05)
         }
+        PumpLayout::SemiAxial => 1.0 - 0.055 * r.powf(m) - 0.09 * (nq / 45.0).log10().powf(2.5),
     }
 }
 
@@ -401,6 +437,41 @@ pub fn blade_count_for_head_rise(nq: f64, target: f64, beta2b: Option<f64>) -> u
 pub fn inlet_area_ratio_band(nq: f64) -> (f64, f64) {
     let centre = 0.275 + 0.00496 * nq;
     (centre - 0.055, centre + 0.055)
+}
+
+/// Above this nq the automatic impeller type is semi-axial: Gülich (Chap. 7.5) finds
+/// semi-axial impellers better than radial ones from nq ≈ 60.
+pub const SEMI_AXIAL_NQ: f64 = 60.0;
+/// nq range where semi-axial impellers are hydraulically at their best (Gülich Chap. 7.5).
+pub const SEMI_AXIAL_NQ_RANGE: (f64, f64) = (40.0, 160.0);
+/// Largest outlet inclination of a semi-axial shroud the contour accepts, rad.
+pub const MAX_OUTLET_INCLINATION: f64 = 80.0 * PI / 180.0;
+
+/// Angle ε_s between the outer streamline at the outlet of a semi-axial impeller and a
+/// normal to the axis, ε_s = 90°·(nq/200)^0.74, rad (Gülich eq. 7.12). Executed pumps lie
+/// within ±5° of it.
+pub fn outlet_inclination(nq: f64) -> f64 {
+    (90.0 * (nq.max(0.0) / 200.0).powf(0.74)).to_radians()
+}
+
+/// Mean and inner outlet diameters over the outer one, (d₂m/d₂a, d₂i/d₂a), of a
+/// semi-axial impeller: d₂m/d₂a = exp(−0.04·(nq/30 − 1)) (eq. 7.13), held at 1 below
+/// nq = 30, and d₂i/d₂a = √(2·(d₂m/d₂a)² − 1) (eq. 7.14) (Gülich 2nd ed.).
+pub fn outlet_diameter_ratios(nq: f64) -> (f64, f64) {
+    let mean = (-0.04 * (nq / 30.0 - 1.0)).exp().min(1.0);
+    (mean, (2.0 * mean * mean - 1.0).max(0.0).sqrt())
+}
+
+/// Mean outlet diameter of an outlet edge from d₂i to d₂a: the one that halves the
+/// annulus, d₂m = √((d₂a² + d₂i²)/2) (the inverse of Gülich eq. 7.14).
+pub fn mean_outlet_diameter(outer: f64, inner: f64) -> f64 {
+    ((outer * outer + inner * inner) / 2.0).sqrt()
+}
+
+/// Smallest blade length on the outer streamline over d₂a of a semi-axial impeller for a
+/// stable Q-H curve, L/d₂a ≥ 1.1·(β₂B,a/25°)·(nq/200)^0.4 (Gülich eq. 7.17).
+pub fn semi_axial_min_blade_length(nq: f64, beta2b_outer: f64) -> f64 {
+    1.1 * (beta2b_outer.to_degrees() / 25.0) * (nq / 200.0).powf(0.4)
 }
 
 /// Range of nq (rpm, m³/s, m) covered by the radial-impeller correlations.
@@ -617,6 +688,43 @@ mod tests {
         let six = head_rise_for_blades(30.0, 6, 25f64.to_radians());
         assert!(head_rise_for_blades(30.0, 6, 18f64.to_radians()) > six);
         assert!(head_rise_for_blades(30.0, 6, 90f64.to_radians()) < six);
+    }
+
+    #[test]
+    fn semi_axial_outlet_follows_gulich() {
+        // Eqs. 7.13–7.14 give d₂i/d₂a = 0.52 at nq = 200 (Gülich's own check).
+        let (mean, inner) = outlet_diameter_ratios(200.0);
+        assert_relative_eq!(inner, 0.52, epsilon = 5e-3);
+        assert_relative_eq!(mean_outlet_diameter(1.0, inner), mean, epsilon = 1e-12);
+        // A radial outlet below nq = 30, and ε_s = 90° at nq = 200.
+        assert_eq!(outlet_diameter_ratios(20.0), (1.0, 1.0));
+        assert_relative_eq!(outlet_inclination(200.0).to_degrees(), 90.0, epsilon = 1e-9);
+        assert_relative_eq!(
+            outlet_inclination(100.0).to_degrees(),
+            90.0 * 0.5f64.powf(0.74),
+            epsilon = 1e-9
+        );
+        assert_relative_eq!(
+            semi_axial_min_blade_length(200.0, 25f64.to_radians()),
+            1.1,
+            epsilon = 1e-12
+        );
+    }
+
+    #[test]
+    fn semi_axial_efficiency_follows_table_3_9() {
+        // Eq. 3.9.3 at nq = 45: the nq term vanishes.
+        let q: f64 = 0.5;
+        let m = 0.1 * (1.0 / q).powf(0.15);
+        assert_relative_eq!(
+            overall_efficiency(PumpLayout::SemiAxial, q, 45.0),
+            1.0 - 0.095 * (1.0 / q).powf(m),
+            epsilon = 1e-12
+        );
+        assert!(
+            hydraulic_efficiency(PumpLayout::SemiAxial, q, 120.0)
+                > overall_efficiency(PumpLayout::SemiAxial, q, 120.0)
+        );
     }
 
     #[test]

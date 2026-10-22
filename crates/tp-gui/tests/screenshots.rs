@@ -489,3 +489,44 @@ fn dialogs() {
         save(&mut harness, &format!("unsaved-{suffix}"));
     }
 }
+
+/// A semi-axial impeller (800 m³/h, 12 m, 1450 rpm, nq ≈ 106): its main dimensions,
+/// meridional section and 3D model.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn semi_axial() {
+    use std::f64::consts::PI;
+    use tp_project::{
+        ComponentKind, DesignPoint, EnergyTransfer, FlowRate, GlobalSetup, MachineType, Project,
+    };
+    let setup = GlobalSetup::new(
+        MachineType::Pump,
+        DesignPoint {
+            flow: FlowRate::Volume(800.0 / 3600.0),
+            energy: EnergyTransfer::Head(12.0),
+            speed: 1450.0 * PI / 30.0,
+        },
+    );
+    let mut project = Project::new("Mixed flow", MachineType::Pump, setup).unwrap();
+    project
+        .add_component(ComponentKind::Impeller, None)
+        .unwrap();
+    let path = std::env::temp_dir().join("turbopump-semi-axial.tpj");
+    project.save(&path).unwrap();
+    let mut harness = Harness::builder()
+        .with_size([1440.0, 900.0])
+        .with_pixels_per_point(1.5)
+        .with_theme(egui::Theme::Light)
+        .wgpu()
+        .build_eframe(|cc| TurbopumpApp::new(cc, Some(&path)));
+    harness.run();
+    save(&mut harness, "semi-axial-main");
+    harness.get_by_label_contains("Accept step").click();
+    harness.run();
+    harness.state_mut().focus_view(View::Meridional);
+    harness.run();
+    save(&mut harness, "semi-axial-meridional");
+    harness.state_mut().focus_view(View::View3d);
+    harness.run();
+    save(&mut harness, "semi-axial-3d");
+}

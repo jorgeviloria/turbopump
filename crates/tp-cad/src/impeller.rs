@@ -299,9 +299,12 @@ pub fn build_impeller(g: &ImpellerGeometry, options: &CadOptions) -> Result<Impe
     let rboss = options
         .boss_diameter
         .map_or_else(|| rb + (0.25 * 2.0 * rb).max(t), |d| d / 2.0);
+    // The hub disk ends at the hub end of the outlet edge (d₂i of a semi-axial impeller).
+    let r2 = r2.min(b.outlet_hub_diameter / 2.0);
     if !(rboss > rb && rboss < r2 - t) {
         return Err(CadError::Input(format!(
-            "the boss diameter must lie between the bore ({:.1} mm) and d₂ less the wall",
+            "the boss diameter must lie between the bore ({:.1} mm) and the hub outlet \
+             diameter less the wall",
             2.0 * rb * MM
         )));
     }

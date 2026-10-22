@@ -56,7 +56,8 @@ $\gamma$ y el bloqueo $\tau_2$ (ec. T3.2.7):
 $$c_{2u} = u_2\,\gamma - \frac{c_{2m}\,\tau_2}{\tan\beta_{2B}}, \qquad
 c_{2m} = \frac{Q_{La}}{\pi d_2 b_2}$$
 
-$Q_{La}$ es el caudal por el rodete: el de la bomba más las fugas. Como primera
+$Q_{La}$ es el caudal por el rodete: el de la bomba más las fugas. En un rodete semiaxial
+$u_2$ es el de la cubierta ($d_{2a}$) y el área es $\pi d_{2m} b_2$ (ec. 3.2.2). Como primera
 aproximación, el deslizamiento no depende del caudal mientras no haya recirculación
 (cap. 4.1.1). Con eso, $H_{th}$ es una recta que baja al crecer el caudal (ec. 4.1).
 

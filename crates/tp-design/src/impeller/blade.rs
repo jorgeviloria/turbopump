@@ -438,7 +438,8 @@ fn section(
             span.fraction
         )));
     }
-    let (beta1, beta2) = (le.blade_angle, basis.outlet_blade_angle);
+    let beta2 = basis.outlet_blade_angle_at(line.point_at_length(s_te).y)?;
+    let (beta1, beta2) = (le.blade_angle, beta2);
     let beta = |mbar: f64| beta_at(settings.beta, beta1, beta2, mbar);
 
     // Conformal mapping on a fine grid: θ(m) = ∫ dm / (r tan β), from the TE backwards.
@@ -673,6 +674,13 @@ impl Blade {
             )?,
             edges: (edges.leading, edges.trailing),
         };
+        if shape.is_cylindrical() && basis.is_semi_axial() {
+            return Err(DesignError::InvalidInput(
+                "cylindrical blades need a radial outlet; a semi-axial impeller takes the \
+                 free-form shape"
+                    .into(),
+            ));
+        }
         let plan = if shape.is_cylindrical() {
             Some(plan_view(basis, contour, channel, shape, &settings)?)
         } else {

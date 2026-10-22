@@ -100,9 +100,18 @@ pub(crate) fn apply_drag(
 ) {
     let hub = contour.hub.control_points();
     let shroud = contour.shroud.control_points();
-    // The tangents meet at the corner of the axial inlet and radial outlet directions.
-    let hub_corner = DVec2::new(hub[3].x, hub[0].y);
-    let shroud_corner = DVec2::new(shroud[3].x, shroud[0].y);
+    // The tangents meet at the corner of the axial inlet and the outlet direction
+    // (radial, or inclined at ε_s for a semi-axial impeller).
+    let corner = |p: &[DVec2]| {
+        let (a, b) = (p[1] - p[0], p[2] - p[3]);
+        let det = a.perp_dot(b);
+        if det.abs() < 1e-15 {
+            DVec2::new(p[3].x, p[0].y)
+        } else {
+            p[0] + a * ((p[3] - p[0]).perp_dot(b) / det)
+        }
+    };
+    let (hub_corner, shroud_corner) = (corner(hub), corner(shroud));
     match handle {
         Handle::HubInlet => {
             input.hub_inlet_tangent = Param::Manual(tangent_fraction(hub[0], hub_corner, pointer));

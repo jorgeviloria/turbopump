@@ -172,6 +172,16 @@ pub(crate) fn show(
                         manual_tag(&input.outlet_width),
                     ),
                     (
+                        "Outlet hub diameter d₂i",
+                        s(Length, d.outlet_hub_diameter),
+                        manual_tag(&input.outlet_hub_diameter),
+                    ),
+                    (
+                        "Outlet inclination ε_s",
+                        s(Angle, d.outlet_inclination),
+                        manual_tag(&input.outlet_inclination),
+                    ),
+                    (
                         "Blades z",
                         d.blade_count.to_string(),
                         manual_tag(&input.blade_count),

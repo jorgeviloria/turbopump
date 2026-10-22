@@ -2391,6 +2391,26 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ),
     ("Gülich eqs. 3.27–3.28", "Gülich, ecs. 3.27–3.28"),
     ("manual", "manual"),
+    (
+        "Automatic: semi-axial above nq = 60, where it beats a radial outlet (Gülich Chap. 7.5)",
+        "Automático: semiaxial por encima de nq = 60, donde supera a la salida radial (Gülich, cap. 7.5)",
+    ),
+    ("automatic: semi-axial", "automático: semiaxial"),
+    ("automatic: radial", "automático: radial"),
+    ("semi-axial (mixed flow)", "semiaxial (flujo mixto)"),
+    (
+        "Outlet hub diameter d₂i",
+        "Diámetro de salida en el cubo d₂i",
+    ),
+    (
+        "Hub end of the outlet edge; d₂ is the shroud end d₂a (Gülich eqs. 7.13–7.14)",
+        "Extremo del cubo del borde de salida; d₂ es el extremo de la cubierta, d₂a (Gülich, ecs. 7.13–7.14)",
+    ),
+    ("Outlet inclination ε_s", "Inclinación de la salida ε_s"),
+    (
+        "Angle of the outer streamline at the outlet to a normal to the axis: 0° radial, 90° axial (Gülich eq. 7.12, ±5° in executed pumps)",
+        "Ángulo de la línea de corriente exterior a la salida respecto a una normal al eje: 0° radial, 90° axial (Gülich, ec. 7.12; ±5° en bombas construidas)",
+    ),
 ];
 
 /// Messages of the design code, most specific first.
@@ -3204,5 +3224,41 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
     (
         "{} blades give a flat head curve that droops toward shut-off (Lobanoff & Ross Fig. 3-2); check its stability",
         "{} álabes dan una curva plana que cae hacia caudal cero (Lobanoff y Ross, fig. 3-2); comprueba su estabilidad",
+    ),
+    (
+        "semi-axial impellers are at their best for nq = {}–{}, this one has nq = {} (Gülich Chap. 7.5)",
+        "los rodetes semiaxiales rinden mejor con nq = {}–{}; este tiene nq = {} (Gülich, cap. 7.5)",
+    ),
+    (
+        "the outlet hub diameter {} mm must lie between 0 and d2 = {} mm",
+        "el diámetro de salida en el cubo, {} mm, debe estar entre 0 y d2 = {} mm",
+    ),
+    (
+        "the outlet inclination must be positive",
+        "la inclinación de la salida debe ser positiva",
+    ),
+    (
+        "the outlet inclination {}° is nearly axial; the contour is limited to {}° (an axial impeller would suit better)",
+        "la inclinación de la salida, {}°, es casi axial; el contorno se limita a {}° (convendría un rodete axial)",
+    ),
+    (
+        "with the free vortex the hub streamline at r = {} mm would need an outlet blade angle above 90°; enlarge the outlet hub diameter",
+        "con el vórtice libre, la línea de corriente del cubo en r = {} mm necesitaría un ángulo de salida mayor de 90°; aumenta el diámetro de salida en el cubo",
+    ),
+    (
+        "the blades fill the outlet circumference at r = {} mm",
+        "los álabes ocupan toda la circunferencia de salida en r = {} mm",
+    ),
+    (
+        "the outer blade is {}·d2 long, below the {}·d2 a semi-axial impeller needs for a stable head curve (Gülich eq. 7.17); lengthen the blade or add wrap",
+        "el álabe exterior mide {}·d2, menos que los {}·d2 que necesita un rodete semiaxial para una curva estable (Gülich, ec. 7.17); alarga el álabe o aumenta el envolvimiento",
+    ),
+    (
+        "axial length {} m is too short for the outlet: the hub and shroud must run axially before they turn",
+        "la longitud axial de {} m es demasiado corta para la salida: el cubo y la cubierta deben avanzar en dirección axial antes de girar",
+    ),
+    (
+        "cylindrical blades need a radial outlet; a semi-axial impeller takes the free-form shape",
+        "los álabes cilíndricos necesitan una salida radial; un rodete semiaxial lleva la forma libre",
     ),
 ];

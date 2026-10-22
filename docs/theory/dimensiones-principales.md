@@ -195,6 +195,48 @@ mínima de Gülich da $\beta_{1B}$ ≈ 35° y un cociente mayor, así que no se 
 **Espesor.** Por defecto, $\max(3\text{ mm};\ 0{,}016\,d_2)$. El libro recomienda
 $e/d_2$ = 0,016-0,022, con un mínimo de 3 a 5 mm en piezas fundidas (p. 347).
 
+## 6b. Rodetes semiaxiales (flujo mixto, cap. 7.5)
+
+**Cuándo.** Por encima de $n_q \approx 60$ un rodete semiaxial supera al radial, y rinde
+mejor entre $n_q$ = 40 y 160. En automático el tipo pasa a semiaxial cuando
+$n_q > 60$; se puede forzar radial o semiaxial.
+
+**Convención.** Como en Gülich, lo que no lleva subíndice es de la línea de corriente
+exterior: $d_2 = d_{2a}$, y $\psi$ (ec. 3.26) fija $d_{2a}$. El borde de salida va de
+$d_{2i}$ en el cubo a $d_{2a}$ en la cubierta:
+
+$$\varepsilon_s = 90°\left(\frac{n_q}{200}\right)^{0{,}74} \quad\text{(7.12)}, \qquad
+\frac{d_{2m}}{d_{2a}} = e^{-0{,}04\,(n_q/30 - 1)} \quad\text{(7.13)}, \qquad
+\frac{d_{2i}}{d_{2a}} = \sqrt{2\left(\frac{d_{2m}}{d_{2a}}\right)^2 - 1} \quad\text{(7.14)}$$
+
+$\varepsilon_s$ es el ángulo de la línea exterior con una normal al eje (0° radial, 90°
+axial). Por debajo de $n_q$ = 30 la ec. 7.13 daría $d_{2m} > d_{2a}$ y se limita a 1. Tanto
+$\varepsilon_s$ como $d_{2i}$ se pueden fijar a mano; con $d_{2i}$ manual,
+$d_{2m} = \sqrt{(d_{2a}^2 + d_{2i}^2)/2}$. $\varepsilon_s$ se limita a 80°.
+
+**Triángulo de salida.** Se calcula en la línea exterior, como en el rodete radial, pero
+con el área $A_2 = \pi d_{2m} b_2$ (ec. 3.2.2), el ancho $b_2/d_{2a}$ de la ec. 7.1
+(fig. 7.2) y el factor del deslizamiento semiaxial $f_1 = 1{,}02 + 1{,}2\cdot10^{-3}(n_q - 50)$
+(ec. 3.2.6).
+
+**Rendimientos.** Ecs. 3.9.3 y 3.9.7 de la tabla 3.9, válidas desde $n_q$ = 45.
+
+**Reparto del trabajo.** Vórtice libre, $c_u r$ = cte (tabla D7.2, caso A): todas las líneas
+de corriente hacen el mismo trabajo. El $\beta_{2B}$ de cada sección sale de la misma
+relación de deslizamiento que la exterior, con $u$ y $c_u$ locales:
+
+$$\tan\beta_{2B}(r) = \frac{\tau\,c_{m2}}{\gamma\,u(r) - c_u(r)}, \qquad c_u(r) = c_{u2a}\,\frac{r_{2a}}{r}$$
+
+Así $\beta_{2B,a} < \beta_{2B,i}$, como pide el libro. Si en el cubo $\gamma u \le c_u$, el
+cubo es demasiado pequeño para el vórtice libre y se avisa.
+
+**Longitud del álabe.** Se avisa si el álabe exterior queda por debajo de
+$L/d_{2a} \ge 1{,}1\,(\beta_{2B,a}/25°)(n_q/200)^{0{,}4}$ (ec. 7.17), el mínimo para una curva
+estable.
+
+**Subida de altura.** Fuera de $n_q$ 4-68 (donde acaba la gráfica de Lobanoff), la subida
+mostrada y la altura a caudal cero salen de la ec. 3.28.
+
 ## 7. Comprobaciones (p. 346)
 
 | Comprobación | Límite |
@@ -246,6 +288,7 @@ Las pruebas automáticas comprueban:
 |---|---|
 | ψ_opt, η_h, η, tolerancia, $b_2/d_2$, deslizamiento, bloqueos, $d_1$ y $f_{d1}$, eje, límites de diseño | **verificado** con la 2.ª ed. |
 | Número de álabes | Pfleiderer, estándar, limitado al rango de Gülich |
+| Semiaxial: ecs. 7.12-7.14, 7.17, 3.9.3, 3.9.7 y $f_1$ (3.2.6) | **verificado** con la 2.ª ed. |
 | Subida de altura, $\beta_{2B}$ estándar, $A_v/A_e$ | ajustes propios a las figs. 3-2, 3-13 y 3-12 de Lobanoff y Ross, comprobados contra las gráficas |
 | $\eta_v$, $\tau_{adm}$, $n_{ss}$ | valores típicos, no correlaciones publicadas |
 
@@ -257,5 +300,6 @@ El registro está en código, en `tp_design::pump::correlations::CORRELATIONS`.
   añada.
 - $\eta_v$ es constante.
 - El eje usa la potencia del punto de diseño.
-- Solo están implementados los rodetes radiales. El rendimiento de bombas semiaxiales y
-  axiales (ecs. 3.9.3 y 3.9.7) llega con esas máquinas.
+- Hay rodetes radiales y semiaxiales; faltan los axiales.
+- La voluta, el difusor y las pérdidas tratan la salida semiaxial como si fuera radial en
+  $d_{2a}$ con ancho $b_2$.

@@ -55,7 +55,7 @@ pub struct CollectorThroat {
 /// whole outlet area of the impeller, m³/s.
 pub fn collector_flow(design: &CentrifugalPumpDesign, throat: CollectorThroat) -> f64 {
     let outlet = &design.outlet;
-    let area2 = PI * design.outlet_diameter * design.outlet_width;
+    let area2 = PI * design.outlet_mean_diameter * design.outlet_width;
     let throats = f64::from(throat.count) * throat.area;
     outlet.triangle.u * area2 * outlet.slip_factor
         / (area2 / throats

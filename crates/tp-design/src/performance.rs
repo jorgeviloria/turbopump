@@ -429,7 +429,7 @@ pub fn predict(
         head: duty.head,
         density: duty.density,
         u2: outlet.triangle.u,
-        area2: PI * design.outlet_diameter * design.outlet_width,
+        area2: PI * design.outlet_mean_diameter * design.outlet_width,
         slip: outlet.slip_factor,
         blockage: outlet.blockage,
         tan_beta2b,

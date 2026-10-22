@@ -52,11 +52,27 @@ Bézier cúbica reproduce un cuarto de elipse.
 **Longitud axial por defecto:** $L = b_2 + (d_1 - d_n)/2$. Es un valor por defecto de
 ingeniería, no una correlación publicada.
 
+**Salida semiaxial.** Las dos paredes salen inclinadas $\varepsilon_s$ respecto a la normal
+al eje, a $b_2$ de distancia. La carcasa termina en $(z_s, r_{2a})$ y el cubo en
+$(L, r_{2i})$, sobre la pared del cubo:
+
+$$\Delta = b_2\,(\cos\varepsilon_s, -\sin\varepsilon_s) + s\,(\sin\varepsilon_s, \cos\varepsilon_s),
+\qquad s = \frac{r_{2i} - r_{2a} + b_2\sin\varepsilon_s}{\cos\varepsilon_s}$$
+
+La esquina de cada Bézier es el punto donde la recta axial de entrada corta la dirección de
+salida. Por defecto la carcasa conserva el tramo axial $(d_1 - d_n)/2$ del rodete radial y
+luego sube con $\varepsilon_s$ hasta $d_{2a}$; $L$ suma el desfase $\Delta_z$ del cubo
+(construcción propia). Con $\varepsilon_s = 0$ todo se reduce al rodete radial. Se rechaza
+una $L$ tan corta que alguna esquina quede antes del plano de entrada.
+
 **Borde de ataque:** se define por su posición en el cubo y en la carcasa, como fracción
 de la longitud de cada curva. Por defecto está al 25 % en el cubo y al 5 % en la
 carcasa. En los spans intermedios se interpola linealmente en la coordenada del canal.
 
-**Borde de salida:** está en $r_2$, la salida del canal.
+**Borde de salida:** es la salida del canal: en $r_2$ en el rodete radial; en el
+semiaxial, la recta de $d_{2i}$ a $d_{2a}$. En el semiaxial cada sección termina con su
+$\beta_{2B}$ del vórtice libre ([dimensiones-principales.md](dimensiones-principales.md)).
+Los álabes cilíndricos (2D) solo se admiten con salida radial.
 
 ## 2. Flujo meridional (cuasi-1D)
 

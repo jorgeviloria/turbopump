@@ -59,6 +59,17 @@ pub struct ImpellerBasis {
     pub nq: f64,
     /// Relative velocity at the impeller outlet w₂, m/s.
     pub outlet_relative_velocity: f64,
+    /// d₂i at the hub end of the outlet edge, m; d₂ for a radial impeller.
+    pub outlet_hub_diameter: f64,
+    /// Inclination ε_s of the outer streamline at the outlet to a normal to the axis,
+    /// rad; 0 for a radial impeller.
+    pub outlet_inclination: f64,
+    /// Slip factor γ at the outer streamline.
+    pub slip_factor: f64,
+    /// c_u2 at d₂ (the outer streamline), m/s.
+    pub outlet_swirl: f64,
+    /// c_m2 at the outlet, uniform over the outlet edge, m/s.
+    pub outlet_meridional_velocity: f64,
 }
 
 impl ImpellerBasis {
@@ -85,7 +96,63 @@ impl ImpellerBasis {
             hydraulic_efficiency: design.efficiencies.hydraulic,
             nq: design.nq,
             outlet_relative_velocity: design.outlet.triangle.w(),
+            outlet_hub_diameter: design.outlet_hub_diameter,
+            outlet_inclination: design.outlet_inclination,
+            slip_factor: design.outlet.slip_factor,
+            outlet_swirl: design.outlet.triangle.cu,
+            outlet_meridional_velocity: design.outlet.triangle.cm,
         }
+    }
+
+    /// The outlet edge runs from d₂i to d₂a: a semi-axial impeller.
+    pub fn is_semi_axial(&self) -> bool {
+        self.outlet_hub_diameter < self.outlet_diameter * (1.0 - 1e-9)
+    }
+
+    /// Blade outlet angle β₂B at radius `r` of the outlet edge. With the free vortex
+    /// c_u·r = const (Gülich Chap. 7.5, Table D7.2 case A) every streamline does the work
+    /// of the outer one, and the slip relation c_u/u = γ − c_m·τ/(u·tan β₂B) of the outer
+    /// streamline gives tan β₂B = τ·c_m/(γ·u − c_u) at each radius, τ by fixed-point
+    /// iteration. A radial impeller keeps β₂B.
+    pub fn outlet_blade_angle_at(&self, r: f64) -> Result<f64, DesignError> {
+        if !self.is_semi_axial() {
+            return Ok(self.outlet_blade_angle);
+        }
+        let r2 = self.outlet_diameter / 2.0;
+        let u = self.omega * r;
+        let cu = self.outlet_swirl * r2 / r;
+        let cm = self.outlet_meridional_velocity;
+        let margin = self.slip_factor * u - cu;
+        if margin <= 0.0 {
+            return Err(DesignError::Infeasible(format!(
+                "with the free vortex the hub streamline at r = {:.1} mm would need an outlet \
+                 blade angle above 90°; enlarge the outlet hub diameter",
+                r * 1e3
+            )));
+        }
+        let mut beta = self.outlet_blade_angle;
+        for _ in 0..50 {
+            let tau = crate::triangle::blockage_factor(
+                self.blade_count,
+                self.blade_thickness,
+                2.0 * r,
+                beta,
+                std::f64::consts::FRAC_PI_2,
+            );
+            if !tau.is_finite() {
+                return Err(DesignError::Infeasible(format!(
+                    "the blades fill the outlet circumference at r = {:.1} mm",
+                    r * 1e3
+                )));
+            }
+            let next = (tau * cm).atan2(margin);
+            let done = (next - beta).abs() < 1e-12;
+            beta = next;
+            if done {
+                break;
+            }
+        }
+        Ok(beta)
     }
 }
 
@@ -139,7 +206,8 @@ impl ImpellerGeometry {
             let p = c.shroud_at(t) + DVec2::new(-along.y, along.x) * wall;
             DVec2::new(p.y, p.x)
         });
-        let r2 = self.basis.outlet_diameter / 2.0;
+        // The rear face starts at the hub end of the outlet edge.
+        let r2 = self.basis.outlet_hub_diameter / 2.0;
         let plus = if double_entry {
             front.map(|p| DVec2::new(p.x, 2.0 * length - p.y))
         } else {
@@ -217,6 +285,21 @@ pub fn build(
             warnings.push(format!(
                 "the cylindrical blade meets the flow {off:+.1}° off its inlet angle at span \
                  {span:.2}; a free-form blade fits every span"
+            ));
+        }
+    }
+    if basis.is_semi_axial() {
+        let shroud = blade.sections.last().expect("a blade has sections");
+        let length = shroud.mean_line_length() / basis.outlet_diameter;
+        let minimum = crate::pump::correlations::semi_axial_min_blade_length(
+            basis.nq,
+            basis.outlet_blade_angle,
+        );
+        if length < minimum {
+            warnings.push(format!(
+                "the outer blade is {length:.2}·d2 long, below the {minimum:.2}·d2 a semi-axial \
+                 impeller needs for a stable head curve (Gülich eq. 7.17); lengthen the blade \
+                 or add wrap"
             ));
         }
     }
@@ -533,6 +616,85 @@ pub(crate) mod tests {
             "{:?}",
             g.warnings
         );
+    }
+
+    /// A semi-axial impeller: 800 m³/h, 12 m, 1450 rpm (nq ≈ 106).
+    fn semi_axial_geometry() -> ImpellerGeometry {
+        let duty = PumpDuty {
+            flow: 800.0 / 3600.0,
+            head: 12.0,
+            machine_head: 12.0,
+            stages: 1,
+            speed: 1450.0 * PI / 30.0,
+            density: 998.2,
+            vapor_pressure: 2339.0,
+            inlet_total_pressure: 101_325.0,
+            kinematic_viscosity: 1.0e-6,
+        };
+        let input = CentrifugalPumpInput::default();
+        let d = design(&duty, &input).unwrap();
+        assert!(d.semi_axial);
+        let basis = ImpellerBasis::from_pump(&d, &input, 1.0);
+        build(&basis, &ImpellerGeometryInput::default()).unwrap()
+    }
+
+    #[test]
+    fn semi_axial_contour_ends_on_an_inclined_outlet_edge() {
+        let g = semi_axial_geometry();
+        let b = &g.basis;
+        let (hub, shroud) = (g.contour.hub.end(), g.contour.shroud.end());
+        let expected = DVec2::new(g.contour.axial_length, b.outlet_hub_diameter / 2.0);
+        assert!(hub.distance(expected) < 1e-12, "{hub} vs {expected}");
+        assert_relative_eq!(shroud.y, b.outlet_diameter / 2.0, max_relative = 1e-12);
+        // Both walls leave at ε_s, b₂ apart.
+        let eps = b.outlet_inclination;
+        let along = DVec2::new(eps.sin(), eps.cos());
+        let tangent = |c: &tp_math::Bezier<DVec2>| {
+            let p = c.control_points();
+            (p[3] - p[2]).normalize()
+        };
+        assert!(tangent(&g.contour.hub).distance(along) < 1e-9);
+        assert!(tangent(&g.contour.shroud).distance(along) < 1e-9);
+        let across = DVec2::new(eps.cos(), -eps.sin());
+        assert_relative_eq!(
+            (hub - shroud).dot(across),
+            b.outlet_width,
+            max_relative = 1e-9
+        );
+    }
+
+    #[test]
+    fn semi_axial_blades_follow_the_free_vortex() {
+        let g = semi_axial_geometry();
+        let b = &g.basis;
+        let shroud = g.blade.sections.last().unwrap();
+        let hub = &g.blade.sections[0];
+        // The outer streamline keeps β₂B; the hub turns more (β₂B,a < β₂B,i, Gülich 7.5).
+        assert_relative_eq!(
+            *shroud.beta.last().unwrap(),
+            b.outlet_blade_angle,
+            epsilon = 1e-6
+        );
+        let hub_beta = *hub.beta.last().unwrap();
+        assert!(hub_beta > b.outlet_blade_angle + 2f64.to_radians());
+        // c_u·r of the outer streamline at the hub, through the slip relation.
+        let r = hub.meridional.last().unwrap().y;
+        let u = b.omega * r;
+        let cu = b.outlet_swirl * b.outlet_diameter / 2.0 / r;
+        let tau = crate::triangle::blockage_factor(
+            b.blade_count,
+            b.blade_thickness,
+            2.0 * r,
+            hub_beta,
+            FRAC_PI_2,
+        );
+        assert_relative_eq!(
+            hub_beta.tan(),
+            tau * b.outlet_meridional_velocity / (b.slip_factor * u - cu),
+            max_relative = 1e-9
+        );
+        // Cylindrical blades need a radial outlet.
+        assert!(shaped(blade::BladeShape::CircularArc, b).is_err());
     }
 
     #[test]

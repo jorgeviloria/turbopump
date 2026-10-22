@@ -16,7 +16,7 @@ use tp_math::roots;
 use tp_units::{STANDARD_GRAVITY as G, SpecificSpeed};
 
 use super::correlations as corr;
-use crate::slip::{F1_RADIAL, wiesner_gulich};
+use crate::slip::{F1_RADIAL, f1_semi_axial, wiesner_gulich};
 use crate::triangle::{VelocityTriangle, blockage_factor};
 use crate::{DesignError, Param};
 
@@ -37,6 +37,20 @@ impl Suction {
             Suction::Double => 2.0,
         }
     }
+}
+
+/// Meridional shape of the impeller outlet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImpellerType {
+    /// Semi-axial above nq = 60, radial below (Gülich Chap. 7.5).
+    #[default]
+    Auto,
+    /// Radial outlet at one diameter d₂.
+    Radial,
+    /// Semi-axial (mixed-flow): the outlet edge runs from d₂i at the hub to d₂a at the
+    /// shroud, the outer streamline inclined ε_s to a normal to the axis.
+    SemiAxial,
 }
 
 /// Operating point and fluid seen by one impeller stage, in SI units.
@@ -67,6 +81,12 @@ pub struct PumpDuty {
 #[serde(default)]
 pub struct CentrifugalPumpInput {
     pub suction: Suction,
+    pub impeller_type: ImpellerType,
+    /// Inclination ε_s of the outer streamline at a semi-axial outlet to a normal to the
+    /// axis, rad (Gülich eq. 7.12).
+    pub outlet_inclination: Param<f64>,
+    /// Hub diameter d₂i of a semi-axial outlet, m (Gülich eqs. 7.13–7.14).
+    pub outlet_hub_diameter: Param<f64>,
     /// Normal or suction impeller; sets the automatic eye-diameter factor.
     pub inlet_design: corr::InletDesign,
     pub hydraulic_efficiency: Param<f64>,
@@ -178,8 +198,17 @@ pub struct CentrifugalPumpDesign {
     pub deviation_angle: f64,
     /// Deceleration w₂/w₁ at the outer streamline (de Haller number).
     pub de_haller: f64,
-    /// Head rise (H₀ − H)/H that the blade number gives at this nq with its standard
-    /// outlet angle (Lobanoff & Ross, Fig. 3-2).
+    /// Semi-axial impeller: the outlet edge runs from d₂i to d₂a. The outlet triangle,
+    /// d₂ and the slip factor belong to the outer streamline (d₂ = d₂a).
+    pub semi_axial: bool,
+    /// d₂i at the hub end of the outlet edge; d₂ for a radial impeller, m.
+    pub outlet_hub_diameter: f64,
+    /// d₂m = √((d₂a² + d₂i²)/2), which sets the outlet area π·d₂m·b₂, m.
+    pub outlet_mean_diameter: f64,
+    /// ε_s of the outer streamline at the outlet, rad; 0 for a radial impeller.
+    pub outlet_inclination: f64,
+    /// Head rise (H₀ − H)/H of the blade number and outlet angle (Lobanoff & Ross,
+    /// Fig. 3-2) for nq 4–68; outside, that of Gülich eq. 3.28 with a volute.
     pub head_rise: f64,
     /// Area between the blades at the inlet over the eye area, A_v/A_e (Lobanoff & Ross,
     /// Fig. 3-12).
@@ -274,6 +303,7 @@ fn inlet_section(
 
 /// Outlet blade angle β₂B that produces c_u2 with `z` blades:
 /// c_u2/u₂ = γ(β₂B) − φ₂·τ₂(β₂B)/tan β₂B.
+#[allow(clippy::too_many_arguments)]
 fn outlet_blade_angle(
     target_cu2: f64,
     u2: f64,
@@ -282,10 +312,11 @@ fn outlet_blade_angle(
     d1m: f64,
     z: u32,
     e: f64,
+    f1: f64,
 ) -> Result<(f64, f64, f64), DesignError> {
     let phi2 = cm2 / u2;
     let residual = |beta: f64| {
-        let gamma = wiesner_gulich(beta, z, d1m / d2, F1_RADIAL);
+        let gamma = wiesner_gulich(beta, z, d1m / d2, f1);
         let tau = blockage_factor(z, e, d2, beta, FRAC_PI_2);
         if !tau.is_finite() {
             return -1.0;
@@ -307,7 +338,7 @@ fn outlet_blade_angle(
     }
     let beta = roots::brent(residual, lo, hi, 1e-12)
         .map_err(|e| DesignError::Infeasible(e.to_string()))?;
-    let gamma = wiesner_gulich(beta, z, d1m / d2, F1_RADIAL);
+    let gamma = wiesner_gulich(beta, z, d1m / d2, f1);
     let tau = blockage_factor(z, e, d2, beta, FRAC_PI_2);
     Ok((beta, gamma, tau))
 }
@@ -334,14 +365,29 @@ pub fn design(
     let eyes = input.suction.eyes();
     let q_eye = flow / eyes;
     let nq = SpecificSpeed::from_head(q_eye, head, omega).nq();
+    let semi_axial = match input.impeller_type {
+        ImpellerType::Auto => nq > corr::SEMI_AXIAL_NQ,
+        ImpellerType::Radial => false,
+        ImpellerType::SemiAxial => true,
+    };
     let (nq_min, nq_max) = corr::NQ_RANGE;
-    if !(nq_min..=nq_max).contains(&nq) {
+    if semi_axial {
+        let (lo, hi) = corr::SEMI_AXIAL_NQ_RANGE;
+        if !(lo..=hi).contains(&nq) {
+            warnings.push(format!(
+                "semi-axial impellers are at their best for nq = {lo}–{hi}, this one has \
+                 nq = {nq:.1} (Gülich Chap. 7.5)"
+            ));
+        }
+    } else if !(nq_min..=nq_max).contains(&nq) {
         warnings.push(format!(
             "nq = {nq:.1} is outside {nq_min}–{nq_max}, the range of radial impellers with \
              5–7 blades; check every automatic value"
         ));
     }
-    let layout = if duty.stages > 1 {
+    let layout = if semi_axial {
+        corr::PumpLayout::SemiAxial
+    } else if duty.stages > 1 {
         corr::PumpLayout::Multistage
     } else if input.suction == Suction::Double {
         corr::PumpLayout::DoubleEntry
@@ -532,6 +578,28 @@ pub fn design(
 
     // 6. Velocity triangles and blades.
     let mean_diameter = ((inlet_diameter.powi(2) + hub_diameter.powi(2)) / 2.0).sqrt();
+    // Outlet edge of a semi-axial impeller: d₂i and the d₂m that sets the outlet area.
+    let f1 = if semi_axial {
+        f1_semi_axial(nq)
+    } else {
+        F1_RADIAL
+    };
+    let (mean_ratio, hub_ratio) = corr::outlet_diameter_ratios(nq);
+    if let Param::Manual(d2i) = input.outlet_hub_diameter
+        && semi_axial
+    {
+        positive("outlet hub diameter", d2i)?;
+    }
+    let outlet_hub_for = |d2: f64| match (semi_axial, input.outlet_hub_diameter) {
+        (false, _) => d2,
+        (true, Param::Manual(d2i)) => d2i,
+        (true, Param::Auto) => hub_ratio * d2,
+    };
+    let outlet_mean_for = |d2: f64| match (semi_axial, input.outlet_hub_diameter) {
+        (false, _) => d2,
+        (true, Param::Manual(d2i)) => corr::mean_outlet_diameter(d2, d2i),
+        (true, Param::Auto) => mean_ratio * d2,
+    };
     let cm1 = q_la_eye / (PI / 4.0 * (inlet_diameter.powi(2) - hub_diameter.powi(2)));
     let width_for = |d2: f64| {
         input
@@ -543,8 +611,8 @@ pub fn design(
     // angle β₂B through the slip relation, minus what the head needs.
     let excess = |z: u32, beta: f64, d2: f64, b2: f64, e: f64| {
         let u2 = omega * d2 / 2.0;
-        let cm2 = impeller_flow / (PI * d2 * b2);
-        let gamma = wiesner_gulich(beta, z, mean_diameter / d2, F1_RADIAL);
+        let cm2 = impeller_flow / (PI * outlet_mean_for(d2) * b2);
+        let gamma = wiesner_gulich(beta, z, mean_diameter / d2, f1);
         let tau = blockage_factor(z, e, d2, beta, FRAC_PI_2);
         if !tau.is_finite() {
             return -G * theoretical_head;
@@ -557,9 +625,10 @@ pub fn design(
                 let b2 = positive("outlet width", width_for(d2))?;
                 let e = positive("blade thickness", thickness_for(d2))?;
                 let u2 = omega * d2 / 2.0;
-                let cm2 = impeller_flow / (PI * d2 * b2);
+                let cm2 = impeller_flow / (PI * outlet_mean_for(d2) * b2);
                 let cu2 = G * theoretical_head / u2;
-                let (beta, gamma, tau) = outlet_blade_angle(cu2, u2, cm2, d2, mean_diameter, z, e)?;
+                let (beta, gamma, tau) =
+                    outlet_blade_angle(cu2, u2, cm2, d2, mean_diameter, z, e, f1)?;
                 return Ok(Outlet {
                     diameter: d2,
                     width: b2,
@@ -603,7 +672,7 @@ pub fn design(
             width: b2,
             thickness: e,
             blade_angle: beta,
-            slip_factor: wiesner_gulich(beta, z, mean_diameter / d2, F1_RADIAL),
+            slip_factor: wiesner_gulich(beta, z, mean_diameter / d2, f1),
             blockage: blockage_factor(z, e, d2, beta, FRAC_PI_2),
         })
     };
@@ -670,7 +739,38 @@ pub fn design(
     })?;
     let u2 = omega * outlet_diameter / 2.0;
     let pressure_coefficient = 2.0 * G * head / (u2 * u2);
-    let cm2 = impeller_flow / (PI * outlet_diameter * outlet_width);
+    let outlet_hub_diameter = outlet_hub_for(outlet_diameter);
+    let outlet_mean_diameter = outlet_mean_for(outlet_diameter);
+    require(
+        outlet_hub_diameter > 0.0 && outlet_hub_diameter <= outlet_diameter,
+        || {
+            format!(
+                "the outlet hub diameter {:.1} mm must lie between 0 and d2 = {:.1} mm",
+                outlet_hub_diameter * 1e3,
+                outlet_diameter * 1e3
+            )
+        },
+    )?;
+    let outlet_inclination = if semi_axial {
+        let eps = input
+            .outlet_inclination
+            .resolve(|| corr::outlet_inclination(nq));
+        require(eps.is_finite() && eps > 0.0, || {
+            "the outlet inclination must be positive".into()
+        })?;
+        if eps > corr::MAX_OUTLET_INCLINATION {
+            warnings.push(format!(
+                "the outlet inclination {:.0}° is nearly axial; the contour is limited to {:.0}° \
+                 (an axial impeller would suit better)",
+                eps.to_degrees(),
+                corr::MAX_OUTLET_INCLINATION.to_degrees()
+            ));
+        }
+        eps.min(corr::MAX_OUTLET_INCLINATION)
+    } else {
+        0.0
+    };
+    let cm2 = impeller_flow / (PI * outlet_mean_diameter * outlet_width);
     let cu2 = G * theoretical_head / u2;
     let inlet_width = (inlet_diameter - hub_diameter) / 2.0;
     if outlet_width / eyes >= inlet_width {
@@ -687,7 +787,17 @@ pub fn design(
         ));
     }
 
-    let head_rise = corr::head_rise_for_blades(nq, blade_count, beta2b);
+    // Outside the chart the shut-off head of Gülich eq. 3.28 sets it, as in the curve.
+    let head_rise = {
+        let (lo, hi) = corr::HEAD_RISE_NQ_RANGE;
+        if (lo..=hi).contains(&nq) {
+            corr::head_rise_for_blades(nq, blade_count, beta2b)
+        } else {
+            crate::performance::shutoff_coefficient(nq, crate::performance::Collector::Volute)
+                / pressure_coefficient
+                - 1.0
+        }
+    };
     if let Some(target) = head_rise_target {
         if (head_rise - target).abs() > 0.03 {
             warnings.push(format!(
@@ -794,6 +904,10 @@ pub fn design(
         efficiency_tolerance: corr::efficiency_tolerance(eta),
         deviation_angle,
         de_haller,
+        semi_axial,
+        outlet_hub_diameter,
+        outlet_mean_diameter,
+        outlet_inclination,
         head_rise,
         inlet_area_ratio,
         warnings,
@@ -1106,6 +1220,89 @@ mod tests {
         // Within 10 < nq < 120 Gülich's 5–7 still hold.
         let r = design(&duty(), &CentrifugalPumpInput::default()).unwrap();
         assert!((5..=7).contains(&r.blade_count));
+    }
+
+    /// 800 m³/h, 12 m, 1450 rpm: nq ≈ 106, a semi-axial impeller.
+    fn mixed_flow_duty() -> PumpDuty {
+        PumpDuty {
+            flow: 800.0 / 3600.0,
+            head: 12.0,
+            machine_head: 12.0,
+            speed: 1450.0 * PI / 30.0,
+            ..duty()
+        }
+    }
+
+    #[test]
+    fn high_nq_gives_a_semi_axial_impeller() {
+        let d = design(&mixed_flow_duty(), &CentrifugalPumpInput::default()).unwrap();
+        assert!(
+            d.semi_axial && (100.0..110.0).contains(&d.nq),
+            "nq {}",
+            d.nq
+        );
+        assert_eq!(d.layout, corr::PumpLayout::SemiAxial);
+        let (mean, hub) = corr::outlet_diameter_ratios(d.nq);
+        assert_relative_eq!(
+            d.outlet_hub_diameter / d.outlet_diameter,
+            hub,
+            max_relative = 1e-12
+        );
+        assert_relative_eq!(
+            d.outlet_mean_diameter / d.outlet_diameter,
+            mean,
+            max_relative = 1e-12
+        );
+        assert_relative_eq!(d.outlet_inclination, corr::outlet_inclination(d.nq));
+        // A₂ = π·d₂m·b₂ and the semi-axial f₁ in the slip factor.
+        let o = &d.outlet;
+        assert_relative_eq!(
+            o.triangle.cm * PI * d.outlet_mean_diameter * d.outlet_width,
+            d.impeller_flow,
+            max_relative = 1e-12
+        );
+        assert_relative_eq!(
+            o.slip_factor,
+            wiesner_gulich(
+                o.blade_angle,
+                d.blade_count,
+                d.inlet_mean.diameter / d.outlet_diameter,
+                f1_semi_axial(d.nq)
+            ),
+            max_relative = 1e-12
+        );
+        delivers_head(&d);
+        // Forced radial, the outlet stays at one diameter.
+        let radial = CentrifugalPumpInput {
+            impeller_type: ImpellerType::Radial,
+            ..Default::default()
+        };
+        let r = design(&mixed_flow_duty(), &radial).unwrap();
+        assert!(!r.semi_axial);
+        assert_eq!(r.outlet_hub_diameter, r.outlet_diameter);
+        assert_eq!(r.outlet_inclination, 0.0);
+        // Below nq = 60 the automatic type stays radial.
+        assert!(
+            !design(&duty(), &CentrifugalPumpInput::default())
+                .unwrap()
+                .semi_axial
+        );
+    }
+
+    #[test]
+    fn manual_outlet_hub_diameter_sets_the_mean_diameter() {
+        let input = CentrifugalPumpInput {
+            outlet_hub_diameter: Param::Manual(0.2),
+            ..Default::default()
+        };
+        let d = design(&mixed_flow_duty(), &input).unwrap();
+        assert_eq!(d.outlet_hub_diameter, 0.2);
+        assert_relative_eq!(
+            d.outlet_mean_diameter,
+            corr::mean_outlet_diameter(d.outlet_diameter, 0.2),
+            max_relative = 1e-12
+        );
+        delivers_head(&d);
     }
 
     #[test]
