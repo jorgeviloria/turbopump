@@ -10,6 +10,7 @@ mod design;
 mod diffuser;
 mod geometry;
 mod performance;
+mod validate;
 mod volute;
 
 use std::path::{Path, PathBuf};
@@ -95,6 +96,9 @@ enum Command {
     /// with Open CASCADE and export them to STEP, IGES or STL.
     #[cfg(feature = "cad")]
     Cad(cad::CadArgs),
+    /// Compare the results of a project with the reference values of a targets file
+    /// and judge each one against its tolerance.
+    Validate(validate::ValidateArgs),
     /// Show a project summary and its open issues.
     Info {
         file: PathBuf,
@@ -197,6 +201,7 @@ fn main() -> ExitCode {
         Command::Analysis(args) => analysis::run(args),
         #[cfg(feature = "cad")]
         Command::Cad(args) => cad::run(args),
+        Command::Validate(args) => validate::run(args),
         Command::Info { file, units } => info(&file, units),
     };
     match result {

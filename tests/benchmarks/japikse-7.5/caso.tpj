@@ -1,0 +1,382 @@
+{
+  "format": "turbopump-project",
+  "version": 1,
+  "project": {
+    "info": {
+      "name": "Japikse 7.5",
+      "author": "",
+      "description": ""
+    },
+    "machine": "pump",
+    "setup": {
+      "design_point": {
+        "flow": {
+          "kind": "volume",
+          "value": 0.315450982
+        },
+        "energy": {
+          "kind": "head",
+          "value": 25.61844
+        },
+        "speed": 104.71975511965977
+      },
+      "inlet": {
+        "total_pressure": 101325.0,
+        "total_temperature": 310.928
+      },
+      "fluid": "Water",
+      "rotation": "clockwise"
+    },
+    "display_units": {
+      "dimensionless": "-",
+      "length": "mm",
+      "head": "m",
+      "area": "mm²",
+      "angle": "°",
+      "velocity": "m/s",
+      "rotational_speed": "rpm",
+      "volume_flow": "m³/h",
+      "mass_flow": "kg/s",
+      "pressure": "bar",
+      "temperature": "°C",
+      "density": "kg/m³",
+      "dynamic_viscosity": "mPa·s",
+      "kinematic_viscosity": "mm²/s",
+      "power": "kW",
+      "torque": "N·m",
+      "force": "N",
+      "specific_energy": "J/kg"
+    },
+    "components": [
+      {
+        "id": 1,
+        "name": "Impeller 1",
+        "kind": {
+          "type": "impeller"
+        },
+        "coupling": "flow_direction",
+        "steps": {
+          "main_dimensions": "done"
+        },
+        "main_dimensions": {
+          "method": "centrifugal_pump",
+          "suction": "single",
+          "impeller_type": "auto",
+          "outlet_inclination": {
+            "mode": "auto"
+          },
+          "outlet_hub_diameter": {
+            "mode": "auto"
+          },
+          "inlet_design": "normal",
+          "hydraulic_efficiency": {
+            "mode": "auto"
+          },
+          "volumetric_efficiency": {
+            "mode": "auto"
+          },
+          "overall_efficiency": {
+            "mode": "auto"
+          },
+          "pressure_coefficient": {
+            "mode": "auto"
+          },
+          "outlet_diameter": {
+            "mode": "manual",
+            "value": 0.44809664
+          },
+          "outlet_width": {
+            "mode": "manual",
+            "value": 0.08012176
+          },
+          "inlet_diameter_factor": {
+            "mode": "auto"
+          },
+          "inlet_diameter": {
+            "mode": "manual",
+            "value": 0.31586424
+          },
+          "blade_count": {
+            "mode": "manual",
+            "value": 7
+          },
+          "head_rise": {
+            "mode": "auto"
+          },
+          "outlet_blade_angle": {
+            "mode": "auto"
+          },
+          "blade_thickness": {
+            "mode": "auto"
+          },
+          "shaft_shear_stress": {
+            "mode": "auto"
+          },
+          "shaft_diameter": {
+            "mode": "auto"
+          },
+          "hub_diameter": {
+            "mode": "manual",
+            "value": 0.17145
+          },
+          "incidence": {
+            "mode": "auto"
+          },
+          "suction_specific_speed": {
+            "mode": "auto"
+          }
+        }
+      },
+      {
+        "id": 2,
+        "name": "Vaneless stator 1",
+        "kind": {
+          "type": "stator",
+          "vaned": false
+        },
+        "coupling": "flow_direction",
+        "steps": {
+          "main_dimensions": "done",
+          "meridional_contour": "done"
+        },
+        "diffuser": {
+          "main": {
+            "flow_factor": {
+              "mode": "auto"
+            },
+            "inlet_diameter": {
+              "mode": "manual",
+              "value": 0.44809664
+            },
+            "inlet_width": {
+              "mode": "manual",
+              "value": 0.08012176
+            },
+            "outlet_diameter": {
+              "mode": "manual",
+              "value": 0.6095999999999999
+            },
+            "incidence": {
+              "mode": "auto"
+            }
+          },
+          "contour": {
+            "outlet_width": {
+              "mode": "manual",
+              "value": 0.07951216
+            }
+          },
+          "properties": {
+            "vane_count": {
+              "mode": "auto"
+            },
+            "throat_factor": {
+              "mode": "auto"
+            },
+            "leading_thickness": {
+              "mode": "auto"
+            }
+          },
+          "mean_lines": {
+            "outlet_angle": {
+              "mode": "auto"
+            },
+            "points": {
+              "mode": "auto"
+            }
+          },
+          "profiles": {
+            "trailing_thickness": {
+              "mode": "auto"
+            }
+          },
+          "edges": {
+            "leading": {
+              "type": "ellipse",
+              "ratio": 3.0
+            },
+            "trailing": {
+              "type": "cut"
+            }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "name": "Volute 1",
+        "kind": {
+          "type": "volute"
+        },
+        "coupling": "flow_direction",
+        "steps": {
+          "volute_setup": "done",
+          "cross_section": "done",
+          "spiral_development": "done",
+          "diffuser": "done",
+          "cut_water": "done",
+          "wall_thickness": "done"
+        },
+        "volute": {
+          "setup": {
+            "kind": "single",
+            "rib_wrap": {
+              "mode": "auto"
+            },
+            "rib_thickness": {
+              "mode": "auto"
+            },
+            "rib_nose_ratio": {
+              "mode": "auto"
+            },
+            "channel_area_ratio": {
+              "mode": "auto"
+            },
+            "flow_factor": {
+              "mode": "auto"
+            },
+            "cutwater_diameter": {
+              "mode": "auto"
+            },
+            "inlet_width": {
+              "mode": "manual",
+              "value": 0.07951216
+            },
+            "cutwater_thickness": {
+              "mode": "auto"
+            }
+          },
+          "cross_section": {
+            "sections": [
+              {
+                "angle": 6.283185307179586,
+                "active": true,
+                "shape": {
+                  "type": "sides",
+                  "left": {
+                    "type": "trapezoidal",
+                    "cone_angle": 0.5235987755982988,
+                    "tangent_angle": 0.0
+                  },
+                  "right": null
+                }
+              }
+            ]
+          },
+          "spiral": {
+            "law": "auto",
+            "wrap": {
+              "mode": "auto"
+            },
+            "exponent": {
+              "mode": "auto"
+            },
+            "velocity_factor": {
+              "mode": "auto"
+            },
+            "reference_velocity": {
+              "mode": "auto"
+            },
+            "reference_flow": {
+              "mode": "auto"
+            },
+            "blind_flow": {
+              "mode": "auto"
+            },
+            "end_height": {
+              "mode": "auto"
+            },
+            "end_area": {
+              "mode": "auto"
+            },
+            "end_area_radius": {
+              "mode": "auto"
+            },
+            "progression": {
+              "type": "linear"
+            },
+            "sections": {
+              "mode": "auto"
+            },
+            "cutwater_correction": true,
+            "compensation": {
+              "enabled": false,
+              "thickness": {
+                "mode": "auto"
+              },
+              "start": {
+                "mode": "auto"
+              }
+            },
+            "arcs": {
+              "enabled": false,
+              "segments": 3
+            }
+          },
+          "diffuser": {
+            "shape": {
+              "type": "radial",
+              "axis_angle": 0.0
+            },
+            "bend_radius": {
+              "mode": "auto"
+            },
+            "length": {
+              "mode": "auto"
+            },
+            "outlet_diameter": {
+              "mode": "auto"
+            },
+            "nominal_size": false,
+            "flange_height": {
+              "mode": "auto"
+            },
+            "rotation": {
+              "mode": "auto"
+            }
+          },
+          "cutwater": {
+            "shape": {
+              "type": "rounded",
+              "radius": {
+                "mode": "auto"
+              }
+            },
+            "incidence": {
+              "mode": "auto"
+            }
+          },
+          "wall": {
+            "thickness": {
+              "mode": "auto"
+            },
+            "flange": {
+              "enabled": true,
+              "outer_diameter": {
+                "mode": "auto"
+              },
+              "thickness": {
+                "mode": "auto"
+              },
+              "bolt_circle": {
+                "mode": "auto"
+              },
+              "bolt_hole": {
+                "mode": "auto"
+              },
+              "bolts": {
+                "mode": "auto"
+              }
+            },
+            "pressure": {
+              "mode": "auto"
+            },
+            "allowable_stress": {
+              "mode": "auto"
+            }
+          }
+        }
+      }
+    ],
+    "next_id": 4
+  }
+}
