@@ -427,6 +427,34 @@ pub fn move_point(wall: &Wall, at: WallPoint, to: DVec2) -> Vec<SegmentInput> {
     input
 }
 
+/// Gives Bézier segment `segment` one more control point without changing its shape
+/// (degree elevation); a line becomes a Bézier through the same points.
+pub fn add_control(wall: &Wall, segment: usize) -> Vec<SegmentInput> {
+    let mut input = wall.to_input();
+    let Some(curve) = wall.segments.get(segment) else {
+        return input;
+    };
+    let elevated = curve.elevate();
+    let p = elevated.control_points();
+    input[segment].kind = SegmentKind::Bezier;
+    input[segment].controls = p[1..p.len() - 1].to_vec();
+    input
+}
+
+/// Removes inner control point `index` of segment `segment`, keeping at least one; the
+/// curve takes the shape of the points left.
+pub fn remove_control(wall: &Wall, segment: usize, index: usize) -> Vec<SegmentInput> {
+    let mut input = wall.to_input();
+    if let Some(s) = input.get_mut(segment)
+        && s.kind == SegmentKind::Bezier
+        && s.controls.len() > 1
+        && index < s.controls.len()
+    {
+        s.controls.remove(index);
+    }
+    input
+}
+
 /// Sets whether the joint after `segment` is tangent.
 pub fn set_smooth(wall: &Wall, segment: usize, smooth: bool) -> Vec<SegmentInput> {
     let mut input = wall.to_input();
@@ -580,6 +608,41 @@ mod tests {
         assert!((length - 0.05 * std::f64::consts::FRAC_PI_2).abs() < 1e-4);
         let line = Wall::single(Bezier::line(DVec2::ZERO, DVec2::new(0.01, 0.02)));
         assert!(line.curvature(10).iter().all(|&(_, k, _)| k == 0.0));
+    }
+
+    #[test]
+    fn control_points_are_added_without_changing_the_shape_and_removed() {
+        let wall = Wall::single(quarter());
+        let more = rebuild(&wall, &add_control(&wall, 0));
+        assert_eq!(more.segments()[0].degree(), 4);
+        for k in 0..=10 {
+            let t = k as f64 / 10.0;
+            assert!(more.segments()[0].eval(t).distance(quarter().eval(t)) < 1e-15);
+        }
+        let fewer = rebuild(&more, &remove_control(&more, 0, 1));
+        assert_eq!(fewer.segments()[0].degree(), 3);
+        // A Bézier keeps one control point at least, and a line has none to remove.
+        let one = Wall::build(
+            wall.start(),
+            wall.end(),
+            &[SegmentInput {
+                kind: SegmentKind::Bezier,
+                controls: vec![DVec2::new(0.04, 0.02)],
+                end: wall.end(),
+                smooth: false,
+            }],
+        )
+        .unwrap();
+        assert_eq!(remove_control(&one, 0, 0), one.to_input());
+        let line = Wall::single(Bezier::line(wall.start(), wall.end()));
+        let curved = rebuild(&line, &add_control(&line, 0));
+        assert_eq!(curved.segments()[0].degree(), 2);
+        assert!(
+            curved.segments()[0]
+                .eval(0.5)
+                .distance(line.segments()[0].eval(0.5))
+                < 1e-15
+        );
     }
 
     #[test]
