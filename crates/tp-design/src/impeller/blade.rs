@@ -228,6 +228,11 @@ pub enum WrapMode {
 /// Blade angles the wrap bump may reach, rad.
 const BUMP_BETA_RANGE: (f64, f64) = (5.0 * PI / 180.0, FRAC_PI_2);
 
+/// How far the bump of a common or linear wrap may lift β above both edge angles of a
+/// section before a warning, rad. Gülich (2nd ed., Chap. 7.2.2.2, Fig. 7.6) develops
+/// β smoothly between its edge values; the limit is our criterion.
+pub const WRAP_HUMP_WARNING: f64 = 15.0 * PI / 180.0;
+
 /// Inputs of the blade-profile step: normal blade thickness, varying linearly from
 /// leading to trailing edge before the edges are shaped. Default: the thickness of the
 /// main-dimensions step.
@@ -1098,11 +1103,31 @@ impl Blade {
                 .collect(),
             None => vec![0.0; frames.len()],
         };
-        let sections = frames
+        let sections: Vec<BladeSection> = frames
             .iter()
             .zip(bumps)
             .map(|(f, bump)| section(f, basis, &settings, plan.as_ref(), bump))
             .collect::<Result<_, _>>()?;
+        // A wrap far from what the edge angles give bends the blade into a hump of β.
+        // Only an imposed wrap does that; a cylindrical blade turns axial on purpose.
+        let imposed =
+            plan.is_none() && matches!(mean_lines.wrap, WrapMode::Common | WrapMode::Linear);
+        for s in sections.iter().filter(|_| imposed) {
+            let (Some(&first), Some(&last)) = (s.beta.first(), s.beta.last()) else {
+                continue;
+            };
+            let peak = s.beta.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+            if peak - first.max(last) > WRAP_HUMP_WARNING {
+                warnings.push(format!(
+                    "the wrap of {:.0}° lifts β to {:.0}° at span {:.2}, {:.0}° above its edge \
+                     angles: a freer wrap or larger inlet angles keep the blade smoother",
+                    s.wrap_angle().to_degrees(),
+                    peak.to_degrees(),
+                    s.span,
+                    (peak - first.max(last)).to_degrees()
+                ));
+            }
+        }
         Ok(Self {
             count: basis.blade_count,
             rotation_sign: basis.rotation_sign,
@@ -1355,6 +1380,39 @@ mod tests {
             last.wrap_angle(),
             max_relative = 1e-6
         );
+    }
+
+    #[test]
+    fn a_wrap_that_bends_the_blade_is_flagged() {
+        let wrapped = |degrees: f64| {
+            blade_with(
+                MeanLineInput {
+                    wrap_angle: Param::Manual(degrees.to_radians()),
+                    ..Default::default()
+                },
+                EdgeInput::default(),
+            )
+        };
+        let hump = |b: &Blade| b.warnings.iter().any(|w| w.contains("lifts β"));
+        // The reference sections wrap about 120° on their own: that keeps β smooth.
+        assert!(!hump(&wrapped(120.0)));
+        // Far less needs a hump of β well above its edge angles.
+        let bent = wrapped(70.0);
+        assert!(hump(&bent), "{:?}", bent.warnings);
+        let rise = |s: &BladeSection| {
+            let peak = s.beta.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+            peak - s.beta[0].max(*s.beta.last().unwrap())
+        };
+        assert!(bent.sections.iter().any(|s| rise(s) > WRAP_HUMP_WARNING));
+        // A free wrap never bends the blade.
+        let free = blade_with(
+            MeanLineInput {
+                wrap: WrapMode::Free,
+                ..Default::default()
+            },
+            EdgeInput::default(),
+        );
+        assert!(!hump(&free));
     }
 
     #[test]

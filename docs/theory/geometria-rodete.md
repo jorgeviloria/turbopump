@@ -306,6 +306,12 @@ automático, cada extremo conserva lo que da su propia distribución de β. Gül
 7.2.2.2, paso 7) da envolvimientos de 130°–160° con 5 álabes, 120°–140° con 6 y
 100°–130° con 7.
 
+**Aviso de joroba.** Un envolvimiento impuesto (común o lineal) muy distinto del que dan
+los ángulos de borde obliga a la joroba a subir β por encima de ellos, y el álabe se
+dobla. Se avisa cuando β supera en más de 15° a los dos ángulos de borde de una
+sección. El umbral es un criterio propio: Gülich (cap. 7.2.2.2, Fig. 7.6) desarrolla β de
+forma suave entre los bordes.
+
 **Comprobación de la integración.** Una línea radial con β constante debe dar la espiral
 logarítmica $\theta = \ln(r_2/r_1)/\tan\beta$.
 

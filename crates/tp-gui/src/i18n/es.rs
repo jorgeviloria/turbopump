@@ -3529,4 +3529,8 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
         "the wrap of {}° is out of reach at span {}: the section wraps {}°",
         "el envolvimiento de {}° no se alcanza en la sección {}: envuelve {}°",
     ),
+    (
+        "the wrap of {}° lifts β to {}° at span {}, {}° above its edge angles: a freer wrap or larger inlet angles keep the blade smoother",
+        "el envolvimiento de {}° sube β hasta {}° en la sección {}, {}° por encima de sus ángulos en los bordes: un envolvimiento más libre o ángulos de entrada mayores dejan el álabe más suave",
+    ),
 ];
