@@ -117,6 +117,24 @@ Los álabes cilíndricos (2D) solo se admiten con salida radial.
 
 **Editor del meridiano.** Es una vista propia para trabajar el meridiano con medidas:
 
+- **Comprobación con Gülich** (cap. 7.2.2.1, Fig. 7.4 y ec. 7.2), punto por punto:
+  - $z_E = (d_{2a} - d_1)(n_q/74)^{1{,}07}$, la extensión axial hasta el extremo de la
+    carcasa; se da por buena dentro de ±25 % (tolerancia nuestra, porque Gülich admite
+    valores menores en bombas pequeñas);
+  - $R_{Ds} = (0{,}6 \text{ a } 0{,}8)\,b_1$, con $b_1 = (d_1 - d_n)/2$, frente al menor radio
+    de curvatura de la carcasa;
+  - $g_1 = (0{,}2 \text{ a } 0{,}3)\,b_1$, el tramo casi axial de la carcasa antes de
+    curvarse; lo medimos hasta donde la carcasa ha girado 10° (criterio nuestro para el
+    «aumento de radio pequeño» del libro);
+  - el borde de ataque en la carcasa, antes de esa curva y no donde la curvatura es alta;
+  - $\varepsilon_{Ds}$, el ángulo de salida de la carcasa: a menudo 0 por debajo de
+    $n_q = 20$ y de unos 15–20° en rodetes radiales de $n_q$ mayor.
+- **Herramientas de dibujo:** una rejilla a la que se ajustan los puntos arrastrados; la
+  medida de distancias con Alt y arrastre; añadir un punto de control a un tramo Bézier
+  (elevación de grado, sin cambiar la forma) o quitarlo; copiar los 100 puntos de una
+  pared, y curvas de referencia a trazos, pegadas como texto o copiadas de una pared para
+  comparar los cambios.
+
 - **Cotas:** de $L$, de $b_2$ y de la $z$ y la $r$ de cada unión de las paredes dibujadas,
   más las del punto bajo el puntero. Las axiales se apilan bajo el eje y los radios a la
   derecha del rodete. Al hacer clic en el valor de una cota se escribe; la de $b_2$ solo
@@ -366,8 +384,10 @@ Valores automáticos, con $d_1 = 77{,}2$ mm por el factor $f_{d1}$ de la tabla 7
 | medio | 30,4 mm | 6,27 m/s | 34,2° | 39,5° | 120,5° | 130,8 mm |
 | carcasa | 38,9 mm | 6,50 m/s | 28,8° | 33,2° | 111,6° | 126,7 mm |
 
-- **Longitud axial:** 46,4 mm. Coincide con la estimación $z_E$ de la ecuación 7.2 del
-  libro (46 mm), aunque falta confirmar desde dónde se mide esa cota.
+- **Longitud axial:** 46,4 mm hasta el cubo. La $z_E$ de la ecuación 7.2 (46 mm) se mide,
+  según la Fig. 7.4 de Gülich, desde el plano de entrada hasta el extremo de la carcasa en
+  $d_2$. Con nuestra $L$ por defecto la carcasa termina en $L - b_2 = 29$ mm, un 37 % más
+  corta de lo recomendado. El editor del meridiano lo señala.
 - **Velocidad meridional:** $c_m$ baja de 6,53 a 3,04 m/s sin repuntes.
 - **Carga del álabe:** $\xi_{ef}/\xi_{adm} = 1{,}21/1{,}09 = 1{,}11$, dentro de la banda
   pero algo por encima del 0,9 recomendado. Con 5 álabes la carga sale de la banda y el
