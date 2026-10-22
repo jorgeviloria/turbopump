@@ -65,6 +65,33 @@ luego sube con $\varepsilon_s$ hasta $d_{2a}$; $L$ suma el desfase $\Delta_z$ de
 (construcción propia). Con $\varepsilon_s = 0$ todo se reduce al rodete radial. Se rechaza
 una $L$ tan corta que alguna esquina quede antes del plano de entrada.
 
+**Paredes dibujadas por tramos.** Cubo y carcasa pueden dejar de ser una sola Bézier y
+dibujarse como una cadena de tramos, cada uno Bézier o recta. El primero empieza en la
+entrada y el último termina en la salida; esos dos puntos siguen saliendo de las
+dimensiones principales y de $L$, así que la pared los acompaña cuando cambian. Las
+uniones intermedias y los puntos de control interiores se guardan como $(z, r)$ absolutos.
+
+Cada unión puede ser tangente o una esquina. En una unión tangente, el lado Bézier gira
+hasta la tangente del otro lado y conserva la distancia de su punto de control a la unión;
+entre dos Béziers, la segunda sigue a la primera, y dos rectas forman siempre esquina
+(construcción propia). Las operaciones de edición son:
+
+- **Dividir** un tramo en $t$ por de Casteljau: los dos tramos nuevos reproducen el
+  original y quedan unidos con tangencia.
+- **Unir** dos tramos contiguos: dos rectas dan una recta; en otro caso, una Bézier cúbica
+  que conserva las tangentes de los extremos.
+- **Cambiar el tipo:** una Bézier pasa a recta perdiendo sus puntos interiores, y una recta
+  pasa a Bézier con los puntos en los tercios.
+- **Mover una unión** arrastra también sus dos puntos de control vecinos, de modo que no
+  pierde la tangencia.
+
+Para el flujo cuasi-1D y los álabes la pared se muestrea con un número de puntos
+proporcional a la longitud de cada tramo; una pared de un solo tramo da exactamente los
+mismos puntos que antes. En la vista meridional, las uniones se dibujan como cuadrados.
+Con el clic derecho sobre un punto se escriben sus coordenadas exactas; si la pared era
+automática, pasa a dibujarse por tramos. Sobre la pared se puede dividir, cambiar el tipo
+o volver al contorno automático.
+
 **Borde de ataque:** se define por su posición en el cubo y en la carcasa, como fracción
 de la longitud de cada curva. Por defecto está al 25 % en el cubo y al 5 % en la
 carcasa. En los spans intermedios se interpola linealmente en la coordenada del canal.
@@ -276,6 +303,8 @@ Valores automáticos, con $d_1 = 77{,}2$ mm por el factor $f_{d1}$ de la tabla 7
 - No hay álabes partidos (splitters) ni álabes de superficie reglada. Los álabes 2D son
   cilíndricos (paralelos al eje); faltan los 2D de los rodetes axiales.
 - El borde de ataque es recto en la coordenada del canal.
+- Las paredes por tramos solo admiten Béziers y rectas; faltan los arcos con rectas
+  tangentes, las B-splines y la continuidad de curvatura en las uniones.
 - No se modelan holguras ni redondeos.
 - La exportación a TurboGrid pasa a la Fase 8 (CFD), donde se podrá validar contra el
   programa.
