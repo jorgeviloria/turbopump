@@ -100,8 +100,23 @@ $\ln n_q$ entre esos extremos. La interpolación es una elección propia; la ec.
 el valor, pero necesita la garganta de entrada y queda pendiente.
 
 **Altura a válvula cerrada:** por debajo de ese caudal las pérdidas no se pueden
-calcular. La altura se lleva hasta la de válvula cerrada, con el coeficiente de las
-ecs. 3.27 y 3.28:
+calcular. La altura se lleva hasta la de válvula cerrada.
+
+Para $n_q$ = 4-68 la da el rodete: la subida de altura $\Delta h$ de su número de álabes
+y su $\beta_{2B}$ (ajuste propio a la fig. 3-2 de Lobanoff y Ross, véase
+[dimensiones-principales.md](dimensiones-principales.md)) sobre la altura de la curva en
+el caudal de diseño:
+
+$$H_0 = H(Q_{opt})\,(1 + \Delta h)\,k_c, \qquad
+\Delta h = f\!\left(n_q,\ \tfrac{z + z_\beta}{2}\right)$$
+
+$z_\beta$ es el número de álabes cuyo ángulo estándar (fig. 3-13) es el $\beta_{2B}$ del
+rodete; con el ángulo estándar, $z_\beta = z$ y se recupera la gráfica. Promediar los dos es
+una interpolación propia: la gráfica solo da las parejas. Así, quitar álabes o bajar
+$\beta_{2B}$ empina la curva. La gráfica no distingue voluta de difusor; con difusor de
+álabes se multiplica por $k_c = 1{,}31/1{,}25$, la relación entre las ecs. 3.27 y 3.28.
+
+Fuera de ese rango de $n_q$ se usan las ecs. 3.27 y 3.28, que solo dependen de $n_q$:
 
 $$\psi_0 = 1{,}31\,e^{-0{,}3\,n_q/100} \ \text{(con difusor)}, \qquad
 \psi_0 = 1{,}25\,e^{-0{,}3\,n_q/100} \ \text{(con voluta)}, \qquad
@@ -133,7 +148,7 @@ rendimiento del diseño a 0,854.
 
 | Punto | Q | H | P | η |
 |---|---|---|---|---|
-| Válvula cerrada | 0 | 39,1 m | 3,0 kW (estimación) | 0 |
+| Válvula cerrada | 0 | 39,8 m | 3,0 kW (estimación) | 0 |
 | Inicio de la recirculación | 53,2 m³/h (53 %) | 38,6 m | 7,77 kW | 0,717 |
 | 75 % | 75,0 m³/h | 36,6 m | 9,45 kW | 0,791 |
 | Máximo rendimiento | 95,9 m³/h (96 %) | 32,9 m | 10,53 kW | 0,815 |
@@ -142,7 +157,8 @@ rendimiento del diseño a 0,854.
 | 150 % | 150,0 m³/h | 16,4 m | 10,99 kW | 0,609 |
 
 Datos de partida: $\beta_{2B} = 22{,}0°$, $\gamma = 0{,}826$, $\tau_2 = 1{,}116$,
-$\varphi_2 = 0{,}116$, $n_q = 35{,}9$ y $\psi_0 = 1{,}122$.
+$\varphi_2 = 0{,}116$, $n_q = 35{,}9$ y 7 álabes, que dan $\Delta h$ = 24,5 % y
+$\psi_0 = 1{,}142$ (las ecs. 3.27-3.28 darían 1,122).
 
 ## 2. Flujo potencial meridional
 

@@ -1549,8 +1549,8 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ),
     ("Shut-off ψ₀", "ψ₀ a válvula cerrada"),
     (
-        "Pressure coefficient 2gH₀/u₂² against a closed valve (Gülich eqs. 3.27–3.28)",
-        "Coeficiente de presión 2gH₀/u₂² con la válvula cerrada (Gülich, ecs. 3.27–3.28)",
+        "Pressure coefficient 2gH₀/u₂² against a closed valve. Automatic: the head rise of the blade number and β₂B for nq 4–68 (Lobanoff & Ross Fig. 3-2), Gülich eqs. 3.27–3.28 outside",
+        "Coeficiente de presión 2gH₀/u₂² con la válvula cerrada. Automático: la subida de altura del número de álabes y β₂B para nq 4–68 (Lobanoff y Ross, fig. 3-2); fuera de ese rango, Gülich, ecs. 3.27–3.28",
     ),
     ("Up to Q/Q_opt", "Hasta Q/Q_opt"),
     ("Largest flow of the curve", "Mayor caudal de la curva"),
@@ -1612,10 +1612,7 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "{} ({} % del diseño) · {} · η {}",
     ),
     ("Shut-off head", "Altura a válvula cerrada"),
-    (
-        "{} (ψ₀ {}, Gülich eqs. 3.27–3.28)",
-        "{} (ψ₀ {}, Gülich, ecs. 3.27–3.28)",
-    ),
+    ("{} (ψ₀ {}, {})", "{} (ψ₀ {}, {})"),
     ("Shut-off power", "Potencia a válvula cerrada"),
     ("{} (estimate)", "{} (estimación)"),
     ("Recirculation below", "Recirculación por debajo de"),
@@ -2388,6 +2385,12 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "The circular-arc and straight shapes fix β from the leading to the trailing edge; the distribution below does not apply",
         "Las formas de arco circular y recta fijan β del borde de ataque al de salida; la distribución de abajo no se aplica",
     ),
+    (
+        "head rise of z and β₂B, Lobanoff & Ross Fig. 3-2",
+        "subida de altura de z y β₂B, Lobanoff y Ross, fig. 3-2",
+    ),
+    ("Gülich eqs. 3.27–3.28", "Gülich, ecs. 3.27–3.28"),
+    ("manual", "manual"),
 ];
 
 /// Messages of the design code, most specific first.
@@ -3177,10 +3180,6 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
     (
         "the head rise of {} % is out of reach at nq = {}: {} blades give about {} %",
         "la subida de altura del {} % no se alcanza con nq = {}: {} álabes dan cerca del {} %",
-    ),
-    (
-        "the head-rise chart assumes β2B ≈ {}° for {} blades; with {}° the curve will differ",
-        "el gráfico de subida de altura supone β2B ≈ {}° para {} álabes; con {}° la curva será distinta",
     ),
     (
         "the plan view of the blade with β2B = {}° cannot reach the leading edge at r = {} mm; raise β2B (90° gives radial blades) or choose another shape",

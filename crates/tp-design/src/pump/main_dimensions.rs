@@ -624,7 +624,9 @@ pub fn design(
 
     let blade_count = match (input.blade_count, head_rise_target) {
         (Param::Manual(z), _) => z,
-        (Param::Auto, Some(h)) => corr::blade_count_for_head_rise(nq, h),
+        (Param::Auto, Some(h)) => {
+            corr::blade_count_for_head_rise(nq, h, input.outlet_blade_angle.manual_value())
+        }
         (Param::Auto, None) => {
             // Gülich's 5–7 blades where they apply, the wider range elsewhere.
             let (lo, hi) = if (nq_min..=nq_max).contains(&nq) {
@@ -685,7 +687,7 @@ pub fn design(
         ));
     }
 
-    let head_rise = corr::head_rise(nq, blade_count);
+    let head_rise = corr::head_rise_for_blades(nq, blade_count, beta2b);
     if let Some(target) = head_rise_target {
         if (head_rise - target).abs() > 0.03 {
             warnings.push(format!(
@@ -699,15 +701,6 @@ pub fn design(
             warnings.push(format!(
                 "{blade_count} blades give a flat head curve that droops toward shut-off \
                  (Lobanoff & Ross Fig. 3-2); check its stability"
-            ));
-        }
-        let standard = corr::standard_outlet_blade_angle(blade_count);
-        if (beta2b - standard).abs() > 4f64.to_radians() {
-            warnings.push(format!(
-                "the head-rise chart assumes β2B ≈ {:.0}° for {blade_count} blades; with \
-                 {:.1}° the curve will differ",
-                standard.to_degrees(),
-                beta2b.to_degrees()
             ));
         }
     }
@@ -1046,7 +1039,10 @@ mod tests {
     #[test]
     fn automatic_design_estimates_its_head_rise() {
         let d = design(&duty(), &CentrifugalPumpInput::default()).unwrap();
-        assert_relative_eq!(d.head_rise, corr::head_rise(d.nq, d.blade_count));
+        assert_relative_eq!(
+            d.head_rise,
+            corr::head_rise_for_blades(d.nq, d.blade_count, d.outlet.blade_angle)
+        );
         assert!(d.inlet_area_ratio > 0.0 && d.inlet_area_ratio < 1.0);
     }
 

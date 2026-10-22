@@ -199,6 +199,8 @@ pub struct PumpPerformance {
     pub shutoff_power: f64,
     /// ψ₀ used for the shut-off head.
     pub shutoff_coefficient: f64,
+    /// Where ψ₀ came from.
+    pub shutoff_source: ShutoffSource,
     /// Flow at which recirculation sets in, m³/s.
     pub recirculation_flow: f64,
     /// Largest flow computed, m³/s.
@@ -277,6 +279,38 @@ pub fn shutoff_coefficient(nq: f64, collector: Collector) -> f64 {
         Collector::Volute | Collector::VanelessDiffuser => 1.25,
     };
     factor * (-0.3 * nq / 100.0).exp()
+}
+
+/// Where the automatic shut-off head comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ShutoffSource {
+    /// The head rise of the blade number and outlet angle ([`blade_shutoff_coefficient`]).
+    Blades,
+    /// Gülich eqs. 3.27–3.28 from nq alone, outside the range of the head-rise chart.
+    SpecificSpeed,
+    Manual,
+}
+
+/// Shut-off pressure coefficient from the blades: H₀ = H·(1 + Δh), Δh the head rise of
+/// the blade number and outlet angle ([`crate::pump::correlations::head_rise_for_blades`],
+/// after Lobanoff & Ross Fig. 3-2) over the head `design_head` of the curve at the design
+/// flow. The chart does not tell volutes from diffusers; vaned diffusers take the ratio
+/// 1.31/1.25 of Gülich eqs. 3.27 and 3.28 on top (our combination).
+pub fn blade_shutoff_coefficient(
+    design: &CentrifugalPumpDesign,
+    collector: Collector,
+    design_head: f64,
+) -> f64 {
+    let rise = crate::pump::correlations::head_rise_for_blades(
+        design.nq,
+        design.blade_count,
+        design.outlet.blade_angle,
+    );
+    let collector_factor = shutoff_coefficient(design.nq, collector)
+        / shutoff_coefficient(design.nq, Collector::Volute);
+    let u2 = design.outlet.triangle.u;
+    2.0 * G * design_head * (1.0 + rise) * collector_factor / (u2 * u2)
 }
 
 /// Flow ratio Q/Q_opt at which recirculation typically sets in: from 0.4 at nq = 10 to
@@ -559,9 +593,23 @@ pub fn predict(
             )));
         }
     }
-    let psi0 = input
-        .shutoff_coefficient
-        .resolve(|| shutoff_coefficient(design.nq, input.collector));
+    let (psi0, shutoff_source) = match input.shutoff_coefficient {
+        Param::Manual(psi0) => (psi0, ShutoffSource::Manual),
+        Param::Auto => {
+            let (lo, hi) = crate::pump::correlations::HEAD_RISE_NQ_RANGE;
+            if (lo..=hi).contains(&design.nq) {
+                (
+                    blade_shutoff_coefficient(design, input.collector, model.point(1.0).head),
+                    ShutoffSource::Blades,
+                )
+            } else {
+                (
+                    shutoff_coefficient(design.nq, input.collector),
+                    ShutoffSource::SpecificSpeed,
+                )
+            }
+        }
+    };
     let shutoff_head = psi0 * model.u2 * model.u2 / (2.0 * G);
 
     // The computed range ends where the head reaches zero, if before the largest flow.
@@ -908,6 +956,7 @@ pub fn predict(
         shutoff_head,
         shutoff_power: shutoff.power,
         shutoff_coefficient: psi0,
+        shutoff_source,
         recirculation_flow: onset * duty.flow * viscous.flow_factor(),
         max_flow: end * duty.flow * viscous.flow_factor(),
         npsh_required: npsh.design_npsh,
@@ -937,9 +986,18 @@ pub const PERFORMANCE_CORRELATIONS: &[crate::pump::correlations::CorrelationInfo
     },
     crate::pump::correlations::CorrelationInfo {
         id: "performance.shutoff_head",
-        description: "ψ₀ = 1.31·e^(−0.3·nq/100) diffuser pumps, 1.25·e^(−0.3·nq/100) volutes",
+        description: "ψ₀ = 1.31·e^(−0.3·nq/100) diffuser pumps, 1.25·e^(−0.3·nq/100) volutes; \
+                      used outside nq 4–68",
         reference: "Gülich 2nd ed., eqs. 3.27 and 3.28",
         verification: crate::pump::correlations::Verification::Verified,
+    },
+    crate::pump::correlations::CorrelationInfo {
+        id: "performance.shutoff_head_blades",
+        description: "H₀ = H·(1 + Δh) with the head rise Δh of the blade number and outlet \
+                      angle for nq 4–68; vaned diffusers × 1.31/1.25 (our combination)",
+        reference: "Lobanoff & Ross, Centrifugal Pumps: Design and Application, 2nd ed., \
+                    Fig. 3-2 (our fit); Gülich 2nd ed., eqs. 3.27 and 3.28 for the collector",
+        verification: crate::pump::correlations::Verification::EngineeringDefault,
     },
     crate::pump::correlations::CorrelationInfo {
         id: "performance.recirculation_onset",
@@ -1464,6 +1522,43 @@ mod tests {
         // 21 points plus the onset of recirculation.
         assert_eq!(p.points.len(), 22);
         assert!(p.points.windows(2).all(|w| w[1].flow >= w[0].flow));
+    }
+
+    #[test]
+    fn the_blades_set_the_shutoff_head() {
+        let (d, p) = performance(&PerformanceInput::default());
+        assert_eq!(p.shutoff_source, ShutoffSource::Blades);
+        let rise = crate::pump::correlations::head_rise_for_blades(
+            d.nq,
+            d.blade_count,
+            d.outlet.blade_angle,
+        );
+        assert_relative_eq!(
+            p.shutoff_head,
+            p.design.head * (1.0 + rise),
+            max_relative = 1e-6
+        );
+        // Fewer blades at a flatter angle give a steeper curve.
+        let steep = CentrifugalPumpInput {
+            head_rise: Param::Manual(0.45),
+            ..Default::default()
+        };
+        let ds = design(&duty(), &steep).unwrap();
+        let ps = predict(
+            &duty(),
+            &ds,
+            &PerformanceInput::default(),
+            &CollectorData::default(),
+        )
+        .unwrap();
+        assert!(ds.blade_count < d.blade_count);
+        let relative = |p: &PumpPerformance| p.shutoff_head / p.design.head;
+        assert!(
+            relative(&ps) > relative(&p) + 0.1,
+            "{} vs {}",
+            relative(&ps),
+            relative(&p)
+        );
     }
 
     #[test]

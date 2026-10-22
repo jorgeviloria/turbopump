@@ -166,7 +166,10 @@ $N_s = 51{,}65\,n_q$), es decir $n_q$ ≈ 4-68, y queda a menos de 2 puntos de l
 para 3 a 8 álabes. La segunda da 17° con 3 álabes, 25° con 6 y 29° con 8.
 
 - **Subida automática:** no se impone; el resultado muestra la subida que corresponde al
-  número de álabes elegido.
+  número de álabes y al $\beta_{2B}$ del diseño. Un ángulo distinto del estándar entra
+  promediando $z$ con el número de álabes cuyo ángulo estándar es ese $\beta_{2B}$
+  (interpolación propia). La curva de prestaciones usa esta subida para la altura a
+  válvula cerrada ([prestaciones.md](prestaciones.md)).
 - **Subida manual:** se toma el $z$ de 3 a 8 cuya curva queda más cerca del objetivo, y
   $\beta_{2B}$ estándar para ese $z$, salvo que $z$ o $\beta_{2B}$ sean manuales. Con 7 u 8
   álabes se avisa: en la gráfica esas curvas caen hacia caudal cero, y Gülich desaconseja

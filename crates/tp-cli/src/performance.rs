@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use clap::Args;
 use tp_design::Param;
-use tp_design::performance::{Collector, PerformanceInput, PumpPerformance};
+use tp_design::performance::{Collector, PerformanceInput, PumpPerformance, ShutoffSource};
 use tp_design::radial_thrust::RadialCollector;
 use tp_project::{ComponentId, ComponentKind, Project};
 use tp_units::{DisplayUnits, QuantityKind, parse_quantity_or};
@@ -280,8 +280,13 @@ fn print_report(
             c.statistical_efficiency
         ),
     }
+    let source = match c.shutoff_source {
+        ShutoffSource::Blades => "head rise of z and β2B, Lobanoff & Ross Fig. 3-2",
+        ShutoffSource::SpecificSpeed => "Gülich eqs. 3.27–3.28",
+        ShutoffSource::Manual => "manual",
+    };
     println!(
-        "Shut-off   H {} (ψ0 {:.3}, Gülich eqs. 3.27–3.28)   P {} (estimate)",
+        "Shut-off   H {} (ψ0 {:.3}, {source})   P {} (estimate)",
         s(Head, c.shutoff_head),
         c.shutoff_coefficient,
         s(Power, c.shutoff_power)

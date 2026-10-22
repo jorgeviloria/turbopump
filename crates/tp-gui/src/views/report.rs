@@ -4,6 +4,7 @@
 use eframe::egui::{self, Grid, RichText, Ui};
 use tp_design::impeller::BladeLoading;
 use tp_design::impeller::loading::blade_velocities;
+use tp_design::performance::ShutoffSource;
 use tp_design::pump::{InletSection, correlations as corr};
 use tp_design::radial_thrust::RadialCollector;
 use tp_design::volute::{AreaLaw, CutwaterShape, DischargeShape, Progression};
@@ -174,6 +175,16 @@ pub(crate) fn show(
                         "Blades z",
                         d.blade_count.to_string(),
                         manual_tag(&input.blade_count),
+                    ),
+                    (
+                        "Head rise to shut-off",
+                        format!("{:.0} %", d.head_rise * 100.0),
+                        manual_tag(&input.head_rise),
+                    ),
+                    (
+                        "Outlet blade angle β₂B",
+                        s(Angle, d.outlet.blade_angle),
+                        manual_tag(&input.outlet_blade_angle),
                     ),
                     (
                         "Blade thickness e",
@@ -393,10 +404,17 @@ pub(crate) fn show(
                             ui,
                             tr("Shut-off head"),
                             tf(
-                                "{} (ψ₀ {}, Gülich eqs. 3.27–3.28)",
+                                "{} (ψ₀ {}, {})",
                                 &[
                                     &s(Head, c.shutoff_head),
                                     &format!("{:.3}", c.shutoff_coefficient),
+                                    &match c.shutoff_source {
+                                        ShutoffSource::Blades => {
+                                            tr("head rise of z and β₂B, Lobanoff & Ross Fig. 3-2")
+                                        }
+                                        ShutoffSource::SpecificSpeed => tr("Gülich eqs. 3.27–3.28"),
+                                        ShutoffSource::Manual => tr("manual"),
+                                    },
                                 ],
                             ),
                         );

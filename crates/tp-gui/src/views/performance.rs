@@ -182,7 +182,7 @@ impl PerformanceView {
             setting(
                 ui,
                 tr("Shut-off ψ₀"),
-                tr("Pressure coefficient 2gH₀/u₂² against a closed valve (Gülich eqs. 3.27–3.28)"),
+                tr("Pressure coefficient 2gH₀/u₂² against a closed valve. Automatic: the head rise of the blade number and β₂B for nq 4–68 (Lobanoff & Ross Fig. 3-2), Gülich eqs. 3.27–3.28 outside"),
                 &mut self.shutoff,
                 curve.shutoff_coefficient,
             );

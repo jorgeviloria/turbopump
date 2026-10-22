@@ -104,7 +104,9 @@ pub const CORRELATIONS: &[CorrelationInfo] = &[
         id: "pump.head_rise",
         description: "head rise from BEP to shut-off (H₀ − H)/H = 0.063·z^−0.632·nq^(0.995 − 0.052·z) \
                       with the standard outlet angle of each blade number; our fit to the chart \
-                      (within 2 points for nq 4–68, z 3–8)",
+                      (within 2 points for nq 4–68, z 3–8). Another angle enters through the \
+                      mean of z and the blade number whose standard angle it is (our \
+                      interpolation)",
         reference: "Lobanoff & Ross, Centrifugal Pumps: Design and Application, 2nd ed., Fig. 3-2",
         verification: Verification::Verified,
     },
@@ -337,9 +339,28 @@ pub fn blade_thickness(d2: f64) -> f64 {
 /// 0.063·z^−0.632·nq^(0.995 − 0.052·z). Our fit to Lobanoff & Ross, Fig. 3-2, read at
 /// Ns = 200–3500 (US units, Ns = 51.65·nq) for 3–8 blades; it stays within two points of
 /// the chart there. Fewer blades and smaller outlet angles give steeper curves.
-pub fn head_rise(nq: f64, z: u32) -> f64 {
-    let z = f64::from(z);
+pub fn head_rise(nq: f64, z: f64) -> f64 {
     0.063 * z.powf(-0.632) * nq.max(0.0).powf(0.995 - 0.052 * z)
+}
+
+/// Blade number, not rounded, whose [`standard_outlet_blade_angle`] is `beta2b` (rad),
+/// held within 3–8.
+pub fn equivalent_blade_count(beta2b: f64) -> f64 {
+    let (lo, hi) = (
+        standard_outlet_blade_angle(3).to_degrees(),
+        standard_outlet_blade_angle(8).to_degrees(),
+    );
+    let beta = beta2b.to_degrees().clamp(lo, hi);
+    let (a, b, c) = (-0.1667, 4.233, 5.8 - beta);
+    (-b + (b * b - 4.0 * a * c).sqrt()) / (2.0 * a)
+}
+
+/// Head rise (H₀ − H)/H of `z` blades at the outlet angle `beta2b` (rad): [`head_rise`]
+/// at the mean of `z` and the [`equivalent_blade_count`] of the angle, so that a smaller
+/// angle steepens the curve as fewer blades do. With the standard angle it is the chart
+/// value itself; the averaging is our interpolation, the chart only gives the pairs.
+pub fn head_rise_for_blades(nq: f64, z: u32, beta2b: f64) -> f64 {
+    head_rise(nq, 0.5 * (f64::from(z) + equivalent_blade_count(beta2b)))
 }
 
 /// Range of nq covered by [`head_rise`].
@@ -357,15 +378,20 @@ pub fn standard_outlet_blade_angle(z: u32) -> f64 {
 /// shut-off, and Gülich advises against 8 or more for the stability of the Q-H curve.
 pub const HEAD_RISE_BLADE_RANGE: (u32, u32) = (3, 8);
 
-/// The blade number within [`HEAD_RISE_BLADE_RANGE`] whose [`head_rise`] at `nq` comes
-/// closest to `target`.
-pub fn blade_count_for_head_rise(nq: f64, target: f64) -> u32 {
+/// The blade number within [`HEAD_RISE_BLADE_RANGE`] whose head rise at `nq` comes
+/// closest to `target`: at the outlet angle `beta2b` (rad) when it is fixed, otherwise
+/// at the standard angle of each blade number.
+pub fn blade_count_for_head_rise(nq: f64, target: f64, beta2b: Option<f64>) -> u32 {
     let (lo, hi) = HEAD_RISE_BLADE_RANGE;
+    let rise = |z: u32| match beta2b {
+        Some(beta) => head_rise_for_blades(nq, z, beta),
+        None => head_rise(nq, f64::from(z)),
+    };
     (lo..=hi)
         .min_by(|&a, &b| {
-            let da = (head_rise(nq, a) - target).abs();
-            let db = (head_rise(nq, b) - target).abs();
-            da.total_cmp(&db)
+            (rise(a) - target)
+                .abs()
+                .total_cmp(&(rise(b) - target).abs())
         })
         .expect("the range is not empty")
 }
@@ -534,7 +560,7 @@ mod tests {
             (3000.0, 7, 0.240),
             (1800.0, 8, 0.133),
         ] {
-            let fit = head_rise(ns / 51.65, z);
+            let fit = head_rise(ns / 51.65, f64::from(z));
             assert!(
                 (fit - chart).abs() < 0.02,
                 "z = {z}, Ns = {ns}: {fit} vs {chart}"
@@ -542,7 +568,7 @@ mod tests {
         }
         // Steeper with fewer blades, at every nq.
         for nq in [10.0, 30.0, 60.0] {
-            assert!((3..12).all(|z| head_rise(nq, z) > head_rise(nq, z + 1)));
+            assert!((3..12).all(|z| head_rise(nq, f64::from(z)) > head_rise(nq, f64::from(z + 1))));
         }
     }
 
@@ -562,9 +588,35 @@ mod tests {
     fn blade_count_for_a_head_rise() {
         // The book's example: Ns ≈ 1680, a 20 % rise → six blades at 25°.
         let nq = 1684.0 / 51.65;
-        assert_eq!(blade_count_for_head_rise(nq, 0.20), 6);
-        assert_eq!(blade_count_for_head_rise(nq, 0.55), 3);
-        assert_eq!(blade_count_for_head_rise(nq, 0.0), HEAD_RISE_BLADE_RANGE.1);
+        assert_eq!(blade_count_for_head_rise(nq, 0.20, None), 6);
+        assert_eq!(blade_count_for_head_rise(nq, 0.55, None), 3);
+        assert_eq!(
+            blade_count_for_head_rise(nq, 0.0, None),
+            HEAD_RISE_BLADE_RANGE.1
+        );
+        // A flatter fixed angle steepens the curve, so it needs more blades for 20 %.
+        assert!(blade_count_for_head_rise(nq, 0.20, Some(17f64.to_radians())) > 6);
+    }
+
+    #[test]
+    fn the_outlet_angle_shapes_the_head_rise() {
+        for z in 3..=8 {
+            let standard = standard_outlet_blade_angle(z);
+            assert_relative_eq!(
+                equivalent_blade_count(standard),
+                f64::from(z),
+                epsilon = 1e-9
+            );
+            assert_relative_eq!(
+                head_rise_for_blades(30.0, z, standard),
+                head_rise(30.0, f64::from(z)),
+                epsilon = 1e-12
+            );
+        }
+        // A smaller angle steepens the curve; radial blades flatten it.
+        let six = head_rise_for_blades(30.0, 6, 25f64.to_radians());
+        assert!(head_rise_for_blades(30.0, 6, 18f64.to_radians()) > six);
+        assert!(head_rise_for_blades(30.0, 6, 90f64.to_radians()) < six);
     }
 
     #[test]
