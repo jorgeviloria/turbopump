@@ -94,10 +94,36 @@ pub const CORRELATIONS: &[CorrelationInfo] = &[
     },
     CorrelationInfo {
         id: "pump.blade_count",
-        description: "Pfleiderer's estimate z = 6.5·(d₂ + d₁m)/(d₂ − d₁m)·sin β_m, limited to the \
-                      5–7 blades recommended for 10 < nq < 120",
+        description: "Pfleiderer's estimate z = 6.5·(d₂ + d₁m)/(d₂ − d₁m)·sin β_m, rounded and \
+                      kept within the 5–7 blades recommended for 10 < nq < 120, within 3–12 \
+                      outside that range; a prescribed head rise picks 3–8",
         reference: "Pfleiderer 1961; range from Gülich 2nd ed., pp. 342–343",
         verification: Verification::Standard,
+    },
+    CorrelationInfo {
+        id: "pump.head_rise",
+        description: "head rise from BEP to shut-off (H₀ − H)/H = 0.063·z^−0.632·nq^(0.995 − 0.052·z) \
+                      with the standard outlet angle of each blade number; our fit to the chart \
+                      (within 2 points for nq 4–68, z 3–8)",
+        reference: "Lobanoff & Ross, Centrifugal Pumps: Design and Application, 2nd ed., Fig. 3-2",
+        verification: Verification::Verified,
+    },
+    CorrelationInfo {
+        id: "pump.standard_outlet_angle",
+        description: "standard outlet blade angle β₂B = 5.8° + 4.233°·z − 0.1667°·z² for 3–8 \
+                      blades (17° for 3, 25° for 6, 29° for 8); our fit to the chart",
+        reference: "Lobanoff & Ross, Centrifugal Pumps: Design and Application, 2nd ed., Fig. 3-13",
+        verification: Verification::Verified,
+    },
+    CorrelationInfo {
+        id: "pump.inlet_area_ratio",
+        description: "area between the blades at the inlet over the eye area, A_v/A_e = \
+                      0.275 + 0.00496·nq ± 0.055; A_v = z·a₁·b₁ with the throat \
+                      a₁ = π·d₁·sin β₁B/z − e at the outer streamline of the eye and \
+                      b₁ = (d₁ − d_n)/2; our fit to the chart. Reported only: the band \
+                      reflects large eyes (β₁B ≈ 15–20°), not the eye of minimum w₁",
+        reference: "Lobanoff & Ross, Centrifugal Pumps: Design and Application, 2nd ed., Fig. 3-12",
+        verification: Verification::Verified,
     },
     CorrelationInfo {
         id: "pump.blade_thickness",
@@ -306,10 +332,58 @@ pub fn blade_thickness(d2: f64) -> f64 {
     (0.016 * d2).max(0.003)
 }
 
-/// Range of nq (rpm, m³/s, m) for radial impellers with 5–7 blades.
+/// Head rise from the best efficiency point to shut-off, (H₀ − H)/H, of an impeller
+/// with `z` blades at their standard outlet angle ([`standard_outlet_blade_angle`]):
+/// 0.063·z^−0.632·nq^(0.995 − 0.052·z). Our fit to Lobanoff & Ross, Fig. 3-2, read at
+/// Ns = 200–3500 (US units, Ns = 51.65·nq) for 3–8 blades; it stays within two points of
+/// the chart there. Fewer blades and smaller outlet angles give steeper curves.
+pub fn head_rise(nq: f64, z: u32) -> f64 {
+    let z = f64::from(z);
+    0.063 * z.powf(-0.632) * nq.max(0.0).powf(0.995 - 0.052 * z)
+}
+
+/// Range of nq covered by [`head_rise`].
+pub const HEAD_RISE_NQ_RANGE: (f64, f64) = (4.0, 68.0);
+
+/// Standard outlet blade angle of an impeller with `z` blades, rad:
+/// 5.8° + 4.233°·z − 0.1667°·z², our fit to Lobanoff & Ross, Fig. 3-13, for 3–8 blades
+/// and held at its end values outside them.
+pub fn standard_outlet_blade_angle(z: u32) -> f64 {
+    let z = f64::from(z.clamp(3, 8));
+    (5.8 + 4.233 * z - 0.1667 * z * z).to_radians()
+}
+
+/// Blade numbers of the head-rise chart. With 7 and 8 blades its curves droop toward
+/// shut-off, and Gülich advises against 8 or more for the stability of the Q-H curve.
+pub const HEAD_RISE_BLADE_RANGE: (u32, u32) = (3, 8);
+
+/// The blade number within [`HEAD_RISE_BLADE_RANGE`] whose [`head_rise`] at `nq` comes
+/// closest to `target`.
+pub fn blade_count_for_head_rise(nq: f64, target: f64) -> u32 {
+    let (lo, hi) = HEAD_RISE_BLADE_RANGE;
+    (lo..=hi)
+        .min_by(|&a, &b| {
+            let da = (head_rise(nq, a) - target).abs();
+            let db = (head_rise(nq, b) - target).abs();
+            da.total_cmp(&db)
+        })
+        .expect("the range is not empty")
+}
+
+/// Recommended band (low, high) of the area between the blades at the inlet over the
+/// eye area, A_v/A_e = 0.275 + 0.00496·nq ± 0.055: our fit to Lobanoff & Ross, Fig. 3-12.
+pub fn inlet_area_ratio_band(nq: f64) -> (f64, f64) {
+    let centre = 0.275 + 0.00496 * nq;
+    (centre - 0.055, centre + 0.055)
+}
+
+/// Range of nq (rpm, m³/s, m) covered by the radial-impeller correlations.
 pub const NQ_RANGE: (f64, f64) = (10.0, 120.0);
-/// Recommended blade numbers of radial impellers.
-pub const BLADE_COUNT_RANGE: (u32, u32) = (5, 7);
+/// Blade numbers Gülich recommends for radial impellers within [`NQ_RANGE`]; Pfleiderer's
+/// automatic estimate stays within them there.
+pub const RADIAL_BLADE_COUNT_RANGE: (u32, u32) = (5, 7);
+/// Blade numbers Pfleiderer's automatic estimate may take outside [`NQ_RANGE`].
+pub const BLADE_COUNT_RANGE: (u32, u32) = (3, 12);
 /// Usual outlet blade angles, degrees.
 pub const OUTLET_BLADE_ANGLE_RANGE: (f64, f64) = (15.0, 45.0);
 /// Recommended incidence, degrees.
@@ -447,6 +521,59 @@ mod tests {
         let omega = 2900.0 * PI / 30.0;
         let d1 = min_relative_velocity_eye_diameter(0.02864, omega, 0.01912);
         assert_relative_eq!(d1, 0.07198, max_relative = 0.01);
+    }
+
+    #[test]
+    fn head_rise_follows_the_chart() {
+        // Points read off Lobanoff & Ross Fig. 3-2 (Ns US → nq = Ns/51.65).
+        for (ns, z, chart) in [
+            (600.0, 3, 0.247),
+            (1400.0, 4, 0.349),
+            (1000.0, 5, 0.201),
+            (2200.0, 6, 0.270),
+            (3000.0, 7, 0.240),
+            (1800.0, 8, 0.133),
+        ] {
+            let fit = head_rise(ns / 51.65, z);
+            assert!(
+                (fit - chart).abs() < 0.02,
+                "z = {z}, Ns = {ns}: {fit} vs {chart}"
+            );
+        }
+        // Steeper with fewer blades, at every nq.
+        for nq in [10.0, 30.0, 60.0] {
+            assert!((3..12).all(|z| head_rise(nq, z) > head_rise(nq, z + 1)));
+        }
+    }
+
+    #[test]
+    fn standard_outlet_angles_follow_the_chart() {
+        for (z, chart) in [(3, 17.0), (4, 20.0), (5, 22.8), (6, 25.1), (8, 29.0)] {
+            let fit = standard_outlet_blade_angle(z).to_degrees();
+            assert!((fit - chart).abs() < 0.4, "z = {z}: {fit}°");
+        }
+        assert_eq!(
+            standard_outlet_blade_angle(12),
+            standard_outlet_blade_angle(8)
+        );
+    }
+
+    #[test]
+    fn blade_count_for_a_head_rise() {
+        // The book's example: Ns ≈ 1680, a 20 % rise → six blades at 25°.
+        let nq = 1684.0 / 51.65;
+        assert_eq!(blade_count_for_head_rise(nq, 0.20), 6);
+        assert_eq!(blade_count_for_head_rise(nq, 0.55), 3);
+        assert_eq!(blade_count_for_head_rise(nq, 0.0), HEAD_RISE_BLADE_RANGE.1);
+    }
+
+    #[test]
+    fn inlet_area_band_rises_with_specific_speed() {
+        let (lo, hi) = inlet_area_ratio_band(1000.0 / 51.65);
+        assert!(
+            (0.31..0.33).contains(&lo) && (0.42..0.44).contains(&hi),
+            "{lo} {hi}"
+        );
     }
 
     #[test]

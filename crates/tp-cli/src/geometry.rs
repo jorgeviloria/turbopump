@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use clap::Args;
 use tp_design::Param;
 use tp_design::impeller::ImpellerGeometryInput;
-use tp_design::impeller::blade::{BetaDistribution, EdgeShape};
+use tp_design::impeller::blade::{BetaDistribution, BladeShape, EdgeShape};
 use tp_design::impeller::{BladeLoading, ImpellerGeometry};
 use tp_io::dwg::{self, DwgVersion};
 use tp_project::{ComponentId, ComponentKind, Project};
@@ -24,8 +24,9 @@ pub(crate) struct GeometryArgs {
     component: Option<u32>,
     /// Fix an input as KEY=VALUE, or KEY=auto. Keys: axial-length, hub-in, hub-out,
     /// shroud-in, shroud-out (Bézier tangent fractions), le-hub, le-shroud (leading-edge
-    /// position as a fraction of the contour), spans, points, beta (linear, or
-    /// smooth:IN,OUT), le and te (cut, round or ellipse:RATIO), e-le, e-te (thickness).
+    /// position as a fraction of the contour), spans, shape (free-form, cylindrical,
+    /// circular-arc or straight), points, beta (linear, or smooth:IN,OUT), le and te
+    /// (cut, round or ellipse:RATIO), e-le, e-te (thickness).
     #[arg(long = "set", value_name = "KEY=VALUE")]
     settings: Vec<String>,
     /// Write impeller.txt (points), impeller.stl (mesh), and the meridional and front
@@ -197,6 +198,20 @@ fn apply(
         "le-hub" => m.leading_edge_hub = quantity(Dimensionless)?,
         "le-shroud" => m.leading_edge_shroud = quantity(Dimensionless)?,
         "spans" => input.properties.spans = count()?,
+        "shape" => {
+            input.properties.shape = match value {
+                "free-form" | "auto" => BladeShape::FreeForm,
+                "cylindrical" => BladeShape::Cylindrical,
+                "circular-arc" => BladeShape::CircularArc,
+                "straight" => BladeShape::Straight,
+                _ => {
+                    return Err(format!(
+                        "shape must be free-form, cylindrical, circular-arc or straight, got \
+                         {value:?}"
+                    ));
+                }
+            }
+        }
         "points" => input.mean_lines.points = count()?,
         "beta" => input.mean_lines.beta = parse_beta(value)?,
         "e-le" => input.profiles.thickness_leading = quantity(Length)?,
@@ -206,7 +221,7 @@ fn apply(
         _ => {
             return Err(format!(
                 "unknown key {key:?}; valid keys: axial-length, hub-in, hub-out, shroud-in, \
-                 shroud-out, le-hub, le-shroud, spans, points, beta, e-le, e-te, le, te"
+                 shroud-out, le-hub, le-shroud, spans, shape, points, beta, e-le, e-te, le, te"
             ));
         }
     }

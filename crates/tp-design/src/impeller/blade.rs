@@ -22,6 +22,119 @@ use crate::{DesignError, Param};
 pub struct BladePropertiesInput {
     /// Number of blade sections from hub to shroud (≥ 2).
     pub spans: Param<u32>,
+    pub shape: BladeShape,
+}
+
+/// Shape of the blade surface.
+///
+/// The cylindrical (2D) shapes sweep one plan-view curve θ(r) parallel to the axis, so
+/// every section shares it: the blade has no lean and can be cast in a one-piece core,
+/// at the price of a leading-edge angle that matches the flow only near one span
+/// (Lobanoff & Ross 2nd ed., ch. 3, accept it for Ns 500–1000, nq ≈ 10–19; Gülich
+/// 2nd ed., Chap. 7.3).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BladeShape {
+    /// Doubly curved: each section has its own β from its leading-edge triangle.
+    #[default]
+    FreeForm,
+    /// Cylindrical, β(r) following the mean-line distribution from the leading edge of
+    /// the middle span to the outlet.
+    Cylindrical,
+    /// Cylindrical, plan view one circular arc through the leading edge of the middle
+    /// span and the outlet (Gülich eq. 7.10).
+    CircularArc,
+    /// Cylindrical, plan view a straight line: r·cos β = r₂·cos β₂B. With β₂B = 90° the
+    /// blades are radial (Gülich Chap. 7.3.3).
+    Straight,
+}
+
+impl BladeShape {
+    /// Cylindrical (2D) blade.
+    pub fn is_cylindrical(self) -> bool {
+        self != BladeShape::FreeForm
+    }
+}
+
+/// Plan view θ(r) of a cylindrical blade, θ from the trailing edge (r₂) in the direction
+/// of rotation.
+#[derive(Debug, Clone)]
+struct PlanView {
+    /// Radii from the smallest leading-edge radius to r₂.
+    r: Vec<f64>,
+    theta: Vec<f64>,
+    beta: Vec<f64>,
+}
+
+impl PlanView {
+    /// `reference` is the leading edge (radius, blade angle) the curve passes through;
+    /// `r_min` the smallest radius it must reach.
+    fn build(
+        shape: BladeShape,
+        distribution: BetaDistribution,
+        reference: (f64, f64),
+        r2: f64,
+        beta2: f64,
+        r_min: f64,
+    ) -> Result<Self, DesignError> {
+        let (r1, beta1) = reference;
+        // cos β(r) = (r₂·cos β₂ + k·(r² − r₂²))/r: a circle for k ≠ 0, a straight line
+        // for k = 0; k makes the arc pass through (r₁, β₁) (Gülich eq. 7.10 rearranged).
+        let k = match shape {
+            BladeShape::CircularArc => (r2 * beta2.cos() - r1 * beta1.cos()) / (r2 * r2 - r1 * r1),
+            _ => 0.0,
+        };
+        let beta_at = |r: f64| -> Option<f64> {
+            match shape {
+                BladeShape::FreeForm | BladeShape::Cylindrical => {
+                    let mbar = ((r - r1) / (r2 - r1)).clamp(0.0, 1.0);
+                    Some(beta_at(distribution, beta1, beta2, mbar))
+                }
+                BladeShape::CircularArc | BladeShape::Straight => {
+                    let c = (r2 * beta2.cos() + k * (r * r - r2 * r2)) / r;
+                    (c.abs() < 1.0).then(|| c.acos())
+                }
+            }
+        };
+        let n = INTEGRATION_STEPS;
+        let r: Vec<f64> = (0..=n)
+            .map(|i| r_min + (r2 - r_min) * i as f64 / n as f64)
+            .collect();
+        let beta = r
+            .iter()
+            .map(|&ri| {
+                beta_at(ri).ok_or_else(|| {
+                    DesignError::Infeasible(format!(
+                        "the plan view of the blade with β2B = {:.1}° cannot reach the leading \
+                         edge at r = {:.1} mm; raise β2B (90° gives radial blades) or choose \
+                         another shape",
+                        beta2.to_degrees(),
+                        ri * 1e3
+                    ))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        // θ(r) = ∫ dr / (r·tan β) from r₂ inwards.
+        let mut theta = vec![0.0; r.len()];
+        for i in (0..n).rev() {
+            let f = |j: usize| beta[j].cos() / (r[j] * beta[j].sin());
+            theta[i] = theta[i + 1] + 0.5 * (r[i + 1] - r[i]) * (f(i) + f(i + 1));
+        }
+        Ok(Self { r, theta, beta })
+    }
+
+    /// θ and the plan-view blade angle at radius `r`.
+    fn at(&self, r: f64) -> (f64, f64) {
+        let n = self.r.len() - 1;
+        let (r0, r1) = (self.r[0], self.r[n]);
+        let x = ((r - r0) / (r1 - r0)).clamp(0.0, 1.0) * n as f64;
+        let i = (x.floor() as usize).min(n - 1);
+        let w = x - i as f64;
+        (
+            self.theta[i] + w * (self.theta[i + 1] - self.theta[i]),
+            self.beta[i] + w * (self.beta[i + 1] - self.beta[i]),
+        )
+    }
 }
 
 pub const DEFAULT_SPANS: u32 = 5;
@@ -245,6 +358,10 @@ fn length_at(line: &Polyline<DVec2>, t: f64) -> f64 {
     cumulative[i] + w * (cumulative[i + 1] - cumulative[i])
 }
 
+/// Smallest dr/dm at the reference leading edge of a cylindrical blade: below it the
+/// plan-view angle would have to be nearly tangential.
+const MIN_CYLINDRICAL_SLOPE: f64 = 0.2;
+
 /// Steps of the fine grid used to integrate the conformal mapping.
 const INTEGRATION_STEPS: usize = 2000;
 
@@ -297,6 +414,7 @@ fn section(
     channel: &Channel,
     span_index: usize,
     settings: &SectionSettings,
+    plan: Option<&PlanView>,
 ) -> Result<BladeSection, DesignError> {
     let span = &channel.spans[span_index];
     let line = Polyline::new(span.points.clone()).expect("channel spans have points");
@@ -345,12 +463,38 @@ fn section(
 
     let mbars = stations(settings.points);
     let m: Vec<f64> = mbars.iter().map(|&x| x * meridional_length).collect();
-    let betas: Vec<f64> = mbars.iter().map(|&x| beta(x)).collect();
     let meridional: Vec<DVec2> = m
         .iter()
         .map(|&mm| line.point_at_length(s_le + mm))
         .collect();
-    let theta: Vec<f64> = mbars.iter().map(|&x| theta_at(x)).collect();
+    let (betas, theta): (Vec<f64>, Vec<f64>) = match plan {
+        None => (
+            mbars.iter().map(|&x| beta(x)).collect(),
+            mbars.iter().map(|&x| theta_at(x)).collect(),
+        ),
+        // A cylindrical blade: θ follows the plan view at the local radius. On the stream
+        // surface cot β = (dr/dm)·cot β_plan, so β → 90° where the section runs axially.
+        Some(plan) => m
+            .iter()
+            .zip(&meridional)
+            .map(|(&mm, p)| {
+                let dr_dm = radial_slope(&line, s_le + mm);
+                if dr_dm < -1e-3 {
+                    return Err(DesignError::Infeasible(format!(
+                        "a cylindrical blade needs the radius to grow along each section, \
+                             but it falls at span {:.2}; move the leading edge or use the \
+                             free-form shape",
+                        span.fraction
+                    )));
+                }
+                let (theta, beta_plan) = plan.at(p.y);
+                let beta = beta_plan.sin().atan2(beta_plan.cos() * dr_dm.max(0.0));
+                Ok((beta, theta))
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .unzip(),
+    };
 
     // Distance along the mean line from the leading edge, for edge shaping.
     let mut along = vec![0.0; m.len()];
@@ -391,11 +535,92 @@ fn section(
     })
 }
 
+/// dr/dm of a span polyline at arc length `s`.
+fn radial_slope(line: &Polyline<DVec2>, s: f64) -> f64 {
+    let h = 1e-4 * line.length();
+    let a = line.point_at_length((s - h).max(0.0));
+    let b = line.point_at_length((s + h).min(line.length()));
+    (b.y - a.y) / a.distance(b)
+}
+
+/// Leading edge of span `index`, with the flow there and dr/dm of the span at it.
+fn span_leading_edge(
+    basis: &ImpellerBasis,
+    contour: &MeridionalContour,
+    channel: &Channel,
+    index: usize,
+    thickness: f64,
+) -> (LeadingEdge, f64) {
+    let span = &channel.spans[index];
+    let line = Polyline::new(span.points.clone()).expect("channel spans have points");
+    let (le_hub, le_shroud) = contour.leading_edge;
+    let t_le = le_hub + span.fraction * (le_shroud - le_hub);
+    let s = length_at(&line, t_le);
+    let position = line.point_at_length(s);
+    (
+        leading_edge(basis, position, channel.cm_at(t_le), thickness),
+        radial_slope(&line, s),
+    )
+}
+
+/// The plan view of a cylindrical blade: through the leading edge of the middle span
+/// (the flow matches there) and β₂B at r₂, reaching in to the smallest leading-edge radius.
+fn plan_view(
+    basis: &ImpellerBasis,
+    contour: &MeridionalContour,
+    channel: &Channel,
+    shape: BladeShape,
+    settings: &SectionSettings,
+) -> Result<PlanView, DesignError> {
+    let edges: Vec<(LeadingEdge, f64)> = (0..channel.spans.len())
+        .map(|j| span_leading_edge(basis, contour, channel, j, settings.thickness_leading))
+        .collect();
+    let (middle, slope) = edges
+        .iter()
+        .zip(&channel.spans)
+        .min_by(|a, b| {
+            (a.1.fraction - 0.5)
+                .abs()
+                .total_cmp(&(b.1.fraction - 0.5).abs())
+        })
+        .map(|(le, _)| *le)
+        .expect("a channel has spans");
+    let r2 = basis.outlet_diameter / 2.0;
+    let r_min = edges
+        .iter()
+        .map(|(le, _)| le.position.y)
+        .fold(f64::INFINITY, f64::min);
+    if middle.position.y >= r2 * (1.0 - 1e-6) {
+        return Err(DesignError::Infeasible(
+            "the leading edge sits at the outlet radius".into(),
+        ));
+    }
+    // Where the section still runs partly axially the blade angle on the stream surface
+    // exceeds the plan-view angle: tan β = tan β_plan/(dr/dm).
+    if slope < MIN_CYLINDRICAL_SLOPE {
+        return Err(DesignError::Infeasible(
+            "a cylindrical blade needs its leading edge where the channel already turns \
+             outward; move the leading edge downstream"
+                .into(),
+        ));
+    }
+    let beta1 = (middle.blade_angle.tan() * slope).atan();
+    PlanView::build(
+        shape,
+        settings.beta,
+        (middle.position.y, beta1),
+        r2,
+        basis.outlet_blade_angle,
+        r_min.min(middle.position.y),
+    )
+}
+
 impl Blade {
     pub(crate) fn build(
         basis: &ImpellerBasis,
         contour: &MeridionalContour,
         channel: &Channel,
+        shape: BladeShape,
         mean_lines: &MeanLineInput,
         profiles: &ProfileInput,
         edges: &EdgeInput,
@@ -448,8 +673,13 @@ impl Blade {
             )?,
             edges: (edges.leading, edges.trailing),
         };
+        let plan = if shape.is_cylindrical() {
+            Some(plan_view(basis, contour, channel, shape, &settings)?)
+        } else {
+            None
+        };
         let sections = (0..channel.spans.len())
-            .map(|j| section(basis, contour, channel, j, &settings))
+            .map(|j| section(basis, contour, channel, j, &settings, plan.as_ref()))
             .collect::<Result<_, _>>()?;
         Ok(Self {
             count: basis.blade_count,
@@ -475,6 +705,7 @@ mod tests {
             &b,
             &contour,
             &channel,
+            BladeShape::FreeForm,
             &mean_lines,
             &ProfileInput::default(),
             &edges,
@@ -616,6 +847,7 @@ mod tests {
             &b,
             &contour,
             &channel,
+            BladeShape::FreeForm,
             &MeanLineInput::default(),
             &profiles,
             &EdgeInput::default(),
@@ -651,5 +883,29 @@ mod edge_tests {
             epsilon = 1e-3
         );
         assert_eq!(EdgeShape::Cut.min_pressure_coefficient(), None);
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests_support {
+    use super::*;
+
+    /// The plan-view blade angle β(r) of `shape` through (r₁, β₁) and (r₂, β₂).
+    pub(crate) fn plan(
+        shape: BladeShape,
+        reference: (f64, f64),
+        r2: f64,
+        beta2: f64,
+    ) -> impl Fn(f64) -> f64 {
+        let view = PlanView::build(
+            shape,
+            BetaDistribution::Linear,
+            reference,
+            r2,
+            beta2,
+            reference.0,
+        )
+        .unwrap();
+        move |r| view.at(r).1
     }
 }

@@ -136,6 +136,28 @@ impl MeridionalContour {
         })
     }
 
+    /// Leading edge parallel to the axis, as cylindrical blades are usually laid out:
+    /// at the radius where the shroud has turned 30° away from axial, and the hub point
+    /// at the same radius. Fractions of the hub and the shroud length.
+    pub fn axial_leading_edge(&self) -> (f64, f64) {
+        const SAMPLES: usize = 400;
+        let h = 0.5 / SAMPLES as f64;
+        let at = |i: usize| i as f64 / SAMPLES as f64;
+        let shroud = (1..SAMPLES)
+            .map(at)
+            .find(|&t| {
+                let (a, b) = (self.shroud_at(t - h), self.shroud_at(t + h));
+                (b.y - a.y) >= 0.5 * a.distance(b)
+            })
+            .unwrap_or(0.5);
+        let r = self.shroud_at(shroud).y;
+        let hub = (0..SAMPLES)
+            .map(at)
+            .find(|&t| self.hub_at(t).y >= r)
+            .unwrap_or(0.5);
+        (hub, shroud)
+    }
+
     /// Hub point at fraction `t` of its arc length.
     pub fn hub_at(&self, t: f64) -> DVec2 {
         self.hub_line.point_at_fraction(t)

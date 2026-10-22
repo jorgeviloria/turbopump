@@ -12,8 +12,8 @@ use tp_units::{DisplayUnits, QuantityKind, parse_quantity_or};
 
 use crate::{CliResult, Outcome, show};
 
-const KEYS: &str = "suction, inlet, eta-h, eta-v, eta, psi, d2, b2, d1, d1-factor, z, e, \
-                    shaft-stress, d-shaft, d-hub, incidence, nss";
+const KEYS: &str = "suction, inlet, eta-h, eta-v, eta, psi, d2, b2, d1, d1-factor, z, \
+                    head-rise, beta2, e, shaft-stress, d-shaft, d-hub, incidence, nss";
 
 #[derive(Args)]
 pub(crate) struct DesignArgs {
@@ -24,7 +24,9 @@ pub(crate) struct DesignArgs {
     component: Option<u32>,
     /// Fix an input as KEY=VALUE, or KEY=auto to return to the automatic value.
     /// Keys: suction (single|double), inlet (normal|suction impeller), eta-h, eta-v, eta,
-    /// psi, d2, b2, d1, d1-factor, z, e, shaft-stress, d-shaft, d-hub, incidence, nss.
+    /// psi, d2, b2, d1, d1-factor, z, head-rise (fraction, e.g. 0.2: picks z and β2B),
+    /// beta2 (outlet blade angle: d2, or b2 when d2 is fixed, then follows from the head),
+    /// e, shaft-stress, d-shaft, d-hub, incidence, nss.
     /// Bare numbers use the project
     /// display units, e.g. `--set d2=180` for 180 mm.
     #[arg(long = "set", value_name = "KEY=VALUE")]
@@ -130,6 +132,8 @@ fn apply(
         "d-hub" => input.hub_diameter = quantity(Length)?,
         "incidence" => input.incidence = quantity(Angle)?,
         "nss" => input.suction_specific_speed = quantity(Dimensionless)?,
+        "head-rise" => input.head_rise = quantity(Dimensionless)?,
+        "beta2" => input.outlet_blade_angle = quantity(Angle)?,
         "z" => {
             input.blade_count = if auto {
                 Param::Auto
@@ -247,6 +251,11 @@ fn print_report(
             tag(&input.blade_count),
         ),
         (
+            "Head rise to H0",
+            format!("{:.0} %", d.head_rise * 100.0),
+            tag(&input.head_rise),
+        ),
+        (
             "Blade thickness",
             s(Length, d.blade_thickness),
             tag(&input.blade_thickness),
@@ -299,12 +308,20 @@ fn print_report(
         s(Angle, t.alpha()),
         o.slip_factor
     );
+    if !input.outlet_blade_angle.is_auto() {
+        println!("         β2B is manual: the head sets d2 (or b2 when d2 is manual)");
+    }
     println!(
         "Checks   δ2 = β2B − β2 {} (≤ {}°)   w2/w1 {:.2} (≥ {})",
         s(Angle, d.deviation_angle),
         correlations::MAX_DEVIATION_ANGLE,
         d.de_haller,
         correlations::DE_HALLER_LIMIT
+    );
+    let (lo, hi) = correlations::inlet_area_ratio_band(d.nq);
+    println!(
+        "         A_v/A_e {:.2} (Lobanoff & Ross {lo:.2}–{hi:.2} for large eyes)",
+        d.inlet_area_ratio
     );
     println!();
     println!(

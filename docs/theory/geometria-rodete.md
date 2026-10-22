@@ -97,6 +97,35 @@ radial con $u_2$ y $c_{m2}$ uniformes.
 
 **Número de spans.** Por defecto son 5.
 
+**Forma del álabe.** Por defecto el álabe es **libre (3D)**: cada span tiene su propio
+$\beta_{1B}$. Las formas **cilíndricas (2D)** extruyen una sola planta $\theta(r)$ a lo
+largo del eje, así que todas las secciones la comparten. El álabe no tiene inclinación y
+se funde con un macho de una pieza. A cambio, su ángulo de entrada solo coincide con el
+flujo cerca de un span. Lobanoff y Ross (cap. 3) lo aceptan para $N_s$ = 500-1000
+($n_q$ ≈ 10-19). Gülich trata estos rodetes en el cap. 7.3.
+
+La planta pasa por el borde de ataque del span central y por $(r_2, \beta_{2B})$:
+
+- **cilíndrico:** $\beta(r)$ sigue la distribución de las líneas medias, con
+  $\bar r = (r - r_1)/(r_2 - r_1)$;
+- **arco circular** (ec. 7.10 reordenada):
+  $\cos\beta(r) = \left[r_2\cos\beta_2 + k\,(r^2 - r_2^2)\right]/r$, con
+  $k = (r_2\cos\beta_2 - r_1\cos\beta_1)/(r_2^2 - r_1^2)$;
+- **recto:** $k = 0$, es decir $r\cos\beta = r_2\cos\beta_{2B}$. Con
+  $\beta_{2B} = 90°$ los álabes son radiales y no envuelven (cap. 7.3.3).
+
+$\theta(r) = \int_r^{r_2} dr/(r\tan\beta)$ se integra una sola vez. En cada sección,
+$\theta$ se toma en el radio local, y el ángulo sobre la superficie de corriente cumple
+$\cot\beta = (dr/dm)\cot\beta_{\text{planta}}$: vale 90° donde la sección es axial. Por
+eso el ángulo de la planta en el span central es $\arctan(\tan\beta_{1B}\,dr/dm)$, y se exige
+$dr/dm \ge 0{,}2$ allí.
+
+Con forma cilíndrica y el borde de ataque en automático, el borde se coloca paralelo al
+eje: en el radio donde la cubierta ya giró 30° respecto a la dirección axial, y con el punto
+del cubo a ese mismo radio. Se avisa si algún span recibe el flujo a más de 5° de su
+ángulo de entrada; esa diferencia es la incidencia que el álabe 2D impone fuera del span
+central.
+
 ## 4. Líneas medias (mapeo conforme)
 
 **Distribución de β.** $\beta$ se define sobre la longitud meridional normalizada
@@ -228,8 +257,8 @@ Valores automáticos, con $d_1 = 77{,}2$ mm por el factor $f_{d1}$ de la tabla 7
 ## Limitaciones
 
 - $c_m$ es uniforme en cada cuasi-ortogonal: falta la corrección por curvatura.
-- No hay álabes partidos (splitters), álabes de superficie reglada ni álabes 2D de
-  elemento radial.
+- No hay álabes partidos (splitters) ni álabes de superficie reglada. Los álabes 2D son
+  cilíndricos (paralelos al eje); faltan los 2D de los rodetes axiales.
 - El borde de ataque es recto en la coordenada del canal.
 - No se modelan holguras ni redondeos.
 - La exportación a TurboGrid pasa a la Fase 8 (CFD), donde se podrá validar contra el

@@ -2351,6 +2351,43 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "the spiral does not meet the inner wall of the discharge diffuser: use a tangent cutwater",
         "la espiral no llega a la pared interior del difusor de descarga: usa un corte de agua tangente",
     ),
+    (
+        "Pfleiderer: 5 to 7 for nq 10–120 (Gülich), 3 to 12 otherwise; the head rise picks 3 to 8 (Lobanoff & Ross Fig. 3-2)",
+        "Pfleiderer: 5 a 7 para nq 10–120 (Gülich), 3 a 12 fuera de ese rango; la subida de altura elige de 3 a 8 (Lobanoff y Ross, fig. 3-2)",
+    ),
+    (
+        "Head rise to shut-off",
+        "Subida de altura hasta caudal cero",
+    ),
+    (
+        "(H₀ − H)/H. Manual: sets the blades and β₂B (Lobanoff & Ross Figs. 3-2 and 3-13); fewer blades give a steeper curve",
+        "(H₀ − H)/H. Manual: fija el número de álabes y β₂B (Lobanoff y Ross, figs. 3-2 y 3-13); con menos álabes la curva es más empinada",
+    ),
+    (
+        "Manual: d₂ follows from the head, or b₂ when d₂ is manual; 90° gives radial blades",
+        "Manual: d₂ sale de la altura, o b₂ si d₂ es manual; 90° da álabes radiales",
+    ),
+    (
+        "Inlet area ratio A_v/A_e",
+        "Relación de áreas de entrada A_v/A_e",
+    ),
+    (
+        "Area between the blades at the inlet over the eye area. Lobanoff & Ross (Fig. 3-12) give {}–{} at this nq for large eyes (β₁B ≈ 15–20°); the eye of minimum w₁ gives more",
+        "Área entre álabes a la entrada sobre el área del ojo. Lobanoff y Ross (fig. 3-12) dan {}–{} a este nq para ojos grandes (β₁B ≈ 15–20°); el ojo de w₁ mínima da más",
+    ),
+    ("Blade shape", "Forma del álabe"),
+    (
+        "Cylindrical (2D) blades share one plan view swept along the axis: no lean, a one-piece core, the leading edge parallel to the axis. They suit nq below about 20 (Lobanoff & Ross ch. 3; Gülich Chap. 7.3)",
+        "Los álabes cilíndricos (2D) comparten una misma planta extruida a lo largo del eje: sin inclinación, con macho de una pieza y el borde de ataque paralelo al eje. Convienen por debajo de nq ≈ 20 (Lobanoff y Ross, cap. 3; Gülich, cap. 7.3)",
+    ),
+    ("free-form (3D)", "libre (3D)"),
+    ("cylindrical (2D)", "cilíndrico (2D)"),
+    ("circular arc (2D)", "arco circular (2D)"),
+    ("straight (2D)", "recto (2D)"),
+    (
+        "The circular-arc and straight shapes fix β from the leading to the trailing edge; the distribution below does not apply",
+        "Las formas de arco circular y recta fijan β del borde de ataque al de salida; la distribución de abajo no se aplica",
+    ),
 ];
 
 /// Messages of the design code, most specific first.
@@ -3108,5 +3145,65 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
     (
         "{} is valid between {} K and {} K, got {} K",
         "{} vale entre {} K y {} K; se dio {} K",
+    ),
+    (
+        "the head rise must lie between 0 and 200 %, got {} %",
+        "la subida de altura debe estar entre 0 y 200 %; se dio {} %",
+    ),
+    (
+        "the head-rise chart covers nq = {}–{}; at nq = {} the blade number it gives is extrapolated",
+        "el gráfico de subida de altura cubre nq = {}–{}; con nq = {} el número de álabes se extrapola",
+    ),
+    (
+        "the outlet blade angle must lie between 5° and 90°, got {}°",
+        "el ángulo de salida del álabe debe estar entre 5° y 90°; se dio {}°",
+    ),
+    (
+        "the pressure coefficient is ignored because the outlet blade angle sets the outlet diameter",
+        "se ignora el coeficiente de presión porque el ángulo de salida del álabe fija el diámetro de salida",
+    ),
+    (
+        "with the outlet blade angle prescribed, the outlet diameter or the outlet width must be automatic",
+        "con el ángulo de salida del álabe fijado, el diámetro o el ancho de salida debe ser automático",
+    ),
+    (
+        "no outlet diameter gives the head with {} blades at β2B = {}°",
+        "ningún diámetro de salida da la altura con {} álabes y β2B = {}°",
+    ),
+    (
+        "with d2 = {} mm, {} blades and β2B = {}° no outlet width gives the head; increase the outlet diameter, the blade angle or the number of blades",
+        "con d2 = {} mm, {} álabes y β2B = {}° ningún ancho de salida da la altura; aumenta el diámetro de salida, el ángulo del álabe o el número de álabes",
+    ),
+    (
+        "the head rise of {} % is out of reach at nq = {}: {} blades give about {} %",
+        "la subida de altura del {} % no se alcanza con nq = {}: {} álabes dan cerca del {} %",
+    ),
+    (
+        "the head-rise chart assumes β2B ≈ {}° for {} blades; with {}° the curve will differ",
+        "el gráfico de subida de altura supone β2B ≈ {}° para {} álabes; con {}° la curva será distinta",
+    ),
+    (
+        "the plan view of the blade with β2B = {}° cannot reach the leading edge at r = {} mm; raise β2B (90° gives radial blades) or choose another shape",
+        "la planta del álabe con β2B = {}° no llega al borde de ataque en r = {} mm; sube β2B (90° da álabes radiales) o elige otra forma",
+    ),
+    (
+        "a cylindrical blade needs the radius to grow along each section, but it falls at span {}; move the leading edge or use the free-form shape",
+        "un álabe cilíndrico necesita que el radio crezca a lo largo de cada sección, pero baja en la sección {}; mueve el borde de ataque o usa la forma libre",
+    ),
+    (
+        "the leading edge sits at the outlet radius",
+        "el borde de ataque está en el radio de salida",
+    ),
+    (
+        "a cylindrical blade needs its leading edge where the channel already turns outward; move the leading edge downstream",
+        "un álabe cilíndrico necesita el borde de ataque donde el canal ya gira hacia fuera; mueve el borde de ataque aguas abajo",
+    ),
+    (
+        "the cylindrical blade meets the flow {}° off its inlet angle at span {}; a free-form blade fits every span",
+        "el álabe cilíndrico recibe el flujo {}° fuera de su ángulo de entrada en la sección {}; un álabe libre se ajusta a todas",
+    ),
+    (
+        "{} blades give a flat head curve that droops toward shut-off (Lobanoff & Ross Fig. 3-2); check its stability",
+        "{} álabes dan una curva plana que cae hacia caudal cero (Lobanoff y Ross, fig. 3-2); comprueba su estabilidad",
     ),
 ];

@@ -84,6 +84,14 @@ pub struct CentrifugalPumpInput {
     /// d₁, m; overrides the factor when manual.
     pub inlet_diameter: Param<f64>,
     pub blade_count: Param<u32>,
+    /// Head rise from the best efficiency point to shut-off, (H₀ − H)/H. Manual: the
+    /// blade number and the outlet blade angle follow Lobanoff & Ross (Figs. 3-2 and
+    /// 3-13) unless they are manual themselves. Automatic: only estimated.
+    pub head_rise: Param<f64>,
+    /// β₂B, rad. Automatic: solved so that the blades produce the head at the outlet
+    /// diameter of ψ. Manual (or set by the head rise): the outlet diameter is solved
+    /// instead, or the outlet width when the diameter is manual.
+    pub outlet_blade_angle: Param<f64>,
     /// Blade thickness at inlet and outlet, m.
     pub blade_thickness: Param<f64>,
     /// Allowable torsional shear stress of the shaft, Pa.
@@ -170,10 +178,43 @@ pub struct CentrifugalPumpDesign {
     pub deviation_angle: f64,
     /// Deceleration w₂/w₁ at the outer streamline (de Haller number).
     pub de_haller: f64,
+    /// Head rise (H₀ − H)/H that the blade number gives at this nq with its standard
+    /// outlet angle (Lobanoff & Ross, Fig. 3-2).
+    pub head_rise: f64,
+    /// Area between the blades at the inlet over the eye area, A_v/A_e (Lobanoff & Ross,
+    /// Fig. 3-12).
+    pub inlet_area_ratio: f64,
     pub warnings: Vec<String>,
 }
 
 const MIN_BLADES: u32 = 3;
+
+/// Outlet of the impeller for one blade number.
+#[derive(Debug, Clone, Copy)]
+struct Outlet {
+    diameter: f64,
+    width: f64,
+    thickness: f64,
+    blade_angle: f64,
+    slip_factor: f64,
+    blockage: f64,
+}
+
+/// Root of an increasing `f` above `lo`: grows the upper end from `start` until `f`
+/// changes sign. `None` when it never does.
+fn rising_root(f: impl Fn(f64) -> f64, lo: f64, start: f64) -> Option<f64> {
+    if f(lo) >= 0.0 {
+        return None;
+    }
+    let mut hi = start.max(lo * 1.01);
+    for _ in 0..60 {
+        if f(hi) > 0.0 {
+            return roots::brent(&f, lo, hi, 1e-12).ok();
+        }
+        hi *= 1.5;
+    }
+    None
+}
 
 fn require(ok: bool, message: impl FnOnce() -> String) -> Result<(), DesignError> {
     if ok {
@@ -384,31 +425,7 @@ pub fn design(
         warnings.push("the hub diameter is smaller than the shaft diameter".into());
     }
 
-    // 4. Outlet diameter.
-    let outlet_diameter = match input.outlet_diameter {
-        Param::Manual(d2) => {
-            if !input.pressure_coefficient.is_auto() {
-                warnings.push(
-                    "the pressure coefficient is ignored because the outlet diameter is fixed"
-                        .into(),
-                );
-            }
-            positive("outlet diameter", d2)?
-        }
-        Param::Auto => {
-            let psi = positive(
-                "pressure coefficient",
-                input
-                    .pressure_coefficient
-                    .resolve(|| corr::pressure_coefficient(nq)),
-            )?;
-            2.0 * (2.0 * G * head / psi).sqrt() / omega
-        }
-    };
-    let u2 = omega * outlet_diameter / 2.0;
-    let pressure_coefficient = 2.0 * G * head / (u2 * u2);
-
-    // 5. Eye diameter and outlet width.
+    // 4. Eye diameter: it depends only on the flow, the speed and the hub.
     let inlet_diameter = match input.inlet_diameter {
         Param::Manual(d1) => positive("inlet diameter", d1)?,
         Param::Auto => {
@@ -426,32 +443,6 @@ pub fn design(
             "inlet diameter {inlet_diameter:.4} m must exceed the hub diameter {hub_diameter:.4} m"
         )
     })?;
-    require(inlet_diameter < outlet_diameter, || {
-        format!(
-            "inlet diameter {inlet_diameter:.4} m must be smaller than the outlet diameter \
-             {outlet_diameter:.4} m; the pressure coefficient is too high for this nq"
-        )
-    })?;
-    let outlet_width = positive(
-        "outlet width",
-        input
-            .outlet_width
-            .resolve(|| eyes * corr::outlet_width_ratio(nq) * outlet_diameter),
-    )?;
-    let blade_thickness = positive(
-        "blade thickness",
-        input
-            .blade_thickness
-            .resolve(|| corr::blade_thickness(outlet_diameter)),
-    )?;
-    let inlet_width = (inlet_diameter - hub_diameter) / 2.0;
-    if outlet_width / eyes >= inlet_width {
-        warnings.push(format!(
-            "outlet width {:.1} mm is not below the inlet width b1 = (d1 − dn)/2 = {:.1} mm",
-            outlet_width / eyes * 1e3,
-            inlet_width * 1e3
-        ));
-    }
     let incidence = input.incidence.resolve(|| 0.0);
     let (i_min, i_max) = corr::INCIDENCE_RANGE;
     if !(i_min..=i_max).contains(&incidence.to_degrees()) {
@@ -461,52 +452,197 @@ pub fn design(
         ));
     }
 
+    // 5. What sets the outlet. A head rise picks the blade number and the outlet blade
+    // angle (Lobanoff & Ross, Figs. 3-2 and 3-13); a prescribed outlet angle leaves the
+    // outlet diameter, or the width when the diameter is fixed, to the head.
+    let head_rise_target = match input.head_rise {
+        Param::Manual(h) => {
+            require(h.is_finite() && h > 0.0 && h < 2.0, || {
+                format!(
+                    "the head rise must lie between 0 and 200 %, got {:.1} %",
+                    h * 100.0
+                )
+            })?;
+            let (lo, hi) = corr::HEAD_RISE_NQ_RANGE;
+            if !(lo..=hi).contains(&nq) {
+                warnings.push(format!(
+                    "the head-rise chart covers nq = {lo}–{hi}; at nq = {nq:.1} the blade \
+                     number it gives is extrapolated"
+                ));
+            }
+            Some(h)
+        }
+        Param::Auto => None,
+    };
+    if let Param::Manual(beta) = input.outlet_blade_angle {
+        require(
+            beta.is_finite() && beta >= 5f64.to_radians() && beta <= FRAC_PI_2,
+            || {
+                format!(
+                    "the outlet blade angle must lie between 5° and 90°, got {:.1}°",
+                    beta.to_degrees()
+                )
+            },
+        )?;
+    }
+    let prescribed_angle = |z: u32| match input.outlet_blade_angle {
+        Param::Manual(beta) => Some(beta),
+        Param::Auto => head_rise_target.map(|_| corr::standard_outlet_blade_angle(z)),
+    };
+    let angle_prescribed = !input.outlet_blade_angle.is_auto() || head_rise_target.is_some();
+
+    // Outlet diameter from ψ, unless it is manual or follows from the outlet angle.
+    let psi_diameter = match input.outlet_diameter {
+        Param::Manual(d2) => {
+            if !input.pressure_coefficient.is_auto() {
+                warnings.push(
+                    "the pressure coefficient is ignored because the outlet diameter is fixed"
+                        .into(),
+                );
+            }
+            Some(positive("outlet diameter", d2)?)
+        }
+        Param::Auto if angle_prescribed => {
+            if !input.pressure_coefficient.is_auto() {
+                warnings.push(
+                    "the pressure coefficient is ignored because the outlet blade angle sets \
+                     the outlet diameter"
+                        .into(),
+                );
+            }
+            None
+        }
+        Param::Auto => {
+            let psi = positive(
+                "pressure coefficient",
+                input
+                    .pressure_coefficient
+                    .resolve(|| corr::pressure_coefficient(nq)),
+            )?;
+            Some(2.0 * (2.0 * G * head / psi).sqrt() / omega)
+        }
+    };
+    if angle_prescribed && !input.outlet_diameter.is_auto() && !input.outlet_width.is_auto() {
+        return Err(DesignError::InvalidInput(
+            "with the outlet blade angle prescribed, the outlet diameter or the outlet width \
+             must be automatic"
+                .into(),
+        ));
+    }
+
     // 6. Velocity triangles and blades.
     let mean_diameter = ((inlet_diameter.powi(2) + hub_diameter.powi(2)) / 2.0).sqrt();
     let cm1 = q_la_eye / (PI / 4.0 * (inlet_diameter.powi(2) - hub_diameter.powi(2)));
-    let cm2 = impeller_flow / (PI * outlet_diameter * outlet_width);
-    // Swirl-free inflow: c_u1 = 0, so g·H_th = u₂·c_u2.
-    let cu2 = G * theoretical_head / u2;
+    let width_for = |d2: f64| {
+        input
+            .outlet_width
+            .resolve(|| eyes * corr::outlet_width_ratio(nq) * d2)
+    };
+    let thickness_for = |d2: f64| input.blade_thickness.resolve(|| corr::blade_thickness(d2));
+    // Swirl-free inflow: c_u1 = 0, so g·H_th = u₂·c_u2. What the blades deliver at the
+    // angle β₂B through the slip relation, minus what the head needs.
+    let excess = |z: u32, beta: f64, d2: f64, b2: f64, e: f64| {
+        let u2 = omega * d2 / 2.0;
+        let cm2 = impeller_flow / (PI * d2 * b2);
+        let gamma = wiesner_gulich(beta, z, mean_diameter / d2, F1_RADIAL);
+        let tau = blockage_factor(z, e, d2, beta, FRAC_PI_2);
+        if !tau.is_finite() {
+            return -G * theoretical_head;
+        }
+        u2 * (gamma * u2 - cm2 * tau / beta.tan()) - G * theoretical_head
+    };
+    let outlet_for = |z: u32| -> Result<Outlet, DesignError> {
+        let (d2, b2, beta) = match (prescribed_angle(z), psi_diameter) {
+            (None, Some(d2)) => {
+                let b2 = positive("outlet width", width_for(d2))?;
+                let e = positive("blade thickness", thickness_for(d2))?;
+                let u2 = omega * d2 / 2.0;
+                let cm2 = impeller_flow / (PI * d2 * b2);
+                let cu2 = G * theoretical_head / u2;
+                let (beta, gamma, tau) = outlet_blade_angle(cu2, u2, cm2, d2, mean_diameter, z, e)?;
+                return Ok(Outlet {
+                    diameter: d2,
+                    width: b2,
+                    thickness: e,
+                    blade_angle: beta,
+                    slip_factor: gamma,
+                    blockage: tau,
+                });
+            }
+            (Some(beta), None) => {
+                let f = |d2: f64| excess(z, beta, d2, width_for(d2), thickness_for(d2));
+                let start = 2.0 * (2.0 * G * head / corr::pressure_coefficient(nq)).sqrt() / omega;
+                let d2 = rising_root(f, 1.02 * inlet_diameter, start).ok_or_else(|| {
+                    DesignError::Infeasible(format!(
+                        "no outlet diameter gives the head with {z} blades at β2B = {:.1}°",
+                        beta.to_degrees()
+                    ))
+                })?;
+                (d2, positive("outlet width", width_for(d2))?, beta)
+            }
+            (Some(beta), Some(d2)) => {
+                let e = positive("blade thickness", thickness_for(d2))?;
+                let f = |b2: f64| excess(z, beta, d2, b2, e);
+                let start = eyes * corr::outlet_width_ratio(nq) * d2;
+                let b2 = rising_root(f, 1e-4 * d2, start).ok_or_else(|| {
+                    DesignError::Infeasible(format!(
+                        "with d2 = {:.1} mm, {z} blades and β2B = {:.1}° no outlet width gives \
+                         the head; increase the outlet diameter, the blade angle or the \
+                         number of blades",
+                        d2 * 1e3,
+                        beta.to_degrees()
+                    ))
+                })?;
+                (d2, b2, beta)
+            }
+            (None, None) => unreachable!("ψ sets the diameter unless the angle is prescribed"),
+        };
+        let e = positive("blade thickness", thickness_for(d2))?;
+        Ok(Outlet {
+            diameter: d2,
+            width: b2,
+            thickness: e,
+            blade_angle: beta,
+            slip_factor: wiesner_gulich(beta, z, mean_diameter / d2, F1_RADIAL),
+            blockage: blockage_factor(z, e, d2, beta, FRAC_PI_2),
+        })
+    };
 
     let solve = |z: u32| -> Result<_, DesignError> {
         require(z >= MIN_BLADES, || {
             format!("at least {MIN_BLADES} blades are needed")
         })?;
-        let section = |d| inlet_section(d, cm1, omega, z, blade_thickness, incidence);
+        let outlet = outlet_for(z)?;
+        let section = |d| inlet_section(d, cm1, omega, z, outlet.thickness, incidence);
         let (hub, mean, shroud) = (
             section(hub_diameter),
             section(mean_diameter),
             section(inlet_diameter),
         );
-        let (beta2b, gamma, tau2) = outlet_blade_angle(
-            cu2,
-            u2,
-            cm2,
-            outlet_diameter,
-            mean_diameter,
-            z,
-            blade_thickness,
-        )?;
-        Ok((hub, mean, shroud, beta2b, gamma, tau2))
+        Ok((hub, mean, shroud, outlet))
     };
 
-    let blade_count = match input.blade_count {
-        Param::Manual(z) => z,
-        Param::Auto => {
+    let blade_count = match (input.blade_count, head_rise_target) {
+        (Param::Manual(z), _) => z,
+        (Param::Auto, Some(h)) => corr::blade_count_for_head_rise(nq, h),
+        (Param::Auto, None) => {
+            // Gülich's 5–7 blades where they apply, the wider range elsewhere.
+            let (lo, hi) = if (nq_min..=nq_max).contains(&nq) {
+                corr::RADIAL_BLADE_COUNT_RANGE
+            } else {
+                corr::BLADE_COUNT_RANGE
+            };
             let mut z = 6;
             for _ in 0..10 {
-                let (_, mean, _, beta2b, _, _) = solve(z)?;
+                let (_, mean, _, outlet) = solve(z)?;
                 let proposed = corr::pfleiderer_blade_count(
                     mean_diameter,
-                    outlet_diameter,
+                    outlet.diameter,
                     mean.blade_angle,
-                    beta2b,
+                    outlet.blade_angle,
                 )
                 .round()
-                .clamp(
-                    f64::from(corr::BLADE_COUNT_RANGE.0),
-                    f64::from(corr::BLADE_COUNT_RANGE.1),
-                ) as u32;
+                .clamp(f64::from(lo), f64::from(hi)) as u32;
                 if proposed == z {
                     break;
                 }
@@ -515,13 +651,73 @@ pub fn design(
             z
         }
     };
-    let (inlet_hub, inlet_mean, inlet_shroud, beta2b, slip_factor, tau2) = solve(blade_count)?;
+    let (inlet_hub, inlet_mean, inlet_shroud, out) = solve(blade_count)?;
+    let Outlet {
+        diameter: outlet_diameter,
+        width: outlet_width,
+        thickness: blade_thickness,
+        blade_angle: beta2b,
+        slip_factor,
+        blockage: tau2,
+    } = out;
+    require(inlet_diameter < outlet_diameter, || {
+        format!(
+            "inlet diameter {inlet_diameter:.4} m must be smaller than the outlet diameter \
+             {outlet_diameter:.4} m; the pressure coefficient is too high for this nq"
+        )
+    })?;
+    let u2 = omega * outlet_diameter / 2.0;
+    let pressure_coefficient = 2.0 * G * head / (u2 * u2);
+    let cm2 = impeller_flow / (PI * outlet_diameter * outlet_width);
+    let cu2 = G * theoretical_head / u2;
+    let inlet_width = (inlet_diameter - hub_diameter) / 2.0;
+    if outlet_width / eyes >= inlet_width {
+        warnings.push(format!(
+            "outlet width {:.1} mm is not below the inlet width b1 = (d1 − dn)/2 = {:.1} mm",
+            outlet_width / eyes * 1e3,
+            inlet_width * 1e3
+        ));
+    }
     if !inlet_shroud.blockage.is_finite() || !inlet_hub.blockage.is_finite() {
         return Err(DesignError::Infeasible(
             "the blades block the whole inlet circumference; reduce thickness or blade number"
                 .into(),
         ));
     }
+
+    let head_rise = corr::head_rise(nq, blade_count);
+    if let Some(target) = head_rise_target {
+        if (head_rise - target).abs() > 0.03 {
+            warnings.push(format!(
+                "the head rise of {:.0} % is out of reach at nq = {nq:.1}: {blade_count} blades \
+                 give about {:.0} %",
+                target * 100.0,
+                head_rise * 100.0
+            ));
+        }
+        if blade_count >= 7 && input.blade_count.is_auto() {
+            warnings.push(format!(
+                "{blade_count} blades give a flat head curve that droops toward shut-off \
+                 (Lobanoff & Ross Fig. 3-2); check its stability"
+            ));
+        }
+        let standard = corr::standard_outlet_blade_angle(blade_count);
+        if (beta2b - standard).abs() > 4f64.to_radians() {
+            warnings.push(format!(
+                "the head-rise chart assumes β2B ≈ {:.0}° for {blade_count} blades; with \
+                 {:.1}° the curve will differ",
+                standard.to_degrees(),
+                beta2b.to_degrees()
+            ));
+        }
+    }
+    // Throat area between the blades at the eye over the eye area (Lobanoff & Ross). Only
+    // reported: their band reflects large eyes with β₁B ≈ 15–20°, while the eye of minimum
+    // w₁ used here gives β₁B ≈ 35° and a larger ratio.
+    let throat = PI * inlet_diameter * inlet_shroud.blade_angle.sin() / f64::from(blade_count)
+        - blade_thickness;
+    let eye_area = PI / 4.0 * (inlet_diameter.powi(2) - hub_diameter.powi(2));
+    let inlet_area_ratio = f64::from(blade_count) * throat.max(0.0) * inlet_width / eye_area;
     let outlet = OutletSection {
         triangle: VelocityTriangle::new(u2, cm2, cu2),
         blade_angle: beta2b,
@@ -605,6 +801,8 @@ pub fn design(
         efficiency_tolerance: corr::efficiency_tolerance(eta),
         deviation_angle,
         de_haller,
+        head_rise,
+        inlet_area_ratio,
         warnings,
     })
 }
@@ -796,6 +994,122 @@ mod tests {
         let mut d = duty();
         d.flow = 0.0;
         assert!(design(&d, &CentrifugalPumpInput::default()).is_err());
+    }
+
+    /// g·H_th = u₂·c_u2 with c_u2 from the slip relation at the solved geometry.
+    fn delivers_head(d: &CentrifugalPumpDesign) {
+        let o = &d.outlet;
+        let phi2 = o.triangle.cm / o.triangle.u;
+        assert_relative_eq!(
+            o.triangle.cu / o.triangle.u,
+            o.slip_factor - phi2 * o.blockage / o.blade_angle.tan(),
+            epsilon = 1e-9
+        );
+        assert_relative_eq!(
+            o.triangle.u * o.triangle.cu / G,
+            d.theoretical_head,
+            max_relative = 1e-9
+        );
+    }
+
+    #[test]
+    fn head_rise_picks_blades_and_outlet_angle() {
+        let steep = CentrifugalPumpInput {
+            head_rise: Param::Manual(0.40),
+            ..Default::default()
+        };
+        let flat = CentrifugalPumpInput {
+            head_rise: Param::Manual(0.15),
+            ..Default::default()
+        };
+        let s = design(&duty(), &steep).unwrap();
+        let f = design(&duty(), &flat).unwrap();
+        assert!(
+            s.blade_count < f.blade_count,
+            "{} vs {}",
+            s.blade_count,
+            f.blade_count
+        );
+        assert!(s.outlet.blade_angle < f.outlet.blade_angle);
+        assert_relative_eq!(
+            s.outlet.blade_angle,
+            corr::standard_outlet_blade_angle(s.blade_count)
+        );
+        assert!((s.head_rise - 0.40).abs() < 0.05, "{}", s.head_rise);
+        assert!((f.head_rise - 0.15).abs() < 0.05, "{}", f.head_rise);
+        // Fewer blades at a flatter angle need a larger impeller for the same head.
+        assert!(s.outlet_diameter > f.outlet_diameter);
+        delivers_head(&s);
+        delivers_head(&f);
+    }
+
+    #[test]
+    fn automatic_design_estimates_its_head_rise() {
+        let d = design(&duty(), &CentrifugalPumpInput::default()).unwrap();
+        assert_relative_eq!(d.head_rise, corr::head_rise(d.nq, d.blade_count));
+        assert!(d.inlet_area_ratio > 0.0 && d.inlet_area_ratio < 1.0);
+    }
+
+    #[test]
+    fn prescribed_outlet_angle_sets_the_diameter() {
+        let base = design(&duty(), &CentrifugalPumpInput::default()).unwrap();
+        let input = CentrifugalPumpInput {
+            blade_count: Param::Manual(base.blade_count),
+            outlet_blade_angle: Param::Manual(base.outlet.blade_angle),
+            ..Default::default()
+        };
+        let d = design(&duty(), &input).unwrap();
+        // The same angle gives back the same impeller.
+        assert_relative_eq!(d.outlet_diameter, base.outlet_diameter, max_relative = 1e-6);
+        // Radial blades reach the head with a smaller impeller.
+        let radial = CentrifugalPumpInput {
+            outlet_blade_angle: Param::Manual(FRAC_PI_2),
+            ..input
+        };
+        let r = design(&duty(), &radial).unwrap();
+        assert!(r.outlet_diameter < base.outlet_diameter);
+        assert_relative_eq!(r.outlet.blade_angle, FRAC_PI_2);
+        delivers_head(&r);
+    }
+
+    #[test]
+    fn prescribed_angle_with_fixed_diameter_sets_the_width() {
+        let input = CentrifugalPumpInput {
+            outlet_diameter: Param::Manual(0.19),
+            blade_count: Param::Manual(4),
+            outlet_blade_angle: Param::Manual(20f64.to_radians()),
+            ..Default::default()
+        };
+        let d = design(&duty(), &input).unwrap();
+        assert_eq!(d.outlet_diameter, 0.19);
+        delivers_head(&d);
+        let both = CentrifugalPumpInput {
+            outlet_width: Param::Manual(0.02),
+            ..input
+        };
+        assert!(matches!(
+            design(&duty(), &both),
+            Err(DesignError::InvalidInput(_))
+        ));
+    }
+
+    #[test]
+    fn automatic_blade_number_leaves_five_to_seven_outside_their_range() {
+        // nq ≈ 210: an eye almost as large as the impeller asks Pfleiderer for many blades.
+        let mut high = duty();
+        high.flow = 600.0 / 3600.0;
+        high.head = 10.0;
+        high.machine_head = 10.0;
+        let input = CentrifugalPumpInput {
+            hydraulic_efficiency: Param::Manual(0.8),
+            overall_efficiency: Param::Manual(0.6),
+            ..Default::default()
+        };
+        let d = design(&high, &input).unwrap();
+        assert!(d.blade_count > 7, "z = {} at nq {}", d.blade_count, d.nq);
+        // Within 10 < nq < 120 Gülich's 5–7 still hold.
+        let r = design(&duty(), &CentrifugalPumpInput::default()).unwrap();
+        assert!((5..=7).contains(&r.blade_count));
     }
 
     #[test]

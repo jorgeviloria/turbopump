@@ -2,7 +2,9 @@
 
 use eframe::egui::{self, ComboBox, DragValue, Grid, RichText, Ui};
 use tp_design::MainDimensionsInput;
-use tp_design::impeller::blade::{BetaDistribution, DEFAULT_POINTS, DEFAULT_SPANS, EdgeShape};
+use tp_design::impeller::blade::{
+    BetaDistribution, BladeShape, DEFAULT_POINTS, DEFAULT_SPANS, EdgeShape,
+};
 use tp_design::impeller::meridian::{
     DEFAULT_LEADING_EDGE_HUB, DEFAULT_LEADING_EDGE_SHROUD, DEFAULT_TANGENT,
 };
@@ -1013,10 +1015,36 @@ fn main_dimensions(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Com
         changed |= param_u32(
             ui,
             tr("Blades z"),
-            tr("5 to 7 (Gülich)"),
+            tr(
+                "Pfleiderer: 5 to 7 for nq 10–120 (Gülich), 3 to 12 otherwise; the head rise picks 3 to 8 (Lobanoff & Ross Fig. 3-2)",
+            ),
             &mut input.blade_count,
             d.map(|d| d.blade_count),
-            3..=12,
+            3..=24,
+        );
+        changed |= param_f64(
+            ui,
+            tr("Head rise to shut-off"),
+            tr(
+                "(H₀ − H)/H. Manual: sets the blades and β₂B (Lobanoff & Ross Figs. 3-2 and 3-13); fewer blades give a steeper curve",
+            ),
+            &mut input.head_rise,
+            Dimensionless,
+            d.map(|d| d.head_rise),
+            &units,
+            0.02..=1.0,
+        );
+        changed |= param_f64(
+            ui,
+            tr("Outlet blade angle β₂B"),
+            tr(
+                "Manual: d₂ follows from the head, or b₂ when d₂ is manual; 90° gives radial blades",
+            ),
+            &mut input.outlet_blade_angle,
+            Angle,
+            d.map(|d| d.outlet.blade_angle),
+            &units,
+            5f64.to_radians()..=90f64.to_radians(),
         );
         changed |= param_f64(
             ui,
@@ -1071,13 +1099,18 @@ fn main_dimensions(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Com
             value_row(ui, tr("Shaft power"), units.show(Power, d.stage_power));
             value_row(
                 ui,
-                tr("Outlet blade angle β₂B"),
-                units.show(Angle, d.outlet.blade_angle),
-            );
-            value_row(
-                ui,
                 tr("Inlet blade angle β₁B (mean)"),
                 units.show(Angle, d.inlet_mean.blade_angle),
+            );
+            let (lo, hi) = corr::inlet_area_ratio_band(d.nq);
+            value_info(
+                ui,
+                tr("Inlet area ratio A_v/A_e"),
+                &tf(
+                    "Area between the blades at the inlet over the eye area. Lobanoff & Ross (Fig. 3-12) give {}–{} at this nq for large eyes (β₁B ≈ 15–20°); the eye of minimum w₁ gives more",
+                    &[&format!("{lo:.2}"), &format!("{hi:.2}")],
+                ),
+                format!("{:.2}", d.inlet_area_ratio),
             );
             value_row(
                 ui,
@@ -1206,6 +1239,32 @@ fn blade_properties(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Co
             Some(g.map_or(DEFAULT_SPANS, |g| g.blade.sections.len() as u32)),
             2..=21,
         );
+        label(
+            ui,
+            tr("Blade shape"),
+            tr(
+                "Cylindrical (2D) blades share one plan view swept along the axis: no lean, a one-piece core, the leading edge parallel to the axis. They suit nq below about 20 (Lobanoff & Ross ch. 3; Gülich Chap. 7.3)",
+            ),
+        );
+        ComboBox::from_id_salt("blade_shape")
+            .selected_text(blade_shape_name(input.properties.shape))
+            .show_ui(ui, |ui| {
+                for shape in [
+                    BladeShape::FreeForm,
+                    BladeShape::Cylindrical,
+                    BladeShape::CircularArc,
+                    BladeShape::Straight,
+                ] {
+                    changed |= ui
+                        .selectable_value(
+                            &mut input.properties.shape,
+                            shape,
+                            blade_shape_name(shape),
+                        )
+                        .changed();
+                }
+            });
+        ui.end_row();
     });
     if changed {
         edit_geometry(cx, id, "edit blade properties", input);
@@ -1232,6 +1291,16 @@ fn blade_properties(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Co
     }
 }
 
+/// Name of a blade shape in the current language.
+fn blade_shape_name(shape: BladeShape) -> &'static str {
+    match shape {
+        BladeShape::FreeForm => tr("free-form (3D)"),
+        BladeShape::Cylindrical => tr("cylindrical (2D)"),
+        BladeShape::CircularArc => tr("circular arc (2D)"),
+        BladeShape::Straight => tr("straight (2D)"),
+    }
+}
+
 fn mean_lines(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: ComponentId) {
     let units = cx.units();
     let mut input = project.impeller_geometry_input(id).unwrap_or_default();
@@ -1239,6 +1308,17 @@ fn mean_lines(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
     let mut changed = false;
     section(ui, tr("Blade angle distribution"));
     props(ui, "beta", |ui| {
+        let shape = input.properties.shape;
+        if matches!(shape, BladeShape::CircularArc | BladeShape::Straight) {
+            value_info(
+                ui,
+                tr("Blade shape"),
+                tr(
+                    "The circular-arc and straight shapes fix β from the leading to the trailing edge; the distribution below does not apply",
+                ),
+                blade_shape_name(shape),
+            );
+        }
         label(ui, tr("Distribution"), "");
         let smooth = matches!(input.mean_lines.beta, BetaDistribution::Smooth { .. });
         ComboBox::from_id_salt("beta_kind")

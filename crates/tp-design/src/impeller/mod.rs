@@ -22,6 +22,11 @@ use meridian::{Channel, MeridionalContour, MeridionalInput};
 /// Quasi-orthogonals used for the meridional flow.
 const QUASI_ORTHOGONALS: usize = 81;
 
+/// Largest difference, in degrees, between the leading-edge angle of a cylindrical blade
+/// and the angle its section's inflow asks for before it is reported (our choice, about
+/// the width of the recommended incidence range of Gülich Table 7.1).
+pub const CYLINDRICAL_INCIDENCE_LIMIT: f64 = 5.0;
+
 /// Main dimensions the geometry is built on, for the modeled side of the impeller
 /// (for a double-entry impeller, one half: half the flow and half the outlet width).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -149,7 +154,13 @@ pub fn build(
     basis: &ImpellerBasis,
     input: &ImpellerGeometryInput,
 ) -> Result<ImpellerGeometry, DesignError> {
-    let contour = MeridionalContour::build(basis, &input.meridional)?;
+    let mut contour = MeridionalContour::build(basis, &input.meridional)?;
+    if input.properties.shape.is_cylindrical()
+        && input.meridional.leading_edge_hub.is_auto()
+        && input.meridional.leading_edge_shroud.is_auto()
+    {
+        contour.leading_edge = contour.axial_leading_edge();
+    }
     let spans = input.properties.spans.resolve(|| DEFAULT_SPANS);
     if spans < 2 {
         return Err(DesignError::InvalidInput(
@@ -161,6 +172,7 @@ pub fn build(
         basis,
         &contour,
         &channel,
+        input.properties.shape,
         &input.mean_lines,
         &input.profiles,
         &input.edges,
@@ -188,7 +200,32 @@ pub fn build(
             rise * 100.0
         ));
     }
-    for s in &blade.sections {
+    let shape = input.properties.shape;
+    if shape.is_cylindrical() {
+        let (off, span) = blade
+            .sections
+            .iter()
+            .map(|s| {
+                (
+                    (s.beta[0] - s.leading_edge.blade_angle).to_degrees(),
+                    s.span,
+                )
+            })
+            .max_by(|a, b| a.0.abs().total_cmp(&b.0.abs()))
+            .expect("a blade has sections");
+        if off.abs() > CYLINDRICAL_INCIDENCE_LIMIT {
+            warnings.push(format!(
+                "the cylindrical blade meets the flow {off:+.1}° off its inlet angle at span \
+                 {span:.2}; a free-form blade fits every span"
+            ));
+        }
+    }
+    // Straight blades are radial or nearly so and wrap little by design.
+    for s in blade
+        .sections
+        .iter()
+        .filter(|_| shape != blade::BladeShape::Straight)
+    {
         let wrap = s.wrap_angle().to_degrees();
         if !(45.0..=200.0).contains(&wrap) {
             warnings.push(format!(
@@ -291,7 +328,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::pump::{PumpDuty, design};
     use approx::assert_relative_eq;
-    use std::f64::consts::PI;
+    use std::f64::consts::{FRAC_PI_2, PI};
 
     /// Geometry of the reference impeller, every value automatic.
     pub(crate) fn reference_geometry() -> ImpellerGeometry {
@@ -397,6 +434,102 @@ pub(crate) mod tests {
         let g = build(&basis, &ImpellerGeometryInput::default()).unwrap();
         assert!(
             g.warnings.iter().any(|w| w.contains("heavily loaded")),
+            "{:?}",
+            g.warnings
+        );
+    }
+
+    fn shaped(
+        shape: blade::BladeShape,
+        basis: &ImpellerBasis,
+    ) -> Result<ImpellerGeometry, DesignError> {
+        let mut g = ImpellerGeometryInput::default();
+        g.properties.shape = shape;
+        build(basis, &g)
+    }
+
+    /// θ of a section at radius `r`, interpolated between its stations.
+    fn theta_at_radius(s: &blade::BladeSection, r: f64) -> f64 {
+        let k = s
+            .meridional
+            .windows(2)
+            .position(|w| (w[0].y - r) * (w[1].y - r) <= 0.0)
+            .expect("the radius lies on the section");
+        let (a, b) = (s.meridional[k].y, s.meridional[k + 1].y);
+        let w = if (b - a).abs() < 1e-15 {
+            0.0
+        } else {
+            (r - a) / (b - a)
+        };
+        s.theta[k] + w * (s.theta[k + 1] - s.theta[k])
+    }
+
+    #[test]
+    fn cylindrical_blades_share_one_plan_view() {
+        use blade::BladeShape::*;
+        let (d, input) = reference_design();
+        let basis = ImpellerBasis::from_pump(&d, &input, 1.0);
+        for shape in [Cylindrical, CircularArc] {
+            let g = shaped(shape, &basis).unwrap();
+            let r2 = basis.outlet_diameter / 2.0;
+            let hub = &g.blade.sections[0];
+            let shroud = g.blade.sections.last().unwrap();
+            // At the same radius every section sits at the same angle: no lean.
+            let r = 0.5
+                * (shroud
+                    .leading_edge
+                    .position
+                    .y
+                    .max(hub.leading_edge.position.y)
+                    + r2);
+            assert_relative_eq!(
+                theta_at_radius(hub, r),
+                theta_at_radius(shroud, r),
+                epsilon = 2e-3
+            );
+            for s in &g.blade.sections {
+                assert_relative_eq!(
+                    *s.beta.last().unwrap(),
+                    basis.outlet_blade_angle,
+                    epsilon = 1e-4
+                );
+            }
+            // The middle span meets its inflow exactly.
+            let mid = &g.blade.sections[g.blade.sections.len() / 2];
+            assert_relative_eq!(mid.beta[0], mid.leading_edge.blade_angle, epsilon = 1e-3);
+        }
+    }
+
+    #[test]
+    fn circular_arc_matches_gulich_eq_7_10() {
+        // On a purely radial section the plan view is the section itself: the arc's
+        // radius from eq. 7.10, R = (r₂² − r₁²)/(2(r₂ cos β₂ − r₁ cos β₁)), fixes
+        // cos β(r) = (r² + R² − a²)/(2rR) with a the distance of its centre from the axis.
+        let (r1, b1, r2, b2) = (0.04, 20f64.to_radians(), 0.1, 25f64.to_radians());
+        let big_r = (r2 * r2 - r1 * r1) / (2.0 * (r2 * b2.cos() - r1 * b1.cos()));
+        let a2 = r2 * r2 + big_r * big_r - 2.0 * r2 * big_r * b2.cos();
+        let plan = blade::tests_support::plan(blade::BladeShape::CircularArc, (r1, b1), r2, b2);
+        for r in [0.05, 0.07, 0.09] {
+            let expected = ((r * r + big_r * big_r - a2) / (2.0 * r * big_r)).acos();
+            assert_relative_eq!(plan(r), expected, epsilon = 1e-6);
+        }
+    }
+
+    #[test]
+    fn straight_radial_blades_have_no_wrap() {
+        let (d, input) = reference_design();
+        let mut basis = ImpellerBasis::from_pump(&d, &input, 1.0);
+        // At 22° a straight blade cannot reach the eye.
+        assert!(shaped(blade::BladeShape::Straight, &basis).is_err());
+        basis.outlet_blade_angle = FRAC_PI_2;
+        let g = shaped(blade::BladeShape::Straight, &basis).unwrap();
+        for s in &g.blade.sections {
+            assert!(s.theta.iter().all(|t| t.abs() < 1e-9));
+            assert!(s.beta.iter().all(|b| (b - FRAC_PI_2).abs() < 1e-9));
+        }
+        // Radial blades meet a swirl-free inflow far off its angle.
+        assert!(
+            g.warnings.iter().any(|w| w.contains("cylindrical blade")),
             "{:?}",
             g.warnings
         );

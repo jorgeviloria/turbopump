@@ -147,8 +147,47 @@ $$\gamma = f_1\left(1 - \frac{\sqrt{\sin\beta_{2B}}}{z^{0,7}}\right) k_w, \qquad
 - no menos de 5 si la altura por etapa supera 100 m.
 
 El valor automático usa la estimación de Pfleiderer, $z = 6{,}5\,(d_2 + d_{1m})/(d_2 - d_{1m})\,\sin\beta_m$,
-redondeada y **limitada a 5-7**. Después se comprueba con el criterio de carga del álabe
-([geometria-rodete.md](geometria-rodete.md)).
+redondeada y **limitada a 5-7 dentro de $10 < n_q < 120$**. Fuera de ese rango se
+admiten de 3 a 12. Después se comprueba con el criterio de carga del álabe
+([geometria-rodete.md](geometria-rodete.md)). A mano se aceptan de 3 a 24 álabes.
+
+**Subida de altura hasta caudal cero.** Lobanoff y Ross (*Centrifugal Pumps: Design and
+Application*, 2.ª ed., cap. 3) eligen el número de álabes y su ángulo de salida según la
+forma de curva que se busca: con menos álabes y ángulos más planos la curva sube más
+desde el punto óptimo hasta caudal cero. Sus figuras 3-2 y 3-13 se ajustaron con
+fórmulas propias:
+
+$$\frac{H_0 - H}{H} = 0{,}063\; z^{-0{,}632}\; n_q^{\,0{,}995 - 0{,}052\,z}$$
+
+$$eta_{2B,	ext{estándar}} = 5{,}8° + 4{,}233°\,z - 0{,}1667°\,z^2 \qquad (3 \le z \le 8)$$
+
+La primera se leyó en la fig. 3-2 entre $N_s$ = 200 y 3500 (unidades de EE. UU.,
+$N_s = 51{,}65\,n_q$), es decir $n_q$ ≈ 4-68, y queda a menos de 2 puntos de la gráfica
+para 3 a 8 álabes. La segunda da 17° con 3 álabes, 25° con 6 y 29° con 8.
+
+- **Subida automática:** no se impone; el resultado muestra la subida que corresponde al
+  número de álabes elegido.
+- **Subida manual:** se toma el $z$ de 3 a 8 cuya curva queda más cerca del objetivo, y
+  $\beta_{2B}$ estándar para ese $z$, salvo que $z$ o $\beta_{2B}$ sean manuales. Con 7 u 8
+  álabes se avisa: en la gráfica esas curvas caen hacia caudal cero, y Gülich desaconseja
+  8 o más por la estabilidad.
+
+**Ángulo de salida prescrito.** Normalmente $d_2$ sale de ψ y $\beta_{2B}$ se despeja para
+dar la altura. Si $\beta_{2B}$ está fijado (a mano o por la subida de altura) se invierte el
+cálculo: se busca con Brent el $d_2$ que cumple
+
+$$u_2\left(\gamma u_2 - \frac{c_{m2}\,\tau_2}{\tan\beta_{2B}}\right) = g H_{th}$$
+
+con $b_2$ y $e$ que dependen de $d_2$. Si $d_2$ también es manual se despeja $b_2$, que es
+como Lobanoff mantiene el punto óptimo al quitar álabes (fig. 3-15). Con $d_2$, $b_2$ y
+$\beta_{2B}$ manuales a la vez el problema está sobredeterminado y se rechaza. $\beta_{2B} = 90°$
+da álabes radiales.
+
+**Área entre álabes a la entrada.** Como dato se calcula
+$A_v/A_e = z\,a_1 b_1 / A_e$, con la garganta $a_1 = \pi d_1 \sin\beta_{1B}/z - e$ en la
+cubierta y $b_1 = (d_1 - d_n)/2$. La fig. 3-12 de Lobanoff da $0{,}275 + 0{,}00496\,n_q
+\pm 0{,}055$, pero corresponde a ojos grandes ($\beta_{1B}$ ≈ 15°-20°). El ojo de $w_1$
+mínima de Gülich da $\beta_{1B}$ ≈ 35° y un cociente mayor, así que no se avisa.
 
 **Espesor.** Por defecto, $\max(3\text{ mm};\ 0{,}016\,d_2)$. El libro recomienda
 $e/d_2$ = 0,016-0,022, con un mínimo de 3 a 5 mm en piezas fundidas (p. 347).
@@ -204,6 +243,7 @@ Las pruebas automáticas comprueban:
 |---|---|
 | ψ_opt, η_h, η, tolerancia, $b_2/d_2$, deslizamiento, bloqueos, $d_1$ y $f_{d1}$, eje, límites de diseño | **verificado** con la 2.ª ed. |
 | Número de álabes | Pfleiderer, estándar, limitado al rango de Gülich |
+| Subida de altura, $\beta_{2B}$ estándar, $A_v/A_e$ | ajustes propios a las figs. 3-2, 3-13 y 3-12 de Lobanoff y Ross, comprobados contra las gráficas |
 | $\eta_v$, $\tau_{adm}$, $n_{ss}$ | valores típicos, no correlaciones publicadas |
 
 El registro está en código, en `tp_design::pump::correlations::CORRELATIONS`.
