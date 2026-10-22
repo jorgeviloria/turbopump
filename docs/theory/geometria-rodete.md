@@ -94,7 +94,21 @@ o volver al contorno automático.
 
 **Borde de ataque:** se define por su posición en el cubo y en la carcasa, como fracción
 de la longitud de cada curva. Por defecto está al 25 % en el cubo y al 5 % en la
-carcasa. En los spans intermedios se interpola linealmente en la coordenada del canal.
+carcasa. Entre esos dos puntos tiene una de tres formas:
+
+- **Según el canal** (por defecto): en los spans intermedios se interpola linealmente la
+  posición en la coordenada del canal.
+- **Recta:** la recta geométrica del punto del cubo al de la carcasa.
+- **Bézier cúbica:** sus dos puntos de control interiores se guardan como coordenadas
+  $(u, v)$ a lo largo y a través de la cuerda cubo→carcasa, en fracciones de su longitud.
+  Así la curva conserva su forma cuando sus extremos se deslizan por las paredes
+  (construcción propia).
+
+Con la recta o la Bézier, cada línea de corriente toma el borde de ataque donde corta la
+curva; si no la corta, se vuelve a la interpolación según el canal. Al pasar a Bézier, la
+curva nueva pasa por el borde actual en sus tercios, con
+$P_1 = (-5P_0 + 18A - 9B + 2P_3)/6$ y $P_2 = (2P_0 - 9A + 18B - 5P_3)/6$, de modo que el
+borde no salta.
 
 **Borde de salida:** es la salida del canal: en $r_2$ en el rodete radial; en el
 semiaxial, la recta de $d_{2i}$ a $d_{2a}$. En el semiaxial cada sección termina con su
@@ -302,7 +316,7 @@ Valores automáticos, con $d_1 = 77{,}2$ mm por el factor $f_{d1}$ de la tabla 7
 - $c_m$ es uniforme en cada cuasi-ortogonal: falta la corrección por curvatura.
 - No hay álabes partidos (splitters) ni álabes de superficie reglada. Los álabes 2D son
   cilíndricos (paralelos al eje); faltan los 2D de los rodetes axiales.
-- El borde de ataque es recto en la coordenada del canal.
+- El borde de ataque es una sola curva (recta o Bézier cúbica): no se divide en tramos.
 - Las paredes por tramos solo admiten Béziers y rectas; faltan los arcos con rectas
   tangentes, las B-splines y la continuidad de curvatura en las uniones.
 - No se modelan holguras ni redondeos.
