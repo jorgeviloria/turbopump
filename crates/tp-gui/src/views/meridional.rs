@@ -3,71 +3,147 @@
 //! two-dimensional potential flow: its stream lines and the meridional velocity along
 //! hub and shroud.
 
-use eframe::egui::{CursorIcon, Sense, Ui};
+use eframe::egui::{CursorIcon, DragValue, Sense, Ui};
 use egui_plot::{
-    Corner, Legend, Line, LineStyle, Plot, PlotPoint, PlotPoints, PlotTransform, Points,
+    Corner, Legend, Line, LineStyle, MarkerShape, Plot, PlotPoint, PlotPoints, PlotTransform,
+    Points,
 };
 use tp_design::Param;
-use tp_design::impeller::ImpellerBasis;
 use tp_design::impeller::meridian::{MeridionalContour, MeridionalInput};
 use tp_design::impeller::potential::{self, PotentialFlow, PotentialMesh};
+use tp_design::impeller::wall::{self, SegmentInput, SegmentKind, Wall, WallPoint};
+use tp_design::impeller::{ImpellerBasis, ImpellerGeometry, ImpellerGeometryInput};
 use tp_math::DVec2;
 use tp_project::ComponentId;
-use tp_units::QuantityKind;
+use tp_units::{DisplayUnits, QuantityKind};
 
 use super::{Palette, unavailable};
 use crate::app::EditCtx;
 use crate::i18n::{tf, tr};
 
+/// Hub or shroud.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Side {
+    Hub,
+    Shroud,
+}
+
+impl Side {
+    fn wall(self, contour: &MeridionalContour) -> &Wall {
+        match self {
+            Side::Hub => &contour.hub,
+            Side::Shroud => &contour.shroud,
+        }
+    }
+
+    fn segments(self, input: &mut MeridionalInput) -> &mut Option<Vec<SegmentInput>> {
+        match self {
+            Side::Hub => &mut input.hub_segments,
+            Side::Shroud => &mut input.shroud_segments,
+        }
+    }
+
+    fn drawn(self, input: &MeridionalInput) -> bool {
+        match self {
+            Side::Hub => input.hub_segments.is_some(),
+            Side::Shroud => input.shroud_segments.is_some(),
+        }
+    }
+}
+
 /// A point of the meridional contour the user can drag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Handle {
+    /// Tangent lengths of an automatic wall: they slide along their tangent line.
     HubInlet,
     HubOutlet,
     ShroudInlet,
     ShroudOutlet,
+    /// A control point or joint of a wall drawn segment by segment.
+    Point(Side, WallPoint),
     LeadingEdgeHub,
     LeadingEdgeShroud,
     AxialLength,
 }
 
 impl Handle {
-    const ALL: [Handle; 7] = [
-        Handle::HubInlet,
-        Handle::HubOutlet,
-        Handle::ShroudInlet,
-        Handle::ShroudOutlet,
-        Handle::LeadingEdgeHub,
-        Handle::LeadingEdgeShroud,
-        Handle::AxialLength,
-    ];
-
     fn label(self) -> &'static str {
         tr(match self {
             Handle::HubInlet => "hub inlet tangent",
             Handle::HubOutlet => "hub outlet tangent",
             Handle::ShroudInlet => "shroud inlet tangent",
             Handle::ShroudOutlet => "shroud outlet tangent",
+            Handle::Point(Side::Hub, WallPoint::Joint { .. }) => "hub joint",
+            Handle::Point(Side::Hub, WallPoint::Control { .. }) => "hub control point",
+            Handle::Point(Side::Shroud, WallPoint::Joint { .. }) => "shroud joint",
+            Handle::Point(Side::Shroud, WallPoint::Control { .. }) => "shroud control point",
             Handle::LeadingEdgeHub => "leading edge on the hub",
             Handle::LeadingEdgeShroud => "leading edge on the shroud",
             Handle::AxialLength => "axial length",
         })
     }
+
+    /// The wall point this handle stands for, if it is one.
+    fn wall_point(self) -> Option<(Side, WallPoint)> {
+        let control = |index| WallPoint::Control { segment: 0, index };
+        match self {
+            Handle::HubInlet => Some((Side::Hub, control(0))),
+            Handle::HubOutlet => Some((Side::Hub, control(1))),
+            Handle::ShroudInlet => Some((Side::Shroud, control(0))),
+            Handle::ShroudOutlet => Some((Side::Shroud, control(1))),
+            Handle::Point(side, at) => Some((side, at)),
+            _ => None,
+        }
+    }
+}
+
+/// Every handle of the contour: the tangent handles of automatic walls, the points of
+/// drawn ones, the leading edge and the axial length.
+pub(crate) fn handles(contour: &MeridionalContour, input: &MeridionalInput) -> Vec<Handle> {
+    let mut handles = Vec::new();
+    for (side, automatic) in [
+        (Side::Hub, [Handle::HubInlet, Handle::HubOutlet]),
+        (Side::Shroud, [Handle::ShroudInlet, Handle::ShroudOutlet]),
+    ] {
+        if side.drawn(input) {
+            let points = side.wall(contour).points();
+            handles.extend(points.into_iter().map(|(at, _)| Handle::Point(side, at)));
+        } else {
+            handles.extend(automatic);
+        }
+    }
+    handles.extend([
+        Handle::LeadingEdgeHub,
+        Handle::LeadingEdgeShroud,
+        Handle::AxialLength,
+    ]);
+    handles
 }
 
 /// Where a handle sits, (z, r) in m.
 pub(crate) fn handle_position(handle: Handle, contour: &MeridionalContour) -> DVec2 {
-    let hub = contour.hub.control_points();
-    let shroud = contour.shroud.control_points();
     match handle {
-        Handle::HubInlet => hub[1],
-        Handle::HubOutlet => hub[2],
-        Handle::ShroudInlet => shroud[1],
-        Handle::ShroudOutlet => shroud[2],
         Handle::LeadingEdgeHub => contour.hub_at(contour.leading_edge.0),
         Handle::LeadingEdgeShroud => contour.shroud_at(contour.leading_edge.1),
         Handle::AxialLength => contour.hub.end(),
+        _ => {
+            let (side, at) = handle.wall_point().expect("other handles are wall points");
+            side.wall(contour)
+                .point(at)
+                .unwrap_or_else(|| side.wall(contour).end())
+        }
     }
+}
+
+/// Moves a wall point to `to` exactly, turning an automatic wall into a drawn one.
+fn place(
+    side: Side,
+    at: WallPoint,
+    to: DVec2,
+    contour: &MeridionalContour,
+    input: &mut MeridionalInput,
+) {
+    *side.segments(input) = Some(wall::move_point(side.wall(contour), at, to));
 }
 
 /// Fraction of the way from `origin` to `corner` of the projection of `pointer`.
@@ -98,8 +174,12 @@ pub(crate) fn apply_drag(
     basis: &ImpellerBasis,
     input: &mut MeridionalInput,
 ) {
-    let hub = contour.hub.control_points();
-    let shroud = contour.shroud.control_points();
+    if let Handle::Point(side, at) = handle {
+        place(side, at, pointer, contour, input);
+        return;
+    }
+    let hub = contour.hub.segments()[0].control_points();
+    let shroud = contour.shroud.segments()[0].control_points();
     // The tangents meet at the corner of the axial inlet and the outlet direction
     // (radial, or inclined at ε_s for a semi-axial impeller).
     let corner = |p: &[DVec2]| {
@@ -140,6 +220,7 @@ pub(crate) fn apply_drag(
             let max = basis.outlet_diameter * 2.0;
             input.axial_length = Param::Manual(pointer.x.clamp(min, max));
         }
+        Handle::Point(..) => {}
     }
 }
 
@@ -147,6 +228,8 @@ pub(crate) fn apply_drag(
 #[derive(Debug)]
 pub(crate) struct MeridionalView {
     dragging: Option<Handle>,
+    /// What the context menu was opened on.
+    menu: Option<MenuTarget>,
     /// Plot transform of the last frame, used to find the handle under the pointer
     /// before the plot is drawn.
     transform: Option<PlotTransform>,
@@ -161,6 +244,7 @@ impl Default for MeridionalView {
     fn default() -> Self {
         Self {
             dragging: None,
+            menu: None,
             transform: None,
             show_stream_lines: true,
             show_quasi_orthogonals: false,
@@ -220,14 +304,20 @@ impl MeridionalView {
                      quasi-one-dimensional flow of the design",
                 ));
             ui.weak("(?)").on_hover_text(tr(
-                "Drag the round handles to shape the contour. Drag the background to pan, \
-                 scroll to zoom, double-click to fit.",
+                "Drag the round handles to shape the contour; right-click a point or a \
+                 wall to type exact values, split a wall into segments or join them. Drag \
+                 the background to pan, scroll to zoom, double-click to fit.",
             ));
         });
 
-        let handles: Vec<(Handle, DVec2)> = Handle::ALL
-            .iter()
-            .map(|&h| (h, handle_position(h, &g.contour)))
+        let current = cx
+            .doc
+            .project()
+            .impeller_geometry_input(id)
+            .unwrap_or_default();
+        let handles: Vec<(Handle, DVec2)> = handles(&g.contour, &current.meridional)
+            .into_iter()
+            .map(|h| (h, handle_position(h, &g.contour)))
             .collect();
         let hovered = match (ui.ctx().pointer_hover_pos(), &self.transform) {
             (Some(pos), Some(t)) if t.frame().contains(pos) => handles
@@ -339,16 +429,19 @@ impl MeridionalView {
                     .color(palette.trailing_edge)
                     .width(2.0),
                 );
-                // Bézier control polygons: the tangent lines the handles slide on.
-                for curve in [&g.contour.hub, &g.contour.shroud] {
-                    let p = curve.control_points();
-                    for pair in [[p[0], p[1]], [p[2], p[3]]] {
-                        plot.line(
-                            Line::new("", line(pair, scale))
-                                .color(palette.handle)
-                                .style(LineStyle::dashed_dense())
-                                .width(1.0),
-                        );
+                // Bézier control polygons: the tangent lines at both ends of each curve.
+                for wall in [&g.contour.hub, &g.contour.shroud] {
+                    for curve in wall.segments().iter().filter(|c| c.degree() > 1) {
+                        let p = curve.control_points();
+                        let n = p.len();
+                        for pair in [[p[0], p[1]], [p[n - 2], p[n - 1]]] {
+                            plot.line(
+                                Line::new("", line(pair, scale))
+                                    .color(palette.handle)
+                                    .style(LineStyle::dashed_dense())
+                                    .width(1.0),
+                            );
+                        }
                     }
                 }
                 if let Some(d) = stator {
@@ -430,8 +523,14 @@ impl MeridionalView {
                 }
                 for &(handle, p) in &handles {
                     let current = active == Some(handle);
+                    let joint = matches!(handle, Handle::Point(_, WallPoint::Joint { .. }));
                     plot.points(
                         Points::new("", vec![[p.x * scale, p.y * scale]])
+                            .shape(if joint {
+                                MarkerShape::Square
+                            } else {
+                                MarkerShape::Circle
+                            })
                             .radius(if current { 6.5 } else { 4.5 })
                             .color(if current {
                                 palette.handle_active
@@ -461,15 +560,32 @@ impl MeridionalView {
             });
             plot_response.clone().on_hover_text(handle.label());
         }
+        if plot_response.secondary_clicked() {
+            self.menu = Some(match hovered {
+                Some(handle) => MenuTarget::Handle(handle),
+                None => response
+                    .inner
+                    .and_then(|pointer| {
+                        let pointer = DVec2::new(pointer.x / scale, pointer.y / scale);
+                        wall_under(&g.contour, pointer, &response.transform, scale)
+                    })
+                    .map_or(MenuTarget::Empty, |(side, segment, t)| {
+                        MenuTarget::Segment(side, segment, t)
+                    }),
+            });
+        }
+        if let Some(target) = self.menu {
+            plot_response.context_menu(|ui| {
+                if let Some(input) = context_menu(ui, target, g, &current, &units) {
+                    let label = target.edit_label();
+                    cx.edit(label, |p| p.set_impeller_geometry(id, input));
+                }
+            });
+        }
         if let (Some(handle), Some(pointer)) = (self.dragging, response.inner)
             && plot_response.dragged()
         {
             let pointer = DVec2::new(pointer.x / scale, pointer.y / scale);
-            let current = cx
-                .doc
-                .project()
-                .impeller_geometry_input(id)
-                .unwrap_or_default();
             let mut input = current.clone();
             apply_drag(handle, pointer, &g.contour, &g.basis, &mut input.meridional);
             if input != current {
@@ -489,6 +605,194 @@ impl MeridionalView {
             None => {}
         }
     }
+}
+
+/// What a right click landed on.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum MenuTarget {
+    Handle(Handle),
+    /// Segment `.1` of a wall, at curve parameter `.2`.
+    Segment(Side, usize, f64),
+    Empty,
+}
+
+impl MenuTarget {
+    fn edit_label(self) -> &'static str {
+        match self {
+            MenuTarget::Handle(_) => "edit point",
+            MenuTarget::Segment(..) | MenuTarget::Empty => "edit wall segments",
+        }
+    }
+}
+
+/// The wall segment within reach of `pointer` on screen, with its curve parameter.
+fn wall_under(
+    contour: &MeridionalContour,
+    pointer: DVec2,
+    transform: &PlotTransform,
+    scale: f64,
+) -> Option<(Side, usize, f64)> {
+    let screen =
+        |p: DVec2| transform.position_from_point(&PlotPoint::new(p.x * scale, p.y * scale));
+    let at = screen(pointer);
+    [Side::Hub, Side::Shroud]
+        .into_iter()
+        .map(|side| {
+            let wall = side.wall(contour);
+            let (segment, t) = wall.nearest(pointer);
+            let d = screen(wall.segments()[segment].eval(t)).distance(at);
+            (side, segment, t, d)
+        })
+        .filter(|&(.., d)| d < 8.0)
+        .min_by(|a, b| a.3.total_cmp(&b.3))
+        .map(|(side, segment, t, _)| (side, segment, t))
+}
+
+/// A length typed in display units; true when it changed.
+fn length_field(ui: &mut Ui, label: &str, value: &mut f64, units: &DisplayUnits) -> bool {
+    let unit = units.get(QuantityKind::Length);
+    let scale = units.to_display(QuantityKind::Length, 1.0);
+    let mut shown = *value * scale;
+    let changed = ui
+        .horizontal(|ui| {
+            ui.label(label);
+            ui.add(
+                DragValue::new(&mut shown)
+                    .speed(0.1)
+                    .max_decimals(4)
+                    .suffix(format!(" {}", unit.symbol)),
+            )
+            .changed()
+        })
+        .inner;
+    if changed {
+        *value = shown / scale;
+    }
+    changed
+}
+
+/// The context menu of the meridional view; the new geometry input when it changed
+/// something.
+fn context_menu(
+    ui: &mut Ui,
+    target: MenuTarget,
+    g: &ImpellerGeometry,
+    current: &ImpellerGeometryInput,
+    units: &DisplayUnits,
+) -> Option<ImpellerGeometryInput> {
+    let contour = &g.contour;
+    let mut input = current.clone();
+    let m = &mut input.meridional;
+    match target {
+        MenuTarget::Handle(Handle::AxialLength) => {
+            ui.strong(tr("Axial length L"));
+            let mut length = contour.axial_length;
+            if length_field(ui, "L", &mut length, units) {
+                m.axial_length = Param::Manual(length.max(g.basis.outlet_width * 1.01));
+            }
+        }
+        MenuTarget::Handle(handle @ (Handle::LeadingEdgeHub | Handle::LeadingEdgeShroud)) => {
+            ui.strong(handle.label());
+            let (param, value) = if handle == Handle::LeadingEdgeHub {
+                (&mut m.leading_edge_hub, contour.leading_edge.0)
+            } else {
+                (&mut m.leading_edge_shroud, contour.leading_edge.1)
+            };
+            let mut percent = value * 100.0;
+            let changed = ui
+                .horizontal(|ui| {
+                    ui.label(tr("Position along the wall"));
+                    ui.add(
+                        DragValue::new(&mut percent)
+                            .speed(0.2)
+                            .range(0.0..=90.0)
+                            .max_decimals(2)
+                            .suffix(" %"),
+                    )
+                    .changed()
+                })
+                .inner;
+            if changed {
+                *param = Param::Manual(percent / 100.0);
+            }
+        }
+        MenuTarget::Handle(handle) => {
+            let (side, at) = handle.wall_point()?;
+            let wall = side.wall(contour);
+            ui.strong(handle.label());
+            let Some(mut p) = wall.point(at) else {
+                ui.weak(tr("This point no longer exists."));
+                return None;
+            };
+            let z = length_field(ui, "z", &mut p.x, units);
+            let r = length_field(ui, "r", &mut p.y, units);
+            if z || r {
+                place(side, at, p, contour, m);
+            }
+            if !side.drawn(&current.meridional) {
+                ui.weak(tr("Typing a value turns this wall into drawn segments."));
+            }
+            if let WallPoint::Joint { segment } = at {
+                ui.separator();
+                let mut smooth = wall.smooth()[segment];
+                if ui.checkbox(&mut smooth, tr("Tangent joint")).changed() {
+                    *side.segments(m) = Some(wall::set_smooth(wall, segment, smooth));
+                }
+                if ui.button(tr("Join the two segments")).clicked() {
+                    *side.segments(m) = Some(wall::merge(wall, segment));
+                    ui.close();
+                }
+            }
+        }
+        MenuTarget::Segment(side, segment, t) => {
+            let wall = side.wall(contour);
+            let curve = wall.segments().get(segment)?;
+            ui.strong(match side {
+                Side::Hub => tr("Hub"),
+                Side::Shroud => tr("Shroud"),
+            });
+            if wall.segments().len() > 1 {
+                ui.weak(tf(
+                    "segment {} of {}",
+                    &[&(segment + 1), &wall.segments().len()],
+                ));
+            }
+            if ui.button(tr("Split here")).clicked() {
+                *side.segments(m) = Some(wall::split(wall, segment, t));
+                ui.close();
+            }
+            let mut kind = if curve.degree() == 1 {
+                SegmentKind::Line
+            } else {
+                SegmentKind::Bezier
+            };
+            let before = kind;
+            ui.horizontal(|ui| {
+                ui.radio_value(&mut kind, SegmentKind::Bezier, tr("Bézier"));
+                ui.radio_value(&mut kind, SegmentKind::Line, tr("Straight line"));
+            });
+            if kind != before {
+                *side.segments(m) = Some(wall::set_kind(wall, segment, kind));
+            }
+            if side.drawn(&current.meridional) {
+                ui.separator();
+                if ui
+                    .button(tr("Back to the automatic contour"))
+                    .on_hover_text(tr(
+                        "One Bézier from the main dimensions, with its tangent lengths",
+                    ))
+                    .clicked()
+                {
+                    *side.segments(m) = None;
+                    ui.close();
+                }
+            }
+        }
+        MenuTarget::Empty => {
+            ui.weak(tr("Right-click a point or a wall to edit it."));
+        }
+    }
+    (input != *current).then_some(input)
 }
 
 /// Meridional velocity along hub and shroud: the potential flow against the uniform
@@ -558,10 +862,35 @@ mod tests {
     }
 
     #[test]
+    fn drawn_walls_offer_their_points_and_move_them_exactly() {
+        let g = geometry();
+        let mut input = tp_design::impeller::ImpellerGeometryInput::default();
+        input.meridional.hub_segments = Some(wall::split(&g.contour.hub, 0, 0.5));
+        let drawn = tp_design::impeller::build(&g.basis, &input).unwrap();
+        let points: Vec<Handle> = handles(&drawn.contour, &input.meridional)
+            .into_iter()
+            .filter(|h| matches!(h, Handle::Point(Side::Hub, _)))
+            .collect();
+        // One joint and two control points on each side of it.
+        assert_eq!(points.len(), 5);
+        assert!(!handles(&drawn.contour, &input.meridional).contains(&Handle::HubInlet));
+        // The split keeps the hub where it was.
+        let (a, b) = (g.contour.hub.sample(50), drawn.contour.hub.sample(50));
+        assert!(a.first().unwrap().distance(*b.first().unwrap()) < 1e-12);
+        let joint = Handle::Point(Side::Hub, WallPoint::Joint { segment: 0 });
+        let to = handle_position(joint, &drawn.contour) + DVec2::new(0.001, 0.002);
+        let mut moved = input.meridional.clone();
+        apply_drag(joint, to, &drawn.contour, &drawn.basis, &mut moved);
+        input.meridional = moved;
+        let after = tp_design::impeller::build(&drawn.basis, &input).unwrap();
+        assert!(handle_position(joint, &after.contour).distance(to) < 1e-12);
+    }
+
+    #[test]
     fn dragging_a_handle_to_its_own_position_keeps_the_input() {
         let g = geometry();
         let mut input = MeridionalInput::default();
-        for handle in Handle::ALL {
+        for handle in handles(&g.contour, &MeridionalInput::default()) {
             let at = handle_position(handle, &g.contour);
             apply_drag(handle, at, &g.contour, &g.basis, &mut input);
         }

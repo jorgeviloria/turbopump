@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use tp_math::{Bezier, DVec2, Polyline};
 
 use super::ImpellerBasis;
+use super::wall::{SegmentInput, Wall};
 use crate::{DesignError, Param};
 
 /// Points used to turn each Bézier contour into an arc-length parameterized polyline.
@@ -32,6 +33,12 @@ pub struct MeridionalInput {
     pub leading_edge_hub: Param<f64>,
     /// Leading-edge position on the shroud, as a fraction (0–1) of the shroud length.
     pub leading_edge_shroud: Param<f64>,
+    /// Hub drawn segment by segment; `None` keeps the automatic Bézier and its tangents.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hub_segments: Option<Vec<SegmentInput>>,
+    /// Shroud drawn segment by segment; `None` keeps the automatic Bézier.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shroud_segments: Option<Vec<SegmentInput>>,
 }
 
 /// Default tangent fraction: close to the 0.552 that makes a cubic Bézier match a
@@ -69,8 +76,8 @@ pub fn outlet_edge(basis: &ImpellerBasis) -> DVec2 {
 /// Hub and shroud contours with the leading-edge position.
 #[derive(Debug, Clone)]
 pub struct MeridionalContour {
-    pub hub: Bezier<DVec2>,
-    pub shroud: Bezier<DVec2>,
+    pub hub: Wall,
+    pub shroud: Wall,
     pub axial_length: f64,
     /// Leading edge on the hub and on the shroud, as fractions of each contour length.
     pub leading_edge: (f64, f64),
@@ -114,27 +121,40 @@ impl MeridionalContour {
         let eps = basis.outlet_inclination;
         let corner = |end: DVec2, r: f64| DVec2::new(end.x - (end.y - r) * eps.tan(), r);
         let (hub_corner, shroud_corner) = (corner(hub_end, rn), corner(shroud_end, r1));
-        if !(length.is_finite() && length > b2 && hub_corner.x > 0.0 && shroud_corner.x > 0.0) {
+        // Only automatic walls need room to run axially before they turn.
+        let room = |corner: DVec2, drawn: bool| drawn || corner.x > 0.0;
+        if !(length.is_finite()
+            && length > b2
+            && room(hub_corner, input.hub_segments.is_some())
+            && room(shroud_corner, input.shroud_segments.is_some()))
+        {
             return Err(DesignError::InvalidInput(format!(
                 "axial length {length:.4} m is too short for the outlet: the hub and shroud \
                  must run axially before they turn"
             )));
         }
         let tangent = |name, p: &Param<f64>| fraction(name, p.resolve(|| DEFAULT_TANGENT));
-        let hub = corner_curve(
-            DVec2::new(0.0, rn),
-            hub_corner,
-            hub_end,
-            tangent("hub inlet tangent", &input.hub_inlet_tangent)?,
-            tangent("hub outlet tangent", &input.hub_outlet_tangent)?,
-        );
-        let shroud = corner_curve(
-            DVec2::new(0.0, r1),
-            shroud_corner,
-            shroud_end,
-            tangent("shroud inlet tangent", &input.shroud_inlet_tangent)?,
-            tangent("shroud outlet tangent", &input.shroud_outlet_tangent)?,
-        );
+        let (hub_start, shroud_start) = (DVec2::new(0.0, rn), DVec2::new(0.0, r1));
+        let hub = match &input.hub_segments {
+            Some(segments) => Wall::build(hub_start, hub_end, segments)?,
+            None => Wall::single(corner_curve(
+                hub_start,
+                hub_corner,
+                hub_end,
+                tangent("hub inlet tangent", &input.hub_inlet_tangent)?,
+                tangent("hub outlet tangent", &input.hub_outlet_tangent)?,
+            )),
+        };
+        let shroud = match &input.shroud_segments {
+            Some(segments) => Wall::build(shroud_start, shroud_end, segments)?,
+            None => Wall::single(corner_curve(
+                shroud_start,
+                shroud_corner,
+                shroud_end,
+                tangent("shroud inlet tangent", &input.shroud_inlet_tangent)?,
+                tangent("shroud outlet tangent", &input.shroud_outlet_tangent)?,
+            )),
+        };
         let leading_edge = (
             fraction(
                 "leading edge on the hub",
@@ -152,9 +172,8 @@ impl MeridionalContour {
                 "the leading edge must lie upstream of the outlet".into(),
             ));
         }
-        let line = |b: &Bezier<DVec2>| {
-            Polyline::new(b.sample(CONTOUR_SAMPLES)).expect("sampled curve has points")
-        };
+        let line =
+            |w: &Wall| Polyline::new(w.sample(CONTOUR_SAMPLES)).expect("sampled curve has points");
         Ok(Self {
             hub_line: line(&hub),
             shroud_line: line(&shroud),
@@ -372,8 +391,8 @@ pub(crate) mod tests {
             DVec2::new(l - b.outlet_width, b.outlet_diameter / 2.0)
         );
         // Axial inflow, radial outflow.
-        let d_in = c.shroud.derivative().eval(0.0);
-        let d_out = c.hub.derivative().eval(1.0);
+        let d_in = c.shroud.segments()[0].derivative().eval(0.0);
+        let d_out = c.hub.segments()[0].derivative().eval(1.0);
         assert!(d_in.y.abs() < 1e-12 && d_in.x > 0.0);
         assert!(d_out.x.abs() < 1e-12 && d_out.y > 0.0);
     }
@@ -431,6 +450,38 @@ pub(crate) mod tests {
         assert!(last < first, "cm1 = {first}, cm2 = {last}");
         assert!(ch.max_cm_rise() < 0.05, "rise = {}", ch.max_cm_rise());
         assert_relative_eq!(ch.cm_at(0.0), first);
+    }
+
+    #[test]
+    fn drawn_walls_reproduce_the_automatic_contour_and_survive_a_round_trip() {
+        let b = basis();
+        let automatic = MeridionalContour::build(&b, &MeridionalInput::default()).unwrap();
+        let input = MeridionalInput {
+            hub_segments: Some(super::super::wall::split(&automatic.hub, 0, 0.4)),
+            shroud_segments: Some(automatic.shroud.to_input()),
+            ..MeridionalInput::default()
+        };
+        let drawn = MeridionalContour::build(&b, &input).unwrap();
+        for t in [0.0, 0.3, 0.7, 1.0] {
+            assert!(drawn.hub_at(t).distance(automatic.hub_at(t)) < 1e-6);
+            assert!(drawn.shroud_at(t).distance(automatic.shroud_at(t)) < 1e-12);
+        }
+        let json = serde_json::to_string(&input).unwrap();
+        let back: MeridionalInput = serde_json::from_str(&json).unwrap();
+        let read = MeridionalContour::build(&b, &back).unwrap();
+        assert_eq!(read.hub.segments().len(), 2);
+        assert_eq!(read.hub.smooth(), [true]);
+        for t in [0.2, 0.5, 0.9] {
+            assert!(read.hub_at(t).distance(drawn.hub_at(t)) < 1e-15);
+        }
+        // Projects saved before drawn walls existed keep the automatic contour.
+        let old: MeridionalInput = serde_json::from_str("{}").unwrap();
+        assert!(old.hub_segments.is_none() && old.shroud_segments.is_none());
+        assert!(
+            !serde_json::to_string(&MeridionalInput::default())
+                .unwrap()
+                .contains("segments")
+        );
     }
 
     #[test]

@@ -156,7 +156,11 @@ mod tests {
         for (spline, curve) in splines.iter().zip([&g.contour.hub, &g.contour.shroud]) {
             assert_eq!(spline.degree_of_curve, 3);
             assert_eq!(spline.knot_values, [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]);
-            for (p, q) in spline.control_points.iter().zip(curve.control_points()) {
+            for (p, q) in spline
+                .control_points
+                .iter()
+                .zip(curve.segments()[0].control_points())
+            {
                 assert_relative_eq!(p.x, q.x * MM, max_relative = 1e-12);
                 assert_relative_eq!(p.y, q.y * MM, max_relative = 1e-12);
             }

@@ -171,7 +171,7 @@ mod tests {
     #[test]
     fn contours_are_cubic_paths() {
         let g = reference();
-        assert_eq!(g.contour.hub.degree(), 3);
+        assert_eq!(g.contour.hub.segments()[0].degree(), 3);
         let svg = write(&meridional(&g));
         assert_eq!(svg.matches("<path d=\"M").count(), 2);
         assert_eq!(svg.matches(" C").count(), 2);

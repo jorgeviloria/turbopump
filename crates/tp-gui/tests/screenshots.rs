@@ -530,3 +530,43 @@ fn semi_axial() {
     harness.run();
     save(&mut harness, "semi-axial-3d");
 }
+
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn meridional_segments() {
+    use tp_design::impeller::wall::{self, SegmentKind};
+    let mut project = tp_gui::default_project();
+    let id = project.components()[0].id();
+    let g = project.compute_impeller_geometry(id).unwrap();
+    let mut input = project.impeller_geometry_input(id).unwrap();
+    let rebuild = |w: &wall::Wall, s: &[wall::SegmentInput]| {
+        wall::Wall::build(w.start(), w.end(), s).unwrap()
+    };
+    // Hub: an axial straight run, then two Béziers joined smoothly.
+    let hub = rebuild(&g.contour.hub, &wall::split(&g.contour.hub, 0, 0.25));
+    let hub = rebuild(&hub, &wall::set_kind(&hub, 0, SegmentKind::Line));
+    let hub = rebuild(&hub, &wall::split(&hub, 1, 0.5));
+    input.meridional.hub_segments = Some(hub.to_input());
+    // Shroud: two Béziers meeting at a corner.
+    let shroud = rebuild(&g.contour.shroud, &wall::split(&g.contour.shroud, 0, 0.55));
+    let shroud = rebuild(&shroud, &wall::set_smooth(&shroud, 0, false));
+    let at = wall::WallPoint::Control {
+        segment: 1,
+        index: 0,
+    };
+    let moved = shroud.point(at).unwrap() + tp_math::DVec2::new(-0.004, 0.006);
+    input.meridional.shroud_segments = Some(wall::move_point(&shroud, at, moved));
+    project.set_impeller_geometry(id, input).unwrap();
+    let path = std::env::temp_dir().join("turbopump-meridional-segments.tpj");
+    project.save(&path).unwrap();
+    let mut harness = Harness::builder()
+        .with_size([1440.0, 900.0])
+        .with_pixels_per_point(1.5)
+        .with_theme(egui::Theme::Light)
+        .wgpu()
+        .build_eframe(|cc| TurbopumpApp::new(cc, Some(&path)));
+    harness.run();
+    harness.state_mut().focus_view(View::Meridional);
+    harness.run();
+    save(&mut harness, "meridional-segments");
+}

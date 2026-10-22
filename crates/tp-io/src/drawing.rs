@@ -234,8 +234,18 @@ pub fn meridional(g: &ImpellerGeometry) -> Drawing {
     for span in &g.channel.spans {
         d.polyline(STREAMLINES, span.points.clone(), false);
     }
-    d.add(CONTOUR, Shape::Bezier(g.contour.hub.clone()));
-    d.add(CONTOUR, Shape::Bezier(g.contour.shroud.clone()));
+    for wall in [&g.contour.hub, &g.contour.shroud] {
+        for segment in wall.segments() {
+            d.add(
+                CONTOUR,
+                if segment.degree() == 1 {
+                    Shape::Line(segment.start(), segment.end())
+                } else {
+                    Shape::Bezier(segment.clone())
+                },
+            );
+        }
+    }
 
     let sections = &g.blade.sections;
     let le: Vec<DVec2> = sections.iter().map(|s| s.leading_edge.position).collect();
@@ -359,7 +369,13 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(curves, [&g.contour.hub, &g.contour.shroud]);
+        assert_eq!(
+            curves,
+            [
+                &g.contour.hub.segments()[0],
+                &g.contour.shroud.segments()[0]
+            ]
+        );
         assert_eq!(
             d.entities.iter().filter(|e| e.layer == STREAMLINES).count(),
             g.channel.spans.len()

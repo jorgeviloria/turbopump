@@ -7,6 +7,7 @@ pub mod blade;
 pub mod loading;
 pub mod meridian;
 pub mod potential;
+pub mod wall;
 
 use std::f64::consts::PI;
 
@@ -649,12 +650,8 @@ pub(crate) mod tests {
         // Both walls leave at ε_s, b₂ apart.
         let eps = b.outlet_inclination;
         let along = DVec2::new(eps.sin(), eps.cos());
-        let tangent = |c: &tp_math::Bezier<DVec2>| {
-            let p = c.control_points();
-            (p[3] - p[2]).normalize()
-        };
-        assert!(tangent(&g.contour.hub).distance(along) < 1e-9);
-        assert!(tangent(&g.contour.shroud).distance(along) < 1e-9);
+        assert!(g.contour.hub.end_direction().distance(along) < 1e-9);
+        assert!(g.contour.shroud.end_direction().distance(along) < 1e-9);
         let across = DVec2::new(eps.cos(), -eps.sin());
         assert_relative_eq!(
             (hub - shroud).dot(across),

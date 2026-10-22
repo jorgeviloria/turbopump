@@ -1198,23 +1198,60 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
             &units,
             0.001..=5.0,
         );
-        let tangents: [(&'static str, &mut Param<f64>); 4] = [
-            ("Hub inlet tangent", &mut m.hub_inlet_tangent),
-            ("Hub outlet tangent", &mut m.hub_outlet_tangent),
-            ("Shroud inlet tangent", &mut m.shroud_inlet_tangent),
-            ("Shroud outlet tangent", &mut m.shroud_outlet_tangent),
+        let walls = [
+            (
+                "Hub drawn by segments",
+                &mut m.hub_segments,
+                [
+                    ("Hub inlet tangent", &mut m.hub_inlet_tangent),
+                    ("Hub outlet tangent", &mut m.hub_outlet_tangent),
+                ],
+            ),
+            (
+                "Shroud drawn by segments",
+                &mut m.shroud_segments,
+                [
+                    ("Shroud inlet tangent", &mut m.shroud_inlet_tangent),
+                    ("Shroud outlet tangent", &mut m.shroud_outlet_tangent),
+                ],
+            ),
         ];
-        for (label, param) in tangents {
-            changed |= param_f64(
-                ui,
-                tr(label),
-                tr("Length of the Bézier tangent as a fraction of the distance to the corner"),
-                param,
-                Dimensionless,
-                Some(DEFAULT_TANGENT),
-                &units,
-                0.05..=0.95,
-            );
+        for (drawn, segments, tangents) in walls {
+            if let Some(list) = segments {
+                let count = list.len();
+                widgets::label(
+                    ui,
+                    tr(drawn),
+                    tr(
+                        "Drawn segment by segment in the meridional view; its tangent lengths \
+                        do not apply",
+                    ),
+                );
+                let automatic = ui
+                    .horizontal(|ui| {
+                        ui.label(tf("{} segments", &[&count]));
+                        ui.button(tr("Automatic")).clicked()
+                    })
+                    .inner;
+                ui.end_row();
+                if automatic {
+                    *segments = None;
+                    changed = true;
+                }
+                continue;
+            }
+            for (label, param) in tangents {
+                changed |= param_f64(
+                    ui,
+                    tr(label),
+                    tr("Length of the Bézier tangent as a fraction of the distance to the corner"),
+                    param,
+                    Dimensionless,
+                    Some(DEFAULT_TANGENT),
+                    &units,
+                    0.05..=0.95,
+                );
+            }
         }
     });
     section(ui, tr("Leading edge"));

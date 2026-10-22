@@ -6,6 +6,48 @@
 
 /// English text → Spanish text.
 pub(super) static TEXTS: &[(&str, &str)] = &[
+    ("{} segments", "{} tramos"),
+    ("hub joint", "unión del cubo"),
+    ("hub control point", "punto de control del cubo"),
+    ("shroud joint", "unión de la cubierta"),
+    ("shroud control point", "punto de control de la cubierta"),
+    ("Position along the wall", "Posición a lo largo de la pared"),
+    ("This point no longer exists.", "Este punto ya no existe."),
+    (
+        "Typing a value turns this wall into drawn segments.",
+        "Al escribir un valor, esta pared pasa a dibujarse por tramos.",
+    ),
+    ("Tangent joint", "Unión tangente"),
+    ("Join the two segments", "Unir los dos tramos"),
+    ("segment {} of {}", "tramo {} de {}"),
+    ("Split here", "Dividir aquí"),
+    ("Bézier", "Bézier"),
+    ("Straight line", "Recta"),
+    (
+        "Back to the automatic contour",
+        "Volver al contorno automático",
+    ),
+    (
+        "One Bézier from the main dimensions, with its tangent lengths",
+        "Una sola Bézier a partir de las dimensiones principales, con sus longitudes de tangente",
+    ),
+    (
+        "Right-click a point or a wall to edit it.",
+        "Haz clic derecho sobre un punto o una pared para editarlos.",
+    ),
+    ("edit point", "editar punto"),
+    ("edit wall segments", "editar tramos de la pared"),
+    (
+        "Drag the round handles to shape the contour; right-click a point or a wall to type exact values, split a wall into segments or join them. Drag the background to pan, scroll to zoom, double-click to fit.",
+        "Arrastra los puntos para dar forma al contorno; con el clic derecho sobre un punto o una pared escribes valores exactos, divides la pared en tramos o los unes. Arrastra el fondo para desplazar, usa la rueda para acercar y haz doble clic para encuadrar.",
+    ),
+    ("Hub drawn by segments", "Cubo dibujado por tramos"),
+    ("Shroud drawn by segments", "Cubierta dibujada por tramos"),
+    (
+        "Drawn segment by segment in the meridional view; its tangent lengths do not apply",
+        "Dibujada tramo a tramo en la vista meridional; sus longitudes de tangente no se aplican",
+    ),
+    ("Automatic", "Automático"),
     ("Settings", "Configuración"),
     // Settings window.
     ("Settings…", "Configuración…"),
@@ -1994,10 +2036,6 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     (
         "Two-dimensional potential flow between hub and shroud: its stream lines, and the meridional velocity along the walls against the quasi-one-dimensional flow of the design",
         "Flujo potencial bidimensional entre cubo y carcasa: sus líneas de corriente y la velocidad meridional a lo largo de las paredes frente al flujo cuasi-unidimensional del diseño",
-    ),
-    (
-        "Drag the round handles to shape the contour. Drag the background to pan, scroll to zoom, double-click to fit.",
-        "Arrastra los puntos redondos para dar forma al contorno. Arrastra el fondo para desplazar, usa la rueda para acercar y haz doble clic para encuadrar.",
     ),
     ("NPSH₃", "NPSH₃"),
     ("volute loss", "pérdida en la voluta"),

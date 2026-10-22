@@ -1349,6 +1349,7 @@ mod tests {
     use super::*;
     use crate::views::meridional::{Handle, handle_position};
     use egui_kittest::Harness;
+    use egui_kittest::kittest::Queryable;
     use egui_plot::PlotPoint;
     use tp_design::impeller::meridian::DEFAULT_TANGENT;
     use tp_units::QuantityKind;
@@ -1409,5 +1410,77 @@ mod tests {
         harness.state_mut().undo();
         assert!(tangent(harness.state()).is_auto());
         assert!(!harness.state().doc.history().can_undo());
+    }
+
+    /// Clicks the secondary button at `at`.
+    fn right_click(harness: &mut Harness<'_, TurbopumpApp>, at: egui::Pos2) {
+        harness.hover_at(at);
+        harness.run();
+        for pressed in [true, false] {
+            harness.input_mut().events.push(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Secondary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.run();
+        }
+    }
+
+    #[test]
+    fn the_context_menu_splits_a_wall_and_undo_restores_it() {
+        let mut harness = Harness::builder()
+            .with_size([1440.0, 900.0])
+            .build_eframe(|cc| TurbopumpApp::new(cc, None));
+        harness.run();
+        harness.state_mut().focus_view(View::Meridional);
+        harness.run();
+        let id = harness.state().active_impeller().unwrap();
+        let segments = |app: &TurbopumpApp| {
+            app.doc
+                .project()
+                .impeller_geometry_input(id)
+                .unwrap()
+                .meridional
+                .hub_segments
+                .map(|s| s.len())
+        };
+        // A point of the hub away from its handles.
+        let app = harness.state();
+        let g = app.derived.geometry(id).unwrap();
+        let p = g.contour.hub_at(0.7);
+        let scale = app
+            .doc
+            .project()
+            .display_units
+            .to_display(QuantityKind::Length, 1.0);
+        let at = app
+            .meridional
+            .transform()
+            .unwrap()
+            .position_from_point(&PlotPoint::new(p.x * scale, p.y * scale));
+
+        right_click(&mut harness, at);
+        harness.get_by_label("Split here").click();
+        harness.run();
+        assert_eq!(segments(harness.state()), Some(2));
+
+        // The joint now has its own menu.
+        let joint = handle_on_screen(
+            harness.state(),
+            Handle::Point(
+                crate::views::meridional::Side::Hub,
+                tp_design::impeller::wall::WallPoint::Joint { segment: 0 },
+            ),
+        );
+        right_click(&mut harness, joint);
+        harness.get_by_label("Tangent joint");
+        harness.get_by_label("Join the two segments").click();
+        harness.run();
+        assert_eq!(segments(harness.state()), Some(1));
+
+        harness.state_mut().undo();
+        harness.state_mut().undo();
+        assert_eq!(segments(harness.state()), None);
     }
 }
