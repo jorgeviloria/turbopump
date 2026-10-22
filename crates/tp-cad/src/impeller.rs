@@ -262,6 +262,9 @@ fn offset_curve(points: &[DVec2], distance: f64, away_from: DVec2) -> Result<Vec
     Ok(offset)
 }
 
+/// Fractions of the requested fillet radius tried in turn.
+const FILLET_RETRIES: [f64; 4] = [1.0, 0.75, 0.5, 0.25];
+
 /// Builds blade, channel, flow domain and impeller solids from the geometry.
 pub fn build_impeller(g: &ImpellerGeometry, options: &CadOptions) -> Result<ImpellerCad, CadError> {
     let b = &g.basis;
@@ -386,24 +389,43 @@ pub fn build_impeller(g: &ImpellerGeometry, options: &CadOptions) -> Result<Impe
     let mut warnings = Vec::new();
     if radius > 0.0 {
         let walls = [g.contour.hub.sample(400), g.contour.shroud.sample(400)];
-        let round = |shape: &Shape| -> Result<Shape, CadError> {
-            let rounded = shape.filleted(&root_edges(shape, &walls), radius * MM)?;
-            if rounded.is_valid() && rounded.solid_count() == 1 {
-                Ok(rounded)
-            } else {
-                Err(CadError::Operation("no single valid solid".into()))
+        // A fillet wider than the corner it rounds fails, typically where a blade root
+        // meets the outlet at d₂: try smaller radii before leaving the edges sharp.
+        let mut failure = None;
+        for scale in FILLET_RETRIES {
+            let r = radius * scale;
+            let attempt = |shape: &Shape| -> Result<Shape, CadError> {
+                let rounded = shape.filleted(&root_edges(shape, &walls), r * MM)?;
+                if rounded.is_valid() && rounded.solid_count() == 1 {
+                    Ok(rounded)
+                } else {
+                    Err(CadError::Operation("no single valid solid".into()))
+                }
+            };
+            match attempt(&impeller).and_then(|i| Ok((i, attempt(&fluid)?))) {
+                Ok((rounded_impeller, rounded_fluid)) => {
+                    impeller = rounded_impeller;
+                    fluid = rounded_fluid;
+                    fillet_radius = r;
+                    break;
+                }
+                Err(e) => {
+                    failure.get_or_insert(e);
+                }
             }
-        };
-        match round(&impeller).and_then(|i| Ok((i, round(&fluid)?))) {
-            Ok((rounded_impeller, rounded_fluid)) => {
-                impeller = rounded_impeller;
-                fluid = rounded_fluid;
-                fillet_radius = radius;
-            }
-            Err(e) => warnings.push(format!(
+        }
+        match failure {
+            Some(e) if fillet_radius == 0.0 => warnings.push(format!(
                 "the {:.1} mm fillets at the blade roots failed ({e}); the edges stay sharp",
                 radius * MM
             )),
+            Some(_) => warnings.push(format!(
+                "the {:.1} mm fillets at the blade roots did not fit; they were built with \
+                 {:.2} mm",
+                radius * MM,
+                fillet_radius * MM
+            )),
+            None => {}
         }
     }
 
@@ -660,8 +682,19 @@ mod tests {
             },
         )
         .unwrap();
-        assert!(finished.warnings.is_empty(), "{:?}", finished.warnings);
-        assert_relative_eq!(finished.fillet_radius, 0.5 * g.basis.blade_thickness);
+        // The roots are rounded, with half the blade thickness or the largest radius
+        // that fits the corner at the outlet, which is then reported.
+        let wanted = 0.5 * g.basis.blade_thickness;
+        assert!(finished.fillet_radius > 0.0 && finished.fillet_radius <= wanted + 1e-12);
+        assert!(
+            finished.warnings.iter().all(|w| w.contains("did not fit")),
+            "{:?}",
+            finished.warnings
+        );
+        assert_eq!(
+            finished.warnings.is_empty(),
+            (finished.fillet_radius - wanted).abs() < 1e-12
+        );
         for shape in [&finished.fluid, &finished.impeller] {
             assert!(shape.is_valid() && shape.solid_count() == 1);
         }

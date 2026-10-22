@@ -73,7 +73,11 @@ escritores STEP e IGES.
    - se redondean con `BRepFilletAPI_MakeFillet` en el rodete (aristas cóncavas) y, con
      el mismo radio, en el dominio fluido (aristas convexas). Una booleana entre los dos
      sólidos redondeados encuentra sus caras comunes y falla, así que no se usa;
-   - si el redondeo falla, el modelo sale con aristas vivas y un aviso.
+   - un redondeo más ancho que la esquina que redondea falla; suele pasar donde la raíz
+     del álabe llega a la salida en $d_2$. Entonces se reintenta con ¾, ½ y ¼ del radio
+     y se avisa del radio conseguido. Solo si fallan todos el modelo sale con aristas
+     vivas y un aviso. En el rodete de referencia, sobre el flujo potencial, los 1,5 mm
+     pedidos quedan en 1,13 mm.
 6. **Agujeros de equilibrado** (con `--balance-holes` o la casilla de la interfaz): uno
    por canal, del diámetro del empuje axial (Gülich cap. 9.2.2, ver
    [`prestaciones.md`](prestaciones.md)). Son taladros paralelos al eje en un círculo
