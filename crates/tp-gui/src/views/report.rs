@@ -847,6 +847,16 @@ pub(crate) fn show(
                                 v.matched_flow.map_or("—".into(), percent),
                             );
                         }
+                        if let Some(q) = c.throat_best_flow {
+                            value_row(
+                                ui,
+                                tr("Best-efficiency flow of the volute throat"),
+                                tf(
+                                    "{} ({} of the design flow, Gülich eq. T4.1.3)",
+                                    &[&s(VolumeFlow, q), &percent(q)],
+                                ),
+                            );
+                        }
                     });
                 warnings(ui, &c.warnings);
             }

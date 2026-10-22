@@ -2013,6 +2013,27 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "A partir de φ_C el radio interior de las secciones sube linealmente hasta r'_z + e en la garganta: la sección final gana una franja tan gruesa como el corte de agua. Es una alternativa a la corrección de la ec. 7.28, para volutas simples externas.",
     ),
     ("Compensate the cutwater", "Compensar el corte de agua"),
+    ("Compensate the rib", "Compensar el nervio"),
+    (
+        "From φ_C to the rib nose the first partial volute grows by the rib, so the outer channel starts with the flow area of the rule instead of accelerating past the rib. Our construction, in place of eq. 7.28 for the rib",
+        "Desde φ_C hasta la nariz del nervio, la primera voluta parcial crece en lo que ocupa el nervio, así que el canal exterior empieza con el área de paso de la regla en vez de acelerar al pasar el nervio. Construcción propia, en lugar de la ec. 7.28 para el nervio",
+    ),
+    (
+        "Rib compensation start φ_C",
+        "Inicio de la compensación del nervio φ_C",
+    ),
+    (
+        "Wrap angle from the cutwater where the base starts to rise; automatic: halfway to the rib nose",
+        "Ángulo desde el corte de agua donde la base empieza a subir; automático: a mitad de camino hasta la nariz del nervio",
+    ),
+    (
+        "Best-efficiency flow of the volute throat",
+        "Caudal óptimo que fija la garganta de la voluta",
+    ),
+    (
+        "{} ({} of the design flow, Gülich eq. T4.1.3)",
+        "{} ({} del caudal de diseño, Gülich ec. T4.1.3)",
+    ),
     ("Thickness e", "Espesor e"),
     (
         "Rise of the inner radius at the throat; automatic: the cutwater thickness e₃",

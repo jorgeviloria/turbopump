@@ -97,6 +97,22 @@ pub struct CollectorData {
     pub volute: Option<VoluteLossGeometry>,
     /// Wrap angle of the inner volute when the volute is a double one, rad.
     pub double_volute_wrap: Option<f64>,
+    /// J_sp = Σ ∬ dA/r over the throats of the volute, m (Gülich Table 4.1).
+    pub throat_integral: Option<f64>,
+}
+
+/// The flow at which the volute characteristic meets the impeller characteristic,
+/// Q_opt,th = η_v·A₂·u₂·γ / (τ₂/tan β₂B + 2π·b₂·Q_Le/(J_sp·Q_La)) (Gülich 2nd ed.,
+/// Table 4.1, eq. T4.1.3), with A₂ and b₂ of the whole impeller (f_q included), no
+/// pre-swirl and the volute sized for the pump flow (Q_Le = Q, so Q_Le/Q_La = η_v). The
+/// throat sets the best-efficiency point: a larger throat moves it to a larger flow.
+pub fn throat_best_efficiency_flow(design: &CentrifugalPumpDesign, throat_integral: f64) -> f64 {
+    let outlet = &design.outlet;
+    let eta_v = design.efficiencies.volumetric;
+    let area2 = PI * design.outlet_mean_diameter * design.outlet_width;
+    let impeller = outlet.blockage / outlet.blade_angle.tan();
+    let volute = 2.0 * PI * design.outlet_width * eta_v / throat_integral;
+    eta_v * area2 * outlet.triangle.u * outlet.slip_factor / (impeller + volute)
 }
 
 impl Default for PerformanceInput {
@@ -220,6 +236,9 @@ pub struct PumpPerformance {
     pub axial: AxialSummary,
     /// The pump in its system.
     pub operation: Operation,
+    /// Best-efficiency flow the throat of the volute gives by Gülich eq. T4.1.3, m³/s;
+    /// `None` without a volute.
+    pub throat_best_flow: Option<f64>,
     /// Leakage, disk friction and mechanical losses of the loss analysis for water;
     /// `None` when the statistics of the design stand for them.
     pub losses: Option<SecondaryLosses>,
@@ -1017,6 +1036,9 @@ pub fn predict(
         radial,
         axial,
         operation,
+        throat_best_flow: collector
+            .throat_integral
+            .map(|j| throat_best_efficiency_flow(design, j)),
         breakdown: losses.map(|l| {
             EfficiencyBreakdown::new(
                 &water_design,
@@ -1643,7 +1665,39 @@ mod tests {
             }),
             volute: Some(geometry),
             double_volute_wrap: None,
+            throat_integral: Some(volute.throat_integral().unwrap() * throat_scale),
         }
+    }
+
+    #[test]
+    fn the_throat_sets_the_best_efficiency_flow() {
+        // Gülich eq. T4.1.3 by hand for the reference pump and its angular-momentum
+        // volute.
+        let d = design(&duty(), &CentrifugalPumpInput::default()).unwrap();
+        let collector = volute_collector(&d, 1.0);
+        let j = collector.throat_integral.unwrap();
+        let o = &d.outlet;
+        let area2 = PI * d.outlet_mean_diameter * d.outlet_width;
+        let eta_v = d.efficiencies.volumetric;
+        let by_hand = eta_v * area2 * o.triangle.u * o.slip_factor
+            / (o.blockage / o.blade_angle.tan() + 2.0 * PI * d.outlet_width * eta_v / j);
+        assert_relative_eq!(
+            throat_best_efficiency_flow(&d, j),
+            by_hand,
+            max_relative = 1e-12
+        );
+        // A volute sized by angular momentum for the design flow puts it near there.
+        let p = with_collector(&collector);
+        let ratio = p.throat_best_flow.unwrap() / duty().flow;
+        assert!((0.85..1.15).contains(&ratio), "{ratio}");
+        // A larger throat moves it to a larger flow.
+        let wide = with_collector(&volute_collector(&d, 1.4));
+        assert!(wide.throat_best_flow.unwrap() > p.throat_best_flow.unwrap());
+        assert!(
+            with_collector(&CollectorData::default())
+                .throat_best_flow
+                .is_none()
+        );
     }
 
     fn with_collector(collector: &CollectorData) -> PumpPerformance {

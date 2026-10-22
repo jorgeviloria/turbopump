@@ -190,6 +190,7 @@ impl Project {
                 throat: Some(throat),
                 volute: Some(VoluteLossGeometry::from_design(&design)),
                 double_volute_wrap: design.rib.map(|r| r.wrap),
+                throat_integral: Some(design.throat_integral()?),
             })
         };
         let kind = |at: usize| components.get(at).map(|c| c.kind());
@@ -204,6 +205,7 @@ impl Project {
                     }),
                     volute: None,
                     double_volute_wrap: None,
+                    throat_integral: None,
                 }
             }
             Some(ComponentKind::Stator { vaned: false })

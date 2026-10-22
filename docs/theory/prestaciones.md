@@ -747,6 +747,35 @@ La suma queda a 0,2 puntos de la estadística en esta bomba. Una garganta de vol
 pierden 1,34 m y la espiral 1,54 m, y $\eta_h$ baja a 0,886: Gülich advierte de las
 pérdidas añadidas del canal exterior (cap. 7.8.1).
 
+**Rozamiento en la voluta con $n_q$ bajo.**
+
+- **Por qué crece.** En una voluta dimensionada por momento angular, la velocidad es el
+  vórtice libre del rodete, $c_u \approx c_{2u} r_2/r$, en toda la vuelta, así que no
+  depende del caudal que ya recogió cada sección. La potencia que disipan las paredes
+  queda $\approx (c_f + 0{,}0015)\,\rho\,c^3 A_{pared}$, y la pérdida de altura,
+  $Z \approx (c_f + 0{,}0015)\,c^3 A_{pared}/(2 g Q)$. Con $n_q$ bajo, $Q$ es pequeño
+  frente al área mojada y a $c^3$, así que la ec. T3.8.21 da una parte de $H_{th}$
+  varias veces mayor que con $n_q$ medio.
+- **Bomba de 240,8 m³/h, 83 m, 1750 rpm** ($n_q$ = 16,5, $c$ ≈ 18–22 m/s en toda la
+  espiral):
+
+  | Voluta | Paredes | Parte de $H_{th}$ |
+  |---|---|---|
+  | Simple | 6,6 m | 6,9 % |
+  | Doble con el nervio compensado | 8,2 m | — |
+  | Doble sin compensar | 11,0 m | — |
+
+  El canal exterior de la voluta doble suma pared, y sin compensar va a 20–26 m/s.
+- **Comparación:** la bomba de referencia ($n_q$ = 36) pierde en las paredes un 2,3 %.
+- **Comprobaciones hechas:**
+  - la ecuación sigue la T3.8.21;
+  - el modelo de Japikse que se suma no incluye rozamiento, así que no hay doble cuenta.
+- **Cuánto fiarse.** Con el nervio compensado, la suma de pérdidas queda 2,8 puntos por
+  debajo de la estadística ($\eta_h$ 0,843 frente a 0,871). Es coherente con lo que advierte Gülich: los valores
+  absolutos de la tabla 3.8 son imprecisos. Además, para el rodete, el mismo método da
+  un rozamiento que crece al bajar $n_q$ y que los ensayos no confirman (p. 110). No
+  aplicamos ninguna corrección.
+
 **Desglose del rendimiento.** Con el análisis de pérdidas, el rendimiento del diseño
 (con agua) se da también como producto:
 

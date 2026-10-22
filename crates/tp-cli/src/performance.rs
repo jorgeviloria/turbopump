@@ -354,6 +354,13 @@ fn print_report(
             v.matched_flow.map_or("—".into(), ratio)
         );
     }
+    if let Some(q) = c.throat_best_flow {
+        println!(
+            "           its throat puts the best-efficiency point at {} ({:.0} % of the design flow, Gülich eq. T4.1.3)",
+            s(VolumeFlow, q),
+            100.0 * q / c.design.flow
+        );
+    }
     if let Some(r) = &c.radial {
         let kind = match r.law.collector {
             RadialCollector::SingleVolute => "single volute".to_owned(),
