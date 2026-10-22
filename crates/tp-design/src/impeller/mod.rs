@@ -620,7 +620,7 @@ pub(crate) mod tests {
     }
 
     /// A semi-axial impeller: 800 m³/h, 12 m, 1450 rpm (nq ≈ 106).
-    fn semi_axial_geometry() -> ImpellerGeometry {
+    pub(crate) fn semi_axial_geometry() -> ImpellerGeometry {
         let duty = PumpDuty {
             flow: 800.0 / 3600.0,
             head: 12.0,

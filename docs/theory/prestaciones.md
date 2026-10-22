@@ -197,8 +197,10 @@ $\psi$.
 - En la entrada y la salida, la condición natural: el flujo cruza esas líneas en
   perpendicular.
 - Para que esas fronteras no deformen el resultado se añaden dos prolongaciones rectas:
-  un anillo axial delante del ojo, tan largo como alto es el ojo, y una corona radial de
-  dos anchos de salida detrás de $d_2$. Los resultados se dan solo en el canal del rodete.
+  un anillo axial delante del ojo, tan largo como alto es el ojo, y detrás de la salida
+  una corona de dos anchos de salida en la que cada pared sigue la dirección con que sale
+  (radial, o inclinada $\varepsilon_s$ en un rodete semiaxial). Los resultados se dan solo
+  en el canal del rodete.
 
 **Velocidades:** $c_m = (Q/2\pi)\,|\nabla\psi|/r$ en cada triángulo, promediado por área
 en los nodos. Las líneas de corriente son las curvas de $\psi$ constante.

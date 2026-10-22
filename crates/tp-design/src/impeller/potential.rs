@@ -265,8 +265,9 @@ fn solve_lines(
 }
 
 /// Potential flow `flow` (m³/s) through the meridional contour of an impeller, with
-/// an axial annulus as long as the eye is high ahead of it and a radial ring twice
-/// as wide as the outlet after it.
+/// an axial annulus as long as the eye is high ahead of it and, after it, a ring that
+/// carries on each wall in the direction it leaves the outlet (radial, or inclined at
+/// ε_s on a semi-axial impeller) for twice the outlet width.
 pub fn solve(
     contour: &MeridionalContour,
     flow: f64,
@@ -276,7 +277,10 @@ pub fn solve(
     let (hub_in, shroud_in) = (contour.hub_at(0.0), contour.shroud_at(0.0));
     let (hub_out, shroud_out) = (contour.hub_at(1.0), contour.shroud_at(1.0));
     let upstream = (shroud_in.y - hub_in.y).abs();
-    let downstream = 2.0 * (hub_out.x - shroud_out.x).abs();
+    let (hub_dir, shroud_dir) = (contour.hub.end_direction(), contour.shroud.end_direction());
+    // The width of the outlet across the mean outflow direction.
+    let along = (hub_dir + shroud_dir).normalize();
+    let downstream = 2.0 * (shroud_out - hub_out).perp_dot(along).abs();
     let ne = EXTENSION_STATIONS;
     let mut lines = Vec::with_capacity(ns + 2 * ne);
     for k in 0..ne {
@@ -289,7 +293,7 @@ pub fn solve(
     }
     for k in 1..=ne {
         let out = downstream * k as f64 / ne as f64;
-        lines.push((hub_out + DVec2::Y * out, shroud_out + DVec2::Y * out));
+        lines.push((hub_out + hub_dir * out, shroud_out + shroud_dir * out));
     }
     solve_lines(&lines, (ne, ne + ns - 1), flow, mesh.across)
 }
@@ -383,5 +387,32 @@ mod tests {
             / flow.across as f64;
         let continuity = g.basis.flow / (PI * g.basis.outlet_diameter * g.basis.outlet_width);
         assert_relative_eq!(outlet, continuity, max_relative = 0.05);
+    }
+
+    #[test]
+    fn a_semi_axial_outlet_leaves_along_its_walls() {
+        let g = crate::impeller::tests::semi_axial_geometry();
+        let flow = solve(&g.contour, g.basis.flow, PotentialMesh::default()).unwrap();
+        // The ring after the outlet carries on in the walls' outflow direction, so the
+        // flow leaves the inclined outlet without piling up on the shroud.
+        let station = flow.channel.1;
+        let (hub, shroud) = (
+            flow.cm[station * flow.across],
+            flow.cm[station * flow.across + flow.across - 1],
+        );
+        assert!(
+            shroud / hub < 1.6,
+            "outlet c_m hub {hub:.2}, shroud {shroud:.2}"
+        );
+        // Mean outlet velocity: the flow over the area π·(r_h + r_s)·b across the walls.
+        let (h, s) = (g.contour.hub.end(), g.contour.shroud.end());
+        let along = (g.contour.hub.end_direction() + g.contour.shroud.end_direction()).normalize();
+        let width = (s - h).perp_dot(along).abs();
+        let continuity = g.basis.flow / (PI * (h.y + s.y) * width);
+        let outlet = (0..flow.across)
+            .map(|j| flow.cm[station * flow.across + j])
+            .sum::<f64>()
+            / flow.across as f64;
+        assert_relative_eq!(outlet, continuity, max_relative = 0.1);
     }
 }
