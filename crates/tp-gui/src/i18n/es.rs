@@ -220,10 +220,6 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Of the shroud upstream of the inlet, where the annular seal runs; automatic: 0.12·d_sp (Gülich Chap. 3.6.2); 0 for none",
         "De la tapa aguas arriba de la entrada, donde va el sello anular; automático: 0,12·d_sp (Gülich, cap. 3.6.2); 0 para ninguno",
     ),
-    (
-        "Between the impeller and the casing: the front one down to the annular seal on the neck, the rear one down to the shaft seal. Their values follow the loss analysis but are not shared with it",
-        "Entre el rodete y la carcasa: la delantera hasta el sello anular del cuello y la trasera hasta el sello del eje. Sus valores siguen el análisis de pérdidas, pero no se comparten con él",
-    ),
     ("Design the side chambers", "Diseñar las cámaras laterales"),
     (
         "Export their fluid with the CAD model; shape them on the Side chambers page of the editor",
@@ -371,6 +367,10 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("shroud cover", "tapa"),
     ("front casing wall", "pared de carcasa delantera"),
     ("rear casing wall", "pared de carcasa trasera"),
+    (
+        "Between the impeller and the casing: the front one down to the annular seal on the neck, the rear one down to the shaft seal. Once designed, the axial thrust and the loss analysis take these seals and gaps wherever theirs are automatic",
+        "Entre el rodete y la carcasa: la delantera hasta el sello anular del cuello y la trasera hasta el sello del eje. Una vez diseñadas, el empuje axial y el análisis de pérdidas toman estos sellos y holguras donde los suyos están en automático",
+    ),
     ("curvature maximum", "curvatura máxima"),
     (
         "Point of smallest radius of curvature of hub and shroud",

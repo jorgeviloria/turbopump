@@ -1610,8 +1610,8 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
         tr("Side chambers"),
         tr(
             "Between the impeller and the casing: the front one down to the annular seal on \
-             the neck, the rear one down to the shaft seal. Their values follow the loss \
-             analysis but are not shared with it",
+             the neck, the rear one down to the shaft seal. Once designed, the axial thrust \
+             and the loss analysis take these seals and gaps wherever theirs are automatic",
         ),
     );
     props(ui, "chambers", |ui| {

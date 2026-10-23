@@ -217,14 +217,49 @@ impl Project {
         })
     }
 
+    /// The performance input of impeller `id` with the seals and gaps of its side
+    /// chambers, when they are designed, wherever `input` leaves them automatic: the
+    /// annular seal on the neck, its clearance and length, the shaft seal and the axial
+    /// gap. Values set by hand in `input` stay.
+    pub fn with_chamber_seals(
+        &self,
+        id: ComponentId,
+        input: &PerformanceInput,
+    ) -> PerformanceInput {
+        let mut input = input.clone();
+        let Ok(geometry) = self.compute_impeller_geometry(id) else {
+            return input;
+        };
+        let chambers = &geometry.contour.chambers;
+        if !chambers.enabled {
+            return input;
+        }
+        let v = chambers.values;
+        let set = |param: &mut tp_design::Param<f64>, value: f64| {
+            if param.is_auto() && value > 0.0 {
+                *param = tp_design::Param::Manual(value);
+            }
+        };
+        // Worn seals stay twice as wide, as the analysis takes them.
+        let wear = if input.wide_seal_clearances { 2.0 } else { 1.0 };
+        set(&mut input.axial.seal_diameter, v.seal_diameter);
+        set(&mut input.axial.shaft_seal_diameter, v.shaft_seal_diameter);
+        set(&mut input.losses.seal_clearance, wear * v.seal_clearance);
+        set(&mut input.losses.seal_length, v.seal_length);
+        set(&mut input.losses.axial_gap, v.axial_gap);
+        input
+    }
+
     /// Predicts the characteristic of impeller `id` from its main dimensions and the
-    /// collector after it. A collector that cannot be computed is left out with a
-    /// warning.
+    /// collector after it, with the seals of its side chambers when they are designed
+    /// (see [`Project::with_chamber_seals`]). A collector that cannot be computed is left
+    /// out with a warning.
     pub fn compute_performance(
         &self,
         id: ComponentId,
         input: &PerformanceInput,
     ) -> Result<PumpPerformance, ProjectError> {
+        let input = &self.with_chamber_seals(id, input);
         let duty = self.pump_duty(id)?;
         let design = self.compute_main_dimensions(id)?;
         let (collector, problem) = match self.collector_data_after(id) {
@@ -706,6 +741,46 @@ mod tests {
         let impeller = p.add_component(ComponentKind::Impeller, None).unwrap();
         let volute = p.add_component(ComponentKind::Volute, None).unwrap();
         (p, impeller, volute)
+    }
+
+    #[test]
+    fn designed_side_chambers_lend_their_seals_to_the_performance() {
+        let (mut p, impeller, _) = pump_with_volute();
+        let base = p.performance_input(impeller).unwrap();
+        // Without chambers nothing changes.
+        assert_eq!(p.with_chamber_seals(impeller, &base), base);
+        let mut input = p.impeller_geometry_input(impeller).unwrap();
+        input.meridional.chambers.enabled = true;
+        input.meridional.chambers.seal_clearance = Param::Manual(0.0004);
+        p.set_impeller_geometry(impeller, input).unwrap();
+        let v = p
+            .compute_impeller_geometry(impeller)
+            .unwrap()
+            .contour
+            .chambers
+            .values;
+        let shared = p.with_chamber_seals(impeller, &base);
+        assert_eq!(shared.losses.seal_clearance, Param::Manual(0.0004));
+        assert_eq!(shared.axial.seal_diameter, Param::Manual(v.seal_diameter));
+        assert_eq!(shared.losses.axial_gap, Param::Manual(v.axial_gap));
+        assert_eq!(shared.losses.seal_length, Param::Manual(v.seal_length));
+        // A value set in the performance step stays; worn seals stay twice as wide.
+        let mut own = base.clone();
+        own.losses.axial_gap = Param::Manual(0.01);
+        own.wide_seal_clearances = true;
+        let kept = p.with_chamber_seals(impeller, &own);
+        assert_eq!(kept.losses.axial_gap, Param::Manual(0.01));
+        assert_eq!(kept.losses.seal_clearance, Param::Manual(0.0008));
+        // A wider seal on the neck leaks more: the efficiency drops.
+        let tight = {
+            let mut q = p.clone();
+            let mut input = q.impeller_geometry_input(impeller).unwrap();
+            input.meridional.chambers.seal_clearance = Param::Manual(0.0001);
+            q.set_impeller_geometry(impeller, input).unwrap();
+            q.compute_performance(impeller, &base).unwrap()
+        };
+        let loose = p.compute_performance(impeller, &base).unwrap();
+        assert!(loose.design.efficiency < tight.design.efficiency);
     }
 
     #[test]

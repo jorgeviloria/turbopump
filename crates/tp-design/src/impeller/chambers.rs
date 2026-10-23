@@ -11,7 +11,8 @@
 //! values here, or drawn segment by segment (see [`super::wall`]). The values follow the
 //! loss analysis: s_ax = 0.05·r₂ (our choice; Gülich finds its effect small, Chap.
 //! 3.6.1), s from Gülich eq. 3.12 on the seal diameter, which is that of the neck, and
-//! d_D the hub diameter, as the axial thrust takes it. They are not shared with it.
+//! d_D the hub diameter, as the axial thrust takes it. When the chambers are designed,
+//! the performance prediction takes them wherever its own are automatic.
 
 use serde::{Deserialize, Serialize};
 use tp_math::DVec2;
