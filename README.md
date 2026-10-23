@@ -8,7 +8,9 @@ compresores y turbinas.
 > Turbopump diseña una bomba centrífuga completa, con rodete, difusor con o sin álabes y
 > voluta, desde el punto de diseño hasta los sólidos CAD (STEP, IGES, STL). Da además la
 > curva característica prevista, el flujo potencial meridional y las velocidades en las
-> caras del álabe, con interfaz gráfica y línea de comandos. La hoja de ruta completa está
+> caras del álabe, con interfaz gráfica y línea de comandos. El editor del meridiano
+> dibuja el canal, el material del cubo y de la tapa y las cámaras laterales, y de ahí
+> sale un único dominio fluido para CFD. La hoja de ruta completa está
 > en [PLAN.md](PLAN.md).
 
 ![Editor de Turbopump](docs/img/editor.jpg)
@@ -18,11 +20,11 @@ compresores y turbinas.
 | Crate | Contenido |
 |---|---|
 | [`tp-units`](crates/tp-units) | Magnitudes físicas, unidades SI/US, conversión y lectura de texto (`"2900 rpm"`), y velocidad específica (nq, ns US, ωs, σ de Cordier) |
-| [`tp-math`](crates/tp-math) | Curvas Bézier y B-spline (evaluación, derivadas, subdivisión, interpolación), polilíneas, interpolación 1D monótona, raíces, cuadratura y sistemas dispersos con gradiente conjugado |
+| [`tp-math`](crates/tp-math) | Curvas Bézier y B-spline (evaluación, derivadas, subdivisión, interpolación, inserción de nudos y paso a tramos Bézier), polilíneas, interpolación 1D monótona, raíces, cuadratura y sistemas dispersos con gradiente conjugado |
 | [`tp-fluids`](crates/tp-fluids) | Propiedades de líquidos con CoolProp, cargado al ejecutar, y un modelo propio del agua (IAPWS) para cuando falta |
-| [`tp-design`](crates/tp-design) | Triángulos de velocidad, deslizamiento (Wiesner), correlaciones de bomba, dimensiones principales y geometría del rodete (contorno meridional, flujo meridional, álabes y espesores), voluta y difusores con o sin álabes, curva característica, flujo potencial meridional y velocidades en las caras del álabe |
+| [`tp-design`](crates/tp-design) | Triángulos de velocidad, deslizamiento (Wiesner), correlaciones de bomba, dimensiones principales y geometría del rodete (contorno meridional por paredes o por línea media, material del cubo y de la tapa, cámaras laterales, flujo meridional, álabes y espesores), voluta y difusores con o sin álabes, curva característica con carga parcial, banda de NPSH₃, flujo potencial meridional y velocidades en las caras del álabe |
 | [`tp-io`](crates/tp-io) | Exportación: lista de puntos, malla STL y dibujos SVG, DXF y DWG |
-| [`tp-cad`](crates/tp-cad) | Sólidos del rodete, los difusores, la voluta con su carcasa y sus dominios fluidos con Open CASCADE, y exportación STEP, IGES y STL |
+| [`tp-cad`](crates/tp-cad) | Sólidos del rodete, los difusores, la voluta con su carcasa y sus dominios fluidos (también las cámaras laterales y un fluido unido de rodete, cámaras y voluta) con Open CASCADE, y exportación STEP, IGES y STL |
 | [`tp-project`](crates/tp-project) | Modelo de proyecto, parámetros automáticos o manuales, componentes y sus reglas, pasos de diseño, archivo `.tpj` y deshacer/rehacer |
 | [`tp-cli`](crates/tp-cli) | Ejecutable `turbopump` para la línea de comandos |
 | [`tp-gui`](crates/tp-gui) | Ejecutable `turbopump-gui`: editor gráfico con egui y vista 3D con wgpu |
@@ -94,9 +96,10 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
   - *3D model*: muestra u oculta cada pieza de la vista 3D o la vuelve translúcida.
 - **Vista principal**, una a la vez y a pantalla completa, elegida en la barra de
   encima:
-  - vista meridional, donde los puntos de control de Bézier, el borde de ataque y la
-    longitud axial se arrastran con el ratón, con las paredes del difusor y las
+  - vista meridional, con el contorno del rodete, las paredes del difusor y las
     secciones de la voluta;
+  - *Editor* del meridiano, donde el contorno se dibuja sobre la vista (ver
+    [Editor del meridiano](#editor-del-meridiano));
   - secciones de la voluta: la definición en edición sobre la familia de secciones a lo
     largo de la espiral, con los puntos de control de los lados Bézier y de segmentos
     para arrastrar y esquinas que se añaden o quitan con el botón derecho;
@@ -104,12 +107,15 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
   - vista frontal de la etapa, con los álabes del difusor y la espiral;
   - vista 3D, con aristas de las piezas, secciones de la voluta, cubo de vistas (un clic
     en una cara gira la cámara), ejes y barra de escala;
-  - curvas: altura, rendimiento, potencia y NPSH₃ previstos frente al caudal, con la
-    zona de recirculación estimada a trazos, el NPSH disponible y la pérdida en la
+  - curvas: altura, rendimiento, potencia y NPSH₃ previstos frente al caudal (la altura
+    a carga parcial según Gülich, cap. 4.3, y el NPSH₃ como banda de cinco métodos
+    publicados), con la zona de recirculación estimada a trazos, el NPSH disponible y la pérdida en la
     voluta, que entra en la curva de altura; también los empujes radial y axial sobre
     el rodete, con o sin agujeros de equilibrado, el rendimiento por suma de pérdidas
     (fugas por los anillos, rozamiento de disco, pérdidas mecánicas y pérdidas
-    hidráulicas del rodete y la voluta), la corrección
+    hidráulicas del rodete y la voluta, y el rendimiento como producto
+    η = η_h·η_v·η_RR·η_m), el caudal en que la garganta de la voluta pone el punto
+    óptimo, la corrección
     para líquidos viscosos y el punto de trabajo en la instalación, con otra velocidad
     o el rodete recortado y el rango de funcionamiento continuo;
   - informe con las mismas cifras que la línea de comandos.
@@ -136,6 +142,57 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
   arrastre completo cuenta como un solo paso.
 - **Exportación:** puntos, malla STL, dibujos en SVG, DXF o DWG, y sólidos CAD STEP, IGES
   o STL, que se construyen en segundo plano.
+
+### Editor del meridiano
+
+La vista *Editor* edita el corte meridional del rodete sobre el propio dibujo, sin
+tablas. Tiene tres páginas: *Flow path* (el canal), *Materials* (el disco del cubo y la
+tapa) y *Side chambers* (las cámaras entre el rodete y la carcasa).
+
+![Editor del meridiano](docs/img/editor-meridiano.jpg)
+
+- **Tramos:** cada pared se compone de tramos que se parten, se unen o cambian de tipo
+  con el botón derecho:
+  - Bézier;
+  - recta;
+  - rectas unidas por un arco, cuyo centro se arrastra para cambiar el radio;
+  - B-spline, con nudos que se insertan;
+  - Bézier acoplada de grado 4, con curvatura nula en los extremos y los ángulos de
+    entrada y salida fijables.
+
+  Un tramo se puede desplazar en paralelo a sí mismo.
+- **Imanes:** al arrastrar, los puntos se pegan a otros puntos y a las rectas cercanas.
+  Con Ctrl se arrastran libres.
+- **Cotas:** d_n, d₁, d₂, b₂ y L se dibujan sobre el contorno y se editan ahí. Un
+  asa hueca es automática y una llena está fijada a mano; con doble clic vuelve a
+  automática.
+- **Borde de ataque:** su punto en el cubo es independiente o sigue al de la carcasa con
+  un Δz o un Δr fijo.
+- **Colocación:** el meridiano se sitúa en z desde el centro de la entrada o de la
+  salida, y la línea de entrada puede ser normal al eje, axial o inclinada un ángulo.
+- **Borde de salida:** d₂ se arrastra, y d₂i también en los rodetes radiales: con
+  d₂i < d₂ el borde queda inclinado y el diseño usa el diámetro medio
+  d₂m = √((d₂² + d₂i²)/2).
+- **Modo de línea media:** en lugar de las dos paredes se dibuja la línea media del
+  canal y una tabla de su área relativa, A = A₁ + A_rel(x)·(A₂ − A₁); cubo y carcasa
+  quedan a ±b/2 con b = A/(2π·r).
+- **Material:** el disco del cubo (con su agujero del eje y su núcleo) y la tapa (con su
+  cuello) salen del espesor de pared, o se dibujan a mano. Los sólidos CAD usan ese
+  mismo contorno.
+- **Cámaras laterales:** la carcasa delantera, a la holgura axial de la tapa, con el
+  anillo de cierre (holgura según Gülich, ec. 3.12), y la trasera hasta el sello del
+  eje. Sus sellos pasan al empuje axial y al análisis de pérdidas cuando estos están en
+  automático.
+- **Cruces:** si dos paredes se cruzan, o una se cruza consigo misma, el punto se
+  marca en rojo y sale un aviso.
+- **Análisis:** la curvatura de las paredes, los círculos de área, las gráficas de área
+  y de curvatura a lo largo del canal y curvas de referencia.
+- **Flujo potencial:** líneas de corriente, isolíneas y mapa de color de c_m y
+  vectores de velocidad, con el bloqueo de los álabes o sin él.
+- **Comprobación:** el panel de propiedades compara el contorno con las
+  recomendaciones de Gülich.
+
+![Cámaras laterales en el editor](docs/img/editor-camaras.jpg)
 
 Las pruebas de la interfaz usan [kittest](https://github.com/rerun-io/kittest) y no
 necesitan GPU. Las capturas con wgpu se generan a mano en `target/screenshots/`:
@@ -180,6 +237,10 @@ espesores y bordes) y exportar puntos, malla STL y dibujos en SVG, DXF y DWG:
 cargo run -p tp-cli -- geometry bomba.tpj --export salida
 ```
 
+Con `--set` se fija también el borde de ataque por puntos (`le-points=Z,R;Z,R`), la
+velocidad de entrada uniforme en todas las secciones (`inlet-velocity=uniform`) y el
+envolvimiento (`wrap=linear`, común o libre).
+
 Los DWG salen en formato 2018; `--dwg-version 2013` elige otro (ver [DWG](#dwg)).
 
 | Vista meridional | Vista frontal |
@@ -187,8 +248,10 @@ Los DWG salen en formato 2018; `--dwg-version 2013` elige otro (ver [DWG](#dwg))
 | ![meridional](docs/img/rodete-referencia-meridional.svg) | ![frontal](docs/img/rodete-referencia-frontal.svg) |
 
 Sólidos CAD del rodete y del dominio fluido (Open CASCADE). El rodete lleva el cubo
-hueco con su agujero del eje y redondeos donde los álabes tocan el cubo y la tapa;
-`--balance-holes` taladra además los agujeros de equilibrado del empuje axial:
+hueco con su agujero del eje, la tapa con su cuello y redondeos donde los álabes tocan el
+cubo y la tapa. El material sale del contorno del proyecto; `--wall`, `--bore` y `--boss`
+lo sustituyen. `--balance-holes` taladra además los agujeros de equilibrado del empuje
+axial:
 
 ```bash
 cargo run -p tp-cli -- cad bomba.tpj --format step,iges,stl --balance-holes
@@ -202,7 +265,11 @@ Una bomba completa se crea con sus componentes de la entrada a la salida: rodete
 estator con álabes (`stator`) o sin ellos (`vaneless-stator`) y voluta. Cada uno se
 diseña con su orden, y `cad` construye los sólidos de todos; de la voluta salen el
 dominio fluido (`volute.step`) y la carcasa con su espesor de pared y la brida de
-salida (`volute-casing.step`). La altura de la cara de salida se puede fijar con
+salida (`volute-casing.step`). Con las cámaras laterales diseñadas salen también su
+fluido (`side-chambers.step`) y, si a continuación del rodete viene una voluta, un único
+fluido para CFD con rodete, cámaras y voluta (`fluid-joined.step`), unido por un anillo
+en la salida del rodete. Ese fluido necesita un borde de salida paralelo al eje
+(d₂i = d₂). La altura de la cara de salida se puede fijar con
 `turbopump volute --set height=…`:
 
 ```bash
@@ -254,7 +321,8 @@ Comparar un proyecto con los valores de referencia de un caso de validación. Ca
 magnitud se juzga contra su tolerancia; el comando termina con código 2 si alguna queda
 fuera, y `--list` muestra las magnitudes disponibles. Los casos están en
 [tests/benchmarks/](tests/benchmarks/), y el resumen de lo comparado, con sus límites, en
-[docs/validation/](docs/validation/):
+[docs/validation/](docs/validation/). Para cargar ensayos propios hay una plantilla de
+Excel en [tests/benchmarks/plantilla/](tests/benchmarks/plantilla/):
 
 ```bash
 cargo run -p tp-cli -- validate tests/benchmarks/japikse-7.5/caso.tpj tests/benchmarks/japikse-7.5/targets.json
