@@ -319,6 +319,7 @@ pub struct TurbopumpApp {
     meridional: MeridionalView,
     cross_section: CrossSectionView,
     performance: PerformanceView,
+    blade: blade::BladeView,
     viewer: Viewer,
     exports: Exports,
     status: Option<Status>,
@@ -397,6 +398,7 @@ impl TurbopumpApp {
             meridional: MeridionalView::default(),
             cross_section: CrossSectionView::default(),
             performance: PerformanceView::default(),
+            blade: blade::BladeView::default(),
             viewer: Viewer::default(),
             exports: Exports::default(),
             status: None,
@@ -635,7 +637,7 @@ impl TurbopumpApp {
                             .show_editor(ui, &mut cx, id, stator, volute, cover);
                     }
                     View::CrossSection => self.cross_section.show(ui, &mut cx, volute, cover),
-                    View::Blade => blade::show(ui, cx.derived, id, &units, cover),
+                    View::Blade => self.blade.show(ui, &mut cx, id, &units, cover),
                     View::FrontView => {
                         front::show(ui, cx.derived, id, stator, volute, &units);
                     }
@@ -1770,6 +1772,58 @@ mod tests {
     }
 
     /// The editor with the default pump, framed and settled.
+    #[test]
+    fn the_blade_edge_step_opens_its_edges_to_drag() {
+        use crate::views::blade::BladePage;
+        use crate::views::blade_edges::{Edge, Span, grips, to_plot};
+        use tp_design::impeller::blade::EdgeShape;
+        let mut harness = Harness::builder()
+            .with_size([1440.0, 900.0])
+            .build_eframe(|cc| TurbopumpApp::new(cc, None));
+        harness.run();
+        let id = harness.state().active_impeller().unwrap();
+        harness.state_mut().selection = Selection::Step(id, DesignStep::BladeEdges);
+        harness.run();
+        harness.run();
+        assert_eq!(harness.state().view, View::Blade);
+        assert_eq!(harness.state().blade.page, BladePage::Edges);
+        let leading = |app: &TurbopumpApp| {
+            app.doc
+                .project()
+                .impeller_geometry_input(id)
+                .unwrap()
+                .edges
+                .leading
+        };
+        assert_eq!(leading(harness.state()), EdgeShape::Ellipse { ratio: 4.0 });
+        // The end of the nose, dragged along the face, makes it longer.
+        let start = {
+            let app = harness.state();
+            let g = app.derived.geometry(id).unwrap();
+            let e = g.basis.blade_thickness;
+            let scale = app
+                .doc
+                .project()
+                .display_units
+                .to_display(QuantityKind::Length, 1.0);
+            let (_, end) = grips(leading(app), e)[0];
+            app.blade
+                .edges
+                .transform(Edge::Leading, Span::Hub)
+                .unwrap()
+                .position_from_point(&to_plot(Edge::Leading, end, e, scale))
+        };
+        drag_by(&mut harness, start, egui::vec2(60.0, 0.0));
+        let EdgeShape::Ellipse { ratio } = leading(harness.state()) else {
+            panic!("still an ellipse");
+        };
+        assert!(ratio > 4.5, "{ratio}");
+        // One drag, one undo step.
+        harness.state_mut().doc.undo();
+        harness.run();
+        assert_eq!(leading(harness.state()), EdgeShape::Ellipse { ratio: 4.0 });
+    }
+
     fn editor() -> Harness<'static, TurbopumpApp> {
         let mut harness = Harness::builder()
             .with_size([1440.0, 900.0])

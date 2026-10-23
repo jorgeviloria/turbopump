@@ -243,37 +243,51 @@ pub struct ProfileInput {
     pub thickness_trailing: Param<f64>,
 }
 
-/// Shape of a blade edge.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum EdgeShape {
-    /// Blunt: full thickness up to the edge.
-    Cut,
-    /// Elliptic nose whose length along the mean line is `ratio` times the half
-    /// thickness (1 = round).
-    Ellipse { ratio: f64 },
-}
+pub use super::edge::{EdgeProfile, EdgeShape};
 
-/// Inputs of the blade-edge step.
+/// Inputs of the blade-edge step: the shapes at the hub, and at the shroud when they
+/// vary linearly from hub to shroud.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct EdgeInput {
     pub leading: EdgeShape,
     pub trailing: EdgeShape,
+    /// The leading edge at the shroud, the spans between blending it with `leading`
+    /// parameter by parameter; `None`: `leading` on every span.
+    pub leading_shroud: Option<EdgeShape>,
+    /// The trailing edge at the shroud, as `leading_shroud`.
+    pub trailing_shroud: Option<EdgeShape>,
 }
 
-impl EdgeShape {
-    /// Minimum pressure coefficient c_p,min = Δp_min/(½ρw₁²) of the leading-edge
-    /// profile at shockless entry: c_p = 2x + x² with x = 0.373·e/L_p, L_p being the
-    /// length of the nose (Gülich 2nd ed., eq. 7.1a). `None` for a blunt edge.
-    pub fn min_pressure_coefficient(&self) -> Option<f64> {
-        match *self {
-            EdgeShape::Cut => None,
-            EdgeShape::Ellipse { ratio } => {
-                let x = 0.373 * 2.0 / ratio;
-                Some(2.0 * x + x * x)
-            }
-        }
+impl EdgeInput {
+    /// The (leading, trailing) shapes of the span at flow fraction `span`.
+    pub fn at(&self, span: f64) -> Result<(EdgeShape, EdgeShape), DesignError> {
+        let blend = |hub: EdgeShape, shroud: Option<EdgeShape>, error: &str| match shroud {
+            None => Ok(hub),
+            Some(shroud) => hub
+                .lerp(shroud, span)
+                .ok_or_else(|| DesignError::InvalidInput(error.into())),
+        };
+        Ok((
+            blend(
+                self.leading,
+                self.leading_shroud,
+                "the leading edge needs the same kind of shape at hub and shroud",
+            )?,
+            blend(
+                self.trailing,
+                self.trailing_shroud,
+                "the trailing edge needs the same kind of shape at hub and shroud",
+            )?,
+        ))
+    }
+
+    /// Every shape given, hub and shroud.
+    pub fn shapes(&self) -> impl Iterator<Item = EdgeShape> + '_ {
+        [self.leading, self.trailing]
+            .into_iter()
+            .chain(self.leading_shroud)
+            .chain(self.trailing_shroud)
     }
 }
 
@@ -284,6 +298,8 @@ impl Default for EdgeInput {
         Self {
             leading: EdgeShape::Ellipse { ratio: 4.0 },
             trailing: EdgeShape::Cut,
+            leading_shroud: None,
+            trailing_shroud: None,
         }
     }
 }
@@ -453,8 +469,8 @@ fn index_of(values: &[f64], target: f64, from_start: bool) -> Option<f64> {
     }
 }
 
-/// One face of a section: the mean line offset by half the thickness along its normal in
-/// the conformal plane, toward +θ for `side` = +1 (pressure) and −θ for −1 (suction).
+/// One face of a section: the mean line moved by `offsets` (m, + toward +θ: the pressure
+/// face) along its normal in the conformal plane.
 /// A blunt edge is cut on the meridional edge, where the face is trimmed or carried on
 /// along its end segment; only the quarter of the points next to a cut edge moves, so
 /// a rounded nose keeps one face point beside each mean-line point.
@@ -466,26 +482,25 @@ fn face(
     m: &[f64],
     beta: &[f64],
     theta: &[f64],
-    thickness: &[f64],
+    offsets: &[f64],
     edges: (EdgeShape, EdgeShape),
-    side: f64,
 ) -> Face {
     let n = m.len();
     let (mut x, mut y) = (Vec::with_capacity(n), Vec::with_capacity(n));
     for k in 0..n {
         let s = s_le + m[k];
-        let h = 0.5 * thickness[k] / line.point_at_length(s).y;
-        x.push(conformal.at(s) + side * h * beta[k].cos());
-        y.push(theta[k] + side * h * beta[k].sin());
+        let h = offsets[k] / line.point_at_length(s).y;
+        x.push(conformal.at(s) + h * beta[k].cos());
+        y.push(theta[k] + h * beta[k].sin());
     }
     let start = match edges.0 {
         EdgeShape::Cut => index_of(&x, conformal.at(s_le), true).unwrap_or(0.0),
-        EdgeShape::Ellipse { .. } => 0.0,
+        _ => 0.0,
     };
     let last = (n - 1) as f64;
     let end = match edges.1 {
         EdgeShape::Cut => index_of(&x, conformal.at(s_le + m[n - 1]), false).unwrap_or(last),
-        EdgeShape::Ellipse { .. } => last,
+        _ => last,
     };
     // The first and last quarter of the points stretch to the cut edges.
     let (head, tail) = (
@@ -545,22 +560,6 @@ fn beta_at(distribution: BetaDistribution, beta1: f64, beta2: f64, mbar: f64) ->
             ])
             .expect("four control points");
             curve.y_at_x(mbar.clamp(0.0, 1.0)).unwrap_or(beta1)
-        }
-    }
-}
-
-/// Thickness reduction factor of an edge at distance `s` from it along the mean line.
-pub(crate) fn edge_factor(shape: EdgeShape, thickness: f64, s: f64) -> f64 {
-    match shape {
-        EdgeShape::Cut => 1.0,
-        EdgeShape::Ellipse { ratio } => {
-            let a = ratio * thickness / 2.0;
-            if s >= a {
-                1.0
-            } else {
-                let x = (a - s.max(0.0)) / a;
-                (1.0 - x * x).max(0.0).sqrt()
-            }
         }
     }
 }
@@ -838,17 +837,41 @@ fn section(
     }
     let total = *along.last().expect("at least two stations");
     let (e1, e2) = (settings.thickness_leading, settings.thickness_trailing);
-    let thickness: Vec<f64> = mbars
+    let profile = |shape, e| EdgeProfile::new(shape, e).map_err(DesignError::InvalidInput);
+    let (leading, trailing) = (
+        profile(settings.edges.0, e1)?,
+        profile(settings.edges.1, e2)?,
+    );
+    if leading.length() + trailing.length() > total {
+        return Err(DesignError::Infeasible(format!(
+            "the leading- and trailing-edge shapes overlap at span {:.2}: shorten them",
+            span.fraction
+        )));
+    }
+    // Signed offsets of both faces from the mean line, m: (pressure, suction).
+    let offsets: Vec<(f64, f64)> = mbars
         .iter()
         .zip(&along)
         .map(|(&mbar, &s)| {
-            let e = e1 + (e2 - e1) * mbar;
-            e * edge_factor(settings.edges.0, e1, s) * edge_factor(settings.edges.1, e2, total - s)
+            let half = 0.5 * (e1 + (e2 - e1) * mbar);
+            let (p, q) = if s < leading.length() {
+                leading.at(s)
+            } else if total - s < trailing.length() {
+                trailing.at(total - s)
+            } else {
+                (1.0, -1.0)
+            };
+            (half * p, half * q)
         })
         .collect();
+    let thickness: Vec<f64> = offsets.iter().map(|(p, q)| p - q).collect();
 
     let conformal = ConformalLine::new(line);
-    let faces = [1.0, -1.0].map(|side| {
+    let faces = [true, false].map(|pressure| {
+        let face_offsets: Vec<f64> = offsets
+            .iter()
+            .map(|&(p, q)| if pressure { p } else { q })
+            .collect();
         face(
             line,
             &conformal,
@@ -856,9 +879,8 @@ fn section(
             &m,
             &betas,
             &theta,
-            &thickness,
+            &face_offsets,
             settings.edges,
-            side,
         )
     });
     let [pressure, suction] = faces;
@@ -997,14 +1019,8 @@ impl Blade {
                 ));
             }
         }
-        for edge in [edges.leading, edges.trailing] {
-            if let EdgeShape::Ellipse { ratio } = edge
-                && !(ratio.is_finite() && ratio > 0.0)
-            {
-                return Err(DesignError::InvalidInput(format!(
-                    "edge ellipse ratio must be positive, got {ratio}"
-                )));
-            }
+        for edge in edges.shapes() {
+            edge.validate().map_err(DesignError::InvalidInput)?;
         }
         let positive = |name: &str, v: f64| {
             if v.is_finite() && v > 0.0 {
@@ -1106,7 +1122,13 @@ impl Blade {
         let sections: Vec<BladeSection> = frames
             .iter()
             .zip(bumps)
-            .map(|(f, bump)| section(f, basis, &settings, plan.as_ref(), bump))
+            .map(|(f, bump)| {
+                let settings = SectionSettings {
+                    edges: edges.at(f.span.fraction)?,
+                    ..settings
+                };
+                section(f, basis, &settings, plan.as_ref(), bump)
+            })
             .collect::<Result<_, _>>()?;
         // A wrap far from what the edge angles give bends the blade into a hump of β.
         // Only an imposed wrap does that; a cylindrical blade turns axial on purpose.
@@ -1279,6 +1301,7 @@ mod tests {
             EdgeInput {
                 leading: EdgeShape::Cut,
                 trailing: EdgeShape::Cut,
+                ..EdgeInput::default()
             },
         );
         let r2 = basis().outlet_diameter / 2.0;
@@ -1310,11 +1333,105 @@ mod tests {
             EdgeInput {
                 leading: EdgeShape::Cut,
                 trailing: EdgeShape::Ellipse { ratio: 1.0 },
+                ..EdgeInput::default()
             },
         );
         let s = &blunt.sections[0];
         assert_relative_eq!(s.thickness[0], basis().blade_thickness);
         assert_eq!(*s.thickness.last().unwrap(), 0.0);
+    }
+
+    #[test]
+    fn edges_can_change_from_hub_to_shroud() {
+        let blade = blade_with(
+            MeanLineInput::default(),
+            EdgeInput {
+                leading: EdgeShape::Ellipse { ratio: 2.0 },
+                leading_shroud: Some(EdgeShape::Ellipse { ratio: 6.0 }),
+                ..EdgeInput::default()
+            },
+        );
+        // The nose is longer toward the shroud: at the same distance from the edge the
+        // blade is thinner there.
+        let thin = |s: &BladeSection| s.thickness[2] / s.thickness.last().unwrap();
+        let (hub, shroud) = (&blade.sections[0], blade.sections.last().unwrap());
+        assert!(
+            thin(hub) > thin(shroud),
+            "{} vs {}",
+            thin(hub),
+            thin(shroud)
+        );
+        let mixed = EdgeInput {
+            leading_shroud: Some(EdgeShape::Cut),
+            ..EdgeInput::default()
+        };
+        let b = basis();
+        let contour = MeridionalContour::build(&b, &MeridionalInput::default()).unwrap();
+        let channel = Channel::build(&contour, b.flow, 61, 5);
+        let built = Blade::build(
+            &b,
+            &contour,
+            &channel,
+            &BladePropertiesInput::default(),
+            &MeanLineInput::default(),
+            &ProfileInput::default(),
+            &mixed,
+        );
+        assert!(built.is_err());
+    }
+
+    #[test]
+    fn an_asymmetric_nose_closes_off_the_mean_line() {
+        let lean = EdgeShape::Bezier {
+            start: [2.0, 2.0],
+            pull: [0.6, 0.6],
+            tip: 0.5,
+            symmetric: false,
+        };
+        let blade = blade_with(
+            MeanLineInput::default(),
+            EdgeInput {
+                leading: lean,
+                ..EdgeInput::default()
+            },
+        );
+        for s in &blade.sections {
+            let (ps, ss) = (s.pressure_side(1.0), s.suction_side(1.0));
+            let mean = s.mean_line(1.0);
+            // Both faces close on the tip of the nose, off the mean line.
+            assert!(ps[0].distance(ss[0]) < 1e-9);
+            let e = basis().blade_thickness;
+            let tip = EdgeProfile::new(lean, e).unwrap().faces()[0][0];
+            assert!(tip.y > 0.1);
+            assert_relative_eq!(
+                ps[0].distance(mean[0]),
+                tip.y * e / 2.0,
+                max_relative = 0.02
+            );
+            assert!(s.thickness[0].abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn overlapping_edges_are_rejected() {
+        let b = basis();
+        let contour = MeridionalContour::build(&b, &MeridionalInput::default()).unwrap();
+        let channel = Channel::build(&contour, b.flow, 61, 5);
+        let long = EdgeShape::Ellipse { ratio: 60.0 };
+        let built = Blade::build(
+            &b,
+            &contour,
+            &channel,
+            &BladePropertiesInput::default(),
+            &MeanLineInput::default(),
+            &ProfileInput::default(),
+            &EdgeInput {
+                leading: long,
+                trailing: long,
+                ..EdgeInput::default()
+            },
+        );
+        assert!(matches!(built, Err(DesignError::Infeasible(m)) if m.contains("overlap")));
     }
 
     #[test]

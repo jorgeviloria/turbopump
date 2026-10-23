@@ -34,7 +34,11 @@ pub(crate) struct GeometryArgs {
     /// (auto or an angle: the wrap every section shares; free: each its own; linear, or
     /// linear:HUB,SHROUD: from the hub wrap to the shroud wrap), shape (free-form,
     /// cylindrical, circular-arc or straight), points, beta (linear, or smooth:IN,OUT),
-    /// le and te (cut, round or ellipse:RATIO), e-le, e-te (thickness).
+    /// le and te (edge shapes: cut, round, ellipse:RATIO, taper[:LENGTH,NOSE,RATIO[,ASYM]],
+    /// bezier[:START,PULL] or bezier:START_P,START_S,PULL_P,PULL_S,TIP, lengths in blade
+    /// thicknesses; at the hub, or on every span), le-shroud-shape and te-shroud-shape
+    /// (the shape at the shroud, blended linearly from the hub; uniform: none),
+    /// e-le, e-te (thickness).
     #[arg(long = "set", value_name = "KEY=VALUE")]
     settings: Vec<String>,
     /// Write impeller.txt (points), impeller.stl (mesh), and the meridional and front
@@ -155,15 +159,86 @@ fn export(dir: &Path, g: &ImpellerGeometry, dwg_version: DwgVersion) -> Result<(
     Ok(())
 }
 
+/// An edge shape: cut, round, ellipse:RATIO, taper[:LENGTH,NOSE,RATIO[,ASYMMETRY]] or
+/// bezier[:START,PULL] (symmetric) or bezier:START_P,START_S,PULL_P,PULL_S,TIP, lengths
+/// in blade thicknesses.
 pub(crate) fn parse_edge(value: &str) -> Result<EdgeShape, String> {
-    match value {
-        "cut" => Ok(EdgeShape::Cut),
-        "round" => Ok(EdgeShape::Ellipse { ratio: 1.0 }),
-        _ => value
-            .strip_prefix("ellipse:")
-            .and_then(|r| r.parse().ok())
-            .map(|ratio| EdgeShape::Ellipse { ratio })
-            .ok_or_else(|| format!("edge must be cut, round or ellipse:RATIO, got {value:?}")),
+    let bad = || {
+        format!(
+            "edge must be cut, round, ellipse:RATIO, taper[:LENGTH,NOSE,RATIO[,ASYMMETRY]] or \
+             bezier[:START,PULL | :START_P,START_S,PULL_P,PULL_S,TIP], got {value:?}"
+        )
+    };
+    let (kind, numbers) = value.split_once(':').unwrap_or((value, ""));
+    let numbers: Vec<f64> = numbers
+        .split(',')
+        .filter(|n| !n.trim().is_empty())
+        .map(|n| n.trim().parse().map_err(|_| bad()))
+        .collect::<Result<_, _>>()?;
+    let shape = match (kind.trim(), numbers.as_slice()) {
+        ("cut", []) => EdgeShape::Cut,
+        ("round", []) => EdgeShape::Ellipse { ratio: 1.0 },
+        ("ellipse", &[ratio]) => EdgeShape::Ellipse { ratio },
+        ("taper", []) => EdgeShape::TAPER,
+        ("taper", &[length, nose, ratio]) => EdgeShape::Taper {
+            length,
+            nose,
+            ratio,
+            asymmetry: 0.0,
+        },
+        ("taper", &[length, nose, ratio, asymmetry]) => EdgeShape::Taper {
+            length,
+            nose,
+            ratio,
+            asymmetry,
+        },
+        ("bezier", []) => EdgeShape::BEZIER,
+        ("bezier", &[start, pull]) => EdgeShape::Bezier {
+            start: [start; 2],
+            pull: [pull; 2],
+            tip: 0.0,
+            symmetric: true,
+        },
+        ("bezier", &[sp, ss, pp, ps, tip]) => EdgeShape::Bezier {
+            start: [sp, ss],
+            pull: [pp, ps],
+            tip,
+            symmetric: false,
+        },
+        _ => return Err(bad()),
+    };
+    shape.validate()?;
+    Ok(shape)
+}
+
+/// A shroud edge shape, or `uniform` for the hub shape on every span.
+fn parse_shroud_edge(value: &str) -> Result<Option<EdgeShape>, String> {
+    if value.trim() == "uniform" {
+        Ok(None)
+    } else {
+        parse_edge(value).map(Some)
+    }
+}
+
+/// How an edge shape reads in the summary.
+fn edge_text(shape: EdgeShape) -> String {
+    match shape.resolved() {
+        EdgeShape::Cut => "blunt".into(),
+        EdgeShape::Ellipse { ratio } => format!("ellipse {ratio}:1"),
+        EdgeShape::Taper {
+            length,
+            nose,
+            ratio,
+            asymmetry,
+        } => {
+            format!("taper over {length} e to a {nose} e nose of {ratio}:1, asymmetry {asymmetry}")
+        }
+        EdgeShape::Bezier {
+            start, pull, tip, ..
+        } => format!(
+            "Bézier, {} e / {} e long, pull {} / {}, tip {tip}",
+            start[0], start[1], pull[0], pull[1]
+        ),
     }
 }
 
@@ -316,10 +391,12 @@ fn apply(
         "e-te" => input.profiles.thickness_trailing = quantity(Length)?,
         "le" => input.edges.leading = parse_edge(value)?,
         "te" => input.edges.trailing = parse_edge(value)?,
+        "le-shroud-shape" => input.edges.leading_shroud = parse_shroud_edge(value)?,
+        "te-shroud-shape" => input.edges.trailing_shroud = parse_shroud_edge(value)?,
         _ => {
             return Err(format!(
                 "unknown key {key:?}; valid keys: axial-length, hub-in, hub-out, shroud-in, \
-                 shroud-out, le-hub, le-shroud, le-points, spans, flow, inlet-velocity, wrap, shape, points, beta, e-le, e-te, le, te"
+                 shroud-out, le-hub, le-shroud, le-points, spans, flow, inlet-velocity, wrap, shape, points, beta, e-le, e-te, le, te, le-shroud-shape, te-shroud-shape"
             ));
         }
     }
@@ -386,14 +463,24 @@ fn print_report(
         1.0 - BladeLoading::BAND,
         1.0 + BladeLoading::BAND
     );
-    match (
-        input.edges.leading,
-        input.edges.leading.min_pressure_coefficient(),
-    ) {
-        (EdgeShape::Ellipse { ratio }, Some(cp)) => println!(
-            "Leading edge   ellipse {ratio}:1, c_p,min at shockless entry {cp:.2} (Gülich eq. 7.1a)"
-        ),
-        _ => println!("Leading edge   blunt"),
+    let edges = [
+        ("hub", Some(input.edges.leading)),
+        ("shroud", input.edges.leading_shroud),
+    ];
+    for (span, shape) in edges {
+        let Some(shape) = shape else { continue };
+        let at = if input.edges.leading_shroud.is_some() {
+            format!(" at the {span}")
+        } else {
+            String::new()
+        };
+        match shape.min_pressure_coefficient() {
+            Some(cp) => println!(
+                "Leading edge   {}{at}, c_p,min at shockless entry {cp:.2} (Gülich eq. 7.1a)",
+                edge_text(shape)
+            ),
+            None => println!("Leading edge   blunt{at}"),
+        }
     }
     if !g.warnings.is_empty() {
         println!();

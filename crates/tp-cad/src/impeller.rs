@@ -771,6 +771,33 @@ mod tests {
     }
 
     #[test]
+    fn shaped_edges_loft_a_valid_blade() {
+        use tp_design::impeller::blade::EdgeShape;
+        let plain = blade_solid(&reference(), 0.0).unwrap();
+        let mut input = tp_design::impeller::ImpellerGeometryInput::default();
+        input.edges.leading = EdgeShape::BEZIER;
+        input.edges.leading_shroud = Some(EdgeShape::Bezier {
+            start: [2.5, 1.6],
+            pull: [0.7, 0.5],
+            tip: 0.35,
+            symmetric: false,
+        });
+        input.edges.trailing = EdgeShape::Taper {
+            length: 4.0,
+            nose: 0.5,
+            ratio: 1.6,
+            asymmetry: 0.3,
+        };
+        let g = super::tests_support::reference_with(&input).0;
+        let blade = blade_solid(&g, 0.0).unwrap();
+        assert!(blade.is_valid());
+        assert_eq!(blade.solid_count(), 1);
+        // The thinner trailing edge takes a little of the blade away.
+        let (shaped, full) = (blade.volume(), plain.volume());
+        assert!(shaped < full && shaped > 0.85 * full, "{shaped} vs {full}");
+    }
+
+    #[test]
     fn rejects_bad_options() {
         let g = reference();
         // Holes that do not fit between boss and rear seal.

@@ -2109,37 +2109,236 @@ fn profiles(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: ComponentI
     }
 }
 
+/// The name of an edge shape in the panel.
+fn edge_shape_name(shape: &EdgeShape) -> &'static str {
+    tr(match shape {
+        EdgeShape::Cut => "blunt (cut)",
+        EdgeShape::Ellipse { .. } => "elliptic",
+        EdgeShape::Taper { .. } => "taper and rounding",
+        EdgeShape::Bezier { .. } => "Bézier",
+    })
+}
+
+/// One edge-shape parameter in blade thicknesses (or a plain ratio with `suffix`).
+fn edge_value(
+    ui: &mut Ui,
+    name: &str,
+    hint: &str,
+    value: &mut f64,
+    range: std::ops::RangeInclusive<f64>,
+    suffix: &str,
+) -> bool {
+    label(ui, name, hint);
+    let changed = ui
+        .add(
+            DragValue::new(value)
+                .range(range)
+                .speed(0.01)
+                .max_decimals(3)
+                .suffix(suffix),
+        )
+        .changed();
+    ui.end_row();
+    changed
+}
+
 fn edge_shape(ui: &mut Ui, salt: &str, shape: &mut EdgeShape) -> bool {
     let mut changed = false;
-    let ellipse = matches!(shape, EdgeShape::Ellipse { .. });
     ComboBox::from_id_salt(salt)
-        .selected_text(tr(if ellipse { "elliptic" } else { "blunt (cut)" }))
+        .selected_text(edge_shape_name(shape))
         .show_ui(ui, |ui| {
-            if ui.selectable_label(ellipse, tr("elliptic")).clicked() && !ellipse {
-                *shape = EdgeShape::Ellipse { ratio: 4.0 };
-                changed = true;
-            }
-            if ui.selectable_label(!ellipse, tr("blunt (cut)")).clicked() && ellipse {
-                *shape = EdgeShape::Cut;
-                changed = true;
+            for option in [
+                EdgeShape::Ellipse { ratio: 4.0 },
+                EdgeShape::TAPER,
+                EdgeShape::BEZIER,
+                EdgeShape::Cut,
+            ] {
+                let selected = shape.same_kind(&option);
+                if ui
+                    .selectable_label(selected, edge_shape_name(&option))
+                    .clicked()
+                    && !selected
+                {
+                    *shape = option;
+                    changed = true;
+                }
             }
         });
     ui.end_row();
-    if let EdgeShape::Ellipse { ratio } = shape {
-        label(
-            ui,
-            tr("Nose ratio"),
-            tr("Length of the nose over the half thickness (1 = round)"),
-        );
-        changed |= ui
-            .add(
-                DragValue::new(ratio)
-                    .range(1.0..=8.0)
-                    .speed(0.02)
-                    .suffix(" : 1"),
-            )
-            .changed();
-        ui.end_row();
+    let thick = tr(" e");
+    match shape {
+        EdgeShape::Cut => {}
+        EdgeShape::Ellipse { ratio } => {
+            changed |= edge_value(
+                ui,
+                tr("Nose ratio"),
+                tr("Length of the nose over the half thickness (1 = round)"),
+                ratio,
+                1.0..=8.0,
+                " : 1",
+            );
+        }
+        EdgeShape::Taper {
+            length,
+            nose,
+            ratio,
+            asymmetry,
+        } => {
+            changed |= edge_value(
+                ui,
+                tr("Taper length"),
+                tr("From full thickness to the edge, in blade thicknesses e"),
+                length,
+                0.2..=20.0,
+                thick,
+            );
+            changed |= edge_value(
+                ui,
+                tr("Nose length"),
+                tr("Length of the rounding at the end of the taper, in e"),
+                nose,
+                0.05..=(*length - 0.01).max(0.05),
+                thick,
+            );
+            changed |= edge_value(
+                ui,
+                tr("Nose ratio"),
+                tr(
+                    "Length of the rounding over its half width; the rounding is tangent \
+                     to the taper",
+                ),
+                ratio,
+                (2.0 * *nose + 0.01)..=20.0,
+                " : 1",
+            );
+            changed |= edge_value(
+                ui,
+                tr("Asymmetry"),
+                tr(
+                    "Moves the tip toward the pressure face (+) or the suction face (−), \
+                     as a fraction of the half width of the nose",
+                ),
+                asymmetry,
+                -0.95..=0.95,
+                "",
+            );
+        }
+        EdgeShape::Bezier {
+            start,
+            pull,
+            tip,
+            symmetric,
+        } => {
+            label(
+                ui,
+                tr("Symmetric"),
+                tr("The same on both faces, the tip on the mean line"),
+            );
+            changed |= ui.checkbox(symmetric, "").changed();
+            ui.end_row();
+            if *symmetric {
+                changed |= edge_value(
+                    ui,
+                    tr("Length"),
+                    tr("Where the nose meets the faces, from the edge, in e"),
+                    &mut start[0],
+                    0.1..=10.0,
+                    thick,
+                );
+                changed |= edge_value(
+                    ui,
+                    tr("Pull"),
+                    tr("How far points 1 and 3 reach toward the edge (0 to 1)"),
+                    &mut pull[0],
+                    0.0..=1.0,
+                    "",
+                );
+            } else {
+                changed |= edge_value(
+                    ui,
+                    tr("Length on the pressure face"),
+                    tr("Where the nose meets the pressure face, from the edge, in e"),
+                    &mut start[0],
+                    0.1..=10.0,
+                    thick,
+                );
+                changed |= edge_value(
+                    ui,
+                    tr("Length on the suction face"),
+                    tr("Where the nose meets the suction face, from the edge, in e"),
+                    &mut start[1],
+                    0.1..=10.0,
+                    thick,
+                );
+                changed |= edge_value(
+                    ui,
+                    tr("Pull on the pressure face"),
+                    tr("How far point 1 reaches toward the edge (0 to 1)"),
+                    &mut pull[0],
+                    0.0..=1.0,
+                    "",
+                );
+                changed |= edge_value(
+                    ui,
+                    tr("Pull on the suction face"),
+                    tr("How far point 3 reaches toward the edge (0 to 1)"),
+                    &mut pull[1],
+                    0.0..=1.0,
+                    "",
+                );
+                changed |= edge_value(
+                    ui,
+                    tr("Tip offset"),
+                    tr("Point 2 off the mean line, in half thicknesses (+ pressure face)"),
+                    tip,
+                    -0.95..=0.95,
+                    "",
+                );
+            }
+        }
+    }
+    changed
+}
+
+/// One edge: hub to shroud mode, then the shape at the hub (or on every span) and, when
+/// it varies, at the shroud.
+fn edge_rows(ui: &mut Ui, salt: &str, hub: &mut EdgeShape, shroud: &mut Option<EdgeShape>) -> bool {
+    let mut changed = false;
+    label(
+        ui,
+        tr("Hub to shroud"),
+        tr(
+            "The same shape on every span, or one at the hub and one at the shroud with the spans between blended linearly",
+        ),
+    );
+    let mut linear = shroud.is_some();
+    ComboBox::from_id_salt((salt, "mode"))
+        .selected_text(tr(if linear { "linear" } else { "uniform" }))
+        .show_ui(ui, |ui| {
+            changed |= ui
+                .selectable_value(&mut linear, false, tr("uniform"))
+                .changed();
+            changed |= ui
+                .selectable_value(&mut linear, true, tr("linear"))
+                .changed();
+        });
+    ui.end_row();
+    if linear != shroud.is_some() {
+        *shroud = linear.then_some(*hub);
+    }
+    if let Some(shroud) = shroud {
+        label(ui, tr("At the hub"), "");
+        changed |= edge_shape(ui, &format!("{salt}_hub"), hub);
+        label(ui, tr("At the shroud"), "");
+        changed |= edge_shape(ui, &format!("{salt}_shroud"), shroud);
+        // Blending needs one kind of shape: the shroud follows a change at the hub.
+        if !shroud.same_kind(hub) {
+            *shroud = *hub;
+            changed = true;
+        }
+    } else {
+        label(ui, tr("Shape"), "");
+        changed |= edge_shape(ui, salt, hub);
     }
     changed
 }
@@ -2147,28 +2346,50 @@ fn edge_shape(ui: &mut Ui, salt: &str, shape: &mut EdgeShape) -> bool {
 fn edges(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: ComponentId) {
     let mut input = project.impeller_geometry_input(id).unwrap_or_default();
     let mut changed = false;
-    section(ui, tr("Edge shapes"));
-    props(ui, "edges", |ui| {
-        label(ui, tr("Leading edge"), "");
-        changed |= edge_shape(ui, "leading_edge_shape", &mut input.edges.leading);
-        label(ui, tr("Trailing edge"), "");
-        changed |= edge_shape(ui, "trailing_edge_shape", &mut input.edges.trailing);
+    let e = &mut input.edges;
+    section(ui, tr("Leading edge"));
+    props(ui, "leading_edge_shape_rows", |ui| {
+        changed |= edge_rows(
+            ui,
+            "leading_edge_shape",
+            &mut e.leading,
+            &mut e.leading_shroud,
+        );
+    });
+    section(ui, tr("Trailing edge"));
+    props(ui, "trailing_edge_shape_rows", |ui| {
+        changed |= edge_rows(
+            ui,
+            "trailing_edge_shape",
+            &mut e.trailing,
+            &mut e.trailing_shroud,
+        );
     });
     section(ui, tr("Results"));
     props(ui, "edges_results", |ui| {
-        match input.edges.leading.min_pressure_coefficient() {
-            Some(cp) => value_info(
-                ui,
-                tr("c_p,min of the leading edge"),
-                tr("At shockless entry (Gülich eq. 7.1a)"),
-                format!("{cp:.2}"),
-            ),
-            None => value_info(
-                ui,
-                tr("c_p,min of the leading edge"),
-                tr("A blunt leading edge causes a strong local pressure drop."),
-                "—",
-            ),
+        let spans = [
+            (tr("c_p,min of the leading edge"), Some(e.leading)),
+            (tr("c_p,min at the shroud"), e.leading_shroud),
+        ];
+        for (name, shape) in spans {
+            let Some(shape) = shape else { continue };
+            match shape.min_pressure_coefficient() {
+                Some(cp) => value_info(
+                    ui,
+                    name,
+                    tr(
+                        "At shockless entry (Gülich eq. 7.1a, for elliptic noses; an \
+                         estimate with the nose length for the other shapes)",
+                    ),
+                    format!("{cp:.2}"),
+                ),
+                None => value_info(
+                    ui,
+                    name,
+                    tr("A blunt leading edge causes a strong local pressure drop."),
+                    "—",
+                ),
+            }
         }
     });
     if changed {

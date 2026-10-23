@@ -2944,6 +2944,100 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Shared by every section; automatic: the mean of the wraps their own β distributions give",
         "Común a todas las secciones; automático: la media de los envolvimientos que da a cada una su distribución de β",
     ),
+    ("taper and rounding", "afilado y redondeo"),
+    (" e", " e"),
+    ("Taper length", "Longitud del afilado"),
+    (
+        "From full thickness to the edge, in blade thicknesses e",
+        "Desde el espesor completo hasta el borde, en espesores del álabe e",
+    ),
+    ("Nose length", "Longitud de la nariz"),
+    (
+        "Length of the rounding at the end of the taper, in e",
+        "Longitud del redondeo al final del afilado, en e",
+    ),
+    (
+        "Length of the rounding over its half width; the rounding is tangent to the taper",
+        "Longitud del redondeo entre su semiancho; el redondeo es tangente al afilado",
+    ),
+    ("Asymmetry", "Asimetría"),
+    (
+        "Moves the tip toward the pressure face (+) or the suction face (−), as a fraction of the half width of the nose",
+        "Lleva la punta hacia la cara de presión (+) o la de succión (−), como fracción del semiancho de la nariz",
+    ),
+    ("Symmetric", "Simétrico"),
+    (
+        "The same on both faces, the tip on the mean line",
+        "Igual en las dos caras, con la punta sobre la línea media",
+    ),
+    (
+        "Where the nose meets the faces, from the edge, in e",
+        "Donde la nariz se une a las caras, desde el borde, en e",
+    ),
+    ("Pull", "Tiro"),
+    (
+        "How far points 1 and 3 reach toward the edge (0 to 1)",
+        "Cuánto se acercan al borde los puntos 1 y 3 (de 0 a 1)",
+    ),
+    (
+        "Length on the pressure face",
+        "Longitud en la cara de presión",
+    ),
+    (
+        "Where the nose meets the pressure face, from the edge, in e",
+        "Donde la nariz se une a la cara de presión, desde el borde, en e",
+    ),
+    (
+        "Length on the suction face",
+        "Longitud en la cara de succión",
+    ),
+    (
+        "Where the nose meets the suction face, from the edge, in e",
+        "Donde la nariz se une a la cara de succión, desde el borde, en e",
+    ),
+    ("Pull on the pressure face", "Tiro en la cara de presión"),
+    (
+        "How far point 1 reaches toward the edge (0 to 1)",
+        "Cuánto se acerca al borde el punto 1 (de 0 a 1)",
+    ),
+    ("Pull on the suction face", "Tiro en la cara de succión"),
+    (
+        "How far point 3 reaches toward the edge (0 to 1)",
+        "Cuánto se acerca al borde el punto 3 (de 0 a 1)",
+    ),
+    ("Tip offset", "Desvío de la punta"),
+    (
+        "Point 2 off the mean line, in half thicknesses (+ pressure face)",
+        "El punto 2 fuera de la línea media, en semiespesores (+ cara de presión)",
+    ),
+    ("Hub to shroud", "Del cubo a la carcasa"),
+    (
+        "The same shape on every span, or one at the hub and one at the shroud with the spans between blended linearly",
+        "La misma forma en todas las secciones, o una en el cubo y otra en la carcasa, con las secciones intermedias mezcladas linealmente",
+    ),
+    ("uniform", "uniforme"),
+    ("At the hub", "En el cubo"),
+    ("At the shroud", "En la carcasa"),
+    ("c_p,min at the shroud", "c_p,min en la carcasa"),
+    (
+        "At shockless entry (Gülich eq. 7.1a, for elliptic noses; an estimate with the nose length for the other shapes)",
+        "Con entrada sin choque (Gülich, ec. 7.1a, para narices elípticas; una estimación con la longitud de la nariz para las demás formas)",
+    ),
+    ("Blade plots", "Gráficas del álabe"),
+    ("points to drag", "puntos para arrastrar"),
+    ("blunt", "romo"),
+    ("nose {}", "nariz {}"),
+    ("nose {}, c_p,min {}", "nariz {}, c_p,min {}"),
+    ("Leading edge at the hub", "Borde de ataque en el cubo"),
+    (
+        "Leading edge at the shroud",
+        "Borde de ataque en la carcasa",
+    ),
+    ("Trailing edge at the hub", "Borde de salida en el cubo"),
+    (
+        "Trailing edge at the shroud",
+        "Borde de salida en la carcasa",
+    ),
 ];
 
 /// Messages of the design code, most specific first.
@@ -3821,5 +3915,65 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
     (
         "the wrap of {}° lifts β to {}° at span {}, {}° above its edge angles: a freer wrap or larger inlet angles keep the blade smoother",
         "el envolvimiento de {}° sube β hasta {}° en la sección {}, {}° por encima de sus ángulos en los bordes: un envolvimiento más libre o ángulos de entrada mayores dejan el álabe más suave",
+    ),
+    (
+        "edge taper length must be positive, got {}",
+        "la longitud del afilado del borde debe ser positiva; se dio {}",
+    ),
+    (
+        "edge nose length must be positive, got {}",
+        "la longitud de la nariz del borde debe ser positiva; se dio {}",
+    ),
+    (
+        "edge nose ratio must be positive, got {}",
+        "la relación de la nariz del borde debe ser positiva; se dio {}",
+    ),
+    (
+        "edge Bézier length must be positive, got {}",
+        "la longitud de la Bézier del borde debe ser positiva; se dio {}",
+    ),
+    (
+        "the edge nose ({} e) must be shorter than its taper ({} e)",
+        "la nariz del borde ({} e) debe ser más corta que su afilado ({} e)",
+    ),
+    (
+        "the edge nose is as wide as the blade: with {} e it needs a ratio above {}",
+        "la nariz del borde es tan ancha como el álabe: con {} e necesita una relación mayor que {}",
+    ),
+    (
+        "the edge asymmetry must lie between −1 and 1, got {}",
+        "la asimetría del borde debe estar entre −1 y 1; se dio {}",
+    ),
+    (
+        "the pull of a Bézier edge lies between 0 and 1, got {}",
+        "el tiro de un borde Bézier está entre 0 y 1; se dio {}",
+    ),
+    (
+        "the tip of a Bézier edge lies within the blade (−1 to 1), got {}",
+        "la punta de un borde Bézier queda dentro del álabe (de −1 a 1); se dio {}",
+    ),
+    (
+        "the edge nose is too short to round off its taper: lengthen the nose or the taper",
+        "la nariz del borde es demasiado corta para redondear su afilado: alarga la nariz o el afilado",
+    ),
+    (
+        "the edge nose folds back: move its points",
+        "la nariz del borde se dobla hacia atrás: mueve sus puntos",
+    ),
+    (
+        "the faces of the edge nose cross: move its points",
+        "las caras de la nariz del borde se cruzan: mueve sus puntos",
+    ),
+    (
+        "the leading edge needs the same kind of shape at hub and shroud",
+        "el borde de ataque necesita el mismo tipo de forma en el cubo y en la carcasa",
+    ),
+    (
+        "the trailing edge needs the same kind of shape at hub and shroud",
+        "el borde de salida necesita el mismo tipo de forma en el cubo y en la carcasa",
+    ),
+    (
+        "the leading- and trailing-edge shapes overlap at span {}: shorten them",
+        "las formas de los bordes de ataque y de salida se solapan en la sección {}: acórtalas",
     ),
 ];

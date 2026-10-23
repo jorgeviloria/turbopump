@@ -103,7 +103,8 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
   - secciones de la voluta: la definición en edición sobre la familia de secciones a lo
     largo de la espiral, con los puntos de control de los lados Bézier y de segmentos
     para arrastrar y esquinas que se añaden o quitan con el botón derecho;
-  - gráficas del álabe (β, θ y espesor);
+  - gráficas del álabe (β, θ y espesor) y, en otra página, los bordes de ataque y de
+    salida en verdadera forma, con sus puntos para arrastrar;
   - vista frontal de la etapa, con los álabes del difusor y la espiral;
   - vista 3D, con aristas de las piezas, secciones de la voluta, cubo de vistas (un clic
     en una cara gira la cámara), ejes y barra de escala;
@@ -194,6 +195,26 @@ tapa) y *Side chambers* (las cámaras entre el rodete y la carcasa).
 
 ![Cámaras laterales en el editor](docs/img/editor-camaras.jpg)
 
+### Bordes del álabe
+
+La vista *Blade* tiene una página *Edges*, que se abre con el paso *Blade edges*. Dibuja
+los bordes de ataque y de salida en verdadera forma, a lo largo y a través de la línea
+media, con las caras de presión y de succión y los puntos para arrastrar. Cuando la forma
+cambia del cubo a la carcasa, salen las dos secciones. Hay cuatro formas:
+
+- **cortado**, con el espesor completo hasta el borde meridional;
+- **elíptico**, con su relación de longitud a semiespesor;
+- **afilado y redondeo**: el espesor baja en recta hasta una nariz tangente al afilado,
+  que puede inclinarse hacia una cara;
+- **Bézier de grado 4**: los puntos 0 y 4 se deslizan por las caras, los 1 y 3 por sus
+  tangentes y el 2 sube o baja; la nariz siempre llega justo al borde. Puede ser
+  simétrica.
+
+El panel da el $c_{p,min}$ del borde de ataque (Gülich, ec. 7.1a), que es una estimación
+para las formas que no son elípticas.
+
+![Bordes del álabe](docs/img/bordes-alabe.jpg)
+
 Las pruebas de la interfaz usan [kittest](https://github.com/rerun-io/kittest) y no
 necesitan GPU. Las capturas con wgpu se generan a mano en `target/screenshots/`:
 
@@ -240,6 +261,17 @@ cargo run -p tp-cli -- geometry bomba.tpj --export salida
 Con `--set` se fija también el borde de ataque por puntos (`le-points=Z,R;Z,R`), la
 velocidad de entrada uniforme en todas las secciones (`inlet-velocity=uniform`) y el
 envolvimiento (`wrap=linear`, común o libre).
+
+Los bordes del álabe (`le`, `te`) pueden ser cortados, elípticos (`ellipse:4`), con un
+afilado que acaba en un redondeo tangente y una asimetría opcional
+(`taper:LONGITUD,NARIZ,RELACIÓN,ASIMETRÍA`), o una Bézier de grado 4 (`bezier:2,0.6`
+simétrica, o `bezier:LP,LS,TP,TS,PUNTA`), con las longitudes en espesores del álabe.
+`le-shroud-shape` y `te-shroud-shape` dan otra forma en la carcasa, y las secciones
+intermedias se mezclan linealmente:
+
+```bash
+cargo run -p tp-cli -- geometry bomba.tpj --set le=bezier --set le-shroud-shape=bezier:2.5,1.6,0.7,0.5,0.35 --set te=taper
+```
 
 Los DWG salen en formato 2018; `--dwg-version 2013` elige otro (ver [DWG](#dwg)).
 

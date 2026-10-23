@@ -725,3 +725,47 @@ fn center_line_mode() {
     harness.run();
     save(&mut harness, "editor-center-line");
 }
+
+/// The blade edges in true shape: a Bézier leading edge that leans toward the shroud and
+/// a tapered trailing edge.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn blade_edges() {
+    use tp_design::impeller::blade::EdgeShape;
+    let mut project = tp_gui::default_project();
+    let id = project.components()[0].id();
+    let mut input = project.impeller_geometry_input(id).unwrap();
+    input.edges.leading = EdgeShape::BEZIER;
+    input.edges.leading_shroud = Some(EdgeShape::Bezier {
+        start: [2.5, 1.6],
+        pull: [0.7, 0.5],
+        tip: 0.35,
+        symmetric: false,
+    });
+    input.edges.trailing = EdgeShape::Taper {
+        length: 4.0,
+        nose: 0.5,
+        ratio: 1.6,
+        asymmetry: 0.3,
+    };
+    project.set_impeller_geometry(id, input).unwrap();
+    let path = std::env::temp_dir().join("turbopump-blade-edges.tpj");
+    project.save(&path).unwrap();
+    for (theme, suffix) in [(egui::Theme::Light, "light"), (egui::Theme::Dark, "dark")] {
+        let mut harness = Harness::builder()
+            .with_size([1440.0, 900.0])
+            .with_pixels_per_point(1.5)
+            .with_theme(theme)
+            .wgpu()
+            .build_eframe(|cc| TurbopumpApp::new(cc, Some(&path)));
+        harness.run();
+        harness
+            .get_all_by_label("Blade edges")
+            .next()
+            .unwrap()
+            .click();
+        harness.run();
+        harness.run();
+        save(&mut harness, &format!("blade-edges-{suffix}"));
+    }
+}

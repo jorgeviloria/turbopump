@@ -11,7 +11,7 @@ use std::f64::consts::{PI, TAU};
 use tp_math::DVec2;
 
 use crate::DesignError;
-use crate::impeller::blade::{EdgeShape, edge_factor};
+use crate::impeller::blade::{EdgeProfile, EdgeShape};
 
 /// What a vane is built from.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -95,19 +95,30 @@ impl VaneGeometry {
         }
         let total = lengths[n - 1];
         let (e3, e4) = (shape.leading_thickness, shape.trailing_thickness);
+        let profile = |edge, e| EdgeProfile::new(edge, e).map_err(DesignError::InvalidInput);
+        let (leading, trailing) = (
+            profile(shape.leading_edge, e3)?,
+            profile(shape.trailing_edge, e4)?,
+        );
         let mut inner_side = Vec::with_capacity(n);
         let mut outer_side = Vec::with_capacity(n);
         for i in 0..n {
             let s = lengths[i];
-            let e = (e3 + (e4 - e3) * s / total)
-                * edge_factor(shape.leading_edge, e3, s)
-                * edge_factor(shape.trailing_edge, e4, total - s);
+            let half = 0.5 * (e3 + (e4 - e3) * s / total);
+            // The inner side takes the pressure-face offsets of the edge shapes.
+            let (inner, outer) = if s < leading.length() {
+                leading.at(s)
+            } else if total - s < trailing.length() {
+                trailing.at(total - s)
+            } else {
+                (1.0, -1.0)
+            };
             let tangent =
                 (mean_line[(i + 1).min(n - 1)] - mean_line[i.saturating_sub(1)]).normalize();
             // Left of the direction of travel: toward the axis.
             let normal = DVec2::new(-tangent.y, tangent.x);
-            inner_side.push(mean_line[i] + normal * (e / 2.0));
-            outer_side.push(mean_line[i] - normal * (e / 2.0));
+            inner_side.push(mean_line[i] + normal * (half * inner));
+            outer_side.push(mean_line[i] + normal * (half * outer));
         }
 
         // The next vane starts one pitch further round; its leading edge faces the inner
