@@ -2615,6 +2615,10 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Gülich eqs. 3.27–3.28", "Gülich, ecs. 3.27–3.28"),
     ("manual", "manual"),
     (
+        "raised to fall into the computed curve",
+        "subida para caer hacia la curva calculada",
+    ),
+    (
         "Automatic: semi-axial above nq = 60, where it beats a radial outlet (Gülich Chap. 7.5)",
         "Automático: semiaxial por encima de nq = 60, donde supera a la salida radial (Gülich, cap. 7.5)",
     ),
@@ -3022,8 +3026,8 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
     ("invalid input: {}", "dato no válido: {}"),
     ("no feasible design: {}", "no hay diseño posible: {}"),
     (
-        "the head rises with flow somewhere below the design point: the Q-H curve may be unstable (Gülich Chap. 4 and 5)",
-        "la altura sube con el caudal en algún tramo por debajo del punto de diseño: la curva Q-H puede ser inestable (Gülich, caps. 4 y 5)",
+        "the head rises with flow somewhere below the design point: the Q-H curve may be unstable, which a prediction from the design point cannot really tell (Gülich Chap. 4.3 and 5)",
+        "la altura sube con el caudal en algún tramo por debajo del punto de diseño: la curva Q-H puede ser inestable, aunque una predicción desde el punto de diseño no permite asegurarlo (Gülich, caps. 4.3 y 5)",
     ),
     (
         "the predicted best efficiency is at {} % of the design flow",

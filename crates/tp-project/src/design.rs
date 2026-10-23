@@ -709,7 +709,7 @@ mod tests {
 
     #[test]
     fn the_collector_sets_the_performance_prediction() {
-        use tp_design::performance::Collector;
+        use tp_design::performance::{Collector, ShutoffSource};
         let (mut p, impeller, _) = pump_with_volute();
         assert_eq!(p.collector_after(impeller).unwrap(), Collector::Volute);
         let volute_curve = p
@@ -733,8 +733,15 @@ mod tests {
         let diffuser_curve = p
             .compute_performance(impeller, &p.performance_input(impeller).unwrap())
             .unwrap();
-        // Diffuser pumps reach a higher head against a closed valve.
-        assert!(diffuser_curve.shutoff_head > volute_curve.shutoff_head);
+        // Diffuser pumps reach a higher head against a closed valve, but in this pump the
+        // computed curve lies above both correlations, so both are raised to it.
+        assert_eq!(diffuser_curve.shutoff_source, ShutoffSource::Curve);
+        assert_eq!(volute_curve.shutoff_source, ShutoffSource::Curve);
+        assert_relative_eq!(
+            diffuser_curve.shutoff_head,
+            volute_curve.shutoff_head,
+            max_relative = 0.01
+        );
         // The vane passages are the throat; the volute behind them is not modelled.
         let data = p.collector_data_after(impeller).unwrap();
         let vanes = p.compute_diffuser(p.components()[1].id()).unwrap();

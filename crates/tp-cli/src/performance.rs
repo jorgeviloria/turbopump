@@ -289,6 +289,7 @@ fn print_report(
     let source = match c.shutoff_source {
         ShutoffSource::Blades => "head rise of z and β2B, Lobanoff & Ross Fig. 3-2",
         ShutoffSource::SpecificSpeed => "Gülich eqs. 3.27–3.28",
+        ShutoffSource::Curve => "raised to fall into the computed curve",
         ShutoffSource::Manual => "manual",
     };
     println!(

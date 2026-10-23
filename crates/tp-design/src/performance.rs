@@ -3,8 +3,9 @@
 //!
 //! Procedure (see `docs/theory/prestaciones.md`), following Gülich 2nd ed., Chap. 4.1
 //! and 4.3:
-//! 1. theoretical head from the outlet velocity triangle with a constant slip factor,
-//!    a linear function of the flow through the impeller (eqs. 4.1 and T3.2.7);
+//! 1. theoretical head from the outlet velocity triangle (eqs. 4.1 and T3.2.7), with
+//!    the slip factor of the design point times the measured trend γ/γ_opt of Fig. 4.15:
+//!    the slip falls at part load, so H_th rises faster than the linear law;
 //! 2. hydraulic efficiency against flow from the statistical eq. 4.14, so that
 //!    H = η_h·H_th (eq. T3.3.7);
 //! 3. power from Euler's equation plus secondary losses that do not depend on flow
@@ -14,14 +15,15 @@
 //!    extrapolated. These points are marked as estimates;
 //! 5. with a volute after the impeller, its losses against flow come from the model of
 //!    [`crate::volute::loss`]. The statistics of eq. 4.14 describe pumps with well
-//!    sized volutes, so at the design point the hydraulic losses are split between an
-//!    equivalent matched volute (λ₆·AR = 1) and the rest of the stage; the rest keeps
-//!    the statistical shape and the actual volute adds its own losses (our split). A
-//!    mismatched volute then loses head at the design point too. With the loss
-//!    analysis the hydraulic losses of the design point are summed instead (Gülich
-//!    Table 3.8): friction and inlet shock in the impeller, the shock where the flow
-//!    widens into the volute and the volute itself; eq. 4.14 keeps their shape against
-//!    flow. Without a volute the statistical η_h stays;
+//!    sized volutes, losses of the volute included, so eq. 4.14 shapes all the
+//!    hydraulic losses and the volute only adds what it loses beyond an equivalent
+//!    matched volute (λ₆·AR = 1 at the design point) of the same shape (our split). A
+//!    mismatched volute then loses head at the design point too and moves the best
+//!    point. With the loss analysis the hydraulic losses of the design point are summed
+//!    instead (Gülich Table 3.8): friction and inlet shock in the impeller, the shock
+//!    where the flow widens into the volute and the volute itself; eq. 4.14 shapes them
+//!    with the matched volute in place of the actual one. Without a volute the
+//!    statistical η_h stays;
 //! 6. the required NPSH₃ against flow after Gülich Chap. 6.3.3 ([`crate::npsh`]);
 //! 7. the steady radial force on the impeller after Gülich Table 9.4
 //!    ([`crate::radial_thrust`]).
@@ -62,8 +64,8 @@ pub struct PerformanceInput {
     pub recirculation_onset: Param<f64>,
     /// ψ₀ = 2gH₀/u₂² at shut-off.
     pub shutoff_coefficient: Param<f64>,
-    /// Shaft power at shut-off, W; automatic: the computed power curve continued
-    /// along its tangent.
+    /// Shaft power at shut-off, W; automatic: the power coefficient of
+    /// [`shutoff_power_coefficient`].
     pub shutoff_power: Param<f64>,
     /// Largest Q/Q_opt to compute.
     pub max_flow_ratio: Param<f64>,
@@ -338,6 +340,23 @@ pub fn hydraulic_efficiency_ratio(flow_ratio: f64) -> f64 {
     1.0 - 0.6 * x * x - 0.25 * x * x * x
 }
 
+/// Slip factor relative to the one of the best point at flow ratio q* = Q/Q_opt, our
+/// fit of the mean line of Gülich Fig. 4.15 (measured γ/γ_opt): 1 + 0.138·(1 − q*)² +
+/// 0.233·(1 − q*)³ below the best point, 1 up to q* = 1.3 and 1 − 0.21·(q* − 1.3)²
+/// above. It gives 1.10 at q* = 0.4, 1.04 at 0.6 and 0.98 at 1.6. The data cover
+/// 0.4 ≤ q* ≤ 1.6; outside that range the end values hold.
+pub fn slip_factor_ratio(flow_ratio: f64) -> f64 {
+    let q = flow_ratio.clamp(0.4, 1.6);
+    if q < 1.0 {
+        let x = 1.0 - q;
+        1.0 + 0.138 * x * x + 0.233 * x * x * x
+    } else if q <= 1.3 {
+        1.0
+    } else {
+        1.0 - 0.21 * (q - 1.3) * (q - 1.3)
+    }
+}
+
 /// Shut-off pressure coefficient ψ₀ = 2gH₀/u₂²: 1.31·e^(−0.3·nq/100) for diffuser pumps
 /// (Gülich eq. 3.27) and 1.25·e^(−0.3·nq/100) for volute pumps (eq. 3.28). Vaneless
 /// diffusers exchange less momentum with the impeller than vaned ones (Chap. 4.1.4):
@@ -350,6 +369,15 @@ pub fn shutoff_coefficient(nq: f64, collector: Collector) -> f64 {
     factor * (-0.3 * nq / 100.0).exp()
 }
 
+/// Power coefficient at shut-off λ₀ = 2P₀/(ρ·π·d₂·b₂·u₂³) (Gülich eq. T3.4.9; d₂ the
+/// mean outlet diameter, u₂ at the shroud): our power-law fit
+/// 0.0276·(nq/10)^0.552 to the volute pumps of Fig. 4.10, within ±16 % of them for
+/// 10 ≤ nq ≤ 92. Outside that range the end values hold. Diffuser pumps above nq ≈ 20
+/// lie higher in the figure; the fit stays for them as the lower bound.
+pub fn shutoff_power_coefficient(nq: f64) -> f64 {
+    0.0276 * (nq.clamp(10.0, 92.0) / 10.0).powf(0.552)
+}
+
 /// Where the automatic shut-off head comes from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -358,6 +386,9 @@ pub enum ShutoffSource {
     Blades,
     /// Gülich eqs. 3.27–3.28 from nq alone, outside the range of the head-rise chart.
     SpecificSpeed,
+    /// Raised to the least head that keeps the estimated range falling from the
+    /// computed curve: the correlation gave less.
+    Curve,
     Manual,
 }
 
@@ -411,31 +442,45 @@ struct Model {
     losses: Option<SecondaryLosses>,
 }
 
-/// The hydraulic losses split between the volute and the rest of the stage.
+/// The volute and its matched equivalent, whose losses eq. 4.14 already holds.
 struct VoluteSplit {
     geometry: VoluteLossGeometry,
+    /// The same volute with the throat that makes λ₆·AR = 1 at the design point.
+    matched: VoluteLossGeometry,
     /// Hydraulic losses of the design point, (1 − η_h)·H_th, m.
     design_losses: f64,
-    /// The part of them not lost in a matched volute, m.
-    design_rest: f64,
 }
 
 impl Model {
-    /// Euler head for flow `impeller_flow` through the impeller, swirl-free inflow:
-    /// c₂u = u₂·γ − c₂m·τ₂/tan β₂B (eq. T3.2.7) and H_th = u₂·c₂u/g.
-    fn theoretical_head(&self, impeller_flow: f64) -> f64 {
-        let cm2 = impeller_flow / self.area2;
-        let cu2 = self.u2 * self.slip - cm2 * self.blockage / self.tan_beta2b;
+    /// Euler head for pump flow `flow` and seal leakage `leakage` through the impeller,
+    /// swirl-free inflow: c₂u = u₂·γ − c₂m·τ₂/tan β₂B (eq. T3.2.7) and H_th = u₂·c₂u/g,
+    /// γ following Fig. 4.15 ([`slip_factor_ratio`]).
+    fn theoretical_head(&self, flow: f64, leakage: f64) -> f64 {
+        let cm2 = (flow + leakage) / self.area2;
+        let slip = self.slip * slip_factor_ratio(flow / self.flow);
+        let cu2 = self.u2 * slip - cm2 * self.blockage / self.tan_beta2b;
         self.u2 * cu2 / G
     }
 
-    /// Losses of the volute for pump flow `flow` and Euler head `theoretical`: the
-    /// swirl c₂u reaches the volute inlet as a free vortex.
+    /// Swirl at the volute inlet for Euler head `theoretical`: c₂u as a free vortex.
+    fn volute_swirl(&self, theoretical: f64, inlet_radius: f64) -> f64 {
+        G * theoretical / self.u2 * self.impeller_radius / inlet_radius
+    }
+
+    /// Losses of the volute for pump flow `flow` and Euler head `theoretical`.
     fn volute_loss(&self, flow: f64, theoretical: f64) -> Option<VoluteLoss> {
         let v = self.volute.as_ref()?;
-        let cu2 = G * theoretical / self.u2;
-        let swirl = cu2 * self.impeller_radius / v.geometry.inlet_radius;
+        let swirl = self.volute_swirl(theoretical, v.geometry.inlet_radius);
         Some(volute_loss(&v.geometry, flow, swirl))
+    }
+
+    /// What the volute loses beyond its matched equivalent, m; it may be negative.
+    fn volute_mismatch(&self, flow: f64, theoretical: f64) -> Option<(VoluteLoss, f64)> {
+        let v = self.volute.as_ref()?;
+        let actual = self.volute_loss(flow, theoretical)?;
+        let swirl = self.volute_swirl(theoretical, v.matched.inlet_radius);
+        let matched = volute_loss(&v.matched, flow, swirl);
+        Some((actual, actual.total() - matched.total()))
     }
 
     fn point(&self, flow_ratio: f64) -> PerformancePoint {
@@ -445,16 +490,12 @@ impl Model {
         let mut leakage = self.leakage;
         let (mut theoretical, mut head, mut volute) = (0.0, 0.0, f64::NAN);
         for _ in 0..4 {
-            theoretical = self.theoretical_head(flow + leakage);
-            head = match (&self.volute, self.volute_loss(flow, theoretical)) {
-                (Some(split), Some(loss)) => {
-                    volute = loss.total();
-                    let rest =
-                        split.design_rest * (1.0 - hydraulic) * theoretical / split.design_losses;
-                    theoretical - volute - rest
-                }
-                _ => hydraulic * theoretical,
-            };
+            theoretical = self.theoretical_head(flow, leakage);
+            head = hydraulic * theoretical;
+            if let Some((loss, mismatch)) = self.volute_mismatch(flow, theoretical) {
+                volute = loss.total();
+                head -= mismatch;
+            }
             leakage = match &self.losses {
                 Some(l) => l.leakage_at(head, theoretical),
                 None => self.leakage * (head.max(0.0) / self.head).sqrt(),
@@ -538,29 +579,27 @@ pub fn predict(
     let mut hydraulic = None;
     if let Some(geometry) = collector.volute {
         let impeller_flow = duty.flow + model.leakage;
-        let theoretical = model.theoretical_head(impeller_flow);
+        let theoretical = model.theoretical_head(duty.flow, model.leakage);
         let design_losses = (1.0 - eta.hydraulic) * theoretical;
-        model.volute = Some(VoluteSplit {
-            geometry,
-            design_losses,
-            design_rest: design_losses,
-        });
+        let swirl = model.volute_swirl(theoretical, geometry.inlet_radius);
+        let actual = volute_loss(&geometry, duty.flow, swirl);
         // The matched volute: the same one with the throat that makes λ₆·AR = 1 at
         // the design point (the matching grows with the throat area).
-        let actual = model
-            .volute_loss(duty.flow, theoretical)
-            .expect("the split has a volute");
         let matched = VoluteLossGeometry {
             throat_area: geometry.throat_area / actual.matching,
             ..geometry
         };
-        let swirl = G * theoretical / model.u2 * model.impeller_radius / geometry.inlet_radius;
+        model.volute = Some(VoluteSplit {
+            geometry,
+            matched,
+            design_losses,
+        });
         let reference = volute_loss(&matched, duty.flow, swirl).total();
         if losses.is_some() {
             // The loss analysis sums the losses of the design point instead (Gülich
             // Table 3.8). Its estimates hold near the best point only (Chap. 3.8), so
-            // eq. 4.14 keeps giving the shape of all but the volute model against flow,
-            // wall friction of the volute included.
+            // eq. 4.14 gives their shape against flow, with the matched volute in place
+            // of the actual one; wall friction of the volute is part of the rest.
             let omega = 2.0 * model.u2 / design.outlet_diameter;
             let impeller = ImpellerChannels::new(design, omega, CHANNEL_ROUGHNESS)
                 .losses(impeller_flow, WATER_VISCOSITY);
@@ -580,10 +619,10 @@ pub fn predict(
                      Euler head: check the impeller and the volute"
                 )));
             }
-            model.peak_hydraulic_efficiency = efficiency / hydraulic_efficiency_ratio(1.0);
+            let matched_efficiency = 1.0 - (rest + reference) / theoretical;
+            model.peak_hydraulic_efficiency = matched_efficiency / hydraulic_efficiency_ratio(1.0);
             if let Some(split) = &mut model.volute {
                 split.design_losses = total;
-                split.design_rest = rest;
             }
             hydraulic = Some(HydraulicLosses {
                 theoretical_head: theoretical,
@@ -599,11 +638,6 @@ pub fn predict(
                 "the volute loses {reference:.2} m at the design point, more than the \
                  {design_losses:.2} m of all the hydraulic losses: check the volute"
             ));
-        }
-        if hydraulic.is_none()
-            && let Some(split) = &mut model.volute
-        {
-            split.design_rest = (design_losses - reference).max(0.0);
         }
     }
     let npsh = NpshCurve::new(
@@ -662,7 +696,7 @@ pub fn predict(
             )));
         }
     }
-    let (psi0, shutoff_source) = match input.shutoff_coefficient {
+    let (mut psi0, mut shutoff_source) = match input.shutoff_coefficient {
         Param::Manual(psi0) => (psi0, ShutoffSource::Manual),
         Param::Auto => {
             let (lo, hi) = crate::pump::correlations::HEAD_RISE_NQ_RANGE;
@@ -679,7 +713,7 @@ pub fn predict(
             }
         }
     };
-    let shutoff_head = psi0 * model.u2 * model.u2 / (2.0 * G);
+    let mut shutoff_head = psi0 * model.u2 * model.u2 / (2.0 * G);
 
     // The computed range ends where the head reaches zero, if before the largest flow.
     let end = if model.point(max_ratio).head > 0.0 {
@@ -699,22 +733,42 @@ pub fn predict(
     };
 
     // Recirculation range: head toward the shut-off head with a cubic that leaves
-    // shut-off flat and meets the computed curve; power continued along the tangent of
-    // the computed curve, or toward a given shut-off power.
+    // shut-off flat and meets the computed curve; power along a straight line from the
+    // shut-off power.
     let step = 1e-4;
     let at_onset = model.point(onset);
     let slope_head = (model.point(onset + step).head - at_onset.head) / step;
-    let slope_power = (model.point(onset + step).power - at_onset.power) / step;
     // End slope in units of the interval, limited so the cubic adds no bump of its own
     // between the two heads (Fritsch and Carlson's monotonicity limit).
-    let rise = at_onset.head - shutoff_head;
     let mut end_slope = onset * slope_head;
+    // Measured characteristics of volute pumps fall from shut-off to the best point
+    // (Gülich Fig. 4.13) and the statistics cannot tell an unstable one (Chap. 4.3):
+    // an automatic shut-off head is at least the one the limit lets fall into the
+    // computed curve.
+    let least = at_onset.head - end_slope.min(0.0) / 3.0;
+    if shutoff_source != ShutoffSource::Manual && shutoff_head < least {
+        shutoff_head = least;
+        psi0 = 2.0 * G * shutoff_head / (model.u2 * model.u2);
+        shutoff_source = ShutoffSource::Curve;
+    }
+    let rise = at_onset.head - shutoff_head;
     if rise < 0.0 && end_slope < 3.0 * rise {
         end_slope = 3.0 * rise;
     }
-    let power_at_zero = input
-        .shutoff_power
-        .resolve(|| (at_onset.power - slope_power * onset).max(model.secondary_power));
+    // Power toward shut-off: what Fig. 4.10 gives, never less than the secondary losses
+    // (Gülich 4.3.5).
+    let power_at_zero = input.shutoff_power.resolve(|| {
+        let u2 = model.u2;
+        let lambda = shutoff_power_coefficient(design.nq);
+        (lambda
+            * water.density
+            * PI
+            * design.outlet_mean_diameter
+            * design.outlet_width
+            * u2.powi(3)
+            / 2.0)
+            .max(model.secondary_power)
+    });
     let estimate = |ratio: f64| -> PerformancePoint {
         let t = ratio / onset;
         let (h00, h01, h11) = (
@@ -735,7 +789,7 @@ pub fn predict(
             estimated: true,
             npsh_required: f64::NAN,
             volute_loss: model
-                .volute_loss(flow, model.theoretical_head(flow + model.leakage))
+                .volute_loss(flow, model.theoretical_head(flow, model.leakage))
                 .map_or(f64::NAN, |l| l.total()),
             radial_force: f64::NAN,
             axial_force: f64::NAN,
@@ -817,16 +871,17 @@ pub fn predict(
     };
 
     let n = input.points.max(11);
-    let mut points: Vec<PerformancePoint> = (0..n)
+    let water_points: Vec<PerformancePoint> = (0..n)
         .map(|i| end * i as f64 / (n - 1) as f64)
         .map(|r| {
-            viscid(if r < onset {
+            if r < onset {
                 estimate(r)
             } else {
                 model.point(r)
-            })
+            }
         })
         .collect();
+    let mut points: Vec<PerformancePoint> = water_points.iter().map(|p| viscid(*p)).collect();
     // The onset itself, so the two parts meet in the plots.
     let at_onset = viscid(at_onset);
     let index = points.partition_point(|p| p.flow < at_onset.flow);
@@ -857,7 +912,7 @@ pub fn predict(
         let theoretical = if p.theoretical_head.is_finite() {
             p.theoretical_head
         } else {
-            model.theoretical_head(p.flow + model.leakage)
+            model.theoretical_head(p.flow, model.leakage)
         };
         axial.forces(p.flow, p.head, theoretical)
     };
@@ -883,13 +938,16 @@ pub fn predict(
             viscosity * 1e6
         ));
     }
-    let rises = points
+    // On the water curve: the viscous correction of a liquid thinner than the reference
+    // water lifts the head a little with flow from shut-off.
+    let rises = water_points
         .windows(2)
         .any(|w| w[1].head > w[0].head + 1e-6 * duty.head);
     if rises {
         warnings.push(
             "the head rises with flow somewhere below the design point: the Q-H curve may be \
-             unstable (Gülich Chap. 4 and 5)"
+             unstable, which a prediction from the design point cannot really tell (Gülich \
+             Chap. 4.3 and 5)"
                 .into(),
         );
     }
@@ -1605,7 +1663,15 @@ mod tests {
 
     #[test]
     fn the_blades_set_the_shutoff_head() {
-        let (d, p) = performance(&PerformanceInput::default());
+        let duty = low_nq_duty();
+        let d = design(&duty, &CentrifugalPumpInput::default()).unwrap();
+        let p = predict(
+            &duty,
+            &d,
+            &PerformanceInput::default(),
+            &CollectorData::default(),
+        )
+        .unwrap();
         assert_eq!(p.shutoff_source, ShutoffSource::Blades);
         let rise = crate::pump::correlations::head_rise_for_blades(
             d.nq,
@@ -1622,9 +1688,9 @@ mod tests {
             head_rise: Param::Manual(0.45),
             ..Default::default()
         };
-        let ds = design(&duty(), &steep).unwrap();
+        let ds = design(&duty, &steep).unwrap();
         let ps = predict(
-            &duty(),
+            &duty,
             &ds,
             &PerformanceInput::default(),
             &CollectorData::default(),
@@ -1640,6 +1706,127 @@ mod tests {
         );
     }
 
+    /// nq ≈ 16, the casing of Gülich Fig. 4.13.
+    fn low_nq_duty() -> PumpDuty {
+        PumpDuty {
+            head: 94.0,
+            machine_head: 94.0,
+            ..duty()
+        }
+    }
+
+    #[test]
+    fn a_low_nq_volute_pump_follows_the_measured_curve_of_fig_4_13() {
+        let duty = low_nq_duty();
+        let d = design(&duty, &CentrifugalPumpInput::default()).unwrap();
+        assert!((15.0..17.0).contains(&d.nq), "{}", d.nq);
+        let input = PerformanceInput {
+            points: 61,
+            ..PerformanceInput::default()
+        };
+        let p = predict(&duty, &d, &input, &volute_collector_for(&d, &duty, 1.0)).unwrap();
+        assert!(p.warnings.is_empty(), "{:?}", p.warnings);
+        assert!(
+            p.points
+                .windows(2)
+                .all(|w| w[1].head <= w[0].head + 1e-9 * duty.head)
+        );
+        let at = |ratio: f64| {
+            let q = ratio * duty.flow;
+            let i = p
+                .points
+                .partition_point(|x| x.flow < q)
+                .clamp(1, p.points.len() - 1);
+            let (a, b) = (p.points[i - 1], p.points[i]);
+            (a.head + (b.head - a.head) * (q - a.flow) / (b.flow - a.flow)) / p.design.head
+        };
+        // H/H_opt of the nq = 16 impeller in Fig. 4.13, read off the figure.
+        for (ratio, measured) in [
+            (0.0, 1.21),
+            (0.35, 1.175),
+            (0.5, 1.15),
+            (0.7, 1.10),
+            (0.8, 1.075),
+            (1.2, 0.89),
+            (1.4, 0.79),
+        ] {
+            let predicted = at(ratio);
+            assert!(
+                (predicted - measured).abs() < 0.06,
+                "q* {ratio}: {predicted:.3} against {measured}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_slip_factor_follows_fig_4_15() {
+        // The mean line of Gülich Fig. 4.15, read off the figure.
+        for (ratio, read) in [
+            (0.4, 1.10),
+            (0.5, 1.065),
+            (0.6, 1.04),
+            (0.8, 1.01),
+            (1.0, 1.0),
+            (1.3, 1.0),
+            (1.6, 0.98),
+        ] {
+            assert!(
+                (slip_factor_ratio(ratio) - read).abs() < 0.006,
+                "q* {ratio}: {}",
+                slip_factor_ratio(ratio)
+            );
+        }
+        assert_relative_eq!(slip_factor_ratio(0.0), slip_factor_ratio(0.4));
+        assert_relative_eq!(slip_factor_ratio(2.0), slip_factor_ratio(1.6));
+    }
+
+    #[test]
+    fn the_shutoff_power_follows_fig_4_10() {
+        // Volute pumps of Gülich Fig. 4.10, read off the figure.
+        for (nq, read) in [(10.0, 0.028), (20.4, 0.040), (30.2, 0.050), (66.4, 0.077)] {
+            let fit = shutoff_power_coefficient(nq);
+            assert!((fit / read - 1.0).abs() < 0.16, "nq {nq}: {fit:.4}");
+        }
+        let duty = low_nq_duty();
+        let d = design(&duty, &CentrifugalPumpInput::default()).unwrap();
+        let p = predict(
+            &duty,
+            &d,
+            &PerformanceInput::default(),
+            &CollectorData::default(),
+        )
+        .unwrap();
+        let u2 = d.outlet.triangle.u;
+        let lambda = 2.0 * p.shutoff_power
+            / (duty.density * PI * d.outlet_mean_diameter * d.outlet_width * u2.powi(3));
+        assert_relative_eq!(lambda, shutoff_power_coefficient(d.nq), max_relative = 1e-9);
+    }
+
+    #[test]
+    fn a_shutoff_head_below_the_curve_is_raised() {
+        // In the reference pump the head rise of the blades stays below what the
+        // computed curve reaches at the onset of recirculation.
+        let (d, p) = performance(&PerformanceInput::default());
+        assert_eq!(p.shutoff_source, ShutoffSource::Curve);
+        let rise = crate::pump::correlations::head_rise_for_blades(
+            d.nq,
+            d.blade_count,
+            d.outlet.blade_angle,
+        );
+        assert!(p.shutoff_head > p.design.head * (1.0 + rise));
+        assert_relative_eq!(
+            p.shutoff_coefficient,
+            2.0 * G * p.shutoff_head / d.outlet.triangle.u.powi(2),
+            max_relative = 1e-12
+        );
+        assert!(!p.warnings.iter().any(|w| w.contains("unstable")));
+        assert!(
+            p.points
+                .windows(2)
+                .all(|w| w[1].head <= w[0].head + 1e-9 * p.design.head)
+        );
+    }
+
     #[test]
     fn a_low_shutoff_head_is_flagged_as_unstable() {
         let input = PerformanceInput {
@@ -1652,9 +1839,17 @@ mod tests {
 
     /// The reference volute, sized by the automatic steps, scaled in throat area.
     fn volute_collector(d: &CentrifugalPumpDesign, throat_scale: f64) -> CollectorData {
+        volute_collector_for(d, &duty(), throat_scale)
+    }
+
+    fn volute_collector_for(
+        d: &CentrifugalPumpDesign,
+        duty: &PumpDuty,
+        throat_scale: f64,
+    ) -> CollectorData {
         use crate::outlet::ImpellerOutlet;
         use crate::volute::{VoluteDesign, VoluteInput};
-        let outlet = ImpellerOutlet::from_pump(d, &duty(), 0.0, 1.0);
+        let outlet = ImpellerOutlet::from_pump(d, duty, 0.0, 1.0);
         let volute = VoluteDesign::new(&outlet, &VoluteInput::default()).unwrap();
         let mut geometry = VoluteLossGeometry::from_design(&volute);
         geometry.throat_area *= throat_scale;

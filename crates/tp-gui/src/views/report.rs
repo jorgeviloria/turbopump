@@ -454,6 +454,9 @@ pub(crate) fn show(
                                             tr("head rise of z and β₂B, Lobanoff & Ross Fig. 3-2")
                                         }
                                         ShutoffSource::SpecificSpeed => tr("Gülich eqs. 3.27–3.28"),
+                                        ShutoffSource::Curve => {
+                                            tr("raised to fall into the computed curve")
+                                        }
                                         ShutoffSource::Manual => tr("manual"),
                                     },
                                 ],
