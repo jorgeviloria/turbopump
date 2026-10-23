@@ -141,10 +141,6 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("independent", "independiente"),
     ("same axial distance", "misma distancia axial"),
     ("same radial distance", "misma distancia radial"),
-    (
-        "A radial outlet stays parallel to the axis; a semi-axial impeller (main dimensions) tilts it.",
-        "Una salida radial queda paralela al eje; un rodete semiaxial (dimensiones principales) la inclina.",
-    ),
     ("point snap", "imán a puntos"),
     (
         "A dragged point takes the z or r of another point near it; hold Ctrl (Cmd) to drag freely",
@@ -370,6 +366,10 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     (
         "Between the impeller and the casing: the front one down to the annular seal on the neck, the rear one down to the shaft seal. Once designed, the axial thrust and the loss analysis take these seals and gaps wherever theirs are automatic",
         "Entre el rodete y la carcasa: la delantera hasta el sello anular del cuello y la trasera hasta el sello del eje. Una vez diseñadas, el empuje axial y el análisis de pérdidas toman estos sellos y holguras donde los suyos están en automático",
+    ),
+    (
+        "Hub end of the outlet edge; d₂ is the shroud end d₂a. Automatic: Gülich eqs. 7.13–7.14 on a semi-axial impeller, d₂ on a radial one; set by hand on a radial one it slants the edge and the design takes the mean diameter",
+        "Extremo del cubo del borde de salida; d₂ es el extremo de la carcasa d₂a. Automático: Gülich, ec. 7.13–7.14 en un rodete semiaxial, d₂ en uno radial; fijado a mano en uno radial inclina el borde y el diseño usa el diámetro medio",
     ),
     ("curvature maximum", "curvatura máxima"),
     (
@@ -2888,10 +2888,6 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     (
         "Outlet hub diameter d₂i",
         "Diámetro de salida en el cubo d₂i",
-    ),
-    (
-        "Hub end of the outlet edge; d₂ is the shroud end d₂a (Gülich eqs. 7.13–7.14)",
-        "Extremo del cubo del borde de salida; d₂ es el extremo de la cubierta, d₂a (Gülich, ecs. 7.13–7.14)",
     ),
     ("Outlet inclination ε_s", "Inclinación de la salida ε_s"),
     (

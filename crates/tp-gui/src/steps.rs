@@ -983,17 +983,19 @@ fn main_dimensions(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Com
             &units,
             0.0005..=1.0,
         );
+        changed |= param_f64(
+            ui,
+            tr("Outlet hub diameter d₂i"),
+            tr(
+                "Hub end of the outlet edge; d₂ is the shroud end d₂a. Automatic: Gülich eqs. 7.13–7.14 on a semi-axial impeller, d₂ on a radial one; set by hand on a radial one it slants the edge and the design takes the mean diameter",
+            ),
+            &mut input.outlet_hub_diameter,
+            Length,
+            d.map(|d| d.outlet_hub_diameter),
+            &units,
+            0.005..=5.0,
+        );
         if d.is_some_and(|d| d.semi_axial) {
-            changed |= param_f64(
-                ui,
-                tr("Outlet hub diameter d₂i"),
-                tr("Hub end of the outlet edge; d₂ is the shroud end d₂a (Gülich eqs. 7.13–7.14)"),
-                &mut input.outlet_hub_diameter,
-                Length,
-                d.map(|d| d.outlet_hub_diameter),
-                &units,
-                0.005..=5.0,
-            );
             changed |= param_f64(
                 ui,
                 tr("Outlet inclination ε_s"),

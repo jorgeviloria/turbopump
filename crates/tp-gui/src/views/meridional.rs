@@ -543,10 +543,17 @@ pub(crate) fn drag_change(
         let d2 = (2.0 * radius).clamp(b.inlet_diameter * 1.05, b.inlet_diameter * 8.0);
         return inputs.main(|m| m.outlet_diameter = Param::Manual(d2));
     }
-    if handle == Handle::AxialLength && inputs.semi_axial {
-        // The hub end of a semi-axial outlet: L along the axis, d₂i across it.
+    if handle == Handle::AxialLength && g.contour.axial_reference == AxialReference::Inlet {
+        // The hub end of the outlet: L along the axis, d₂i across it, which slants the
+        // trailing edge of a radial impeller.
         let b = &g.basis;
         let d2i = (2.0 * pointer.y).clamp(b.hub_diameter * 1.05, b.outlet_diameter);
+        // Along the axis alone it is L: d₂i stays as it is, automatic or not.
+        if (d2i - b.outlet_hub_diameter).abs() < 0.005 * b.outlet_diameter {
+            return inputs.geometry(|input| {
+                apply_drag(handle, pointer, &g.contour, b, &mut input.meridional)
+            });
+        }
         return inputs.both(
             |input| apply_drag(handle, pointer, &g.contour, b, &mut input.meridional),
             |m| m.outlet_hub_diameter = Param::Manual(d2i),
@@ -571,10 +578,9 @@ pub(crate) fn is_manual(handle: Handle, inputs: Inputs<'_>) -> bool {
         Handle::LeadingEdgeShroud => !m.leading_edge_shroud.is_auto(),
         Handle::AxialLength => {
             !m.axial_length.is_auto()
-                || inputs.semi_axial
-                    && inputs
-                        .main
-                        .is_some_and(|d| !d.outlet_hub_diameter.is_auto())
+                || inputs
+                    .main
+                    .is_some_and(|d| !d.outlet_hub_diameter.is_auto())
         }
         Handle::TrailingEdge => inputs.main.is_some_and(|d| !d.outlet_diameter.is_auto()),
         Handle::AxialReference => m.axial_position.abs() > 1e-12,
@@ -607,7 +613,7 @@ pub(crate) fn reset_change(handle: Handle, inputs: Inputs<'_>) -> Option<Change>
     if handle == Handle::InletShroud {
         return inputs.geometry(|input| input.meridional.inlet_tilt = InletTilt::Normal);
     }
-    if handle == Handle::AxialLength && inputs.semi_axial {
+    if handle == Handle::AxialLength {
         return inputs.both(
             |input| input.meridional.axial_length = Param::Auto,
             |d| d.outlet_hub_diameter = Param::Auto,
@@ -2953,11 +2959,11 @@ fn trailing_edge_menu(
     let (mut d2, mut b2, mut d2i) = (b.outlet_diameter, b.outlet_width, b.outlet_hub_diameter);
     let diameter = length_field(ui, "d₂", &mut d2, units);
     let width = length_field(ui, "b₂", &mut b2, units);
-    // A semi-axial outlet tilts: its hub end and its inclination are inputs too.
-    let (mut hub, mut tilt) = (false, false);
+    // The hub end slants the edge; a semi-axial outlet has its inclination too.
+    let hub = length_field(ui, "d₂i", &mut d2i, units);
+    let mut tilt = false;
     let mut degrees = b.outlet_inclination.to_degrees();
     if inputs.semi_axial {
-        hub = length_field(ui, "d₂i", &mut d2i, units);
         tilt = ui
             .horizontal(|ui| {
                 ui.label("ε_s");
@@ -2971,11 +2977,6 @@ fn trailing_edge_menu(
                 .changed()
             })
             .inner;
-    } else {
-        ui.weak(tr(
-            "A radial outlet stays parallel to the axis; a semi-axial impeller (main \
-             dimensions) tilts it.",
-        ));
     }
     ui.weak(tr("A main dimension: typing a value sets it by hand."));
     if !(diameter || width || hub || tilt) {

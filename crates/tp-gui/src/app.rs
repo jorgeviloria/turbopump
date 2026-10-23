@@ -2421,4 +2421,33 @@ mod tests {
         assert!(m.axial_position.abs() < 1e-15);
         assert!((joint(harness.state()).x - before.x).abs() < 1e-9);
     }
+
+    #[test]
+    fn the_hub_end_of_a_radial_outlet_slants_the_trailing_edge() {
+        let mut harness = editor();
+        let id = harness.state().active_impeller().unwrap();
+        // Along the axis alone: L by hand, d₂i still automatic.
+        let start = handle_on_screen(harness.state(), Handle::AxialLength);
+        drag_by(&mut harness, start, egui::vec2(15.0, 0.0));
+        assert!(!meridional(harness.state()).axial_length.is_auto());
+        assert!(
+            main_dimensions(harness.state())
+                .outlet_hub_diameter
+                .is_auto()
+        );
+        harness.state_mut().undo();
+        harness.run();
+        // Down: a smaller d₂i, the edge slants and the impeller stays radial.
+        let start = handle_on_screen(harness.state(), Handle::AxialLength);
+        drag_by(&mut harness, start, egui::vec2(0.0, 30.0));
+        let d2i = main_dimensions(harness.state()).outlet_hub_diameter;
+        let g = harness.state().derived.geometry(id).unwrap();
+        assert!(
+            d2i.manual_value()
+                .is_some_and(|d| d < g.basis.outlet_diameter),
+            "{d2i:?}"
+        );
+        assert!(g.basis.outlet_inclination.abs() < 1e-12, "radial");
+        assert!(g.contour.hub.end().y < g.contour.shroud.end().y - 1e-4);
+    }
 }
