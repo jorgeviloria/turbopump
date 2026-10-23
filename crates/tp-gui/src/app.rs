@@ -251,7 +251,7 @@ fn view_for(kind: ComponentKind, step: DesignStep) -> Option<View> {
     use DesignStep::*;
     match (kind, step) {
         (_, ModelSettings) => Some(View::View3d),
-        (ComponentKind::Impeller, MeridionalContour) => Some(View::Meridional),
+        (ComponentKind::Impeller, MeridionalContour) => Some(View::MeridianEditor),
         (
             ComponentKind::Impeller,
             BladeProperties | BladeMeanLines | BladeProfiles | BladeEdges,
@@ -303,6 +303,8 @@ pub struct TurbopumpApp {
     sidebar_open: bool,
     /// The selection the dialog and the view last followed.
     followed: Option<Selection>,
+    /// The view shown last frame.
+    shown: Option<View>,
     /// The main view changes to suit the step that opens.
     follow_step: bool,
     /// Whether the tree panel is open.
@@ -385,6 +387,7 @@ impl TurbopumpApp {
             view: View::View3d,
             sidebar_open: true,
             followed: None,
+            shown: None,
             follow_step: true,
             tree_open: true,
             language: Language::English,
@@ -584,6 +587,14 @@ impl TurbopumpApp {
             // The width the floating properties panel hides on the right of the view.
             let cover = self.sidebar_extent(ui.ctx(), main_area) + SIDEBAR_MARGIN;
             let active = self.active_impeller();
+            // The editor opens on the meridian, framed, with its step in the panel.
+            if self.view == View::MeridianEditor && self.shown != Some(View::MeridianEditor) {
+                self.meridional.framed = false;
+                if let Some(id) = active {
+                    self.selection = Selection::Step(id, DesignStep::MeridionalContour);
+                }
+            }
+            self.shown = Some(self.view);
             let stator = self.active_stator();
             let volute = self.active_volute();
             let mut cx = EditCtx {
@@ -1517,8 +1528,7 @@ mod tests {
         let id = harness.state().active_impeller().unwrap();
         let app = harness.state();
         let g = app.derived.geometry(id).unwrap();
-        let input = app.doc.project().impeller_geometry_input(id).unwrap();
-        let lines = dimension_lines(&g.contour, &input.meridional, &g.basis, true, None);
+        let lines = dimension_lines(&g.contour, &g.basis, true, None);
         let length = lines
             .iter()
             .find(|l| l.dimension == Dimension::AxialLength)
@@ -1757,5 +1767,188 @@ mod tests {
 
         harness.state_mut().undo();
         assert_eq!(shape(harness.state()), LeadingEdgeShape::Channel);
+    }
+
+    /// The editor with the default pump, framed and settled.
+    fn editor() -> Harness<'static, TurbopumpApp> {
+        let mut harness = Harness::builder()
+            .with_size([1440.0, 900.0])
+            .build_eframe(|cc| TurbopumpApp::new(cc, None));
+        harness.run();
+        harness.state_mut().focus_view(View::MeridianEditor);
+        harness.run();
+        harness
+    }
+
+    /// Drags from `start` by `delta` in a few steps, as a hand would.
+    fn drag_by(harness: &mut Harness<'_, TurbopumpApp>, start: egui::Pos2, delta: egui::Vec2) {
+        harness.hover_at(start);
+        harness.run();
+        harness.drag_at(start);
+        harness.run();
+        // A fixed number of frames per step: the geometry repaints while it follows.
+        for step in 1..=6 {
+            harness.hover_at(start + delta * (step as f32 / 6.0));
+            harness.run_steps(3);
+        }
+        harness.drop_at(start + delta);
+        harness.run();
+    }
+
+    /// Two clicks at `at` in one frame: each kittest frame lasts a quarter of a second,
+    /// longer than a double click.
+    fn double_click(harness: &mut Harness<'_, TurbopumpApp>, at: egui::Pos2) {
+        harness.hover_at(at);
+        harness.run();
+        for pressed in [true, false, true, false] {
+            harness.input_mut().events.push(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+        }
+        harness.run();
+    }
+
+    fn meridional(app: &TurbopumpApp) -> tp_design::impeller::meridian::MeridionalInput {
+        let id = app.active_impeller().unwrap();
+        app.doc
+            .project()
+            .impeller_geometry_input(id)
+            .unwrap()
+            .meridional
+    }
+
+    fn main_dimensions(app: &TurbopumpApp) -> tp_design::pump::CentrifugalPumpInput {
+        let id = app.active_impeller().unwrap();
+        app.doc.project().pump_impeller_input(id).unwrap()
+    }
+
+    #[test]
+    fn the_editor_opens_with_the_meridional_contour_in_the_panel() {
+        let mut harness = editor();
+        let id = harness.state().active_impeller().unwrap();
+        assert_eq!(
+            harness.state().selection(),
+            Selection::Step(id, DesignStep::MeridionalContour)
+        );
+        assert_eq!(harness.state().view(), View::MeridianEditor);
+        assert!(harness.state().sidebar_open());
+        harness.get_by_label("Check against Gülich");
+        // Another step keeps the editor; from another view the meridional step opens it.
+        harness
+            .get_all_by_label("Main dimensions")
+            .last()
+            .unwrap()
+            .click();
+        harness.run();
+        assert_eq!(harness.state().view(), View::MeridianEditor);
+        harness.state_mut().focus_view(View::Blade);
+        harness.run();
+        harness
+            .get_all_by_label("Meridional contour")
+            .last()
+            .unwrap()
+            .click();
+        harness.run();
+        assert_eq!(harness.state().view(), View::MeridianEditor);
+    }
+
+    #[test]
+    fn a_dragged_tangent_turns_manual_and_a_double_click_makes_it_automatic() {
+        let mut harness = editor();
+        let start = handle_on_screen(harness.state(), Handle::ShroudInlet);
+        drag_by(&mut harness, start, egui::vec2(30.0, 0.0));
+        let dragged = meridional(harness.state()).shroud_inlet_tangent;
+        assert!(
+            dragged.manual_value().is_some_and(|t| t > DEFAULT_TANGENT),
+            "{dragged:?}"
+        );
+        let at = handle_on_screen(harness.state(), Handle::ShroudInlet);
+        double_click(&mut harness, at);
+        assert!(meridional(harness.state()).shroud_inlet_tangent.is_auto());
+        // Undo brings the hand-set value back.
+        harness.state_mut().undo();
+        assert_eq!(meridional(harness.state()).shroud_inlet_tangent, dragged);
+    }
+
+    #[test]
+    fn the_leading_edge_goes_back_to_automatic_from_its_menu() {
+        let mut harness = editor();
+        let start = handle_on_screen(harness.state(), Handle::LeadingEdgeHub);
+        drag_by(&mut harness, start, egui::vec2(20.0, -10.0));
+        assert!(!meridional(harness.state()).leading_edge_hub.is_auto());
+        let at = handle_on_screen(harness.state(), Handle::LeadingEdgeHub);
+        right_click(&mut harness, at);
+        harness.get_by_label("Back to automatic").click();
+        harness.run();
+        assert!(meridional(harness.state()).leading_edge_hub.is_auto());
+    }
+
+    #[test]
+    fn the_trailing_edge_drags_d2_and_resets_it() {
+        let mut harness = editor();
+        let d2 = |app: &TurbopumpApp| main_dimensions(app).outlet_diameter;
+        let before = harness
+            .state()
+            .derived
+            .geometry(harness.state().active_impeller().unwrap())
+            .unwrap()
+            .basis
+            .outlet_diameter;
+        let start = handle_on_screen(harness.state(), Handle::TrailingEdge);
+        // Upwards on screen: a larger radius.
+        drag_by(&mut harness, start, egui::vec2(0.0, -30.0));
+        let dragged = d2(harness.state()).manual_value();
+        assert!(
+            dragged.is_some_and(|d| d > before),
+            "{dragged:?} vs {before}"
+        );
+        let at = handle_on_screen(harness.state(), Handle::TrailingEdge);
+        double_click(&mut harness, at);
+        assert!(d2(harness.state()).is_auto());
+    }
+
+    #[test]
+    fn the_outlet_diameter_is_typed_on_its_dimension() {
+        use crate::views::meridional::{Dimension, dimension_lines};
+        let mut harness = editor();
+        let id = harness.state().active_impeller().unwrap();
+        let app = harness.state();
+        let g = app.derived.geometry(id).unwrap();
+        let lines = dimension_lines(&g.contour, &g.basis, true, None);
+        let d2 = lines
+            .iter()
+            .find(|l| l.dimension == Dimension::OutletDiameter)
+            .unwrap();
+        let middle = d2.from.lerp(d2.to, 0.5);
+        let scale = app
+            .doc
+            .project()
+            .display_units
+            .to_display(QuantityKind::Length, 1.0);
+        let at = app
+            .meridional
+            .transform()
+            .unwrap()
+            .position_from_point(&PlotPoint::new(middle.x * scale, middle.y * scale));
+        click_with(&mut harness, at, egui::PointerButton::Primary);
+        harness
+            .input_mut()
+            .events
+            .push(egui::Event::Text("180".into()));
+        harness.run();
+        harness.key_press(egui::Key::Enter);
+        harness.run();
+        let typed = main_dimensions(harness.state()).outlet_diameter;
+        assert!(
+            typed
+                .manual_value()
+                .is_some_and(|d| (d - 0.18).abs() < 1e-12),
+            "{typed:?}"
+        );
+        let g = harness.state().derived.geometry(id).unwrap();
+        assert!((g.basis.outlet_diameter - 0.18).abs() < 1e-9);
     }
 }

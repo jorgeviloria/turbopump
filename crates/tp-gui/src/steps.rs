@@ -1343,6 +1343,15 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                 format!("{:.1} %", g.channel.max_cm_rise() * 100.0),
             );
         });
+        section_info(
+            ui,
+            tr("Check against Gülich"),
+            tr(
+                "Recommendations for the meridional section of radial impellers: Gülich, \
+                 Centrifugal Pumps, chap. 7.2.2.1 and eq. 7.2",
+            ),
+        );
+        crate::views::meridian_editor::guide_table(ui, g, &units);
     }
 }
 

@@ -331,6 +331,13 @@ fn the_interface_switches_to_spanish_and_back() {
     harness.state_mut().focus_view(View::Report);
     harness.run();
     harness.get_by_label("Informe");
+    // The editor moved the panel to the meridional contour: back to the first step.
+    harness
+        .get_all_by_label("Dimensiones principales")
+        .last()
+        .unwrap()
+        .click();
+    harness.run();
     harness.get_by_label_contains("Aceptar paso").click();
     harness.run();
     assert_eq!(

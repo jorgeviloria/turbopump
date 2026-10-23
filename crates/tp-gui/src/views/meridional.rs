@@ -10,13 +10,14 @@ use egui_plot::{
     Corner, Legend, Line, LineStyle, MarkerShape, Plot, PlotBounds, PlotPoint, PlotPoints,
     PlotTransform, Points, Text,
 };
-use tp_design::Param;
 use tp_design::impeller::meridian::{
     LeadingEdgeShape, MeridionalContour, MeridionalInput, chord_coordinates,
 };
 use tp_design::impeller::potential::{self, PotentialFlow, PotentialMesh};
 use tp_design::impeller::wall::{self, SegmentInput, SegmentKind, Wall, WallPoint};
 use tp_design::impeller::{ImpellerBasis, ImpellerGeometry, ImpellerGeometryInput};
+use tp_design::pump::CentrifugalPumpInput;
+use tp_design::{MainDimensionsInput, Param};
 use tp_math::DVec2;
 use tp_project::ComponentId;
 use tp_units::{DisplayUnits, QuantityKind};
@@ -70,6 +71,8 @@ pub(crate) enum Handle {
     /// Inner control point of a Bézier leading edge.
     LeadingEdgeControl(usize),
     AxialLength,
+    /// Middle of the trailing edge: it moves radially and sets d₂.
+    TrailingEdge,
 }
 
 impl Handle {
@@ -87,6 +90,7 @@ impl Handle {
             Handle::LeadingEdgeShroud => "leading edge on the shroud",
             Handle::LeadingEdgeControl(_) => "leading edge control point",
             Handle::AxialLength => "axial length",
+            Handle::TrailingEdge => "trailing edge",
         })
     }
 
@@ -123,7 +127,7 @@ pub(crate) fn handles(contour: &MeridionalContour, input: &MeridionalInput) -> V
     if matches!(contour.leading_edge_shape, LeadingEdgeShape::Bezier { .. }) {
         handles.extend([Handle::LeadingEdgeControl(0), Handle::LeadingEdgeControl(1)]);
     }
-    handles.push(Handle::AxialLength);
+    handles.extend([Handle::AxialLength, Handle::TrailingEdge]);
     handles
 }
 
@@ -133,6 +137,7 @@ pub(crate) fn handle_position(handle: Handle, contour: &MeridionalContour) -> DV
         Handle::LeadingEdgeHub => contour.hub_at(contour.leading_edge.0),
         Handle::LeadingEdgeShroud => contour.shroud_at(contour.leading_edge.1),
         Handle::AxialLength => contour.hub.end(),
+        Handle::TrailingEdge => contour.hub.end().lerp(contour.shroud.end(), 0.5),
         Handle::LeadingEdgeControl(i) => contour
             .leading_edge_curve()
             .and_then(|c| c.control_points().get(i + 1).copied())
@@ -247,8 +252,112 @@ pub(crate) fn apply_drag(
             let max = basis.outlet_diameter * 2.0;
             input.axial_length = Param::Manual(pointer.x.clamp(min, max));
         }
-        Handle::Point(..) | Handle::LeadingEdgeControl(_) => {}
+        // The outlet belongs to the main dimensions: see `drag_change`.
+        Handle::Point(..) | Handle::LeadingEdgeControl(_) | Handle::TrailingEdge => {}
     }
+}
+
+/// An edit of the diagram: the geometry inputs, or the main dimensions for the
+/// diameters and the outlet.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Change {
+    Geometry(ImpellerGeometryInput),
+    Main(CentrifugalPumpInput),
+}
+
+impl Change {
+    /// Applies the change as part of the current gesture.
+    pub(crate) fn apply(self, cx: &mut EditCtx<'_>, id: ComponentId, label: &str) {
+        match self {
+            Change::Geometry(input) => cx.edit(label, |p| p.set_impeller_geometry(id, input)),
+            Change::Main(input) => cx.edit(label, |p| {
+                p.set_main_dimensions(id, MainDimensionsInput::CentrifugalPump(input))
+            }),
+        };
+    }
+}
+
+/// The inputs the diagram edits.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Inputs<'a> {
+    pub geometry: &'a ImpellerGeometryInput,
+    /// None when the impeller has no pump main dimensions.
+    pub main: Option<&'a CentrifugalPumpInput>,
+}
+
+impl Inputs<'_> {
+    /// The geometry inputs changed by `edit`, if that changes them.
+    fn geometry(&self, edit: impl FnOnce(&mut ImpellerGeometryInput)) -> Option<Change> {
+        let mut input = self.geometry.clone();
+        edit(&mut input);
+        (input != *self.geometry).then_some(Change::Geometry(input))
+    }
+
+    /// The main dimensions changed by `edit`, if that changes them.
+    fn main(&self, edit: impl FnOnce(&mut CentrifugalPumpInput)) -> Option<Change> {
+        let current = self.main?;
+        let mut input = current.clone();
+        edit(&mut input);
+        (input != *current).then_some(Change::Main(input))
+    }
+}
+
+/// The change that moves `handle` to `pointer` ((z, r) in m), if any.
+pub(crate) fn drag_change(
+    handle: Handle,
+    pointer: DVec2,
+    g: &ImpellerGeometry,
+    inputs: Inputs<'_>,
+) -> Option<Change> {
+    if handle == Handle::TrailingEdge {
+        // The shroud end follows the pointer radially: d₂ is its diameter.
+        let middle = handle_position(handle, &g.contour);
+        let radius = pointer.y + g.contour.shroud.end().y - middle.y;
+        let b = &g.basis;
+        let d2 = (2.0 * radius).clamp(b.inlet_diameter * 1.05, b.inlet_diameter * 8.0);
+        return inputs.main(|m| m.outlet_diameter = Param::Manual(d2));
+    }
+    inputs
+        .geometry(|input| apply_drag(handle, pointer, &g.contour, &g.basis, &mut input.meridional))
+}
+
+/// Whether the input behind `handle` is set by hand. The points of drawn walls and of
+/// a Bézier leading edge always are.
+pub(crate) fn is_manual(handle: Handle, inputs: Inputs<'_>) -> bool {
+    let m = &inputs.geometry.meridional;
+    match handle {
+        Handle::HubInlet => !m.hub_inlet_tangent.is_auto(),
+        Handle::HubOutlet => !m.hub_outlet_tangent.is_auto(),
+        Handle::ShroudInlet => !m.shroud_inlet_tangent.is_auto(),
+        Handle::ShroudOutlet => !m.shroud_outlet_tangent.is_auto(),
+        Handle::LeadingEdgeHub => !m.leading_edge_hub.is_auto(),
+        Handle::LeadingEdgeShroud => !m.leading_edge_shroud.is_auto(),
+        Handle::AxialLength => !m.axial_length.is_auto(),
+        Handle::TrailingEdge => inputs.main.is_some_and(|d| !d.outlet_diameter.is_auto()),
+        Handle::Point(..) | Handle::LeadingEdgeControl(_) => true,
+    }
+}
+
+/// The change that returns the input behind `handle` to automatic, when it is manual
+/// and has an automatic value.
+pub(crate) fn reset_change(handle: Handle, inputs: Inputs<'_>) -> Option<Change> {
+    if handle == Handle::TrailingEdge {
+        return inputs.main(|d| d.outlet_diameter = Param::Auto);
+    }
+    inputs.geometry(|input| {
+        let m = &mut input.meridional;
+        let param = match handle {
+            Handle::HubInlet => &mut m.hub_inlet_tangent,
+            Handle::HubOutlet => &mut m.hub_outlet_tangent,
+            Handle::ShroudInlet => &mut m.shroud_inlet_tangent,
+            Handle::ShroudOutlet => &mut m.shroud_outlet_tangent,
+            Handle::LeadingEdgeHub => &mut m.leading_edge_hub,
+            Handle::LeadingEdgeShroud => &mut m.leading_edge_shroud,
+            Handle::AxialLength => &mut m.axial_length,
+            Handle::Point(..) | Handle::LeadingEdgeControl(_) | Handle::TrailingEdge => return,
+        };
+        *param = Param::Auto;
+    })
 }
 
 /// What the meridional diagram draws.
@@ -257,8 +366,8 @@ pub(crate) struct Display {
     pub stream_lines: bool,
     pub quasi_orthogonals: bool,
     pub potential: bool,
-    /// Dimensions of the main points and the guide lines of d_n, d₁ and d₂. The point
-    /// under the pointer is dimensioned either way.
+    /// The main dimensions d_n, d₁, d₂, b₂ and L. The point under the pointer is
+    /// dimensioned either way.
     pub dimensions: bool,
     /// The point of largest curvature of hub and shroud.
     pub curvature: bool,
@@ -267,6 +376,8 @@ pub(crate) struct Display {
     /// The diffuser or volute that follows.
     pub adjacent: bool,
     pub legend: bool,
+    /// Cross-section area and wall curvature along the channel, under the diagram.
+    pub charts: bool,
     /// Grid that dragged points snap to, m; 0 leaves them free.
     pub snap: f64,
 }
@@ -281,6 +392,7 @@ impl Display {
         area_circles: false,
         adjacent: true,
         legend: true,
+        charts: false,
         snap: 0.0,
     };
     pub(crate) const EDITOR: Display = Display {
@@ -288,10 +400,11 @@ impl Display {
         quasi_orthogonals: false,
         potential: false,
         dimensions: true,
-        curvature: true,
+        curvature: false,
         area_circles: false,
         adjacent: false,
         legend: false,
+        charts: false,
         snap: 0.0,
     };
 }
@@ -310,6 +423,10 @@ pub(crate) enum Fit {
 pub(crate) enum Dimension {
     AxialLength,
     OutletWidth,
+    /// The diameters of the main dimensions: d_n and d₁ at the inlet, d₂ at the outlet.
+    HubDiameter,
+    InletDiameter,
+    OutletDiameter,
     /// Axial position of a handle, from the inlet plane.
     Z(Handle),
     /// Radius of a handle, from the axis.
@@ -321,19 +438,54 @@ impl Dimension {
         match self {
             Dimension::AxialLength => tr("Axial length L").to_owned(),
             Dimension::OutletWidth => tr("Outlet width b₂").to_owned(),
+            Dimension::HubDiameter => tr("Hub diameter d_n").to_owned(),
+            Dimension::InletDiameter => tr("Eye diameter d₁").to_owned(),
+            Dimension::OutletDiameter => tr("Outlet diameter d₂").to_owned(),
             Dimension::Z(h) => tf("z of the {}", &[&h.label()]),
             Dimension::R(h) => tf("r of the {}", &[&h.label()]),
         }
     }
 
-    /// Whether the value can be typed: the points that move freely and L.
+    /// The symbol written before the value, for the main dimensions.
+    fn symbol(self) -> Option<&'static str> {
+        match self {
+            Dimension::AxialLength => Some("L"),
+            Dimension::OutletWidth => Some("b₂"),
+            Dimension::HubDiameter => Some("d_n"),
+            Dimension::InletDiameter => Some("d₁"),
+            Dimension::OutletDiameter => Some("d₂"),
+            Dimension::Z(_) | Dimension::R(_) => None,
+        }
+    }
+
+    /// Whether it is one of the main dimensions of the impeller, set in their step.
+    fn is_main(self) -> bool {
+        matches!(
+            self,
+            Dimension::OutletWidth
+                | Dimension::HubDiameter
+                | Dimension::InletDiameter
+                | Dimension::OutletDiameter
+        )
+    }
+
+    /// Whether the value can be typed: the main dimensions and the points that move
+    /// freely.
     fn editable(self) -> bool {
         match self {
-            Dimension::AxialLength => true,
-            Dimension::OutletWidth => false,
             Dimension::Z(h) | Dimension::R(h) => {
                 h.wall_point().is_some() || matches!(h, Handle::LeadingEdgeControl(_))
             }
+            _ => true,
+        }
+    }
+
+    /// The value as drawn: the symbol of a main dimension, then the length.
+    pub(crate) fn text(self, value: f64, units: &DisplayUnits) -> String {
+        let length = units.show(QuantityKind::Length, value);
+        match self.symbol() {
+            Some(symbol) => format!("{symbol} {length}"),
+            None => length,
         }
     }
 }
@@ -348,12 +500,12 @@ pub(crate) struct DimensionLine {
     pub value: f64,
 }
 
-/// The dimensions to draw: with `permanent`, L, b₂ and the joints of drawn walls; and
-/// the axial position and radius of the `hovered` point. Axial dimensions stack under
-/// the axis, radii to the right of the impeller (our own layout).
+/// The dimensions to draw: with `permanent`, the main dimensions L, b₂, d_n, d₁ and d₂;
+/// and the axial position and radius of the `hovered` point. Axial dimensions stack
+/// under the axis, d_n and d₁ left of the inlet, d₂ and the radii right of the
+/// impeller (our own layout).
 pub(crate) fn dimension_lines(
     contour: &MeridionalContour,
-    input: &MeridionalInput,
     basis: &ImpellerBasis,
     permanent: bool,
     hovered: Option<Handle>,
@@ -366,6 +518,7 @@ pub(crate) fn dimension_lines(
         .chain(&shroud.sample(120))
         .map(|p| p.x)
         .fold(contour.axial_length, f64::max);
+    let z_min = hub.start().x.min(shroud.start().x).min(0.0);
     let mut lines = Vec::new();
     let mut rows = 0;
     let mut columns = 0;
@@ -383,18 +536,18 @@ pub(crate) fn dimension_lines(
             value: p.x,
         });
     };
-    let mut radial = |lines: &mut Vec<DimensionLine>, dimension, p: DVec2| {
-        columns += 1;
-        let x = z_max + gap * columns as f64;
-        lines.push(DimensionLine {
-            dimension,
-            from: DVec2::new(x, 0.0),
-            to: DVec2::new(x, p.y),
-            extensions: vec![[p, DVec2::new(x, p.y)]],
-            value: p.y,
-        });
+    // From the axis up to `p`, at axial position `x`.
+    let radius = |dimension, p: DVec2, x: f64, value: f64| DimensionLine {
+        dimension,
+        from: DVec2::new(x, 0.0),
+        to: DVec2::new(x, p.y),
+        extensions: vec![[p, DVec2::new(x, p.y)]],
+        value,
     };
-    let mut points: Vec<Handle> = Vec::new();
+    let mut right = |lines: &mut Vec<DimensionLine>, dimension, p: DVec2, value: f64| {
+        columns += 1;
+        lines.push(radius(dimension, p, z_max + gap * columns as f64, value));
+    };
     if permanent {
         axial(&mut lines, Dimension::AxialLength, hub.end());
         // b₂ normal to the outlet direction ε_s: on a semi-axial impeller the two ends
@@ -411,64 +564,89 @@ pub(crate) fn dimension_lines(
             extensions: vec![[shroud.end(), a], [hub.end(), b]],
             value: basis.outlet_width,
         });
-        for side in [Side::Hub, Side::Shroud] {
-            if side.drawn(input) {
-                points.extend(
-                    side.wall(contour)
-                        .points()
-                        .into_iter()
-                        .filter(|(at, _)| matches!(at, WallPoint::Joint { .. }))
-                        .map(|(at, _)| Handle::Point(side, at)),
-                );
+        right(
+            &mut lines,
+            Dimension::OutletDiameter,
+            shroud.end(),
+            basis.outlet_diameter,
+        );
+        // The smaller inlet diameter nearer the inlet; no d_n without a hub.
+        let inlet = [
+            (Dimension::HubDiameter, hub.start(), basis.hub_diameter),
+            (
+                Dimension::InletDiameter,
+                shroud.start(),
+                basis.inlet_diameter,
+            ),
+        ];
+        let mut column = 0;
+        for (dimension, p, value) in inlet {
+            if p.y > 1e-9 {
+                column += 1;
+                lines.push(radius(dimension, p, z_min - gap * column as f64, value));
             }
         }
     }
     if let Some(h) = hovered
-        && h != Handle::AxialLength
-        && !points.contains(&h)
+        && !matches!(h, Handle::AxialLength | Handle::TrailingEdge)
     {
-        points.push(h);
-    }
-    for h in points {
         let p = handle_position(h, contour);
         axial(&mut lines, Dimension::Z(h), p);
-        radial(&mut lines, Dimension::R(h), p);
+        right(&mut lines, Dimension::R(h), p, p.y);
     }
     lines
 }
 
-/// The input with dimension `dimension` set to `value` (m).
+/// The change that sets dimension `dimension` to `value` (m), if it changes anything.
 fn set_dimension(
     dimension: Dimension,
     value: f64,
     g: &ImpellerGeometry,
-    current: &ImpellerGeometryInput,
-) -> ImpellerGeometryInput {
+    inputs: Inputs<'_>,
+) -> Option<Change> {
     let contour = &g.contour;
-    let mut input = current.clone();
-    let m = &mut input.meridional;
+    let length = value.max(1e-4);
+    match dimension {
+        Dimension::AxialLength => {
+            return inputs.geometry(|input| {
+                input.meridional.axial_length =
+                    Param::Manual(value.max(g.basis.outlet_width * 1.01));
+            });
+        }
+        Dimension::OutletWidth => {
+            return inputs.main(|m| m.outlet_width = Param::Manual(length));
+        }
+        Dimension::HubDiameter => {
+            return inputs.main(|m| m.hub_diameter = Param::Manual(value.max(0.0)));
+        }
+        Dimension::InletDiameter => {
+            return inputs.main(|m| m.inlet_diameter = Param::Manual(length));
+        }
+        Dimension::OutletDiameter => {
+            return inputs.main(|m| m.outlet_diameter = Param::Manual(length));
+        }
+        Dimension::Z(_) | Dimension::R(_) => {}
+    }
     let moved = |h: Handle, z: Option<f64>, r: Option<f64>| {
         let p = handle_position(h, contour);
         DVec2::new(z.unwrap_or(p.x), r.unwrap_or(p.y))
     };
     let (handle, to) = match dimension {
-        Dimension::AxialLength => {
-            m.axial_length = Param::Manual(value.max(g.basis.outlet_width * 1.01));
-            return input;
-        }
-        Dimension::OutletWidth => return input,
         Dimension::Z(h) => (h, moved(h, Some(value), None)),
         Dimension::R(h) => (h, moved(h, None, Some(value.max(0.0)))),
+        _ => return None,
     };
-    match handle {
-        Handle::LeadingEdgeControl(i) => place_edge_control(i, to, contour, m),
-        h => {
-            if let Some((side, at)) = h.wall_point() {
-                place(side, at, to, contour, m);
+    inputs.geometry(|input| {
+        let m = &mut input.meridional;
+        match handle {
+            Handle::LeadingEdgeControl(i) => place_edge_control(i, to, contour, m),
+            h => {
+                if let Some((side, at)) = h.wall_point() {
+                    place(side, at, to, contour, m);
+                }
             }
         }
-    }
-    input
+    })
 }
 
 /// The distance being measured: a line between the two points and its length with
@@ -503,10 +681,20 @@ fn paint_measure(
     painter.galley(rect.min + egui::vec2(3.0, 3.0), galley, color);
 }
 
+/// Whether the value of a dimension line from `a` to `b` (screen) is turned to read
+/// along it, as on a drawing: on the lines that are nearly vertical.
+fn reads_upwards(a: egui::Pos2, b: egui::Pos2) -> bool {
+    (b - a).normalized().x.abs() < 0.3
+}
+
 /// Where the value of a dimension line from `a` to `b` (screen) goes: in the middle,
 /// or past the end when it does not fit between the arrows.
 fn value_rect(a: egui::Pos2, b: egui::Pos2, text: egui::Vec2) -> egui::Rect {
-    let size = text + egui::vec2(6.0, 2.0);
+    let size = if reads_upwards(a, b) {
+        egui::vec2(text.y + 2.0, text.x + 6.0)
+    } else {
+        text + egui::vec2(6.0, 2.0)
+    };
     let along = (b - a).normalized();
     // How far the value reaches along the line.
     let extent = size.x * along.x.abs() + size.y * along.y.abs();
@@ -569,7 +757,95 @@ fn paint_dimensions(
                 egui::StrokeKind::Inside,
             );
         }
-        painter.galley(rect.center() - galley.size() / 2.0, galley, color);
+        let half = galley.size() / 2.0;
+        if reads_upwards(a, b) {
+            // Turned a quarter anticlockwise about its top-left corner.
+            let corner = rect.center() + egui::vec2(-half.y, half.x);
+            painter.add(
+                egui::epaint::TextShape::new(corner, galley, color)
+                    .with_angle(-std::f32::consts::FRAC_PI_2),
+            );
+        } else {
+            painter.galley(rect.center() - half, galley, color);
+        }
+    }
+}
+
+/// The pointer position in the bottom-right corner of the diagram.
+fn paint_pointer(ui: &Ui, transform: &PlotTransform, p: DVec2, units: &DisplayUnits) {
+    let frame = *transform.frame();
+    let painter = ui.painter_at(frame);
+    let visuals = ui.visuals();
+    let text = format!(
+        "z {}   r {}",
+        units.show(QuantityKind::Length, p.x),
+        units.show(QuantityKind::Length, p.y)
+    );
+    let galley = painter.layout_no_wrap(
+        text,
+        egui::FontId::monospace(11.0),
+        visuals.weak_text_color(),
+    );
+    let rect = egui::Rect::from_min_size(
+        frame.right_bottom() - galley.size() - egui::vec2(10.0, 8.0),
+        galley.size(),
+    );
+    painter.rect_filled(rect.expand(3.0), 2.0, visuals.extreme_bg_color);
+    painter.galley(rect.min, galley, visuals.weak_text_color());
+}
+
+/// The color of what `handle` shapes.
+fn handle_color(handle: Handle, palette: &Palette) -> Color32 {
+    match handle {
+        Handle::HubInlet
+        | Handle::HubOutlet
+        | Handle::AxialLength
+        | Handle::Point(Side::Hub, _) => palette.hub,
+        Handle::ShroudInlet | Handle::ShroudOutlet | Handle::Point(Side::Shroud, _) => {
+            palette.shroud
+        }
+        Handle::LeadingEdgeHub | Handle::LeadingEdgeShroud | Handle::LeadingEdgeControl(_) => {
+            palette.leading_edge
+        }
+        Handle::TrailingEdge => palette.trailing_edge,
+    }
+}
+
+/// The handles over the plot, in the color of what they shape: hollow while their
+/// input is automatic, filled once it is set by hand, squares at the joints of drawn
+/// walls.
+fn paint_handles(
+    ui: &Ui,
+    transform: &PlotTransform,
+    handles: &[(Handle, DVec2)],
+    active: Option<Handle>,
+    inputs: Inputs<'_>,
+    scale: f64,
+) {
+    let painter = ui.painter_at(*transform.frame());
+    let palette = Palette::of(ui);
+    let background = ui.visuals().extreme_bg_color;
+    for &(handle, p) in handles {
+        let at = transform.position_from_point(&PlotPoint::new(p.x * scale, p.y * scale));
+        let current = active == Some(handle);
+        let color = if current {
+            palette.handle_active
+        } else {
+            handle_color(handle, &palette)
+        };
+        let radius = if current { 6.0 } else { 4.5 };
+        let fill = if is_manual(handle, inputs) {
+            color
+        } else {
+            background
+        };
+        let stroke = egui::Stroke::new(1.8, color);
+        if matches!(handle, Handle::Point(_, WallPoint::Joint { .. })) {
+            let square = egui::Rect::from_center_size(at, egui::Vec2::splat(2.0 * radius));
+            painter.rect(square, 0.0, fill, stroke, egui::StrokeKind::Middle);
+        } else {
+            painter.circle(at, radius, fill, stroke);
+        }
     }
 }
 
@@ -838,6 +1114,11 @@ impl MeridionalView {
         let unit = units.get(QuantityKind::Length).symbol;
         let scale = units.to_display(QuantityKind::Length, 1.0);
         let palette = Palette::of(ui);
+        let main = cx.doc.project().pump_impeller_input(id).ok();
+        let inputs = Inputs {
+            geometry: current,
+            main: main.as_ref(),
+        };
 
         let handles: Vec<(Handle, DVec2)> = handles(&g.contour, &current.meridional)
             .into_iter()
@@ -862,18 +1143,12 @@ impl MeridionalView {
             .dragging
             .and(self.transform.as_ref())
             .map(|t| *t.bounds());
-        let dimensions = dimension_lines(
-            &g.contour,
-            &current.meridional,
-            &g.basis,
-            display.dimensions,
-            active,
-        );
+        let dimensions = dimension_lines(&g.contour, &g.basis, display.dimensions, active);
         // Dimension values as drawn, to find the one under the pointer.
         let font = egui::FontId::proportional(12.0);
         let texts: Vec<String> = dimensions
             .iter()
-            .map(|d| units.show(QuantityKind::Length, d.value))
+            .map(|d| d.dimension.text(d.value, &units))
             .collect();
         let label_rect = |t: &PlotTransform, d: &DimensionLine, text: &str| {
             let screen =
@@ -892,30 +1167,23 @@ impl MeridionalView {
             _ => None,
         };
         let fit = self.fit.take();
-        // Extent of the contour, and of the contour with its permanent dimensions. The
-        // dimensions are painted over the plot so they never move its bounds.
+        // Extent of the contour with its permanent dimensions, and room for their
+        // values. The dimensions are painted over the plot so they never move its bounds.
         let extent = |points: &[DVec2]| {
             let (mut lo, mut hi) = (points[0], points[0]);
             for p in points {
                 lo = lo.min(*p);
                 hi = hi.max(*p);
             }
-            let margin = (hi - lo) * 0.08;
+            let margin = (hi - lo) * 0.12;
             ((lo - margin) * scale, (hi + margin) * scale)
         };
         let mut outline: Vec<DVec2> = g.contour.hub.sample(120);
         outline.extend(g.contour.shroud.sample(120));
-        let contour_bounds = extent(&outline);
         outline.extend(
-            dimension_lines(
-                &g.contour,
-                &current.meridional,
-                &g.basis,
-                display.dimensions,
-                None,
-            )
-            .iter()
-            .flat_map(|d| [d.from, d.to]),
+            dimension_lines(&g.contour, &g.basis, display.dimensions, None)
+                .iter()
+                .flat_map(|d| [d.from, d.to]),
         );
         let meridian_bounds = extent(&outline);
 
@@ -927,6 +1195,8 @@ impl MeridionalView {
             .height(size.y)
             .data_aspect(1.0)
             .allow_drag(active.is_none() && !measuring)
+            // A double click on a handle sets it back to automatic, elsewhere it fits.
+            .allow_double_click_reset(hovered.is_none())
             .sense(Sense::click_and_drag())
             .x_axis_label(format!("z [{unit}]"))
             .y_axis_label(format!("r [{unit}]"));
@@ -956,32 +1226,6 @@ impl MeridionalView {
                 }
                 Some(Fit::All) => plot.set_auto_bounds(true),
                 None => {}
-            }
-            if display.dimensions {
-                // Guide lines at the main diameters.
-                let b = &g.basis;
-                let (z0, z1) = (contour_bounds.0.x / scale, contour_bounds.1.x / scale);
-                for (name, d) in [
-                    ("d_n", b.hub_diameter),
-                    ("d₁", b.inlet_diameter),
-                    ("d₂", b.outlet_diameter),
-                ] {
-                    let r = d / 2.0;
-                    plot.line(
-                        Line::new("", line([DVec2::new(z0, r), DVec2::new(z1, r)], scale))
-                            .color(palette.guide)
-                            .style(LineStyle::dashed_loose())
-                            .width(0.8),
-                    );
-                    plot.text(
-                        Text::new(
-                            "",
-                            PlotPoint::new(z0 * scale, r * scale),
-                            RichText::new(name).size(11.0).color(palette.guide),
-                        )
-                        .anchor(egui::Align2::LEFT_BOTTOM),
-                    );
-                }
             }
             if display.quasi_orthogonals {
                 for qo in g.channel.quasi_orthogonals.iter().step_by(4) {
@@ -1054,27 +1298,18 @@ impl MeridionalView {
                 .color(palette.trailing_edge)
                 .width(2.0),
             );
-            // Bézier control polygons: the tangent lines at both ends of each curve.
-            for wall in [&g.contour.hub, &g.contour.shroud] {
-                for curve in wall.segments().iter().filter(|c| c.degree() > 1) {
-                    let p = curve.control_points();
-                    let n = p.len();
-                    for pair in [[p[0], p[1]], [p[n - 2], p[n - 1]]] {
-                        plot.line(
-                            Line::new("", line(pair, scale))
-                                .color(palette.handle)
-                                .style(LineStyle::dashed_dense())
-                                .width(1.0),
-                        );
-                    }
-                }
-            }
-            if let Some(curve) = g.contour.leading_edge_curve().filter(|c| c.degree() > 1) {
-                let p = curve.control_points();
-                for pair in [[p[0], p[1]], [p[2], p[3]]] {
+            // Bézier control polygons, in the color of their curve.
+            let edge = g.contour.leading_edge_curve();
+            let curves = [
+                (g.contour.hub.segments(), palette.hub),
+                (g.contour.shroud.segments(), palette.shroud),
+                (edge.as_slice(), palette.leading_edge),
+            ];
+            for (segments, color) in curves {
+                for curve in segments.iter().filter(|c| c.degree() > 1) {
                     plot.line(
-                        Line::new("", line(pair, scale))
-                            .color(palette.handle)
+                        Line::new("", line(curve.control_points().iter().copied(), scale))
+                            .color(color.gamma_multiply(0.7))
                             .style(LineStyle::dashed_dense())
                             .width(1.0),
                     );
@@ -1196,25 +1431,6 @@ impl MeridionalView {
                     );
                 }
             }
-            for &(handle, p) in &handles {
-                let current = active == Some(handle);
-                let joint = matches!(handle, Handle::Point(_, WallPoint::Joint { .. }));
-                plot.points(
-                    Points::new("", vec![[p.x * scale, p.y * scale]])
-                        .shape(if joint {
-                            MarkerShape::Square
-                        } else {
-                            MarkerShape::Circle
-                        })
-                        .radius(if current { 6.5 } else { 4.5 })
-                        .color(if current {
-                            palette.handle_active
-                        } else {
-                            palette.handle
-                        })
-                        .filled(true),
-                );
-            }
             plot.pointer_coordinate()
         });
 
@@ -1227,8 +1443,12 @@ impl MeridionalView {
             hovered_dimension,
             scale,
         );
-        self.transform = Some(response.transform);
+        paint_handles(ui, &response.transform, &handles, active, inputs, scale);
         self.pointer = response.inner.map(|p| DVec2::new(p.x / scale, p.y / scale));
+        if let Some(p) = self.pointer {
+            paint_pointer(ui, &response.transform, p, &units);
+        }
+        self.transform = Some(response.transform);
         let plot_response = &response.response;
         if measuring && hovered.is_none() && plot_response.drag_started() {
             self.measure = self.pointer.map(|p| (p, p));
@@ -1255,7 +1475,24 @@ impl MeridionalView {
             } else {
                 CursorIcon::Grab
             });
-            plot_response.clone().on_hover_text(handle.label());
+            let state = if reset_change(handle, inputs).is_some() {
+                tr("set by hand; double-click to make it automatic")
+            } else if is_manual(handle, inputs) {
+                ""
+            } else {
+                tr("automatic; drag it to set it by hand")
+            };
+            let text = if state.is_empty() {
+                handle.label().to_owned()
+            } else {
+                format!("{}\n{state}", handle.label())
+            };
+            plot_response.clone().on_hover_text(text);
+            if plot_response.double_clicked()
+                && let Some(change) = reset_change(handle, inputs)
+            {
+                change.apply(cx, id, "reset to automatic");
+            }
         } else if let Some(dimension) = hovered_dimension {
             ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
             plot_response
@@ -1295,11 +1532,10 @@ impl MeridionalView {
         }
         if let Some(target) = self.menu {
             plot_response.context_menu(|ui| {
-                if let Some(input) =
-                    context_menu(ui, target, g, current, &units, &mut self.references)
+                if let Some(change) =
+                    context_menu(ui, target, g, inputs, &units, &mut self.references)
                 {
-                    let label = target.edit_label();
-                    cx.edit(label, |p| p.set_impeller_geometry(id, input));
+                    change.apply(cx, id, target.edit_label());
                 }
             });
         }
@@ -1310,17 +1546,13 @@ impl MeridionalView {
                 DVec2::new(pointer.x / scale, pointer.y / scale),
                 display.snap,
             );
-            let mut input = current.clone();
-            apply_drag(handle, pointer, &g.contour, &g.basis, &mut input.meridional);
-            if input != *current {
-                cx.edit(&tf("drag {}", &[&handle.label()]), |p| {
-                    p.set_impeller_geometry(id, input)
-                });
+            if let Some(change) = drag_change(handle, pointer, g, inputs) {
+                change.apply(cx, id, &tf("drag {}", &[&handle.label()]));
                 // Show the new geometry even if the pointer stops here.
                 ui.ctx().request_repaint();
             }
         }
-        self.dimension_box(ui, cx, id, g, current, &dimensions);
+        self.dimension_box(ui, cx, id, g, inputs, &dimensions);
     }
 
     /// The box in which a clicked dimension is typed. It opens with the value selected,
@@ -1332,7 +1564,7 @@ impl MeridionalView {
         cx: &mut EditCtx<'_>,
         id: ComponentId,
         g: &ImpellerGeometry,
-        current: &ImpellerGeometryInput,
+        inputs: Inputs<'_>,
         dimensions: &[DimensionLine],
     ) {
         let Some(mut edit) = self.dimension_edit.take() else {
@@ -1358,8 +1590,11 @@ impl MeridionalView {
             .show(ui.ctx(), |ui| {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
                     ui.label(RichText::new(edit.dimension.label()).strong());
-                    if converts_wall(edit.dimension, current) {
+                    if converts_wall(edit.dimension, inputs.geometry) {
                         ui.weak(tr("Typing a value turns this wall into drawn segments."));
+                    }
+                    if edit.dimension.is_main() {
+                        ui.weak(tr("A main dimension: typing a value sets it by hand."));
                     }
                     ui.horizontal(|ui| {
                         let mut box_ = egui::TextEdit::singleline(text)
@@ -1400,9 +1635,8 @@ impl MeridionalView {
         if apply {
             match parse_value(text) {
                 Some(value) => {
-                    let input = set_dimension(edit.dimension, value / scale, g, current);
-                    if input != *current {
-                        cx.edit("edit dimension", |p| p.set_impeller_geometry(id, input));
+                    if let Some(change) = set_dimension(edit.dimension, value / scale, g, inputs) {
+                        change.apply(cx, id, "edit dimension");
                     }
                     return;
                 }
@@ -1586,16 +1820,67 @@ fn length_field(ui: &mut Ui, label: &str, value: &mut f64, units: &DisplayUnits)
     changed
 }
 
-/// The context menu of the meridional view; the new geometry input when it changed
-/// something.
+/// The context menu of the meridional view, with a way back to automatic for the
+/// handles set by hand; the change when it changed something.
 fn context_menu(
     ui: &mut Ui,
     target: MenuTarget,
     g: &ImpellerGeometry,
-    current: &ImpellerGeometryInput,
+    inputs: Inputs<'_>,
     units: &DisplayUnits,
     references: &mut Vec<Reference>,
-) -> Option<ImpellerGeometryInput> {
+) -> Option<Change> {
+    let mut change = edit_menu(ui, target, g, inputs, units, references);
+    if let MenuTarget::Handle(handle) = target
+        && let Some(reset) = reset_change(handle, inputs)
+    {
+        ui.separator();
+        if ui.button(tr("Back to automatic")).clicked() {
+            change = Some(reset);
+            ui.close();
+        }
+    }
+    change
+}
+
+/// The outlet: d₂ and b₂ of the main dimensions.
+fn trailing_edge_menu(
+    ui: &mut Ui,
+    g: &ImpellerGeometry,
+    inputs: Inputs<'_>,
+    units: &DisplayUnits,
+) -> Option<Change> {
+    ui.strong(tr("Trailing edge"));
+    let (mut d2, mut b2) = (g.basis.outlet_diameter, g.basis.outlet_width);
+    let diameter = length_field(ui, "d₂", &mut d2, units);
+    let width = length_field(ui, "b₂", &mut b2, units);
+    ui.weak(tr("A main dimension: typing a value sets it by hand."));
+    if !(diameter || width) {
+        return None;
+    }
+    inputs.main(|m| {
+        if diameter {
+            m.outlet_diameter = Param::Manual(d2.max(1e-4));
+        }
+        if width {
+            m.outlet_width = Param::Manual(b2.max(1e-4));
+        }
+    })
+}
+
+/// The edits of the context menu of `target`.
+fn edit_menu(
+    ui: &mut Ui,
+    target: MenuTarget,
+    g: &ImpellerGeometry,
+    inputs: Inputs<'_>,
+    units: &DisplayUnits,
+    references: &mut Vec<Reference>,
+) -> Option<Change> {
+    if target == MenuTarget::Handle(Handle::TrailingEdge) {
+        return trailing_edge_menu(ui, g, inputs, units);
+    }
+    let current = inputs.geometry;
     let contour = &g.contour;
     let mut input = current.clone();
     let m = &mut input.meridional;
@@ -1769,7 +2054,7 @@ fn context_menu(
             ui.weak(tr("Right-click a point or a wall to edit it."));
         }
     }
-    (input != *current).then_some(input)
+    (input != *current).then_some(Change::Geometry(input))
 }
 
 /// Meridional velocity along hub and shroud: the potential flow against the uniform
@@ -1866,8 +2151,7 @@ mod tests {
     #[test]
     fn dimensions_measure_their_points_and_set_them_exactly() {
         let g = geometry();
-        let automatic = MeridionalInput::default();
-        let lines = dimension_lines(&g.contour, &automatic, &g.basis, true, None);
+        let lines = dimension_lines(&g.contour, &g.basis, true, None);
         let value = |lines: &[DimensionLine], d: Dimension| {
             lines.iter().find(|l| l.dimension == d).map(|l| l.value)
         };
@@ -1877,39 +2161,144 @@ mod tests {
         );
         let b2 = value(&lines, Dimension::OutletWidth).unwrap();
         assert!((b2 - g.basis.outlet_width).abs() < 1e-9, "{b2}");
-        // Only L and b₂ while the walls are automatic; the hovered point adds its own.
-        assert_eq!(lines.len(), 2);
-        let hovered = dimension_lines(
-            &g.contour,
-            &automatic,
-            &g.basis,
-            false,
-            Some(Handle::HubInlet),
-        );
+        // The main dimensions only; the hovered point adds its own.
+        let b = &g.basis;
+        for (d, expected) in [
+            (Dimension::HubDiameter, b.hub_diameter),
+            (Dimension::InletDiameter, b.inlet_diameter),
+            (Dimension::OutletDiameter, b.outlet_diameter),
+        ] {
+            assert_eq!(value(&lines, d), Some(expected), "{d:?}");
+        }
+        assert_eq!(lines.len(), 5);
+        // d₂ reaches from the axis to the shroud end, d₁ to the shroud inlet.
+        let d2 = lines
+            .iter()
+            .find(|l| l.dimension == Dimension::OutletDiameter)
+            .unwrap();
+        assert!((d2.to.y - g.contour.shroud.end().y).abs() < 1e-12 && d2.from.y == 0.0);
+        let d1 = lines
+            .iter()
+            .find(|l| l.dimension == Dimension::InletDiameter)
+            .unwrap();
+        assert!(d1.from.x < 0.0, "d₁ stands left of the inlet");
+        let hovered = dimension_lines(&g.contour, &g.basis, false, Some(Handle::HubInlet));
         let p = handle_position(Handle::HubInlet, &g.contour);
         assert_eq!(value(&hovered, Dimension::Z(Handle::HubInlet)), Some(p.x));
         assert_eq!(value(&hovered, Dimension::R(Handle::HubInlet)), Some(p.y));
 
-        // Drawn walls dimension their joints, and a typed value moves the joint.
+        // A typed value moves the joint of a drawn wall.
         let mut input = ImpellerGeometryInput::default();
         input.meridional.hub_segments = Some(wall::split(&g.contour.hub, 0, 0.5));
+        let main = CentrifugalPumpInput::default();
+        let inputs = Inputs {
+            geometry: &input,
+            main: Some(&main),
+        };
         let drawn = tp_design::impeller::build(&g.basis, &input).unwrap();
         let joint = Handle::Point(Side::Hub, WallPoint::Joint { segment: 0 });
-        let lines = dimension_lines(&drawn.contour, &input.meridional, &drawn.basis, true, None);
-        assert!(value(&lines, Dimension::Z(joint)).is_some());
-        let moved = set_dimension(Dimension::R(joint), 0.03, &drawn, &input);
+        let Some(Change::Geometry(moved)) =
+            set_dimension(Dimension::R(joint), 0.03, &drawn, inputs)
+        else {
+            panic!("a geometry change");
+        };
         let after = tp_design::impeller::build(&drawn.basis, &moved).unwrap();
         let p = handle_position(joint, &after.contour);
         assert!((p.y - 0.03).abs() < 1e-12);
         assert!((p.x - handle_position(joint, &drawn.contour).x).abs() < 1e-12);
-        let longer = set_dimension(Dimension::AxialLength, 0.05, &drawn, &input);
+        let Some(Change::Geometry(longer)) =
+            set_dimension(Dimension::AxialLength, 0.05, &drawn, inputs)
+        else {
+            panic!("a geometry change");
+        };
         assert_eq!(longer.meridional.axial_length, Param::Manual(0.05));
-        // b₂ comes from the main dimensions.
-        assert!(!Dimension::OutletWidth.editable());
+        // The diameters and b₂ set the main dimensions by hand.
+        let main_change = |d: Dimension, v: f64| match set_dimension(d, v, &drawn, inputs) {
+            Some(Change::Main(m)) => m,
+            other => panic!("{other:?}"),
+        };
         assert_eq!(
-            set_dimension(Dimension::OutletWidth, 0.1, &drawn, &input),
-            input
+            main_change(Dimension::OutletWidth, 0.02).outlet_width,
+            Param::Manual(0.02)
         );
+        assert_eq!(
+            main_change(Dimension::OutletDiameter, 0.2).outlet_diameter,
+            Param::Manual(0.2)
+        );
+        assert_eq!(
+            main_change(Dimension::InletDiameter, 0.08).inlet_diameter,
+            Param::Manual(0.08)
+        );
+        assert_eq!(
+            main_change(Dimension::HubDiameter, 0.02).hub_diameter,
+            Param::Manual(0.02)
+        );
+        // Without pump main dimensions there is nothing to set.
+        let geometry_only = Inputs {
+            geometry: &input,
+            main: None,
+        };
+        assert_eq!(
+            set_dimension(Dimension::OutletDiameter, 0.2, &drawn, geometry_only),
+            None
+        );
+    }
+
+    #[test]
+    fn the_trailing_edge_sets_d2_and_handles_go_back_to_automatic() {
+        let g = geometry();
+        let input = ImpellerGeometryInput::default();
+        let main = CentrifugalPumpInput::default();
+        let inputs = Inputs {
+            geometry: &input,
+            main: Some(&main),
+        };
+        // Dragged 5 mm outwards, the trailing edge sets d₂ 10 mm larger, by hand.
+        let edge = handle_position(Handle::TrailingEdge, &g.contour);
+        let Some(Change::Main(dragged)) = drag_change(
+            Handle::TrailingEdge,
+            edge + DVec2::new(0.003, 0.005),
+            &g,
+            inputs,
+        ) else {
+            panic!("a main-dimensions change");
+        };
+        let d2 = dragged.outlet_diameter.manual_value().unwrap();
+        assert!((d2 - (g.basis.outlet_diameter + 0.01)).abs() < 1e-9, "{d2}");
+        assert!(!is_manual(Handle::TrailingEdge, inputs));
+        let after = Inputs {
+            geometry: &input,
+            main: Some(&dragged),
+        };
+        assert!(is_manual(Handle::TrailingEdge, after));
+        assert_eq!(
+            reset_change(Handle::TrailingEdge, after),
+            Some(Change::Main(main.clone()))
+        );
+
+        // A dragged tangent is manual until it is reset; automatic ones have no reset.
+        let Some(Change::Geometry(moved)) =
+            drag_change(Handle::ShroudInlet, DVec2::new(10.0, 10.0), &g, inputs)
+        else {
+            panic!("a geometry change");
+        };
+        let moved_inputs = Inputs {
+            geometry: &moved,
+            main: Some(&main),
+        };
+        assert!(is_manual(Handle::ShroudInlet, moved_inputs));
+        assert_eq!(
+            reset_change(Handle::ShroudInlet, moved_inputs),
+            Some(Change::Geometry(input.clone()))
+        );
+        for handle in handles(&g.contour, &input.meridional) {
+            assert!(!is_manual(handle, inputs), "{handle:?}");
+            assert_eq!(reset_change(handle, inputs), None, "{handle:?}");
+        }
+        // The points of a drawn wall are its own: nothing to reset them to.
+        let joint = Handle::Point(Side::Hub, WallPoint::Joint { segment: 0 });
+        assert!(is_manual(joint, inputs));
+        assert_eq!(reset_change(joint, inputs), None);
     }
 
     #[test]
@@ -1920,7 +2309,7 @@ mod tests {
         basis.outlet_hub_diameter = basis.outlet_diameter * 0.8;
         let input = MeridionalInput::default();
         let contour = MeridionalContour::build(&basis, &input).unwrap();
-        let lines = dimension_lines(&contour, &input, &basis, true, None);
+        let lines = dimension_lines(&contour, &basis, true, None);
         let b2 = lines
             .iter()
             .find(|l| l.dimension == Dimension::OutletWidth)

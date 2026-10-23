@@ -261,6 +261,7 @@ fn spanish() {
         (View::Report, "es-report"),
         (View::Performance, "es-curves"),
         (View::Meridional, "es-meridional"),
+        (View::MeridianEditor, "es-editor"),
         (View::View3d, "es-3d"),
     ] {
         harness.state_mut().focus_view(view);
@@ -579,4 +580,26 @@ fn meridional_segments() {
     harness.state_mut().focus_view(View::MeridianEditor);
     harness.run();
     save(&mut harness, "meridian-editor");
+}
+
+/// The meridian editor on the automatic contour of a new impeller.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn meridian_editor() {
+    for (theme, suffix) in [(egui::Theme::Dark, "dark"), (egui::Theme::Light, "light")] {
+        let mut harness = harness(theme);
+        harness.state_mut().focus_view(View::MeridianEditor);
+        harness.run();
+        save(&mut harness, &format!("editor-{suffix}"));
+    }
+    // The analysis menu open, with the charts under the diagram.
+    let mut harness = harness(egui::Theme::Light);
+    harness.state_mut().focus_view(View::MeridianEditor);
+    harness.run();
+    harness.get_by_label_contains("Analysis").click();
+    harness.run();
+    harness.get_by_label("area and curvature charts").click();
+    harness.get_by_label("curvature maximum").click();
+    harness.run();
+    save(&mut harness, "editor-analysis");
 }

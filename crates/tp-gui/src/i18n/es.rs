@@ -30,10 +30,6 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Dragged points snap to this grid",
         "Los puntos arrastrados se ajustan a esta rejilla",
     ),
-    (
-        "Hold Alt and drag on the diagram to measure a distance",
-        "Mantén Alt y arrastra sobre el diagrama para medir una distancia",
-    ),
     ("Check against Gülich", "Comprobación con Gülich"),
     (
         "Recommendations for the meridional section of radial impellers: Gülich, Centrifugal Pumps, chap. 7.2.2.1 and eq. 7.2",
@@ -82,13 +78,38 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Meridian editor", "Editor del meridiano"),
     ("Editor", "Editor"),
     ("edit dimension", "editar cota"),
+    ("reset to automatic", "volver a automático"),
     ("z of the {}", "{}: z"),
     ("r of the {}", "{}: r"),
     ("{}: click to type it", "{} (haz clic para escribirla)"),
     (
-        "L, b₂ and the joints of the drawn walls, with guide lines at d_n, d₁ and d₂. Click a value to type it.",
-        "L, b₂ y las uniones de las paredes dibujadas, con líneas guía en d_n, d₁ y d₂. Haz clic en un valor para escribirlo.",
+        "The main dimensions d_n, d₁, d₂, b₂ and L. Click a value to type it.",
+        "Las dimensiones principales d_n, d₁, d₂, b₂ y L. Haz clic en un valor para escribirlo.",
     ),
+    ("Analysis", "Análisis"),
+    ("area and curvature charts", "gráficas de área y curvatura"),
+    (
+        "Cross-section area along the channel and curvature along the walls, under the diagram: both should change smoothly",
+        "Área de paso a lo largo del canal y curvatura a lo largo de las paredes, bajo el dibujo: las dos deben variar con suavidad",
+    ),
+    (
+        "Drag a point to shape the meridian: hollow points are automatic, filled ones set by hand. Double-click a point to make it automatic again. Right-click a point or a wall for exact values, segments and joints. Click a dimension to type it. Hold Alt and drag to measure a distance.",
+        "Arrastra un punto para dar forma al meridiano: los huecos son automáticos y los rellenos, manuales. Doble clic en un punto lo vuelve automático. Clic derecho en un punto o en una pared para valores exactos, tramos y uniones. Clic en una cota para escribirla. Mantén Alt y arrastra para medir una distancia.",
+    ),
+    (
+        "set by hand; double-click to make it automatic",
+        "manual; doble clic para volver a automático",
+    ),
+    (
+        "automatic; drag it to set it by hand",
+        "automático; arrástralo para fijarlo a mano",
+    ),
+    (
+        "A main dimension: typing a value sets it by hand.",
+        "Es una dimensión principal: al escribir un valor pasa a manual.",
+    ),
+    ("Back to automatic", "Volver a automático"),
+    ("trailing edge", "borde de salida"),
     ("curvature maximum", "curvatura máxima"),
     (
         "Point of smallest radius of curvature of hub and shroud",
@@ -111,28 +132,6 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "fraction of the wall length",
         "fracción de la longitud de la pared",
     ),
-    ("Points of the meridian", "Puntos del meridiano"),
-    (
-        "Coordinates in {}: z from the inlet plane, r from the axis.",
-        "Coordenadas en {}: z desde el plano de entrada, r desde el eje.",
-    ),
-    (
-        "Automatic: one Bézier from the main dimensions.",
-        "Automática: una Bézier a partir de las dimensiones principales.",
-    ),
-    ("inlet tangent", "tangente de entrada"),
-    ("outlet tangent", "tangente de salida"),
-    ("Draw by segments", "Dibujar por tramos"),
-    (
-        "Turn this wall into segments you can split, join and type point by point",
-        "Convierte esta pared en tramos que puedes dividir, unir y escribir punto a punto",
-    ),
-    ("segment {}", "tramo {}"),
-    ("Split this segment in two", "Dividir este tramo en dos"),
-    ("control point", "punto de control"),
-    ("joint {}", "unión {}"),
-    ("on the hub", "en el cubo"),
-    ("on the shroud", "en la carcasa"),
     (
         "leading edge control point",
         "punto de control del borde de ataque",
