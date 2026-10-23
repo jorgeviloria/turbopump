@@ -125,7 +125,6 @@ pub fn automatic_hub(
     shroud: &Wall,
     basis: &ImpellerBasis,
     m: &Material,
-    axial_length: f64,
 ) -> Result<Vec<SegmentInput>, DesignError> {
     let t = m.wall_thickness;
     let (rb, rboss) = (m.bore_diameter / 2.0, m.boss_diameter / 2.0);
@@ -176,7 +175,7 @@ pub fn automatic_hub(
         ));
     }
     let meet = *back.last().expect("not empty");
-    let rear = axial_length + t;
+    let rear = hub.end().x + t;
     let start = hub.start();
     let mut wire = vec![line(back[0]), curve(&back)?];
     let corners = [
@@ -245,7 +244,6 @@ pub fn wires(
     shroud: &Wall,
     basis: &ImpellerBasis,
     m: &Material,
-    axial_length: f64,
     drawn: (Option<&[SegmentInput]>, Option<&[SegmentInput]>),
 ) -> Result<MaterialWires, DesignError> {
     let mut warnings = Vec::new();
@@ -274,7 +272,7 @@ pub fn wires(
         hub,
         middle(shroud),
         drawn.0,
-        automatic_hub(hub, shroud, basis, m, axial_length),
+        automatic_hub(hub, shroud, basis, m),
     )?;
     let shroud_wire = pick(
         "shroud",
@@ -324,7 +322,7 @@ mod tests {
             assert!((d - t).abs() < 0.03 * t, "{d} vs {t}");
         }
         // The rear face of the boss sits a wall behind the outlet, down to the bore.
-        let rear = c.axial_length + t;
+        let rear = c.hub.end().x + t;
         let rb = m.bore_diameter / 2.0;
         assert!(
             hub.points()

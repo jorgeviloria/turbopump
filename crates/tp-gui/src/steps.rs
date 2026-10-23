@@ -1224,6 +1224,116 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
             &units,
             0.001..=5.0,
         );
+        if let Some(g) = g {
+            use tp_design::impeller::meridian::{AxialReference, InletTilt};
+            let contour = &g.contour;
+            label(
+                ui,
+                tr("Axial reference"),
+                tr(
+                    "The point whose axial position is given: the middle of the inlet line or \
+                     of the outlet line; the other end follows from L",
+                ),
+            );
+            let before = (m.axial_reference, m.axial_position);
+            let name = |r: AxialReference| {
+                tr(match r {
+                    AxialReference::Inlet => "middle of the inlet",
+                    AxialReference::Outlet => "middle of the outlet",
+                })
+            };
+            ComboBox::from_id_salt("axial_reference")
+                .selected_text(name(m.axial_reference))
+                .show_ui(ui, |ui| {
+                    for (reference, point) in [
+                        (
+                            AxialReference::Inlet,
+                            contour.hub.start().lerp(contour.shroud.start(), 0.5),
+                        ),
+                        (
+                            AxialReference::Outlet,
+                            contour.hub.end().lerp(contour.shroud.end(), 0.5),
+                        ),
+                    ] {
+                        // The meridian stays where it is: the position follows.
+                        if ui
+                            .selectable_label(m.axial_reference == reference, name(reference))
+                            .clicked()
+                        {
+                            m.axial_reference = reference;
+                            m.axial_position = point.x;
+                        }
+                    }
+                });
+            ui.end_row();
+            label(
+                ui,
+                tr("Axial position z"),
+                tr(
+                    "Of the reference point; changing it moves the whole meridian, drawn points included",
+                ),
+            );
+            let mut position = m.axial_position;
+            if widgets::quantity(ui, &mut position, Length, &units, -10.0..=10.0) {
+                m.shift(position - m.axial_position);
+                m.axial_position = position;
+            }
+            ui.end_row();
+            changed |= (m.axial_reference, m.axial_position) != before;
+            label(
+                ui,
+                tr("Inlet line"),
+                tr(
+                    "Normal to the axis, or leaning: the shroud point an axial distance \
+                     downstream of the hub point, or the line at an angle from the normal",
+                ),
+            );
+            let height = (contour.shroud.start().y - contour.hub.start().y).max(1e-9);
+            let offset = m.inlet_tilt.offset(height);
+            let tilt = m.inlet_tilt;
+            let tilt_name = |t: &InletTilt| {
+                tr(match t {
+                    InletTilt::Normal => "normal to the axis",
+                    InletTilt::Axial(_) => "axial distance",
+                    InletTilt::Angle(_) => "angle",
+                })
+            };
+            ComboBox::from_id_salt("inlet_tilt")
+                .selected_text(tilt_name(&tilt))
+                .show_ui(ui, |ui| {
+                    for option in [
+                        InletTilt::Normal,
+                        InletTilt::Axial(offset),
+                        InletTilt::Angle((offset / height).atan()),
+                    ] {
+                        let same = std::mem::discriminant(&option) == std::mem::discriminant(&tilt);
+                        if ui.selectable_label(same, tilt_name(&option)).clicked() && !same {
+                            m.inlet_tilt = option;
+                        }
+                    }
+                });
+            ui.end_row();
+            match &mut m.inlet_tilt {
+                InletTilt::Normal => {}
+                InletTilt::Axial(dz) => {
+                    label(ui, tr("Shroud point Δz"), tr("Downstream of the hub point"));
+                    changed |= widgets::quantity(ui, dz, Length, &units, -1.0..=1.0);
+                    ui.end_row();
+                }
+                InletTilt::Angle(angle) => {
+                    label(
+                        ui,
+                        tr("Inlet angle"),
+                        tr(
+                            "From the normal to the axis; positive with the shroud point downstream",
+                        ),
+                    );
+                    changed |= widgets::quantity(ui, angle, Angle, &units, -1.0..=1.0);
+                    ui.end_row();
+                }
+            }
+            changed |= m.inlet_tilt != tilt;
+        }
         let walls = [
             (
                 "Hub drawn by segments",

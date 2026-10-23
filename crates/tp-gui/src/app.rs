@@ -2369,4 +2369,56 @@ mod tests {
         double_click(&mut harness, at);
         assert!(meridional(harness.state()).center_line.is_none());
     }
+
+    #[test]
+    fn the_reference_point_moves_the_meridian_and_the_inlet_point_leans_it() {
+        use tp_design::impeller::meridian::InletTilt;
+        let mut harness = editor();
+        let id = harness.state().active_impeller().unwrap();
+        // A drawn hub, to see it move along.
+        let mut input = harness
+            .state()
+            .doc
+            .project()
+            .impeller_geometry_input(id)
+            .unwrap();
+        let g = harness.state().derived.geometry(id).unwrap();
+        input.meridional.hub_segments =
+            Some(tp_design::impeller::wall::split(&g.contour.hub, 0, 0.5));
+        harness
+            .state_mut()
+            .doc
+            .edit_gesture("drawn", |p| p.set_impeller_geometry(id, input))
+            .unwrap();
+        harness.run();
+        let joint =
+            |app: &TurbopumpApp| app.derived.geometry(id).unwrap().contour.hub.segments()[0].end();
+        let before = joint(harness.state());
+        let start = handle_on_screen(harness.state(), Handle::AxialReference);
+        drag_by(&mut harness, start, egui::vec2(-30.0, 0.0));
+        let m = meridional(harness.state());
+        assert!(m.axial_position < -1e-3, "{}", m.axial_position);
+        let after = joint(harness.state());
+        assert!(
+            (after.x - before.x - m.axial_position).abs() < 1e-9,
+            "the drawn hub moves along"
+        );
+        assert!((after.y - before.y).abs() < 1e-12);
+
+        // The shroud point of the inlet, dragged downstream: the line leans.
+        let start = handle_on_screen(harness.state(), Handle::InletShroud);
+        drag_by(&mut harness, start, egui::vec2(12.0, 0.0));
+        let InletTilt::Axial(dz) = meridional(harness.state()).inlet_tilt else {
+            panic!("an axial tilt");
+        };
+        assert!(dz > 1e-4, "{dz}");
+        let at = handle_on_screen(harness.state(), Handle::InletShroud);
+        double_click(&mut harness, at);
+        assert_eq!(meridional(harness.state()).inlet_tilt, InletTilt::Normal);
+        let at = handle_on_screen(harness.state(), Handle::AxialReference);
+        double_click(&mut harness, at);
+        let m = meridional(harness.state());
+        assert!(m.axial_position.abs() < 1e-15);
+        assert!((joint(harness.state()).x - before.x).abs() < 1e-9);
+    }
 }

@@ -200,7 +200,8 @@ impl ImpellerGeometry {
     pub fn sides(&self, wall: f64, double_entry: bool) -> crate::outlet::ImpellerSides {
         use crate::outlet::SIDE_POINTS;
         let c = &self.contour;
-        let length = c.axial_length;
+        // The axial position of the hub at the outlet.
+        let length = c.hub.end().x;
         let last = (SIDE_POINTS - 1) as f64;
         // The shroud from the outlet (t = 1) to the eye (t = 0), (z, r), moved outward:
         // to the left of the way from the eye to the outlet.

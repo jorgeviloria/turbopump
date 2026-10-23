@@ -1,9 +1,11 @@
 //! Meridional contour of a radial impeller and the quasi-one-dimensional flow through it.
 //!
 //! Coordinates in the meridional plane are `DVec2 { x: z, y: r }`: z along the axis in
-//! the inflow direction, r the radius. The inlet plane is z = 0; at the outlet
-//! (r = d₂/2) the shroud sits at z = L − b₂ and the hub at z = L, L being the axial
-//! length of the impeller.
+//! the inflow direction, r the radius. The hub point of the inlet sits at z = z₀, 0
+//! unless the meridian is placed elsewhere (see [`AxialReference`]); at the outlet
+//! (r = d₂/2) the shroud sits at z₀ + L − b₂ and the hub at z₀ + L, L being the axial
+//! length of the impeller. The inlet line may lean: its shroud point lies Δz
+//! downstream of its hub point (see [`InletTilt`]).
 
 use std::f64::consts::PI;
 
@@ -68,6 +70,72 @@ pub struct MeridionalInput {
     /// Cross section along the center line, (x, A_rel) pairs; empty for linear.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub area_progression: Vec<[f64; 2]>,
+    /// The point the axial position refers to.
+    pub axial_reference: AxialReference,
+    /// Axial position z of the reference point, m.
+    pub axial_position: f64,
+    /// How the inlet line leans.
+    pub inlet_tilt: InletTilt,
+}
+
+/// The point of the center line whose axial position is given: the middle of the inlet
+/// line or of the outlet line. The other end follows from the axial length.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AxialReference {
+    #[default]
+    Inlet,
+    Outlet,
+}
+
+/// How the inlet line, from the hub point to the shroud point, leans.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub enum InletTilt {
+    /// Normal to the axis.
+    #[default]
+    Normal,
+    /// The shroud point lies this far downstream of the hub point, m.
+    Axial(f64),
+    /// The line leans this much from the normal to the axis, rad, the shroud point
+    /// downstream for a positive angle.
+    Angle(f64),
+}
+
+impl InletTilt {
+    /// The axial offset of the shroud point from the hub point for an inlet `height`
+    /// high, m.
+    pub fn offset(self, height: f64) -> f64 {
+        match self {
+            InletTilt::Normal => 0.0,
+            InletTilt::Axial(dz) => dz,
+            InletTilt::Angle(a) => height * a.tan(),
+        }
+    }
+}
+
+impl MeridionalInput {
+    /// Moves every point stored in absolute coordinates by `dz` along the axis: drawn
+    /// walls, center line, material wires and casing walls. Moved together with the
+    /// axial position, the whole meridian shifts.
+    pub fn shift(&mut self, dz: f64) {
+        let by = DVec2::new(dz, 0.0);
+        let wires = [
+            &mut self.hub_segments,
+            &mut self.shroud_segments,
+            &mut self.center_line,
+            &mut self.hub_material,
+            &mut self.shroud_material,
+            &mut self.chambers.front,
+            &mut self.chambers.rear,
+        ];
+        for segments in wires.into_iter().flatten() {
+            for s in segments {
+                s.end += by;
+                for c in &mut s.controls {
+                    *c += by;
+                }
+            }
+        }
+    }
 }
 
 /// How the hub point of the leading edge sits relative to its shroud point.
@@ -371,6 +439,8 @@ pub struct MeridionalContour {
     /// otherwise.
     pub center_line: Wall,
     pub axial_length: f64,
+    /// The point the axial position refers to, as given.
+    pub axial_reference: AxialReference,
     /// Leading edge on the hub and on the shroud, as fractions of each contour length.
     pub leading_edge: (f64, f64),
     /// The leading edge as a curve, unless it follows the channel.
@@ -401,6 +471,15 @@ fn corner_curve(start: DVec2, corner: DVec2, end: DVec2, t_in: f64, t_out: f64) 
 }
 
 impl MeridionalContour {
+    /// The reference point of the axial position: the middle of the inlet line or of
+    /// the outlet line.
+    pub fn axial_reference_point(&self) -> DVec2 {
+        match self.axial_reference {
+            AxialReference::Inlet => self.hub.start().lerp(self.shroud.start(), 0.5),
+            AxialReference::Outlet => self.hub.end().lerp(self.shroud.end(), 0.5),
+        }
+    }
+
     pub fn build(basis: &ImpellerBasis, input: &MeridionalInput) -> Result<Self, DesignError> {
         let rn = basis.hub_diameter / 2.0;
         let r1 = basis.inlet_diameter / 2.0;
@@ -410,17 +489,23 @@ impl MeridionalContour {
         // Both walls run axially from the inlet, turn at a corner and leave the outlet at
         // ε_s; each corner sits where the axial line meets the outlet direction.
         let edge = outlet_edge(basis);
-        let hub_end = DVec2::new(length, basis.outlet_hub_diameter / 2.0);
-        let shroud_end = DVec2::new(length - edge.x, r2);
+        // The hub point of the inlet: where the reference point puts it.
+        let tilt = input.inlet_tilt.offset(r1 - rn);
+        let z0 = match input.axial_reference {
+            AxialReference::Inlet => input.axial_position - tilt / 2.0,
+            AxialReference::Outlet => input.axial_position - (length - edge.x / 2.0),
+        };
+        let hub_end = DVec2::new(z0 + length, basis.outlet_hub_diameter / 2.0);
+        let shroud_end = DVec2::new(z0 + length - edge.x, r2);
         let eps = basis.outlet_inclination;
         let corner = |end: DVec2, r: f64| DVec2::new(end.x - (end.y - r) * eps.tan(), r);
         let (hub_corner, shroud_corner) = (corner(hub_end, rn), corner(shroud_end, r1));
         // Only automatic walls need room to run axially before they turn.
-        let room = |corner: DVec2, drawn: bool| drawn || corner.x > 0.0;
+        let room = |corner: DVec2, start: f64, drawn: bool| drawn || corner.x > start;
         if !(length.is_finite()
             && length > b2
-            && room(hub_corner, input.hub_segments.is_some())
-            && room(shroud_corner, input.shroud_segments.is_some()))
+            && room(hub_corner, z0, input.hub_segments.is_some())
+            && room(shroud_corner, z0 + tilt, input.shroud_segments.is_some()))
         {
             return Err(DesignError::InvalidInput(format!(
                 "axial length {length:.4} m is too short for the outlet: the hub and shroud \
@@ -428,7 +513,7 @@ impl MeridionalContour {
             )));
         }
         let tangent = |name, p: &Param<f64>| fraction(name, p.resolve(|| DEFAULT_TANGENT));
-        let (hub_start, shroud_start) = (DVec2::new(0.0, rn), DVec2::new(0.0, r1));
+        let (hub_start, shroud_start) = (DVec2::new(z0, rn), DVec2::new(z0 + tilt, r1));
         let hub = match &input.hub_segments {
             Some(segments) => Wall::build(hub_start, hub_end, segments)?,
             None => Wall::single(corner_curve(
@@ -517,7 +602,6 @@ impl MeridionalContour {
             &shroud,
             basis,
             &settings,
-            length,
             (
                 input.hub_material.as_deref(),
                 input.shroud_material.as_deref(),
@@ -533,6 +617,7 @@ impl MeridionalContour {
             shroud_line,
             chambers: side_chambers,
             center_line,
+            axial_reference: input.axial_reference,
             hub,
             shroud,
             hub_material: wires.hub,
@@ -1002,6 +1087,80 @@ pub(crate) mod tests {
     }
 
     /// The Bézier a leading-edge shape stands for, between `hub` and `shroud`.
+    #[test]
+    fn the_meridian_moves_with_its_axial_position_and_reference() {
+        let b = basis();
+        let base = MeridionalContour::build(&b, &MeridionalInput::default()).unwrap();
+        let moved = |input: MeridionalInput| MeridionalContour::build(&b, &input).unwrap();
+        let dz = 0.05;
+        let at_inlet = moved(MeridionalInput {
+            axial_position: dz,
+            ..MeridionalInput::default()
+        });
+        for (p, q) in base.hub.sample(50).iter().zip(at_inlet.hub.sample(50)) {
+            assert!((q - *p - DVec2::new(dz, 0.0)).length() < 1e-12);
+        }
+        assert!((at_inlet.hub_material.end().x - dz).abs() < 1e-12);
+        assert_eq!(at_inlet.axial_length, base.axial_length);
+        // From the outlet: the middle of the outlet line sits at the position, wherever
+        // the axial length puts the inlet.
+        let at_outlet = moved(MeridionalInput {
+            axial_reference: AxialReference::Outlet,
+            axial_position: 0.2,
+            axial_length: Param::Manual(0.06),
+            ..MeridionalInput::default()
+        });
+        let middle = at_outlet.hub.end().lerp(at_outlet.shroud.end(), 0.5);
+        assert!((middle.x - 0.2).abs() < 1e-12);
+        assert!((at_outlet.hub.end().x - at_outlet.hub.start().x - 0.06).abs() < 1e-12);
+        // The guide measures from the inlet: it does not move with the meridian.
+        let (g0, g1) = (
+            super::super::guide::guide(&base, &b),
+            super::super::guide::guide(&at_inlet, &b),
+        );
+        assert!((g0.axial_extension.actual - g1.axial_extension.actual).abs() < 1e-12);
+        assert!((g0.inlet_run.actual - g1.inlet_run.actual).abs() < 1e-9);
+
+        // Drawn walls move along when shifted with the position.
+        let mut input = MeridionalInput {
+            hub_segments: Some(super::super::wall::split(&base.hub, 0, 0.4)),
+            ..MeridionalInput::default()
+        };
+        let drawn = moved(input.clone());
+        input.shift(dz);
+        input.axial_position = dz;
+        let shifted = moved(input);
+        for (p, q) in drawn.hub.sample(50).iter().zip(shifted.hub.sample(50)) {
+            assert!((q - *p - DVec2::new(dz, 0.0)).length() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn the_inlet_line_leans_by_an_axial_distance_or_an_angle() {
+        let b = basis();
+        let height = (b.inlet_diameter - b.hub_diameter) / 2.0;
+        for (tilt, dz) in [
+            (InletTilt::Axial(0.004), 0.004),
+            (
+                InletTilt::Angle(20f64.to_radians()),
+                height * 20f64.to_radians().tan(),
+            ),
+        ] {
+            let c = MeridionalContour::build(
+                &b,
+                &MeridionalInput {
+                    inlet_tilt: tilt,
+                    ..MeridionalInput::default()
+                },
+            )
+            .unwrap();
+            assert!((c.shroud.start().x - c.hub.start().x - dz).abs() < 1e-12);
+            // The middle of the inlet line stays at the axial position.
+            let middle = c.hub.start().lerp(c.shroud.start(), 0.5);
+            assert!(middle.x.abs() < 1e-12);
+        }
+    }
+
     #[test]
     fn the_hub_point_of_the_leading_edge_keeps_its_offset_from_the_shroud_point() {
         let b = basis();

@@ -332,7 +332,7 @@ pub fn build_impeller(g: &ImpellerGeometry, options: &CadOptions) -> Result<Impe
         .sample(200)
         .iter()
         .map(|p| p.x)
-        .fold(g.contour.axial_length, f64::max);
+        .fold(g.contour.hub.end().x, f64::max);
 
     // The side chambers, revolved from their outlines.
     let chambers = &g.contour.chambers;

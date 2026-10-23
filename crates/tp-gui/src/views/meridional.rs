@@ -12,7 +12,8 @@ use egui_plot::{
     PlotTransform, Points, Text,
 };
 use tp_design::impeller::meridian::{
-    DesignMode, EdgeExtent, LeadingEdgeShape, MeridionalContour, MeridionalInput, chord_coordinates,
+    AxialReference, DesignMode, EdgeExtent, InletTilt, LeadingEdgeShape, MeridionalContour,
+    MeridionalInput, chord_coordinates,
 };
 use tp_design::impeller::potential::{self, PotentialFlow, PotentialMesh};
 use tp_design::impeller::wall::{self, Segment, SegmentInput, SegmentKind, Wall, WallPoint};
@@ -132,7 +133,13 @@ pub(crate) enum Handle {
     LeadingEdgeShroud,
     /// Inner control point of a Bézier leading edge.
     LeadingEdgeControl(usize),
+    /// The axial length: at the hub end of the outlet, or at the hub start of the inlet
+    /// when the outlet is the axial reference.
     AxialLength,
+    /// The reference point of the axial position: it moves the whole meridian.
+    AxialReference,
+    /// The shroud point of the inlet line: it moves axially and leans the line.
+    InletShroud,
     /// Middle of the trailing edge: it moves radially and sets d₂.
     TrailingEdge,
     /// Centre of the rounded corner of arc segment `.1`: it moves along the bisector
@@ -156,6 +163,8 @@ impl Handle {
             Handle::LeadingEdgeControl(_) => "leading edge control point",
             Handle::AxialLength => "axial length",
             Handle::TrailingEdge => "trailing edge",
+            Handle::AxialReference => "axial reference point",
+            Handle::InletShroud => "shroud point of the inlet",
             Handle::ArcCenter(Side::Hub, _) => "hub arc centre",
             Handle::ArcCenter(Side::Shroud, _) => "shroud arc centre",
             Handle::Point(Side::HubMaterial, WallPoint::Joint { .. }) => "hub disk corner",
@@ -233,7 +242,12 @@ pub(crate) fn handles(contour: &MeridionalContour, input: &MeridionalInput) -> V
     if matches!(contour.leading_edge_shape, LeadingEdgeShape::Bezier { .. }) {
         handles.extend([Handle::LeadingEdgeControl(0), Handle::LeadingEdgeControl(1)]);
     }
-    handles.extend([Handle::AxialLength, Handle::TrailingEdge]);
+    handles.extend([
+        Handle::AxialLength,
+        Handle::AxialReference,
+        Handle::InletShroud,
+        Handle::TrailingEdge,
+    ]);
     handles
 }
 
@@ -265,7 +279,12 @@ pub(crate) fn handle_position(handle: Handle, contour: &MeridionalContour) -> DV
     match handle {
         Handle::LeadingEdgeHub => contour.hub_at(contour.leading_edge.0),
         Handle::LeadingEdgeShroud => contour.shroud_at(contour.leading_edge.1),
-        Handle::AxialLength => contour.hub.end(),
+        Handle::AxialLength => match contour.axial_reference {
+            AxialReference::Inlet => contour.hub.end(),
+            AxialReference::Outlet => contour.hub.start(),
+        },
+        Handle::AxialReference => contour.axial_reference_point(),
+        Handle::InletShroud => contour.shroud.start(),
         Handle::TrailingEdge => contour.hub.end().lerp(contour.shroud.end(), 0.5),
         Handle::ArcCenter(side, segment) => {
             let wall = side.wall(contour);
@@ -404,9 +423,33 @@ pub(crate) fn apply_drag(
                 Param::Manual(nearest_fraction(|t| contour.shroud_at(t), pointer));
         }
         Handle::AxialLength => {
+            // From the fixed end: the inlet, or the outlet when it is the reference.
+            let length = match contour.axial_reference {
+                AxialReference::Inlet => pointer.x - contour.hub.start().x,
+                AxialReference::Outlet => contour.hub.end().x - pointer.x,
+            };
             let min = basis.outlet_width * 1.1;
             let max = basis.outlet_diameter * 2.0;
-            input.axial_length = Param::Manual(pointer.x.clamp(min, max));
+            input.axial_length = Param::Manual(length.clamp(min, max));
+        }
+        Handle::AxialReference => {
+            // The whole meridian, drawn points included, moves with it.
+            let delta = pointer.x - contour.axial_reference_point().x;
+            input.axial_position += delta;
+            input.shift(delta);
+        }
+        Handle::InletShroud => {
+            let (hub, shroud) = (contour.hub.start(), contour.shroud.start());
+            // The inlet reference keeps the middle of the line in place.
+            let tilt = match contour.axial_reference {
+                AxialReference::Inlet => 2.0 * (pointer.x - hub.lerp(shroud, 0.5).x),
+                AxialReference::Outlet => pointer.x - hub.x,
+            };
+            let height = (shroud.y - hub.y).max(1e-9);
+            input.inlet_tilt = match input.inlet_tilt {
+                InletTilt::Angle(_) => InletTilt::Angle((tilt / height).atan()),
+                _ => InletTilt::Axial(tilt),
+            };
         }
         // The outlet belongs to the main dimensions: see `drag_change`.
         Handle::Point(..)
@@ -534,6 +577,8 @@ pub(crate) fn is_manual(handle: Handle, inputs: Inputs<'_>) -> bool {
                         .is_some_and(|d| !d.outlet_hub_diameter.is_auto())
         }
         Handle::TrailingEdge => inputs.main.is_some_and(|d| !d.outlet_diameter.is_auto()),
+        Handle::AxialReference => m.axial_position.abs() > 1e-12,
+        Handle::InletShroud => m.inlet_tilt != InletTilt::Normal,
         // A point of a wire round the flow path may still be automatic.
         Handle::Point(side, _) | Handle::ArcCenter(side, _) => !side.is_wire() || side.drawn(m),
         Handle::LeadingEdgeControl(_) => true,
@@ -551,6 +596,16 @@ pub(crate) fn reset_change(handle: Handle, inputs: Inputs<'_>) -> Option<Change>
         && side.is_wire()
     {
         return inputs.geometry(|input| *side.segments(&mut input.meridional) = None);
+    }
+    if handle == Handle::AxialReference {
+        return inputs.geometry(|input| {
+            let m = &mut input.meridional;
+            m.shift(-m.axial_position);
+            m.axial_position = 0.0;
+        });
+    }
+    if handle == Handle::InletShroud {
+        return inputs.geometry(|input| input.meridional.inlet_tilt = InletTilt::Normal);
     }
     if handle == Handle::AxialLength && inputs.semi_axial {
         return inputs.both(
@@ -574,6 +629,8 @@ pub(crate) fn reset_change(handle: Handle, inputs: Inputs<'_>) -> Option<Change>
             Handle::Point(..)
             | Handle::LeadingEdgeControl(_)
             | Handle::TrailingEdge
+            | Handle::AxialReference
+            | Handle::InletShroud
             | Handle::ArcCenter(..) => return,
         };
         *param = Param::Auto;
@@ -807,8 +864,10 @@ pub(crate) fn dimension_lines(
         .iter()
         .chain(&shroud.sample(120))
         .map(|p| p.x)
-        .fold(contour.axial_length, f64::max);
-    let z_min = hub.start().x.min(shroud.start().x).min(0.0);
+        .fold(contour.hub.end().x, f64::max);
+    let z_min = hub.start().x.min(shroud.start().x);
+    // Axial dimensions start at the hub point of the inlet.
+    let z0 = hub.start().x;
     let mut lines = Vec::new();
     let mut rows = 0;
     let mut columns = 0;
@@ -817,13 +876,13 @@ pub(crate) fn dimension_lines(
         let y = -gap * rows as f64;
         lines.push(DimensionLine {
             dimension,
-            from: DVec2::new(0.0, y),
+            from: DVec2::new(z0, y),
             to: DVec2::new(p.x, y),
             extensions: vec![
-                [DVec2::new(0.0, 0.0), DVec2::new(0.0, y)],
+                [DVec2::new(z0, 0.0), DVec2::new(z0, y)],
                 [p, DVec2::new(p.x, y)],
             ],
-            value: p.x,
+            value: p.x - z0,
         });
     };
     // From the axis up to `p`, at axial position `x`.
@@ -895,7 +954,10 @@ pub(crate) fn dimension_lines(
             value: f.radius,
         });
     } else if let Some(h) = hovered
-        && !matches!(h, Handle::AxialLength | Handle::TrailingEdge)
+        && !matches!(
+            h,
+            Handle::AxialLength | Handle::TrailingEdge | Handle::AxialReference
+        )
     {
         let p = handle_position(h, contour);
         axial(&mut lines, Dimension::Z(h), p);
@@ -946,7 +1008,7 @@ fn set_dimension(
         DVec2::new(z.unwrap_or(p.x), r.unwrap_or(p.y))
     };
     let (handle, to) = match dimension {
-        Dimension::Z(h) => (h, moved(h, Some(value), None)),
+        Dimension::Z(h) => (h, moved(h, Some(contour.hub.start().x + value), None)),
         Dimension::R(h) => (h, moved(h, None, Some(value.max(0.0)))),
         _ => return None,
     };
@@ -1369,6 +1431,8 @@ fn handle_color(handle: Handle, palette: &Palette) -> Color32 {
             palette.leading_edge
         }
         Handle::TrailingEdge => palette.trailing_edge,
+        Handle::AxialReference => palette.stator,
+        Handle::InletShroud => palette.shroud,
     }
 }
 
@@ -1933,6 +1997,15 @@ impl MeridionalView {
                     .width(1.5),
                 );
             }
+            // The inlet line, normal to the axis or leaning.
+            plot.line(
+                Line::new(
+                    "",
+                    line([g.contour.hub.start(), g.contour.shroud.start()], scale),
+                )
+                .color(palette.guide)
+                .width(1.0),
+            );
             plot.line(
                 Line::new("hub", line(g.contour.hub.sample(240), scale))
                     .color(palette.hub)
@@ -2479,6 +2552,88 @@ pub(crate) fn bezier_along_edge(g: &ImpellerGeometry) -> LeadingEdgeShape {
     }
 }
 
+/// Where the meridian sits along the axis: the reference point and its position.
+/// Choosing the other reference keeps the meridian in place; a new position moves it
+/// whole, drawn points included.
+pub(crate) fn axial_placement(
+    ui: &mut Ui,
+    contour: &MeridionalContour,
+    m: &mut MeridionalInput,
+    units: &DisplayUnits,
+) {
+    ui.horizontal(|ui| {
+        ui.label(tr("reference"));
+        for (reference, name) in [
+            (AxialReference::Inlet, tr("middle of the inlet")),
+            (AxialReference::Outlet, tr("middle of the outlet")),
+        ] {
+            if ui.radio(m.axial_reference == reference, name).clicked()
+                && m.axial_reference != reference
+            {
+                let point = match reference {
+                    AxialReference::Inlet => contour.hub.start().lerp(contour.shroud.start(), 0.5),
+                    AxialReference::Outlet => contour.hub.end().lerp(contour.shroud.end(), 0.5),
+                };
+                m.axial_reference = reference;
+                m.axial_position = point.x;
+            }
+        }
+    });
+    let mut position = m.axial_position;
+    if length_field(ui, tr("axial position z"), &mut position, units) {
+        m.shift(position - m.axial_position);
+        m.axial_position = position;
+    }
+}
+
+/// How the inlet line leans: normal to the axis, by the axial distance of its shroud
+/// point, or by an angle. Changing the way keeps the line as it is.
+pub(crate) fn inlet_tilt(
+    ui: &mut Ui,
+    contour: &MeridionalContour,
+    m: &mut MeridionalInput,
+    units: &DisplayUnits,
+) {
+    let height = (contour.shroud.start().y - contour.hub.start().y).max(1e-9);
+    let offset = m.inlet_tilt.offset(height);
+    ui.horizontal(|ui| {
+        for (tilt, name) in [
+            (InletTilt::Normal, tr("normal to the axis")),
+            (InletTilt::Axial(offset), tr("axial distance")),
+            (InletTilt::Angle((offset / height).atan()), tr("angle")),
+        ] {
+            let same = std::mem::discriminant(&tilt) == std::mem::discriminant(&m.inlet_tilt);
+            if ui.radio(same, name).clicked() && !same {
+                m.inlet_tilt = tilt;
+            }
+        }
+    });
+    match &mut m.inlet_tilt {
+        InletTilt::Normal => {}
+        InletTilt::Axial(dz) => {
+            length_field(ui, "Δz", dz, units);
+        }
+        InletTilt::Angle(angle) => {
+            let mut degrees = angle.to_degrees();
+            ui.horizontal(|ui| {
+                ui.label(tr("from the normal to the axis"));
+                if ui
+                    .add(
+                        DragValue::new(&mut degrees)
+                            .speed(0.2)
+                            .range(-60.0..=60.0)
+                            .max_decimals(2)
+                            .suffix("°"),
+                    )
+                    .changed()
+                {
+                    *angle = degrees.to_radians();
+                }
+            });
+        }
+    }
+}
+
 /// The shape choice of the leading edge.
 /// The names of the ways the hub point of the leading edge can follow its shroud point.
 pub(crate) fn extent_name(extent: EdgeExtent) -> &'static str {
@@ -2899,6 +3054,14 @@ fn edit_menu(
             leading_edge_shape(ui, g, m);
             ui.separator();
             leading_edge_extent(ui, g, m, units);
+        }
+        MenuTarget::Handle(handle @ Handle::AxialReference) => {
+            ui.strong(handle.label());
+            axial_placement(ui, contour, m, units);
+        }
+        MenuTarget::Handle(handle @ Handle::InletShroud) => {
+            ui.strong(handle.label());
+            inlet_tilt(ui, contour, m, units);
         }
         MenuTarget::Handle(handle @ Handle::ArcCenter(side, segment)) => {
             ui.strong(handle.label());

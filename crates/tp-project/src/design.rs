@@ -452,7 +452,8 @@ impl Project {
         let geometry = self.compute_impeller_geometry(impeller)?;
         // A double-entry impeller is modelled as one half whose hub is the plane of
         // symmetry; a single-entry impeller discharges between shroud and hub.
-        let length = geometry.contour.axial_length;
+        // The hub end of the outlet, wherever the meridian is placed.
+        let length = geometry.contour.hub.end().x;
         let midplane = match self.pump_impeller_input(impeller)?.suction {
             Suction::Single => length - geometry.basis.outlet_width / 2.0,
             Suction::Double => length,

@@ -62,8 +62,10 @@ pub fn guide(contour: &MeridionalContour, basis: &ImpellerBasis) -> MeridianGuid
     let b1 = (basis.inlet_diameter - basis.hub_diameter) / 2.0;
 
     let ze = (basis.outlet_diameter - basis.inlet_diameter) * (basis.nq / NQ_REF).powf(ZE_EXPONENT);
+    // Axial positions from the inlet, at the shroud point of the inlet line.
+    let z0 = shroud.start().x;
     let axial_extension = Check::range(
-        shroud.end().x,
+        shroud.end().x - z0,
         ze * (1.0 - ZE_TOLERANCE),
         ze * (1.0 + ZE_TOLERANCE),
     );
@@ -85,18 +87,19 @@ pub fn guide(contour: &MeridionalContour, basis: &ImpellerBasis) -> MeridianGuid
     let shroud_radius = Check::range(radius, 0.6 * b1, 0.8 * b1);
 
     let points = shroud.sample(600);
-    let run = points
+    let run = (points
         .windows(2)
         .find(|w| {
             let d = w[1] - w[0];
             d.y.atan2(d.x).abs() > RUN_ANGLE
         })
         .map_or(shroud.end().x, |w| w[0].x)
+        - z0)
         .max(0.0);
     let inlet_run = Check::range(run, 0.2 * b1, 0.3 * b1);
 
     let leading_edge = contour.shroud_at(contour.leading_edge.1);
-    let leading_edge_before_bend = leading_edge.x <= run + 1e-9;
+    let leading_edge_before_bend = leading_edge.x - z0 <= run + 1e-9;
 
     let out = shroud.end_direction();
     let shroud_outlet_angle = (FRAC_PI_2 - out.y.atan2(out.x)).abs();

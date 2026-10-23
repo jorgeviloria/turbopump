@@ -650,6 +650,11 @@ fn meridian_segment_kinds() {
     use tp_design::impeller::wall::{self, SegmentKind};
     let mut project = tp_gui::default_project();
     let id = project.components()[0].id();
+    // An inlet line leaning 15° from the normal to the axis, before the walls are drawn.
+    let mut input = project.impeller_geometry_input(id).unwrap();
+    input.meridional.inlet_tilt =
+        tp_design::impeller::meridian::InletTilt::Angle(15f64.to_radians());
+    project.set_impeller_geometry(id, input).unwrap();
     let g = project.compute_impeller_geometry(id).unwrap();
     let mut input = project.impeller_geometry_input(id).unwrap();
     let rebuild = |w: &wall::Wall, s: &[wall::SegmentInput]| {
