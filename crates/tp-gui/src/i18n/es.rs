@@ -320,6 +320,15 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "center line arc centre",
         "centro del arco de la línea media",
     ),
+    ("Potential", "Potencial"),
+    ("c_m iso-lines", "isolíneas de c_m"),
+    ("c_m color map", "mapa de color de c_m"),
+    ("velocity vectors", "vectores de velocidad"),
+    ("blade blockage", "bloqueo de los álabes"),
+    (
+        "Solve with the thickness of the blades: among them only the open part of the circumference carries the flow (Gülich eqs. 3.1.7 and 3.2.3)",
+        "Resuelve con el espesor de los álabes: entre ellos solo la parte libre de la circunferencia lleva el caudal (Gülich, ec. 3.1.7 y 3.2.3)",
+    ),
     ("curvature maximum", "curvatura máxima"),
     (
         "Point of smallest radius of curvature of hub and shroud",

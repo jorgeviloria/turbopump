@@ -5,7 +5,8 @@
 
 use std::f64::consts::PI;
 
-use eframe::egui::{self, Color32, CursorIcon, DragValue, RichText, Sense, Ui};
+use eframe::egui::containers::menu::{MenuButton, MenuConfig};
+use eframe::egui::{self, Color32, CursorIcon, DragValue, PopupCloseBehavior, RichText, Sense, Ui};
 use egui_plot::{
     Corner, Legend, Line, LineStyle, MarkerShape, Plot, PlotBounds, PlotPoint, PlotPoints,
     PlotTransform, Points, Text,
@@ -585,6 +586,9 @@ pub(crate) struct Display {
     pub stream_lines: bool,
     pub quasi_orthogonals: bool,
     pub potential: bool,
+    /// What the potential flow shows: stream lines, iso-lines and a color map of c_m,
+    /// velocity vectors; and whether it takes the blockage of the blades into account.
+    pub potential_view: PotentialView,
     /// The main dimensions d_n, d₁, d₂, b₂ and L. The point under the pointer is
     /// dimensioned either way.
     pub dimensions: bool,
@@ -607,6 +611,27 @@ pub(crate) struct Display {
     pub material_lines: bool,
     /// What the handles edit.
     pub page: Page,
+}
+
+/// What the potential flow shows over the diagram.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PotentialView {
+    pub stream_lines: bool,
+    pub iso_lines: bool,
+    pub map: bool,
+    pub vectors: bool,
+    /// Solve with the blockage of the blade thickness.
+    pub blades: bool,
+}
+
+impl PotentialView {
+    const DEFAULT: PotentialView = PotentialView {
+        stream_lines: true,
+        iso_lines: false,
+        map: false,
+        vectors: false,
+        blades: false,
+    };
 }
 
 /// What the handles of the diagram edit.
@@ -638,6 +663,7 @@ impl Display {
         stream_lines: true,
         quasi_orthogonals: false,
         potential: false,
+        potential_view: PotentialView::DEFAULT,
         dimensions: false,
         curvature: false,
         area_circles: false,
@@ -654,6 +680,7 @@ impl Display {
         stream_lines: false,
         quasi_orthogonals: false,
         potential: false,
+        potential_view: PotentialView::DEFAULT,
         dimensions: true,
         curvature: false,
         area_circles: false,
@@ -1142,6 +1169,173 @@ fn paint_guides(ui: &Ui, transform: &PlotTransform, guides: &[[DVec2; 2]], scale
     }
 }
 
+/// A color for `t` ∈ [0, 1], from slow (deep blue) to fast (warm red) through teal,
+/// green and yellow (our ramp).
+fn ramp(t: f32) -> Color32 {
+    const STOPS: [(u8, u8, u8); 5] = [
+        (40, 60, 150),
+        (30, 150, 170),
+        (90, 180, 90),
+        (230, 200, 60),
+        (210, 70, 50),
+    ];
+    let t = t.clamp(0.0, 1.0) * (STOPS.len() - 1) as f32;
+    let i = (t.floor() as usize).min(STOPS.len() - 2);
+    let f = t - i as f32;
+    let (a, b) = (STOPS[i], STOPS[i + 1]);
+    let mix = |x: u8, y: u8| (f32::from(x) + (f32::from(y) - f32::from(x)) * f).round() as u8;
+    Color32::from_rgb(mix(a.0, b.0), mix(a.1, b.1), mix(a.2, b.2))
+}
+
+/// The meridional velocity of the potential flow over the plot: a color map, iso-lines
+/// and vectors as `view` asks, with a color bar of the range in the top-left corner.
+fn paint_potential(
+    ui: &Ui,
+    transform: &PlotTransform,
+    flow: &PotentialFlow,
+    view: PotentialView,
+    scale: f64,
+    units: &DisplayUnits,
+) {
+    if !(view.map || view.iso_lines || view.vectors) {
+        return;
+    }
+    let painter = ui.painter_at(*transform.frame());
+    let screen =
+        |p: DVec2| transform.position_from_point(&PlotPoint::new(p.x * scale, p.y * scale));
+    let (ns, nj) = (flow.stations, flow.across);
+    let index = |i: usize, j: usize| i * nj + j;
+    // The range of the channel proper, without the extensions.
+    let (first, last) = flow.channel;
+    let range = (first..=last).flat_map(|i| (0..nj).map(move |j| flow.cm[i * nj + j]));
+    let (lo, hi) = range.fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), c| {
+        (lo.min(c), hi.max(c))
+    });
+    let span = (hi - lo).max(1e-9);
+    let level = |c: f64| ((c - lo) / span) as f32;
+    if view.map {
+        let mut mesh = egui::epaint::Mesh::default();
+        for k in 0..ns * nj {
+            let color = ramp(level(flow.cm[k])).gamma_multiply(0.75);
+            mesh.colored_vertex(screen(flow.nodes[k]), color);
+        }
+        for i in 0..ns - 1 {
+            for j in 0..nj - 1 {
+                let (a, b, c, d) = (
+                    index(i, j),
+                    index(i + 1, j),
+                    index(i + 1, j + 1),
+                    index(i, j + 1),
+                );
+                mesh.add_triangle(a as u32, b as u32, c as u32);
+                mesh.add_triangle(a as u32, c as u32, d as u32);
+            }
+        }
+        painter.add(egui::Shape::mesh(mesh));
+    }
+    if view.iso_lines {
+        // Marching squares on each cell, at ten levels across the range.
+        let stroke = egui::Stroke::new(1.0, ui.visuals().text_color().gamma_multiply(0.7));
+        for n in 1..10 {
+            let value = lo + span * f64::from(n) / 10.0;
+            for i in 0..ns - 1 {
+                for j in 0..nj - 1 {
+                    let corners = [
+                        index(i, j),
+                        index(i + 1, j),
+                        index(i + 1, j + 1),
+                        index(i, j + 1),
+                    ];
+                    let mut crossings = Vec::with_capacity(4);
+                    for e in 0..4 {
+                        let (a, b) = (corners[e], corners[(e + 1) % 4]);
+                        let (ca, cb) = (flow.cm[a], flow.cm[b]);
+                        if (ca - value) * (cb - value) < 0.0 {
+                            let t = (value - ca) / (cb - ca);
+                            crossings.push(flow.nodes[a].lerp(flow.nodes[b], t));
+                        }
+                    }
+                    for pair in crossings.as_chunks::<2>().0 {
+                        painter.line_segment([screen(pair[0]), screen(pair[1])], stroke);
+                    }
+                }
+            }
+        }
+    }
+    if view.vectors {
+        // Every sixth node along and every fourth across; the fastest 1.5 cells long.
+        let reach = flow
+            .nodes
+            .windows(2)
+            .map(|w| screen(w[0]).distance(screen(w[1])))
+            .fold(0.0_f32, f32::max)
+            .min(30.0);
+        for i in (0..ns).step_by(6) {
+            for j in (1..nj - 1).step_by(4) {
+                let k = index(i, j);
+                let v = flow.velocity[k];
+                let from = screen(flow.nodes[k]);
+                let tip = screen(flow.nodes[k] + v.normalize_or_zero() * 1e-3);
+                let along = (tip - from).normalized();
+                let length = reach * 1.5 * (v.length() / hi.max(1e-9)) as f32;
+                let to = from + along * length;
+                // Over the color map the arrows take the text color to stand out.
+                let color = if view.map {
+                    ui.visuals().text_color()
+                } else {
+                    ramp(level(v.length()))
+                };
+                let stroke = egui::Stroke::new(1.4, color);
+                painter.line_segment([from, to], stroke);
+                let back = to - along * 5.0;
+                let side = along.rot90() * 2.5;
+                painter.add(egui::Shape::convex_polygon(
+                    vec![to, back + side, back - side],
+                    color,
+                    egui::Stroke::NONE,
+                ));
+            }
+        }
+    }
+    // The color bar: slow at the bottom, fast at the top.
+    if view.map || view.vectors {
+        let frame = transform.frame();
+        let bar =
+            egui::Rect::from_min_size(frame.min + egui::vec2(12.0, 12.0), egui::vec2(10.0, 90.0));
+        let mut mesh = egui::epaint::Mesh::default();
+        let steps = 12;
+        for s in 0..=steps {
+            let t = s as f32 / steps as f32;
+            let y = bar.bottom() - t * bar.height();
+            mesh.colored_vertex(egui::pos2(bar.left(), y), ramp(t));
+            mesh.colored_vertex(egui::pos2(bar.right(), y), ramp(t));
+            if s > 0 {
+                let b = (2 * s) as u32;
+                mesh.add_triangle(b - 2, b - 1, b);
+                mesh.add_triangle(b - 1, b + 1, b);
+            }
+        }
+        painter.add(egui::Shape::mesh(mesh));
+        let text = ui.visuals().text_color();
+        let font = egui::FontId::proportional(11.0);
+        let show = |c: f64| units.show(QuantityKind::Velocity, c);
+        painter.text(
+            bar.right_top() + egui::vec2(4.0, 0.0),
+            egui::Align2::LEFT_TOP,
+            show(hi),
+            font.clone(),
+            text,
+        );
+        painter.text(
+            bar.right_bottom() + egui::vec2(4.0, 0.0),
+            egui::Align2::LEFT_BOTTOM,
+            show(lo),
+            font,
+            text,
+        );
+    }
+}
+
 /// The pointer position in the bottom-right corner of the diagram.
 fn paint_pointer(ui: &Ui, transform: &PlotTransform, p: DVec2, units: &DisplayUnits) {
     let frame = *transform.frame();
@@ -1285,6 +1479,10 @@ fn circle(center: DVec2, radius: f64) -> Vec<DVec2> {
         .collect()
 }
 
+/// What a potential flow was solved for: the geometry revision, the impeller and
+/// whether with blade blockage.
+type PotentialKey = (u64, ComponentId, bool);
+
 /// State of the meridional view and its editor between frames.
 #[derive(Debug)]
 pub(crate) struct MeridionalView {
@@ -1313,7 +1511,7 @@ pub(crate) struct MeridionalView {
     /// Points typed or pasted for a new reference curve.
     pub(crate) reference_text: String,
     /// Potential flow of the last geometry it was solved for.
-    potential: Option<((u64, ComponentId), Result<PotentialFlow, String>)>,
+    potential: Option<(PotentialKey, Result<PotentialFlow, String>)>,
 }
 
 impl Default for MeridionalView {
@@ -1376,10 +1574,16 @@ impl MeridionalView {
         id: ComponentId,
         g: &ImpellerGeometry,
     ) -> Option<&Result<PotentialFlow, String>> {
-        let key = (revision, id);
+        let blades = self.view.potential_view.blades;
+        let key = (revision, id, blades);
         if self.potential.as_ref().is_none_or(|(k, _)| *k != key) {
-            let solution = potential::solve(&g.contour, g.basis.flow, PotentialMesh::default())
-                .map_err(|e| e.to_string());
+            let mesh = PotentialMesh::default();
+            let solution = if blades {
+                potential::solve_with_blades(&g.contour, g.basis.flow, mesh, &g.blade)
+            } else {
+                potential::solve(&g.contour, g.basis.flow, mesh)
+            }
+            .map_err(|e| e.to_string());
             self.potential = Some((key, solution));
         }
         self.potential.as_ref().map(|(_, s)| s)
@@ -1424,6 +1628,26 @@ impl MeridionalView {
                      lines, and the meridional velocity along the walls against the \
                      quasi-one-dimensional flow of the design",
                 ));
+            if d.potential {
+                let v = &mut d.potential_view;
+                MenuButton::new(format!("{} {}", crate::theme::icon::EYE, tr("Potential")))
+                    .config(
+                        MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside),
+                    )
+                    .ui(ui, |ui| {
+                        ui.checkbox(&mut v.stream_lines, tr("stream lines"));
+                        ui.checkbox(&mut v.iso_lines, tr("c_m iso-lines"));
+                        ui.checkbox(&mut v.map, tr("c_m color map"));
+                        ui.checkbox(&mut v.vectors, tr("velocity vectors"));
+                        ui.separator();
+                        ui.checkbox(&mut v.blades, tr("blade blockage"))
+                            .on_hover_text(tr(
+                                "Solve with the thickness of the blades: among them only the \
+                                 open part of the circumference carries the flow (Gülich eqs. \
+                                 3.1.7 and 3.2.3)",
+                            ));
+                    });
+            }
             ui.weak("(?)").on_hover_text(tr(
                 "Drag the round handles to shape the contour; right-click a point or a \
                  wall to type exact values, split a wall into segments or join them. Drag \
@@ -1642,7 +1866,9 @@ impl MeridionalView {
                     );
                 }
             }
-            if let Some(Ok(flow)) = potential {
+            if let Some(Ok(flow)) = potential
+                && display.potential_view.stream_lines
+            {
                 for fraction in [0.25, 0.5, 0.75] {
                     let stream = flow.streamline(fraction);
                     plot.line(
@@ -1893,6 +2119,16 @@ impl MeridionalView {
             hovered_dimension,
             scale,
         );
+        if let Some(Ok(flow)) = potential {
+            paint_potential(
+                ui,
+                &response.transform,
+                flow,
+                display.potential_view,
+                scale,
+                &units,
+            );
+        }
         paint_handles(ui, &response.transform, &handles, active, inputs, scale);
         self.pointer = response.inner.map(|p| DVec2::new(p.x / scale, p.y / scale));
         if let Some(p) = self.pointer {

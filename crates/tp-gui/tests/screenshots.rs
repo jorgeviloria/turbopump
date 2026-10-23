@@ -221,6 +221,23 @@ fn potential_flow() {
     harness.remove_cursor();
     harness.run();
     save(&mut harness, "potential-flow");
+    // The color map of c_m with its iso-lines and vectors, the blades blocking the flow.
+    harness.get_by_label_contains("Potential").click();
+    harness.run();
+    for option in [
+        "c_m iso-lines",
+        "c_m color map",
+        "velocity vectors",
+        "blade blockage",
+    ] {
+        harness.get_by_label(option).click();
+        harness.run();
+    }
+    harness.key_press(egui::Key::Escape);
+    harness.remove_cursor();
+    harness.run();
+    harness.run();
+    save(&mut harness, "potential-maps");
 }
 
 /// The properties folded to a strip: the view takes the whole window.

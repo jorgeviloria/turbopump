@@ -10,7 +10,12 @@
 //! structured mesh: ψ = 0 on the hub, ψ = Q/2π on the shroud, and flow normal to the
 //! inlet and outlet lines. For an impeller, a straight annulus ahead of the eye and a
 //! ring after the outlet, along the walls' outflow direction, keep those boundaries
-//! away from the blades. Unlike the
+//! away from the blades. The blockage of the blades can be taken into account: where
+//! they are, only the open fraction B = 1/τ = 1 − z·e/(π·d·sin β_B) of the circumference
+//! carries the flow (blockage factor τ of Gülich eqs. 3.1.7 and 3.2.3, blades normal to
+//! hub and shroud), so the equation becomes
+//! ∂/∂z((1/(r·B))·∂ψ/∂z) + ∂/∂r((1/(r·B))·∂ψ/∂r) = 0 and c = |∇ψ|/(r·B).
+//! Unlike the
 //! quasi-one-dimensional flow of the meridional step, the meridional velocity varies
 //! across the channel: it is higher on the inside of a bend (see
 //! `docs/theory/prestaciones.md`).
@@ -21,8 +26,10 @@ use serde::Serialize;
 use tp_math::DVec2;
 use tp_math::sparse::{Triplets, conjugate_gradient};
 
+use super::blade::{Blade, BladeSection};
 use super::meridian::{MeridionalContour, SpanLine};
 use crate::DesignError;
+use crate::triangle::blockage_factor;
 
 /// Mesh density of the solution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,6 +66,8 @@ pub struct PotentialFlow {
     pub psi: Vec<f64>,
     /// Meridional velocity at each node, m/s.
     pub cm: Vec<f64>,
+    /// Its direction and size at each node, (c_z, c_r) in m/s.
+    pub velocity: Vec<DVec2>,
     /// Conjugate gradient iterations used.
     pub iterations: usize,
 }
@@ -140,7 +149,7 @@ pub fn solve_channel(
             (hub(t), shroud(t))
         })
         .collect();
-    solve_lines(&lines, (0, ns - 1), flow, mesh.across)
+    solve_lines(&lines, (0, ns - 1), flow, mesh.across, &|_| 1.0)
 }
 
 /// Solves the potential flow through the channel whose cross lines run from the hub
@@ -151,6 +160,7 @@ fn solve_lines(
     channel: (usize, usize),
     flow: f64,
     across: usize,
+    open: &dyn Fn(DVec2) -> f64,
 ) -> Result<PotentialFlow, DesignError> {
     let (ns, nj) = (lines.len(), across.max(3));
     let index = |i: usize, j: usize| i * nj + j;
@@ -181,7 +191,9 @@ fn solve_lines(
             triangles.push([a, c, d]);
         }
     }
-    // Shape-function gradients, area and mean radius of each triangle.
+    // Shape-function gradients, area and mean radius of each triangle; the radius
+    // carries the open fraction of the circumference, so that 1/(r·B) weighs both the
+    // equation and the velocity.
     let elements: Vec<([DVec2; 3], f64, f64)> = triangles
         .iter()
         .map(|t| {
@@ -191,7 +203,8 @@ fn solve_lines(
                 let (b, c) = ((a + 1) % 3, (a + 2) % 3);
                 (p[c] - p[b]).perp() / twice_area
             });
-            let radius = (p[0].y + p[1].y + p[2].y) / 3.0;
+            let centroid = (p[0] + p[1] + p[2]) / 3.0;
+            let radius = centroid.y * open(centroid).clamp(0.05, 1.0);
             (gradients, 0.5 * twice_area.abs(), radius)
         })
         .collect();
@@ -251,16 +264,21 @@ fn solve_lines(
     // Velocity per triangle, then area-weighted at the nodes.
     let scale = flow / (2.0 * PI);
     let mut sum = vec![0.0; nodes.len()];
+    let mut vectors = vec![DVec2::ZERO; nodes.len()];
     let mut weight = vec![0.0; nodes.len()];
     for (t, (gradients, area, radius)) in triangles.iter().zip(&elements) {
         let grad: DVec2 = (0..3).map(|a| gradients[a] * psi[t[a]]).sum();
         let speed = scale * grad.length() / radius;
+        // c_z = (1/r)·∂ψ/∂r, c_r = −(1/r)·∂ψ/∂z.
+        let velocity = DVec2::new(grad.y, -grad.x) * (scale / radius);
         for &k in t {
             sum[k] += speed * area;
+            vectors[k] += velocity * *area;
             weight[k] += area;
         }
     }
     let cm = sum.iter().zip(&weight).map(|(s, w)| s / w).collect();
+    let velocity = vectors.iter().zip(&weight).map(|(v, w)| *v / *w).collect();
 
     Ok(PotentialFlow {
         stations: ns,
@@ -269,8 +287,48 @@ fn solve_lines(
         nodes,
         psi,
         cm,
+        velocity,
         iterations,
     })
+}
+
+/// The fraction of the circumference the blades of `blade` leave open at (z, r): 1/τ of
+/// [`blockage_factor`] with the thickness e and blade angle β_B of the nearest station
+/// of a blade section, and 1 upstream of the leading edge and downstream of the
+/// trailing edge.
+pub fn blade_opening(blade: &Blade) -> impl Fn(DVec2) -> f64 + '_ {
+    move |at: DVec2| {
+        let mut best: Option<(f64, &BladeSection, usize)> = None;
+        for section in &blade.sections {
+            for (k, p) in section.meridional.iter().enumerate() {
+                let d = p.distance_squared(at);
+                if best.is_none_or(|(b, ..)| d < b) {
+                    best = Some((d, section, k));
+                }
+            }
+        }
+        let Some((_, s, k)) = best else {
+            return 1.0;
+        };
+        let n = s.meridional.len();
+        // Beyond an edge the nearest station is that edge, and the point lies past it.
+        let beyond = |edge: usize, inner: usize| {
+            n > 1
+                && k == edge
+                && (at - s.meridional[edge]).dot(s.meridional[edge] - s.meridional[inner]) > 0.0
+        };
+        if beyond(0, 1) || beyond(n - 1, n - 2) {
+            return 1.0;
+        }
+        let tau = blockage_factor(
+            blade.count,
+            s.thickness[k],
+            2.0 * at.y,
+            s.beta[k].abs().max(0.05),
+            std::f64::consts::FRAC_PI_2,
+        );
+        (1.0 / tau).clamp(0.05, 1.0)
+    }
 }
 
 /// Potential flow `flow` (m³/s) through the meridional contour of an impeller, with
@@ -281,6 +339,26 @@ pub fn solve(
     contour: &MeridionalContour,
     flow: f64,
     mesh: PotentialMesh,
+) -> Result<PotentialFlow, DesignError> {
+    solve_open(contour, flow, mesh, &|_| 1.0)
+}
+
+/// [`solve`] with the blockage of the blades of `blade` (see [`blade_opening`]).
+pub fn solve_with_blades(
+    contour: &MeridionalContour,
+    flow: f64,
+    mesh: PotentialMesh,
+    blade: &Blade,
+) -> Result<PotentialFlow, DesignError> {
+    solve_open(contour, flow, mesh, &blade_opening(blade))
+}
+
+/// [`solve`] with the open fraction of the circumference `open` at each (z, r).
+fn solve_open(
+    contour: &MeridionalContour,
+    flow: f64,
+    mesh: PotentialMesh,
+    open: &dyn Fn(DVec2) -> f64,
 ) -> Result<PotentialFlow, DesignError> {
     let ns = mesh.stations.max(3);
     let (hub_in, shroud_in) = (contour.hub_at(0.0), contour.shroud_at(0.0));
@@ -304,7 +382,7 @@ pub fn solve(
         let out = downstream * k as f64 / ne as f64;
         lines.push((hub_out + hub_dir * out, shroud_out + shroud_dir * out));
     }
-    solve_lines(&lines, (ne, ne + ns - 1), flow, mesh.across)
+    solve_lines(&lines, (ne, ne + ns - 1), flow, mesh.across, open)
 }
 
 #[cfg(test)]
@@ -312,6 +390,31 @@ mod tests {
     use super::*;
     use crate::impeller::tests::reference_geometry;
     use approx::assert_relative_eq;
+
+    #[test]
+    fn the_blades_speed_up_the_flow_where_they_block_it() {
+        let g = reference_geometry();
+        let mesh = PotentialMesh::default();
+        let open = solve(&g.contour, g.basis.flow, mesh).unwrap();
+        let blocked = solve_with_blades(&g.contour, g.basis.flow, mesh, &g.blade).unwrap();
+        // In the middle of the channel, among the blades, the flow is faster by about τ.
+        let (first, last) = open.channel;
+        let i = (first + last) / 2;
+        let j = open.across / 2;
+        let k = i * open.across + j;
+        let tau = 1.0 / blade_opening(&g.blade)(open.nodes[k]);
+        assert!(tau > 1.01, "the blades block the channel: τ = {tau}");
+        let ratio = blocked.cm[k] / open.cm[k];
+        assert!((ratio / tau - 1.0).abs() < 0.1, "{ratio} vs τ = {tau}");
+        // Ahead of the blades nothing changes.
+        let ahead = 2 * open.across + j;
+        assert!((blocked.cm[ahead] / open.cm[ahead] - 1.0).abs() < 0.02);
+        // The velocity vectors have the size of c_m and run along the channel.
+        let v = open.velocity[k];
+        assert!((v.length() / open.cm[k] - 1.0).abs() < 0.05);
+        let along = open.nodes[k + open.across] - open.nodes[k];
+        assert!(v.dot(along) > 0.0);
+    }
 
     #[test]
     fn an_annulus_has_uniform_axial_velocity() {
