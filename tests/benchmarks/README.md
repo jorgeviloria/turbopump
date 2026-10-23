@@ -60,6 +60,11 @@ distinta. `cm2`, `cm1` y `beta2` usan el caudal del rodete $Q_{La} = Q/\eta_v$, 
   carpeta se excluye en `.git/info/exclude` de cada copia local, así que nunca entra en el
   repositorio. La prueba ejecuta esos casos si existen.
 
+## Ensayos medidos
+
+[plantilla/](plantilla/) tiene una hoja de cálculo para pasar a Turbopump una bomba
+ensayada (geometría principal y curva medida) y el formato CSV en que se exporta.
+
 ## Casos
 
 | Caso | Fuente | Resultado |
