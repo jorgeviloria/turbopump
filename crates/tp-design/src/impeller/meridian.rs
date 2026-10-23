@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use tp_math::{Bezier, DVec2, Polyline};
 
 use super::ImpellerBasis;
+use super::chambers::{self, ChamberSettings, Chambers};
 use super::material::{self, Material, MaterialSettings};
 use super::wall::{SegmentInput, Wall};
 use crate::{DesignError, Param};
@@ -54,6 +55,8 @@ pub struct MeridionalInput {
     /// outlet back to the shroud start; `None` keeps the automatic one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shroud_material: Option<Vec<SegmentInput>>,
+    /// The side chambers between the impeller and the casing.
+    pub chambers: ChamberSettings,
 }
 
 /// How the hub point of the leading edge sits relative to its shroud point.
@@ -350,6 +353,8 @@ pub struct MeridionalContour {
     pub material: Material,
     /// What of the material could not be built as asked.
     pub material_warnings: Vec<String>,
+    /// The side chambers beside the material, built whether designed or not.
+    pub chambers: Chambers,
     pub axial_length: f64,
     /// Leading edge on the hub and on the shroud, as fractions of each contour length.
     pub leading_edge: (f64, f64),
@@ -478,9 +483,15 @@ impl MeridionalContour {
                 input.shroud_material.as_deref(),
             ),
         )?;
+        let inside = hub_line
+            .point_at_fraction(0.5)
+            .lerp(shroud_line.point_at_fraction(0.5), 0.5);
+        let side_chambers =
+            chambers::build(&wires.shroud, &wires.hub, inside, basis, &input.chambers)?;
         Ok(Self {
             hub_line,
             shroud_line,
+            chambers: side_chambers,
             hub,
             shroud,
             hub_material: wires.hub,

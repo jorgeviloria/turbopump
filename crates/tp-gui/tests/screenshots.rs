@@ -612,6 +612,17 @@ fn meridian_editor() {
     harness.run();
     harness.run();
     save(&mut harness, "editor-materials");
+    // The side chambers, designed.
+    harness
+        .get_all_by_label("Side chambers")
+        .next()
+        .unwrap()
+        .click();
+    harness.run();
+    harness.get_by_label("design the side chambers").click();
+    harness.run();
+    harness.run();
+    save(&mut harness, "editor-chambers");
 }
 
 /// The segment types of a drawn wall: the hub as lines and an arc, the shroud as a

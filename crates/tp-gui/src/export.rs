@@ -380,7 +380,11 @@ mod cad {
         let deflection = g.basis.outlet_diameter * 1e3 / 2000.0;
         let mut files = Vec::new();
         for format in formats {
-            for (stem, shape) in [("impeller", &cad.impeller), ("fluid", &cad.fluid)] {
+            let chambers = cad.side_chambers.as_ref().map(|s| ("side-chambers", s));
+            for (stem, shape) in [("impeller", &cad.impeller), ("fluid", &cad.fluid)]
+                .into_iter()
+                .chain(chambers)
+            {
                 let path = folder.join(format!("{stem}.{format}"));
                 write(shape, &path, format, deflection)?;
                 files.push(path);

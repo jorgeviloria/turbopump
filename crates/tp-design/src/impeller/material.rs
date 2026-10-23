@@ -7,7 +7,8 @@
 //! - hub: across the wall at the outlet, the hub contour offset by the thickness down
 //!   to the boss, the rear face of the boss, the bore, and up to the hub at the inlet;
 //! - shroud: across the wall at the outlet, the shroud contour offset outwards by the
-//!   thickness, and down to the shroud at the inlet.
+//!   thickness, a cylindrical neck reaching upstream of the inlet for the annular seal,
+//!   and down to the shroud at the inlet.
 //!
 //! A drawn wire is edited segment by segment like the walls (see [`super::wall`]).
 
@@ -38,6 +39,10 @@ pub struct MaterialSettings {
     /// Outer diameter of the boss around the bore, m; automatic: the bore plus a wall
     /// of a quarter of the bore, and no less than the wall thickness.
     pub boss_diameter: Param<f64>,
+    /// Length of the neck of the shroud upstream of the inlet, where the annular seal
+    /// runs, m; automatic: the seal length 0.12·d_sp (Gülich Chap. 3.6.2) with
+    /// d_sp = d₁ + 2·wall; 0 leaves no neck.
+    pub neck_length: Param<f64>,
 }
 
 /// Thickness of the hub disk and the shroud unless given: 0.02·d₂, at least 3 mm (our
@@ -52,6 +57,13 @@ pub struct Material {
     pub wall_thickness: f64,
     pub bore_diameter: f64,
     pub boss_diameter: f64,
+    pub neck_length: f64,
+}
+
+/// Diameter of the annular seal on the neck unless given: the eye d₁ plus the wall on
+/// both sides, as the axial thrust takes it.
+pub fn default_seal_diameter(basis: &ImpellerBasis, wall_thickness: f64) -> f64 {
+    basis.inlet_diameter + 2.0 * wall_thickness
 }
 
 impl MaterialSettings {
@@ -65,10 +77,14 @@ impl MaterialSettings {
             let rb = bore_diameter / 2.0;
             2.0 * (rb + (0.5 * rb).max(wall_thickness))
         });
+        let neck_length = self.neck_length.resolve(|| {
+            crate::losses::SEAL_LENGTH_RATIO * default_seal_diameter(basis, wall_thickness)
+        });
         Material {
             wall_thickness,
             bore_diameter,
             boss_diameter,
+            neck_length: neck_length.max(0.0),
         }
     }
 }
@@ -193,7 +209,16 @@ pub fn automatic_shroud(
         hub.sample(OFFSET_SAMPLES)[OFFSET_SAMPLES / 2],
     )?;
     let back: Vec<DVec2> = outer.iter().rev().copied().collect();
-    Ok(vec![line(back[0]), curve(&back)?, line(shroud.start())])
+    let mut wire = vec![line(back[0]), curve(&back)?];
+    let eye = *back.last().expect("points");
+    if m.neck_length > 0.0 {
+        // The neck: upstream along its outer radius, then in to the eye radius.
+        let tip = eye - DVec2::new(m.neck_length, 0.0);
+        wire.push(line(tip));
+        wire.push(line(DVec2::new(tip.x, shroud.start().y)));
+    }
+    wire.push(line(shroud.start()));
+    Ok(wire)
 }
 
 /// A plain wire when the automatic one cannot be built: `thickness` along the axis
@@ -320,6 +345,17 @@ mod tests {
         assert!((first.distance(c.shroud.end()) - t).abs() < 1e-3 * t);
         // Outwards: towards the inlet side, away from the hub.
         assert!(first.x < c.shroud.end().x);
+        // The neck runs upstream of the inlet as long as the seal.
+        let m = MaterialSettings::default().resolve(&b);
+        let neck = &s.segments()[2];
+        assert_eq!(neck.kind(), SegmentKind::Line);
+        assert!((neck.start().x - neck.end().x - m.neck_length).abs() < 1e-12);
+        assert!(
+            (neck.start().y - neck.end().y).abs() < 1e-12,
+            "along the axis"
+        );
+        let d_sp = default_seal_diameter(&b, t);
+        assert!((m.neck_length - 0.12 * d_sp).abs() < 1e-12);
     }
 
     #[test]

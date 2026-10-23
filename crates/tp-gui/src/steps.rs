@@ -1391,6 +1391,18 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
             &units,
             0.0..=1.0,
         );
+        changed |= param_f64(
+            ui,
+            tr("Neck length"),
+            tr(
+                "Of the shroud upstream of the inlet, where the annular seal runs; automatic: 0.12·d_sp (Gülich Chap. 3.6.2); 0 for none",
+            ),
+            &mut settings.neck_length,
+            Length,
+            used.map(|u| u.neck_length),
+            &units,
+            0.0..=0.5,
+        );
         for (name, wire) in [
             (tr("Hub disk drawn by segments"), &mut m.hub_material),
             (tr("Shroud cover drawn by segments"), &mut m.shroud_material),
@@ -1403,6 +1415,97 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                 ui,
                 name,
                 tr("Drawn on the Materials page of the editor; the values above do not apply"),
+            );
+            let automatic = ui
+                .horizontal(|ui| {
+                    ui.label(tf("{} segments", &[&count]));
+                    ui.button(tr("Automatic")).clicked()
+                })
+                .inner;
+            ui.end_row();
+            if automatic {
+                *wire = None;
+                changed = true;
+            }
+        }
+    });
+    section_info(
+        ui,
+        tr("Side chambers"),
+        tr(
+            "Between the impeller and the casing: the front one down to the annular seal on \
+             the neck, the rear one down to the shaft seal. Their values follow the loss \
+             analysis but are not shared with it",
+        ),
+    );
+    props(ui, "chambers", |ui| {
+        let built = g.map(|g| g.contour.chambers.values);
+        let chambers = &mut m.chambers;
+        label(
+            ui,
+            tr("Design the side chambers"),
+            tr(
+                "Export their fluid with the CAD model; shape them on the Side chambers page of the editor",
+            ),
+        );
+        changed |= ui.checkbox(&mut chambers.enabled, "").changed();
+        ui.end_row();
+        changed |= param_f64(
+            ui,
+            tr("Axial gap s_ax"),
+            tr(
+                "Between the impeller and the casing walls; automatic: 0.05·r₂ (our choice; Gülich finds its effect small, Chap. 3.6.1)",
+            ),
+            &mut chambers.axial_gap,
+            Length,
+            built.map(|v| v.axial_gap),
+            &units,
+            0.0001..=0.2,
+        );
+        changed |= param_f64(
+            ui,
+            tr("Seal clearance s"),
+            tr("Radial, of the annular seal on the neck; automatic: Gülich eq. 3.12"),
+            &mut chambers.seal_clearance,
+            Length,
+            built.map(|v| v.seal_clearance),
+            &units,
+            0.00001..=0.01,
+        );
+        changed |= param_f64(
+            ui,
+            tr("Shaft seal diameter d_D"),
+            tr("Where the rear chamber ends; automatic: the hub diameter"),
+            &mut chambers.shaft_seal_diameter,
+            Length,
+            built.map(|v| v.shaft_seal_diameter),
+            &units,
+            0.001..=2.0,
+        );
+        if let Some(v) = built {
+            value_row(
+                ui,
+                tr("Seal diameter d_sp"),
+                units.show(Length, v.seal_diameter),
+            );
+            value_row(
+                ui,
+                tr("Seal length L_sp"),
+                units.show(Length, v.seal_length),
+            );
+        }
+        for (name, wire) in [
+            (tr("Front casing drawn by segments"), &mut chambers.front),
+            (tr("Rear casing drawn by segments"), &mut chambers.rear),
+        ] {
+            let Some(list) = wire else {
+                continue;
+            };
+            let count = list.len();
+            label(
+                ui,
+                name,
+                tr("Drawn on the Side chambers page of the editor; the gap above does not apply"),
             );
             let automatic = ui
                 .horizontal(|ui| {

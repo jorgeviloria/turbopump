@@ -4,6 +4,7 @@
 //! so the same code serves any machine type that produces them.
 
 pub mod blade;
+pub mod chambers;
 pub mod guide;
 pub mod loading;
 pub mod material;
@@ -241,6 +242,7 @@ pub fn build(
         ));
     }
     let mut warnings = contour.material_warnings.clone();
+    warnings.extend(contour.chambers.warnings.iter().cloned());
     // The quasi-orthogonals keep the quasi-one-dimensional flow; the blade sections lie
     // on the stream surfaces of the chosen flow, solved on the same stations so that a
     // span point's index stays its channel position.

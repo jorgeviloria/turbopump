@@ -197,7 +197,11 @@ pub(crate) fn run(args: CadArgs) -> CliResult {
         // STL chordal deflection: 1/2000 of the outlet diameter, in mm.
         let deflection = geometry.basis.outlet_diameter * 1e3 / 2000.0;
         for &format in &args.format {
-            for (stem, shape) in [("impeller", &cad.impeller), ("fluid", &cad.fluid)] {
+            let chambers = cad.side_chambers.as_ref().map(|s| ("side-chambers", s));
+            for (stem, shape) in [("impeller", &cad.impeller), ("fluid", &cad.fluid)]
+                .into_iter()
+                .chain(chambers)
+            {
                 let path = dir.join(format!("{stem}.{}", format.extension()));
                 write(shape, &path, format, deflection)?;
             }

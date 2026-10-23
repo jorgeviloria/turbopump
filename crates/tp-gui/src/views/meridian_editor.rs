@@ -11,7 +11,7 @@ use tp_design::impeller::guide;
 use tp_project::ComponentId;
 use tp_units::{DisplayUnits, QuantityKind};
 
-use super::meridional::{Fit, MeridionalView, Reference, Scene, parse_points};
+use super::meridional::{Fit, MeridionalView, Page, Reference, Scene, parse_points};
 use super::{Palette, unavailable};
 use crate::app::EditCtx;
 use crate::i18n::{tf, tr};
@@ -59,7 +59,27 @@ impl MeridionalView {
         ui.allocate_ui_with_layout(
             egui::vec2(width, 0.0),
             egui::Layout::left_to_right(egui::Align::Center).with_main_wrap(true),
-            |ui| self.toolbar(ui, &units),
+            |ui| {
+                self.toolbar(ui, &units);
+                // The side chambers are designed, for the CAD model, from their page.
+                if self.editor.page == Page::Chambers {
+                    let mut enabled = current.meridional.chambers.enabled;
+                    let toggled = ui
+                        .checkbox(&mut enabled, tr("design the side chambers"))
+                        .on_hover_text(tr(
+                            "Export their fluid with the CAD model and check them in the \
+                             design; the walls can be shaped either way",
+                        ))
+                        .changed();
+                    if toggled {
+                        let mut input = current.clone();
+                        input.meridional.chambers.enabled = enabled;
+                        cx.edit("edit meridional contour", |p| {
+                            p.set_impeller_geometry(id, input)
+                        });
+                    }
+                }
+            },
         );
         ui.add_space(4.0);
 
@@ -93,16 +113,22 @@ impl MeridionalView {
     /// One row: the page, dimensions, the analysis menu, framing, the snap grid and the
     /// help.
     fn toolbar(&mut self, ui: &mut Ui, units: &DisplayUnits) {
-        // What the handles edit: the walls of the flow path or the closed material.
-        let materials = self.editor.materials;
-        ui.selectable_value(&mut self.editor.materials, false, tr("Flow path"))
+        // What the handles edit: the walls of the flow path, the closed material or the
+        // casing walls of the side chambers.
+        let page = self.editor.page;
+        ui.selectable_value(&mut self.editor.page, Page::FlowPath, tr("Flow path"))
             .on_hover_text(tr("Hub, shroud and blade edges"));
-        ui.selectable_value(&mut self.editor.materials, true, tr("Materials"))
+        ui.selectable_value(&mut self.editor.page, Page::Materials, tr("Materials"))
             .on_hover_text(tr(
                 "The closed contours of the hub disk and the shroud cover: drag their \
                  points, right-click a wire for its segments",
             ));
-        if self.editor.materials != materials {
+        ui.selectable_value(&mut self.editor.page, Page::Chambers, tr("Side chambers"))
+            .on_hover_text(tr(
+                "The casing walls beside the impeller: the front chamber down to the annular \
+                 seal, the rear one down to the shaft seal",
+            ));
+        if self.editor.page != page {
             self.fit = Some(Fit::Meridian);
         }
         ui.separator();

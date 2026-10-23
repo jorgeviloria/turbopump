@@ -199,19 +199,88 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("hub disk arc centre", "centro del arco del disco del cubo"),
     ("shroud cover arc centre", "centro del arco de la tapa"),
     ("{} copy", "{} (copia)"),
-    (
-        "Back to the automatic material",
-        "Volver al material automático",
-    ),
-    (
-        "The wall thickness, the bore and the boss of the material settings",
-        "El espesor de pared, el agujero y el saliente de los ajustes del material",
-    ),
     ("offset", "desplazamiento"),
     ("Apply", "Aplicar"),
     (
         "Moves the segment this far away from the channel (negative: towards it); its joints move along, the ends of the wall stay",
         "Desplaza el tramo esta distancia alejándolo del canal (negativa: hacia él); sus uniones lo acompañan y los extremos de la pared se quedan",
+    ),
+    ("design the side chambers", "diseñar las cámaras laterales"),
+    (
+        "Export their fluid with the CAD model and check them in the design; the walls can be shaped either way",
+        "Exporta su fluido con el modelo CAD y las revisa en el diseño; las paredes se pueden modelar en cualquier caso",
+    ),
+    ("Side chambers", "Cámaras laterales"),
+    (
+        "The casing walls beside the impeller: the front chamber down to the annular seal, the rear one down to the shaft seal",
+        "Las paredes de carcasa junto al rodete: la cámara delantera hasta el sello anular y la trasera hasta el sello del eje",
+    ),
+    ("Neck length", "Longitud del cuello"),
+    (
+        "Of the shroud upstream of the inlet, where the annular seal runs; automatic: 0.12·d_sp (Gülich Chap. 3.6.2); 0 for none",
+        "De la tapa aguas arriba de la entrada, donde va el sello anular; automático: 0,12·d_sp (Gülich, cap. 3.6.2); 0 para ninguno",
+    ),
+    (
+        "Between the impeller and the casing: the front one down to the annular seal on the neck, the rear one down to the shaft seal. Their values follow the loss analysis but are not shared with it",
+        "Entre el rodete y la carcasa: la delantera hasta el sello anular del cuello y la trasera hasta el sello del eje. Sus valores siguen el análisis de pérdidas, pero no se comparten con él",
+    ),
+    ("Design the side chambers", "Diseñar las cámaras laterales"),
+    (
+        "Export their fluid with the CAD model; shape them on the Side chambers page of the editor",
+        "Exporta su fluido con el modelo CAD; se modelan en la página Cámaras laterales del editor",
+    ),
+    ("Axial gap s_ax", "Holgura axial s_ax"),
+    (
+        "Between the impeller and the casing walls; automatic: 0.05·r₂ (our choice; Gülich finds its effect small, Chap. 3.6.1)",
+        "Entre el rodete y las paredes de carcasa; automático: 0,05·r₂ (elección nuestra; Gülich ve su efecto pequeño, cap. 3.6.1)",
+    ),
+    ("Seal clearance s", "Holgura del sello s"),
+    (
+        "Radial, of the annular seal on the neck; automatic: Gülich eq. 3.12",
+        "Radial, del sello anular del cuello; automático: Gülich, ec. 3.12",
+    ),
+    ("Shaft seal diameter d_D", "Diámetro del sello del eje d_D"),
+    (
+        "Where the rear chamber ends; automatic: the hub diameter",
+        "Donde termina la cámara trasera; automático: el diámetro del cubo",
+    ),
+    ("Seal diameter d_sp", "Diámetro del sello d_sp"),
+    ("Seal length L_sp", "Longitud del sello L_sp"),
+    (
+        "Front casing drawn by segments",
+        "Carcasa delantera dibujada por tramos",
+    ),
+    (
+        "Rear casing drawn by segments",
+        "Carcasa trasera dibujada por tramos",
+    ),
+    (
+        "Drawn on the Side chambers page of the editor; the gap above does not apply",
+        "Dibujada en la página Cámaras laterales del editor; la holgura de arriba no se aplica",
+    ),
+    ("Front casing wall", "Pared de carcasa delantera"),
+    ("Rear casing wall", "Pared de carcasa trasera"),
+    ("front casing corner", "esquina de la carcasa delantera"),
+    (
+        "front casing control point",
+        "punto de control de la carcasa delantera",
+    ),
+    ("rear casing corner", "esquina de la carcasa trasera"),
+    (
+        "rear casing control point",
+        "punto de control de la carcasa trasera",
+    ),
+    (
+        "front casing arc centre",
+        "centro del arco de la carcasa delantera",
+    ),
+    (
+        "rear casing arc centre",
+        "centro del arco de la carcasa trasera",
+    ),
+    (
+        "The wire as the values of the properties panel draw it",
+        "El alambre como lo trazan los valores de la barra de propiedades",
     ),
     ("curvature maximum", "curvatura máxima"),
     (

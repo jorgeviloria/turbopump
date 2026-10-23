@@ -34,6 +34,9 @@ pub(crate) enum Side {
     Shroud,
     HubMaterial,
     ShroudMaterial,
+    /// The casing walls of the side chambers.
+    FrontCasing,
+    RearCasing,
 }
 
 impl Side {
@@ -41,6 +44,8 @@ impl Side {
     pub(crate) const WALLS: [Side; 2] = [Side::Hub, Side::Shroud];
     /// The wires of the material.
     pub(crate) const MATERIALS: [Side; 2] = [Side::HubMaterial, Side::ShroudMaterial];
+    /// The casing walls of the side chambers.
+    pub(crate) const CASINGS: [Side; 2] = [Side::FrontCasing, Side::RearCasing];
 
     pub(crate) fn wall(self, contour: &MeridionalContour) -> &Wall {
         match self {
@@ -48,6 +53,8 @@ impl Side {
             Side::Shroud => &contour.shroud,
             Side::HubMaterial => &contour.hub_material,
             Side::ShroudMaterial => &contour.shroud_material,
+            Side::FrontCasing => &contour.chambers.front_casing,
+            Side::RearCasing => &contour.chambers.rear_casing,
         }
     }
 
@@ -57,6 +64,8 @@ impl Side {
             Side::Shroud => &mut input.shroud_segments,
             Side::HubMaterial => &mut input.hub_material,
             Side::ShroudMaterial => &mut input.shroud_material,
+            Side::FrontCasing => &mut input.chambers.front,
+            Side::RearCasing => &mut input.chambers.rear,
         }
     }
 
@@ -66,16 +75,24 @@ impl Side {
             Side::Shroud => input.shroud_segments.is_some(),
             Side::HubMaterial => input.hub_material.is_some(),
             Side::ShroudMaterial => input.shroud_material.is_some(),
+            Side::FrontCasing => input.chambers.front.is_some(),
+            Side::RearCasing => input.chambers.rear.is_some(),
         }
     }
 
-    pub(crate) fn is_material(self) -> bool {
-        matches!(self, Side::HubMaterial | Side::ShroudMaterial)
+    /// Whether it is a wire round the flow path, material or casing: its points show
+    /// automatic or drawn, and it goes back to automatic as a whole.
+    pub(crate) fn is_wire(self) -> bool {
+        !matches!(self, Side::Hub | Side::Shroud)
     }
 
-    /// Whether it belongs to the hub side: the hub or the hub disk.
-    fn on_hub(self) -> bool {
-        matches!(self, Side::Hub | Side::HubMaterial)
+    /// The color it is drawn in.
+    fn color(self, palette: &Palette) -> Color32 {
+        match self {
+            Side::Hub | Side::HubMaterial => palette.hub,
+            Side::Shroud | Side::ShroudMaterial => palette.shroud,
+            Side::FrontCasing | Side::RearCasing => palette.volute,
+        }
     }
 
     /// Its name, as a menu heading.
@@ -85,6 +102,8 @@ impl Side {
             Side::Shroud => "Shroud",
             Side::HubMaterial => "Hub disk",
             Side::ShroudMaterial => "Shroud cover",
+            Side::FrontCasing => "Front casing wall",
+            Side::RearCasing => "Rear casing wall",
         })
     }
 }
@@ -137,6 +156,16 @@ impl Handle {
             }
             Handle::ArcCenter(Side::HubMaterial, _) => "hub disk arc centre",
             Handle::ArcCenter(Side::ShroudMaterial, _) => "shroud cover arc centre",
+            Handle::Point(Side::FrontCasing, WallPoint::Joint { .. }) => "front casing corner",
+            Handle::Point(Side::FrontCasing, WallPoint::Control { .. }) => {
+                "front casing control point"
+            }
+            Handle::Point(Side::RearCasing, WallPoint::Joint { .. }) => "rear casing corner",
+            Handle::Point(Side::RearCasing, WallPoint::Control { .. }) => {
+                "rear casing control point"
+            }
+            Handle::ArcCenter(Side::FrontCasing, _) => "front casing arc centre",
+            Handle::ArcCenter(Side::RearCasing, _) => "rear casing arc centre",
         })
     }
 
@@ -188,11 +217,12 @@ pub(crate) fn handles(contour: &MeridionalContour, input: &MeridionalInput) -> V
     handles
 }
 
-/// The handles of the material wires: every point, drawn or automatic (dragging one
-/// turns its wire into drawn segments), and the centres of rounded corners.
-pub(crate) fn material_handles(contour: &MeridionalContour) -> Vec<Handle> {
+/// The handles of the wires `sides` round the flow path: every point, drawn or
+/// automatic (dragging one turns its wire into drawn segments), and the centres of
+/// rounded corners.
+pub(crate) fn wire_handles(contour: &MeridionalContour, sides: &[Side]) -> Vec<Handle> {
     let mut handles = Vec::new();
-    for side in Side::MATERIALS {
+    for &side in sides {
         let wall = side.wall(contour);
         handles.extend(
             wall.points()
@@ -367,8 +397,10 @@ pub(crate) fn apply_drag(
 }
 
 /// An edit of the diagram: the geometry inputs, or the main dimensions for the
-/// diameters and the outlet.
+/// diameters and the outlet. One is made per edit and applied at once, so the size of
+/// its variants does not matter.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum Change {
     Geometry(ImpellerGeometryInput),
     Main(CentrifugalPumpInput),
@@ -482,8 +514,8 @@ pub(crate) fn is_manual(handle: Handle, inputs: Inputs<'_>) -> bool {
                         .is_some_and(|d| !d.outlet_hub_diameter.is_auto())
         }
         Handle::TrailingEdge => inputs.main.is_some_and(|d| !d.outlet_diameter.is_auto()),
-        // A material point belongs to a wire that may still be automatic.
-        Handle::Point(side, _) | Handle::ArcCenter(side, _) => !side.is_material() || side.drawn(m),
+        // A point of a wire round the flow path may still be automatic.
+        Handle::Point(side, _) | Handle::ArcCenter(side, _) => !side.is_wire() || side.drawn(m),
         Handle::LeadingEdgeControl(_) => true,
     }
 }
@@ -494,9 +526,9 @@ pub(crate) fn reset_change(handle: Handle, inputs: Inputs<'_>) -> Option<Change>
     if handle == Handle::TrailingEdge {
         return inputs.main(|d| d.outlet_diameter = Param::Auto);
     }
-    // A material wire goes back to automatic as a whole.
+    // A wire round the flow path goes back to automatic as a whole.
     if let Handle::Point(side, _) | Handle::ArcCenter(side, _) = handle
-        && side.is_material()
+        && side.is_wire()
     {
         return inputs.geometry(|input| *side.segments(&mut input.meridional) = None);
     }
@@ -554,8 +586,30 @@ pub(crate) struct Display {
     pub snap_lines: bool,
     /// The material wires are drawn, faintly unless they are being edited.
     pub material_lines: bool,
-    /// The material wires are edited instead of the flow path.
-    pub materials: bool,
+    /// What the handles edit.
+    pub page: Page,
+}
+
+/// What the handles of the diagram edit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Page {
+    /// Hub, shroud and blade edges.
+    FlowPath,
+    /// The closed material of hub disk and shroud cover.
+    Materials,
+    /// The casing walls of the side chambers.
+    Chambers,
+}
+
+impl Display {
+    /// The walls the handles and the menus edit.
+    pub(crate) fn edited(&self) -> [Side; 2] {
+        match self.page {
+            Page::FlowPath => Side::WALLS,
+            Page::Materials => Side::MATERIALS,
+            Page::Chambers => Side::CASINGS,
+        }
+    }
 }
 
 impl Display {
@@ -573,7 +627,7 @@ impl Display {
         snap_points: false,
         snap_lines: false,
         material_lines: false,
-        materials: false,
+        page: Page::FlowPath,
     };
     pub(crate) const EDITOR: Display = Display {
         stream_lines: false,
@@ -589,7 +643,7 @@ impl Display {
         snap_points: true,
         snap_lines: false,
         material_lines: true,
-        materials: false,
+        page: Page::FlowPath,
     };
 }
 
@@ -1093,15 +1147,9 @@ fn paint_pointer(ui: &Ui, transform: &PlotTransform, p: DVec2, units: &DisplayUn
 /// The color of what `handle` shapes.
 fn handle_color(handle: Handle, palette: &Palette) -> Color32 {
     match handle {
-        Handle::HubInlet
-        | Handle::HubOutlet
-        | Handle::AxialLength
-        | Handle::Point(Side::Hub | Side::HubMaterial, _)
-        | Handle::ArcCenter(Side::Hub | Side::HubMaterial, _) => palette.hub,
-        Handle::ShroudInlet
-        | Handle::ShroudOutlet
-        | Handle::Point(Side::Shroud | Side::ShroudMaterial, _)
-        | Handle::ArcCenter(Side::Shroud | Side::ShroudMaterial, _) => palette.shroud,
+        Handle::HubInlet | Handle::HubOutlet | Handle::AxialLength => palette.hub,
+        Handle::Point(side, _) | Handle::ArcCenter(side, _) => side.color(palette),
+        Handle::ShroudInlet | Handle::ShroudOutlet => palette.shroud,
         Handle::LeadingEdgeHub | Handle::LeadingEdgeShroud | Handle::LeadingEdgeControl(_) => {
             palette.leading_edge
         }
@@ -1427,10 +1475,9 @@ impl MeridionalView {
             semi_axial: g.basis.outlet_inclination > 0.0,
         };
 
-        let editable = if display.materials {
-            material_handles(&g.contour)
-        } else {
-            handles(&g.contour, &current.meridional)
+        let editable = match display.page {
+            Page::FlowPath => handles(&g.contour, &current.meridional),
+            _ => wire_handles(&g.contour, &display.edited()),
         };
         let handles: Vec<(Handle, DVec2)> = editable
             .into_iter()
@@ -1457,7 +1504,7 @@ impl MeridionalView {
             .map(|t| *t.bounds());
         // The main dimensions belong to the flow path; the material shows only the
         // point under the pointer.
-        let permanent = display.dimensions && !display.materials;
+        let permanent = display.dimensions && display.page == Page::FlowPath;
         let dimensions = dimension_lines(&g.contour, &g.basis, permanent, active);
         // Dimension values as drawn, to find the one under the pointer.
         let font = egui::FontId::proportional(12.0);
@@ -1495,8 +1542,13 @@ impl MeridionalView {
         };
         let mut outline: Vec<DVec2> = g.contour.hub.sample(120);
         outline.extend(g.contour.shroud.sample(120));
-        if display.material_lines || display.materials {
+        if display.material_lines || display.page != Page::FlowPath {
             for side in Side::MATERIALS {
+                outline.extend(side.wall(&g.contour).sample(120));
+            }
+        }
+        if display.page == Page::Chambers {
+            for side in Side::CASINGS {
                 outline.extend(side.wall(&g.contour).sample(120));
             }
         }
@@ -1589,23 +1641,36 @@ impl MeridionalView {
                     );
                 }
             }
-            if display.material_lines || display.materials {
-                // The closed material: strong while edited, faint otherwise.
-                for side in Side::MATERIALS {
-                    let color = if side.on_hub() {
-                        palette.hub
-                    } else {
-                        palette.shroud
-                    };
-                    let (color, width) = if display.materials {
-                        (color, 1.8)
-                    } else {
-                        (color.gamma_multiply(0.45), 1.0)
-                    };
+            // The wires round the flow path: strong while edited, faint otherwise; the
+            // chambers when they are designed or edited.
+            let chambers = current.meridional.chambers.enabled || display.page == Page::Chambers;
+            let wires = Side::MATERIALS
+                .into_iter()
+                .filter(|_| display.material_lines || display.page != Page::FlowPath)
+                .chain(Side::CASINGS.into_iter().filter(|_| chambers));
+            for side in wires {
+                let (color, width) = if display.edited().contains(&side) {
+                    (side.color(&palette), 1.8)
+                } else {
+                    (side.color(&palette).gamma_multiply(0.45), 1.0)
+                };
+                plot.line(
+                    Line::new("material", line(side.wall(&g.contour).sample(240), scale))
+                        .color(color)
+                        .width(width),
+                );
+            }
+            if chambers {
+                // The openings of the chambers: to the volute at r₂, to the suction
+                // at the seal, and the shaft seal behind.
+                let c = &g.contour.chambers;
+                for outline in [&c.front, &c.rear] {
+                    let closing = [outline[outline.len() - 1], outline[0]];
                     plot.line(
-                        Line::new("material", line(side.wall(&g.contour).sample(240), scale))
-                            .color(color)
-                            .width(width),
+                        Line::new("", line(closing, scale))
+                            .color(palette.volute.gamma_multiply(0.45))
+                            .style(LineStyle::dashed_loose())
+                            .width(1.0),
                     );
                 }
             }
@@ -1641,17 +1706,8 @@ impl MeridionalView {
             // Control polygons in the color of their curve: Bézier and B-spline
             // polygons, the corner lines of an arc and the radii to its centre.
             let mut polygons: Vec<(Vec<DVec2>, Color32)> = Vec::new();
-            let edited = if display.materials {
-                Side::MATERIALS
-            } else {
-                Side::WALLS
-            };
-            for side in edited {
-                let color = if side.on_hub() {
-                    palette.hub
-                } else {
-                    palette.shroud
-                };
+            for side in display.edited() {
+                let color = side.color(&palette);
                 for segment in side.wall(&g.contour).segments() {
                     if segment.kind() != SegmentKind::Line {
                         polygons.push((segment.control_points().to_vec(), color));
@@ -1664,7 +1720,7 @@ impl MeridionalView {
                 }
             }
             if let Some(curve) = g.contour.leading_edge_curve().filter(|c| c.degree() > 1)
-                && !display.materials
+                && display.page == Page::FlowPath
             {
                 polygons.push((curve.control_points().to_vec(), palette.leading_edge));
             }
@@ -1886,11 +1942,7 @@ impl MeridionalView {
                     .inner
                     .and_then(|pointer| {
                         let pointer = DVec2::new(pointer.x / scale, pointer.y / scale);
-                        let sides = if display.materials {
-                            Side::MATERIALS
-                        } else {
-                            Side::WALLS
-                        };
+                        let sides = display.edited();
                         wall_under(&g.contour, &sides, pointer, &response.transform, scale)
                     })
                     .map_or(MenuTarget::Empty, |(side, segment, t)| {
@@ -2669,10 +2721,10 @@ fn edit_menu(
             }
             if side.drawn(&current.meridional) {
                 ui.separator();
-                let (name, hint) = if side.is_material() {
+                let (name, hint) = if side.is_wire() {
                     (
-                        tr("Back to the automatic material"),
-                        tr("The wall thickness, the bore and the boss of the material settings"),
+                        tr("Back to automatic"),
+                        tr("The wire as the values of the properties panel draw it"),
                     )
                 } else {
                     (

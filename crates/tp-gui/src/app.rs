@@ -2278,4 +2278,40 @@ mod tests {
             gap(moved)
         );
     }
+
+    #[test]
+    fn the_side_chambers_page_designs_and_shapes_the_casing_walls() {
+        use crate::views::meridional::{Page, Side};
+        use tp_design::impeller::wall::WallPoint;
+        let mut harness = editor();
+        let id = harness.state().active_impeller().unwrap();
+        harness.state_mut().meridional.editor.page = Page::Chambers;
+        harness.run();
+        harness.run();
+        harness.get_by_label("design the side chambers").click();
+        harness.run();
+        assert!(meridional(harness.state()).chambers.enabled);
+
+        // A control point of the front wall: dragged away from the shroud, the wall is
+        // drawn by hand and the chamber widens there.
+        let app = harness.state();
+        let c = &app.derived.geometry(id).unwrap().contour;
+        let at = WallPoint::Control {
+            segment: 0,
+            index: 3,
+        };
+        let before = c.chambers.front_casing.point(at).unwrap();
+        let handle = Handle::Point(Side::FrontCasing, at);
+        let start = handle_on_screen(app, handle);
+        drag_by(&mut harness, start, egui::vec2(-20.0, 0.0));
+        assert!(meridional(harness.state()).chambers.front.is_some());
+        let c = &harness.state().derived.geometry(id).unwrap().contour;
+        let after = c.chambers.front_casing.point(at).unwrap();
+        assert!(after.x < before.x - 1e-4, "{after} vs {before}");
+        // The rear wall stays automatic.
+        assert!(meridional(harness.state()).chambers.rear.is_none());
+        let at = handle_on_screen(harness.state(), handle);
+        double_click(&mut harness, at);
+        assert!(meridional(harness.state()).chambers.front.is_none());
+    }
 }

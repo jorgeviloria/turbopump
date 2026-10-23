@@ -87,6 +87,8 @@ pub struct ImpellerCad {
     pub blades: Shape,
     /// Impeller material: hub disk, shroud and blades.
     pub impeller: Shape,
+    /// Fluid of the side chambers between the impeller and the casing, when designed.
+    pub side_chambers: Option<Shape>,
     /// Wall thickness used, m.
     pub wall_thickness: f64,
     /// Bore and boss diameters, m.
@@ -243,6 +245,44 @@ fn wire_chains(wire: &Wall, points: usize) -> Vec<Vec<DVec3>> {
         .collect()
 }
 
+/// A closed outline (z, r) as point chains split where it turns by more than 20°, so
+/// that each smooth run becomes one spline and the corners stay sharp.
+fn outline_chains(outline: &[DVec2]) -> Vec<Vec<DVec3>> {
+    let mut points: Vec<DVec2> = Vec::with_capacity(outline.len());
+    for &p in outline {
+        if points.last().is_none_or(|q| q.distance(p) > 1e-9) {
+            points.push(p);
+        }
+    }
+    if points.len() > 1 && points[0].distance(points[points.len() - 1]) <= 1e-9 {
+        points.pop();
+    }
+    let n = points.len();
+    let corner = |i: usize| {
+        let (a, b, c) = (points[(i + n - 1) % n], points[i], points[(i + 1) % n]);
+        (b - a).normalize_or_zero().dot((c - b).normalize_or_zero()) < 20f64.to_radians().cos()
+    };
+    let corners: Vec<usize> = (0..n).filter(|&i| corner(i)).collect();
+    let starts = if corners.is_empty() { vec![0] } else { corners };
+    starts
+        .iter()
+        .enumerate()
+        .map(|(k, &from)| {
+            let to = starts[(k + 1) % starts.len()];
+            let mut chain = vec![xz(points[from])];
+            let mut i = from;
+            loop {
+                i = (i + 1) % n;
+                chain.push(xz(points[i]));
+                if i == to {
+                    break;
+                }
+            }
+            chain
+        })
+        .collect()
+}
+
 /// Fractions of the requested fillet radius tried in turn.
 const FILLET_RETRIES: [f64; 4] = [1.0, 0.75, 0.5, 0.25];
 
@@ -293,6 +333,18 @@ pub fn build_impeller(g: &ImpellerGeometry, options: &CadOptions) -> Result<Impe
         .iter()
         .map(|p| p.x)
         .fold(g.contour.axial_length, f64::max);
+
+    // The side chambers, revolved from their outlines.
+    let chambers = &g.contour.chambers;
+    let side_chambers = if chambers.enabled {
+        let solids = [&chambers.front, &chambers.rear]
+            .into_iter()
+            .map(|outline| occ::revolve_z(&profile_face(&outline_chains(outline))?))
+            .collect::<Result<Vec<_>, _>>()?;
+        Some(occ::compound(&solids)?)
+    } else {
+        None
+    };
 
     // Blades.
     let blade = blade_solid(g, options.blade_extension)?;
@@ -386,6 +438,7 @@ pub fn build_impeller(g: &ImpellerGeometry, options: &CadOptions) -> Result<Impe
         fluid,
         blades,
         impeller,
+        side_chambers,
         wall_thickness: t,
         bore_diameter: 2.0 * rb,
         boss_diameter: 2.0 * rboss,
@@ -683,6 +736,31 @@ mod tests {
         let walls = heavy.impeller_volume() - heavy.blades.volume() * 1e-9;
         assert_relative_eq!(walls, pappus(&thick), max_relative = 5e-3);
         assert!(heavy.impeller_volume() > cad.impeller_volume() * 1.1);
+    }
+
+    #[test]
+    fn designed_side_chambers_are_revolved_into_their_fluid() {
+        let g = reference();
+        assert!(
+            build_impeller(&g, &CadOptions::default())
+                .unwrap()
+                .side_chambers
+                .is_none()
+        );
+        let mut input = tp_design::impeller::ImpellerGeometryInput::default();
+        input.meridional.chambers.enabled = true;
+        let with = tp_design::impeller::build(&g.basis, &input).unwrap();
+        let sharp = CadOptions {
+            fillet_radius: Some(0.0),
+            ..CadOptions::default()
+        };
+        let cad = build_impeller(&with, &sharp).unwrap();
+        let chambers = cad.side_chambers.unwrap();
+        assert!(chambers.is_valid());
+        assert_eq!(chambers.solid_count(), 2);
+        let c = &with.contour.chambers;
+        let pappus = revolved_volume(&c.front) + revolved_volume(&c.rear);
+        assert_relative_eq!(chambers.volume() * 1e-9, pappus, max_relative = 5e-3);
     }
 
     #[test]
