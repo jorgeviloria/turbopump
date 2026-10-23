@@ -17,8 +17,6 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Draws the wall as it is now, dashed, to compare changes",
         "Dibuja la pared tal como está ahora, a trazos, para comparar los cambios",
     ),
-    ("hub copy", "copia del cubo"),
-    ("shroud copy", "copia de la carcasa"),
     ("Copy the wall points", "Copiar los puntos de la pared"),
     (
         "100 lines of z and r, tab separated, to paste elsewhere",
@@ -156,6 +154,64 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     (
         "A dragged point lands on the line through two other points near it",
         "El punto arrastrado cae en la recta que pasa por otros dos puntos cercanos",
+    ),
+    ("Flow path", "Canal"),
+    (
+        "Hub, shroud and blade edges",
+        "Cubo, carcasa y bordes del álabe",
+    ),
+    ("Materials", "Materiales"),
+    (
+        "The closed contours of the hub disk and the shroud cover: drag their points, right-click a wire for its segments",
+        "Los contornos cerrados del disco del cubo y de la tapa: arrastra sus puntos; clic derecho en un alambre para sus tramos",
+    ),
+    (
+        "Hub and shroud as one Bézier each, and the automatic material; undo brings them back",
+        "Cubo y carcasa como una Bézier cada uno, y el material automático; deshacer los recupera",
+    ),
+    ("Material", "Material"),
+    (
+        "The closed contours of the hub disk and the shroud cover, for the CAD model: automatic from these values, or drawn on the Materials page of the editor",
+        "Los contornos cerrados del disco del cubo y de la tapa, para el modelo CAD: automáticos con estos valores, o dibujados en la página Materiales del editor",
+    ),
+    (
+        "Hub disk drawn by segments",
+        "Disco del cubo dibujado por tramos",
+    ),
+    ("Shroud cover drawn by segments", "Tapa dibujada por tramos"),
+    (
+        "Drawn on the Materials page of the editor; the values above do not apply",
+        "Dibujado en la página Materiales del editor; los valores de arriba no se aplican",
+    ),
+    (
+        "Set in the meridional editor, Materials page",
+        "Se fija en el editor meridional, página Materiales",
+    ),
+    ("Hub disk", "Disco del cubo"),
+    ("Shroud cover", "Tapa"),
+    ("hub disk corner", "esquina del disco del cubo"),
+    (
+        "hub disk control point",
+        "punto de control del disco del cubo",
+    ),
+    ("shroud cover corner", "esquina de la tapa"),
+    ("shroud cover control point", "punto de control de la tapa"),
+    ("hub disk arc centre", "centro del arco del disco del cubo"),
+    ("shroud cover arc centre", "centro del arco de la tapa"),
+    ("{} copy", "{} (copia)"),
+    (
+        "Back to the automatic material",
+        "Volver al material automático",
+    ),
+    (
+        "The wall thickness, the bore and the boss of the material settings",
+        "El espesor de pared, el agujero y el saliente de los ajustes del material",
+    ),
+    ("offset", "desplazamiento"),
+    ("Apply", "Aplicar"),
+    (
+        "Moves the segment this far away from the channel (negative: towards it); its joints move along, the ends of the wall stay",
+        "Desplaza el tramo esta distancia alejándolo del canal (negativa: hacia él); sus uniones lo acompañan y los extremos de la pared se quedan",
     ),
     ("curvature maximum", "curvatura máxima"),
     (

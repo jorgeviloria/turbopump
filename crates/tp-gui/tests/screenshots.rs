@@ -605,6 +605,13 @@ fn meridian_editor() {
     harness.get_by_label("curvature maximum").click();
     harness.run();
     save(&mut harness, "editor-analysis");
+    // The closed material of hub disk and shroud cover.
+    harness.get_by_label_contains("Analysis").click();
+    harness.run();
+    harness.get_by_label("Materials").click();
+    harness.run();
+    harness.run();
+    save(&mut harness, "editor-materials");
 }
 
 /// The segment types of a drawn wall: the hub as lines and an arc, the shroud as a

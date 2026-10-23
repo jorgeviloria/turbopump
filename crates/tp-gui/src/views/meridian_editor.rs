@@ -90,8 +90,22 @@ impl MeridionalView {
         }
     }
 
-    /// One row: dimensions, the analysis menu, framing, the snap grid and the help.
+    /// One row: the page, dimensions, the analysis menu, framing, the snap grid and the
+    /// help.
     fn toolbar(&mut self, ui: &mut Ui, units: &DisplayUnits) {
+        // What the handles edit: the walls of the flow path or the closed material.
+        let materials = self.editor.materials;
+        ui.selectable_value(&mut self.editor.materials, false, tr("Flow path"))
+            .on_hover_text(tr("Hub, shroud and blade edges"));
+        ui.selectable_value(&mut self.editor.materials, true, tr("Materials"))
+            .on_hover_text(tr(
+                "The closed contours of the hub disk and the shroud cover: drag their \
+                 points, right-click a wire for its segments",
+            ));
+        if self.editor.materials != materials {
+            self.fit = Some(Fit::Meridian);
+        }
+        ui.separator();
         ui.checkbox(&mut self.editor.dimensions, tr("dimensions"))
             .on_hover_text(tr(
                 "The main dimensions d_n, d₁, d₂, b₂ and L. Click a value to type it.",
@@ -327,7 +341,13 @@ fn recover(ui: &mut Ui, cx: &mut EditCtx<'_>, id: ComponentId, reason: &str) {
         .impeller_geometry_input(id)
         .unwrap_or_default();
     let m = &current.meridional;
-    if m.hub_segments.is_none() && m.shroud_segments.is_none() {
+    let drawn = [
+        &m.hub_segments,
+        &m.shroud_segments,
+        &m.hub_material,
+        &m.shroud_material,
+    ];
+    if drawn.iter().all(|s| s.is_none()) {
         unavailable(ui, reason);
         return;
     }
@@ -338,13 +358,17 @@ fn recover(ui: &mut Ui, cx: &mut EditCtx<'_>, id: ComponentId, reason: &str) {
         if ui
             .button(tr("Back to the automatic contour"))
             .on_hover_text(tr(
-                "Hub and shroud as one Bézier each; undo brings them back",
+                "Hub and shroud as one Bézier each, and the automatic material; undo brings \
+                 them back",
             ))
             .clicked()
         {
             let mut input = current.clone();
-            input.meridional.hub_segments = None;
-            input.meridional.shroud_segments = None;
+            let m = &mut input.meridional;
+            m.hub_segments = None;
+            m.shroud_segments = None;
+            m.hub_material = None;
+            m.shroud_material = None;
             cx.edit("edit wall segments", |p| p.set_impeller_geometry(id, input));
         }
         ui.weak(tr("Or undo the last change."));

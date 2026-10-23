@@ -1348,6 +1348,75 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
             ui.end_row();
         }
     });
+    section_info(
+        ui,
+        tr("Material"),
+        tr(
+            "The closed contours of the hub disk and the shroud cover, for the CAD model: \
+             automatic from these values, or drawn on the Materials page of the editor",
+        ),
+    );
+    props(ui, "material", |ui| {
+        let used = g.map(|g| g.contour.material);
+        let settings = &mut m.material;
+        changed |= param_f64(
+            ui,
+            tr("Wall thickness"),
+            tr("Hub disk and shroud; automatic: max(3 mm, 0.02·d₂)"),
+            &mut settings.wall_thickness,
+            Length,
+            used.map(|u| u.wall_thickness),
+            &units,
+            0.0005..=0.2,
+        );
+        changed |= param_f64(
+            ui,
+            tr("Bore diameter"),
+            tr("Automatic: the hub diameter at the eye"),
+            &mut settings.bore_diameter,
+            Length,
+            used.map(|u| u.bore_diameter),
+            &units,
+            0.0..=1.0,
+        );
+        changed |= param_f64(
+            ui,
+            tr("Boss diameter"),
+            tr(
+                "Around the bore; automatic: the bore plus a wall of a quarter of it, no thinner than the wall",
+            ),
+            &mut settings.boss_diameter,
+            Length,
+            used.map(|u| u.boss_diameter),
+            &units,
+            0.0..=1.0,
+        );
+        for (name, wire) in [
+            (tr("Hub disk drawn by segments"), &mut m.hub_material),
+            (tr("Shroud cover drawn by segments"), &mut m.shroud_material),
+        ] {
+            let Some(list) = wire else {
+                continue;
+            };
+            let count = list.len();
+            label(
+                ui,
+                name,
+                tr("Drawn on the Materials page of the editor; the values above do not apply"),
+            );
+            let automatic = ui
+                .horizontal(|ui| {
+                    ui.label(tf("{} segments", &[&count]));
+                    ui.button(tr("Automatic")).clicked()
+                })
+                .inner;
+            ui.end_row();
+            if automatic {
+                *wire = None;
+                changed = true;
+            }
+        }
+    });
     if changed {
         edit_geometry(cx, id, "edit meridional contour", input);
     }

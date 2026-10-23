@@ -6,6 +6,7 @@
 pub mod blade;
 pub mod guide;
 pub mod loading;
+pub mod material;
 pub mod meridian;
 pub mod potential;
 pub mod wall;
@@ -186,11 +187,7 @@ pub struct ImpellerGeometry {
     pub warnings: Vec<String>,
 }
 
-/// Thickness of the hub disk and the shroud of the CAD model unless given: 0.02·d₂, at
-/// least 3 mm (our choice for a cast impeller).
-pub fn default_wall_thickness(outlet_diameter: f64) -> f64 {
-    (0.02 * outlet_diameter).max(0.003)
-}
+pub use material::default_wall_thickness;
 
 impl ImpellerGeometry {
     /// The outer faces of the impeller of walls `wall` thick, as the casing beside it sees
@@ -243,7 +240,7 @@ pub fn build(
             "at least 2 spans (hub and shroud) are needed".into(),
         ));
     }
-    let mut warnings = Vec::new();
+    let mut warnings = contour.material_warnings.clone();
     // The quasi-orthogonals keep the quasi-one-dimensional flow; the blade sections lie
     // on the stream surfaces of the chosen flow, solved on the same stations so that a
     // span point's index stays its channel position.

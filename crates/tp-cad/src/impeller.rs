@@ -9,8 +9,8 @@
 //!   (blades ∩ channel), less the balance holes.
 //! - **Fillets** where the blades meet hub and shroud, on the impeller and on the flow
 //!   domain alike.
-//! - **Hub disk**: a wall as thick as the shroud behind the hub contour and a boss
-//!   around the shaft bore, hollow between them on the rear side.
+//! - **Hub disk and shroud**: the closed material contours of the meridional design
+//!   (`tp_design::impeller::material`), automatic or drawn.
 //!
 //! Coordinates: z along the axis in the inflow direction, the meridional profile drawn
 //! in the xz plane (x = r), all in millimetres.
@@ -19,6 +19,7 @@ use std::f64::consts::PI;
 
 use tp_design::impeller::ImpellerGeometry;
 use tp_design::impeller::blade::BladeSection;
+use tp_design::impeller::wall::{SegmentKind, Wall};
 use tp_math::{DVec2, DVec3};
 
 use crate::CadError;
@@ -47,16 +48,10 @@ pub struct BalanceHoles {
     pub pitch_diameter: f64,
 }
 
-/// Options of the CAD model.
+/// Options of the CAD model. The material of hub disk and shroud comes from the
+/// meridional design.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CadOptions {
-    /// Wall thickness of hub disk and shroud, m. `None`: max(3 mm, 0.02·d₂).
-    pub wall_thickness: Option<f64>,
-    /// Bore diameter of the hub, m. `None`: the hub diameter at the eye.
-    pub bore_diameter: Option<f64>,
-    /// Outer diameter of the boss around the bore, m. `None`: the bore plus a wall of
-    /// a quarter of the bore, and no less than the wall thickness.
-    pub boss_diameter: Option<f64>,
     /// Fillet radius where the blades meet hub and shroud, m. `None`: half the blade
     /// thickness; zero leaves the edges sharp.
     pub fillet_radius: Option<f64>,
@@ -71,9 +66,6 @@ pub struct CadOptions {
 impl Default for CadOptions {
     fn default() -> Self {
         Self {
-            wall_thickness: None,
-            bore_diameter: None,
-            boss_diameter: None,
             fillet_radius: None,
             balance_holes: None,
             contour_points: 41,
@@ -235,31 +227,20 @@ fn blade_solid(g: &ImpellerGeometry, extension: f64) -> Result<Shape, CadError> 
     occ::loft(&wires)
 }
 
-/// Offsets a meridional curve (z, r) by `distance` along its normal on the side away
-/// from `away_from`. Fails if the curvature radius is smaller than the offset.
-fn offset_curve(points: &[DVec2], distance: f64, away_from: DVec2) -> Result<Vec<DVec2>, CadError> {
-    let n = points.len();
-    let tangent = |i: usize| (points[(i + 1).min(n - 1)] - points[i.saturating_sub(1)]).normalize();
-    let mid = n / 2;
-    let normal = |t: DVec2| DVec2::new(-t.y, t.x);
-    let side = if normal(tangent(mid)).dot(away_from - points[mid]) > 0.0 {
-        -1.0
-    } else {
-        1.0
-    };
-    let offset: Vec<DVec2> = (0..n)
-        .map(|i| points[i] + normal(tangent(i)) * (side * distance))
-        .collect();
-    // An offset larger than the curvature radius reverses the curve locally.
-    for i in 0..n - 1 {
-        if (offset[i + 1] - offset[i]).dot(points[i + 1] - points[i]) <= 0.0 {
-            return Err(CadError::Input(format!(
-                "wall thickness {:.1} mm exceeds the curvature radius of the contour",
-                distance * MM
-            )));
-        }
-    }
-    Ok(offset)
+/// The point chains of the edges of `wire`, `points` for each curved segment.
+fn wire_chains(wire: &Wall, points: usize) -> Vec<Vec<DVec3>> {
+    wire.segments()
+        .iter()
+        .map(|s| {
+            if s.kind() == SegmentKind::Line {
+                vec![xz(s.start()), xz(s.end())]
+            } else {
+                (0..points)
+                    .map(|i| xz(s.eval(i as f64 / (points - 1) as f64)))
+                    .collect()
+            }
+        })
+        .collect()
 }
 
 /// Fractions of the requested fillet radius tried in turn.
@@ -268,20 +249,9 @@ const FILLET_RETRIES: [f64; 4] = [1.0, 0.75, 0.5, 0.25];
 /// Builds blade, channel, flow domain and impeller solids from the geometry.
 pub fn build_impeller(g: &ImpellerGeometry, options: &CadOptions) -> Result<ImpellerCad, CadError> {
     let b = &g.basis;
-    let (rn, r2) = (b.hub_diameter / 2.0, b.outlet_diameter / 2.0);
-    let length = g.contour.axial_length;
-    let t = options
-        .wall_thickness
-        .unwrap_or_else(|| tp_design::impeller::default_wall_thickness(b.outlet_diameter));
-    let rb = options.bore_diameter.map_or(rn, |d| d / 2.0);
-    if !(t > 0.0 && t.is_finite()) {
-        return Err(CadError::Input("wall thickness must be positive".into()));
-    }
-    if !(rb > 0.0 && rb <= rn) {
-        return Err(CadError::Input(
-            "the bore diameter must be positive and not larger than the hub diameter".into(),
-        ));
-    }
+    let material = g.contour.material;
+    let t = material.wall_thickness;
+    let (rb, rboss) = (material.bore_diameter / 2.0, material.boss_diameter / 2.0);
     let k = options.contour_points.max(5);
     let hub: Vec<DVec2> = g.contour.hub.sample(k);
     let shroud: Vec<DVec2> = g.contour.shroud.sample(k);
@@ -296,74 +266,33 @@ pub fn build_impeller(g: &ImpellerGeometry, options: &CadOptions) -> Result<Impe
         vec![xz(shroud[0]), xz(hub[0])],
     ])?)?;
 
-    // Hub disk: a wall of thickness t behind the hub contour, from d₂ in to the boss,
-    // and the boss from the bore out, up to the rear face (our design).
-    let rear = length + t;
-    let rboss = options
-        .boss_diameter
-        .map_or_else(|| rb + (0.25 * 2.0 * rb).max(t), |d| d / 2.0);
-    // The hub disk ends at the hub end of the outlet edge (d₂i of a semi-axial impeller).
-    let r2 = r2.min(b.outlet_hub_diameter / 2.0);
-    if !(rboss > rb && rboss < r2 - t) {
-        return Err(CadError::Input(format!(
-            "the boss diameter must lie between the bore ({:.1} mm) and the hub outlet \
-             diameter less the wall",
-            2.0 * rb * MM
-        )));
-    }
     let pattern = options
         .balance_holes
         .as_ref()
         .map(|holes| hole_pattern(holes, rboss))
         .transpose()?;
-    let behind = offset_curve(&hub, t, shroud[k / 2])?;
-    // The back of the wall, from d₂ inward, until it meets the boss.
-    let mut back: Vec<DVec2> = Vec::new();
-    for i in (0..k).rev() {
-        let p = behind[i];
-        if p.y <= rboss {
-            let q = back.last().copied().unwrap_or(p);
-            let f = (q.y - rboss) / (q.y - p.y);
-            back.push(q + (p - q) * f);
-            break;
-        }
-        back.push(p);
-    }
-    if back.last().is_some_and(|p| p.y > rboss) {
-        let end = *back.last().expect("not empty");
-        back.push(DVec2::new(end.x, rboss));
-    }
-    let meet = *back.last().expect("not empty");
-    // Shroud: the shroud contour thickened outwards (away from the hub).
-    let outer = offset_curve(&shroud, t, hub[k / 2])?;
 
-    // Everything the impeller fills when the flow domain is taken out: hub disk,
-    // channel and shroud in one profile. Cutting the (rounded) flow domain out of it
+    // Everything the impeller fills when the flow domain is taken out, in one profile:
+    // across the inlet, the shroud material back to the outlet, across the outlet and
+    // the hub material back to the inlet. Cutting the (rounded) flow domain out of it
     // meets no wall face, only the inlet and the outlet.
-    let start = hub[0];
-    let mut profile = Vec::new();
-    if start.y - rb > 1e-9 {
-        profile.push(vec![xz(DVec2::new(start.x, rb)), xz(start)]);
+    let (hub_wire, shroud_wire) = (&g.contour.hub_material, &g.contour.shroud_material);
+    let mut profile = vec![vec![xz(hub[0]), xz(shroud[0])]];
+    profile.extend(wire_chains(shroud_wire, k).into_iter().rev().map(|mut c| {
+        c.reverse();
+        c
+    }));
+    if shroud[k - 1].distance(hub[k - 1]) > 1e-9 {
+        profile.push(vec![xz(shroud[k - 1]), xz(hub[k - 1])]);
     }
-    profile.extend([
-        vec![xz(start), xz(shroud[0])],
-        vec![xz(shroud[0]), xz(outer[0])],
-        chain(&outer),
-    ]);
-    // Across the outlet at d₂: shroud wall, channel and hub wall.
-    let rim = [outer[k - 1], shroud[k - 1], hub[k - 1], back[0]];
-    profile.extend(
-        rim.windows(2)
-            .filter(|w| w[0].distance(w[1]) > 1e-9)
-            .map(|w| vec![xz(w[0]), xz(w[1])]),
-    );
-    profile.extend([
-        chain(&back),
-        vec![xz(meet), xz(DVec2::new(rear, rboss))],
-        vec![xz(DVec2::new(rear, rboss)), xz(DVec2::new(rear, rb))],
-        vec![xz(DVec2::new(rear, rb)), xz(DVec2::new(start.x, rb))],
-    ]);
-    let material = occ::revolve_z(&profile_face(&profile)?)?;
+    profile.extend(wire_chains(hub_wire, k));
+    let material_solid = occ::revolve_z(&profile_face(&profile)?)?;
+    // The rear face of the hub disk, for the balance holes.
+    let rear = hub_wire
+        .sample(200)
+        .iter()
+        .map(|p| p.x)
+        .fold(g.contour.axial_length, f64::max);
 
     // Blades.
     let blade = blade_solid(g, options.blade_extension)?;
@@ -376,7 +305,7 @@ pub fn build_impeller(g: &ImpellerGeometry, options: &CadOptions) -> Result<Impe
     let blades = channel.common(&all_blades)?;
     // The walls are the profile less the channel: their faces are those of the channel,
     // which the trimmed blades share.
-    let mut impeller = material.cut(&channel)?.fuse(&blades)?;
+    let mut impeller = material_solid.cut(&channel)?.fuse(&blades)?;
 
     // Fillets where the blades meet hub and shroud: concave edges of the impeller and
     // convex ones of the flow domain, rounded on each with the same radius. (A boolean
@@ -725,18 +654,40 @@ mod tests {
     }
 
     #[test]
+    fn the_material_contours_set_the_impeller_solid() {
+        // The material as Pappus sees it: hub disk and shroud regions revolved.
+        let pappus = |g: &ImpellerGeometry| {
+            let region = |wall: &tp_design::impeller::wall::Wall, wire: &Wall| {
+                let mut polygon = wall.sample(2000);
+                polygon.extend(wire.sample(2000));
+                revolved_volume(&polygon)
+            };
+            let c = &g.contour;
+            region(&c.hub, &c.hub_material) + region(&c.shroud, &c.shroud_material)
+        };
+        let sharp = CadOptions {
+            fillet_radius: Some(0.0),
+            ..CadOptions::default()
+        };
+        let g = reference();
+        let cad = build_impeller(&g, &sharp).unwrap();
+        let walls = cad.impeller_volume() - cad.blades.volume() * 1e-9;
+        assert_relative_eq!(walls, pappus(&g), max_relative = 5e-3);
+
+        // Thicker walls, set in the meridional design, make a heavier impeller.
+        let mut input = tp_design::impeller::ImpellerGeometryInput::default();
+        input.meridional.material.wall_thickness = tp_design::Param::Manual(0.006);
+        let thick = tp_design::impeller::build(&g.basis, &input).unwrap();
+        let heavy = build_impeller(&thick, &sharp).unwrap();
+        assert_relative_eq!(heavy.wall_thickness, 0.006);
+        let walls = heavy.impeller_volume() - heavy.blades.volume() * 1e-9;
+        assert_relative_eq!(walls, pappus(&thick), max_relative = 5e-3);
+        assert!(heavy.impeller_volume() > cad.impeller_volume() * 1.1);
+    }
+
+    #[test]
     fn rejects_bad_options() {
         let g = reference();
-        let thick = CadOptions {
-            wall_thickness: Some(0.2),
-            ..Default::default()
-        };
-        assert!(build_impeller(&g, &thick).is_err());
-        let wide_bore = CadOptions {
-            bore_diameter: Some(1.0),
-            ..Default::default()
-        };
-        assert!(build_impeller(&g, &wide_bore).is_err());
         // Holes that do not fit between boss and rear seal.
         let big_holes = CadOptions {
             balance_holes: Some(BalanceHoleOptions {

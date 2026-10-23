@@ -322,9 +322,6 @@ mod cad {
         step: bool,
         iges: bool,
         stl: bool,
-        wall: Param<f64>,
-        bore: Param<f64>,
-        boss: Param<f64>,
         fillet: Param<f64>,
         balance_holes: bool,
         /// Material density, kg/m³.
@@ -339,9 +336,6 @@ mod cad {
                 step: true,
                 iges: false,
                 stl: false,
-                wall: Param::Auto,
-                bore: Param::Auto,
-                boss: Param::Auto,
                 fillet: Param::Auto,
                 balance_holes: false,
                 density: 7850.0,
@@ -487,9 +481,6 @@ mod cad {
             folder: PathBuf,
         ) {
             let options = CadOptions {
-                wall_thickness: self.wall.manual_value(),
-                bore_diameter: self.bore.manual_value(),
-                boss_diameter: self.boss.manual_value(),
                 fillet_radius: self.fillet.manual_value(),
                 balance_holes: holes,
                 ..CadOptions::default()
@@ -578,7 +569,6 @@ mod cad {
                 ui.label(tr("The impeller geometry has errors; fix them first."));
                 return;
             };
-            let d2 = g.basis.outlet_diameter;
             // The volute goes along once all of its steps are accepted.
             let volute_ready = volute.filter(|&v| {
                 project.component(v).is_some_and(|c| {
@@ -604,38 +594,18 @@ mod cad {
                 .num_columns(3)
                 .spacing([10.0, 4.0])
                 .show(ui, |ui| {
-                    param_f64(
-                        ui,
-                        tr("Wall thickness"),
-                        tr("Hub disk and shroud; automatic: max(3 mm, 0.02·d₂)"),
-                        &mut self.wall,
-                        Length,
-                        Some((0.02 * d2).max(0.003)),
-                        &units,
-                        0.0005..=0.2,
-                    );
-                    param_f64(
-                        ui,
-                        tr("Bore diameter"),
-                        tr("Automatic: the hub diameter at the eye"),
-                        &mut self.bore,
-                        Length,
-                        Some(g.basis.hub_diameter),
-                        &units,
-                        0.0..=1.0,
-                    );
-                    let wall = self.wall.manual_value().unwrap_or((0.02 * d2).max(0.003));
-                    let bore = self.bore.manual_value().unwrap_or(g.basis.hub_diameter);
-                    param_f64(
-                        ui,
-                        tr("Boss diameter"),
-                        tr("Around the bore; automatic: the bore plus a wall of a quarter of it, no thinner than the wall"),
-                        &mut self.boss,
-                        Length,
-                        Some(bore + 2.0 * (0.25 * bore).max(wall)),
-                        &units,
-                        0.0..=1.0,
-                    );
+                    // The material comes from the meridional design.
+                    let m = g.contour.material;
+                    let hint = tr("Set in the meridional editor, Materials page");
+                    for (name, value) in [
+                        (tr("Wall thickness"), m.wall_thickness),
+                        (tr("Bore diameter"), m.bore_diameter),
+                        (tr("Boss diameter"), m.boss_diameter),
+                    ] {
+                        ui.label(name).on_hover_text(hint);
+                        ui.label(units.show(Length, value)).on_hover_text(hint);
+                        ui.end_row();
+                    }
                     param_f64(
                         ui,
                         tr("Fillet radius"),

@@ -2211,4 +2211,71 @@ mod tests {
             .push(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
         assert!((corner_x(harness.state()) - goal).abs() > 1e-5);
     }
+
+    #[test]
+    fn the_materials_page_edits_the_closed_hub_disk_and_shroud_cover() {
+        use crate::views::meridional::Side;
+        use tp_design::impeller::wall::WallPoint;
+        let mut harness = editor();
+        let id = harness.state().active_impeller().unwrap();
+        harness.get_by_label("Materials").click();
+        harness.run();
+        harness.run();
+        // The corner of the boss: dragging it draws the hub disk by hand.
+        let app = harness.state();
+        let wire = &app.derived.geometry(id).unwrap().contour.hub_material;
+        let (corner, _) = wire
+            .points()
+            .into_iter()
+            .find(|(at, _)| matches!(at, WallPoint::Joint { .. }))
+            .unwrap();
+        let handle = Handle::Point(Side::HubMaterial, corner);
+        let before = wire.point(corner).unwrap();
+        let start = handle_on_screen(app, handle);
+        drag_by(&mut harness, start, egui::vec2(15.0, 0.0));
+        let drawn = meridional(harness.state()).hub_material;
+        assert!(drawn.is_some(), "the hub disk is drawn by hand");
+        let after = harness
+            .state()
+            .derived
+            .geometry(id)
+            .unwrap()
+            .contour
+            .hub_material
+            .point(corner)
+            .unwrap();
+        assert!(after.x > before.x + 1e-4, "{after} vs {before}");
+        assert!(
+            meridional(harness.state()).hub_segments.is_none(),
+            "the hub stays"
+        );
+        // A double click puts the automatic disk back.
+        let at = handle_on_screen(harness.state(), handle);
+        double_click(&mut harness, at);
+        assert!(meridional(harness.state()).hub_material.is_none());
+
+        // The shroud cover, offset outwards by a wall thickness: twice as thick there.
+        let app = harness.state();
+        let c = &app.derived.geometry(id).unwrap().contour;
+        let thickness = c.material.wall_thickness;
+        let cover = c.shroud_material.segments()[1].eval(0.5);
+        let at = screen_of(app, cover);
+        right_click(&mut harness, at);
+        harness.get_by_label("Apply").click();
+        harness.run();
+        let c = &harness.state().derived.geometry(id).unwrap().contour;
+        assert!(meridional(harness.state()).shroud_material.is_some());
+        let moved = c.shroud_material.segments()[1].eval(0.5);
+        let wall = c.shroud.sample(2000);
+        let gap = |p: tp_math::DVec2| {
+            wall.iter()
+                .map(|q| q.distance(p))
+                .fold(f64::INFINITY, f64::min)
+        };
+        assert!(
+            (gap(moved) - 2.0 * thickness).abs() < 0.1 * thickness,
+            "{}",
+            gap(moved)
+        );
+    }
 }

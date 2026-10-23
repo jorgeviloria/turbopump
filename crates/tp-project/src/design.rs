@@ -460,7 +460,7 @@ impl Project {
         // The faces of the impeller, with the walls of its CAD model, for a casing
         // beside it.
         let double_entry = self.pump_impeller_input(impeller)?.suction == Suction::Double;
-        let wall = tp_design::impeller::default_wall_thickness(geometry.basis.outlet_diameter);
+        let wall = geometry.contour.material.wall_thickness;
         Ok(ImpellerOutlet {
             sides: Some(geometry.sides(wall, double_entry)),
             ..ImpellerOutlet::from_pump(&main, &duty, midplane, geometry.blade.rotation_sign)

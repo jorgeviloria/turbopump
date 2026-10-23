@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use tp_math::{Bezier, DVec2, Polyline};
 
 use super::ImpellerBasis;
+use super::material::{self, Material, MaterialSettings};
 use super::wall::{SegmentInput, Wall};
 use crate::{DesignError, Param};
 
@@ -43,6 +44,16 @@ pub struct MeridionalInput {
     /// Shroud drawn segment by segment; `None` keeps the automatic Bézier.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shroud_segments: Option<Vec<SegmentInput>>,
+    /// Thickness, bore and boss of the automatic material.
+    pub material: MaterialSettings,
+    /// Wire of the hub disk drawn segment by segment, from the hub end at the outlet
+    /// back to the hub start; `None` keeps the automatic one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hub_material: Option<Vec<SegmentInput>>,
+    /// Wire of the shroud cover drawn segment by segment, from the shroud end at the
+    /// outlet back to the shroud start; `None` keeps the automatic one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shroud_material: Option<Vec<SegmentInput>>,
 }
 
 /// How the hub point of the leading edge sits relative to its shroud point.
@@ -331,6 +342,14 @@ pub fn outlet_edge(basis: &ImpellerBasis) -> DVec2 {
 pub struct MeridionalContour {
     pub hub: Wall,
     pub shroud: Wall,
+    /// Wire of the hub disk, from the hub end at the outlet back to the hub start.
+    pub hub_material: Wall,
+    /// Wire of the shroud cover, from the shroud end at the outlet back to its start.
+    pub shroud_material: Wall,
+    /// Thickness, bore and boss as used for the material.
+    pub material: Material,
+    /// What of the material could not be built as asked.
+    pub material_warnings: Vec<String>,
     pub axial_length: f64,
     /// Leading edge on the hub and on the shroud, as fractions of each contour length.
     pub leading_edge: (f64, f64),
@@ -447,11 +466,27 @@ impl MeridionalContour {
                 "the leading edge must lie upstream of the outlet".into(),
             ));
         }
+        let settings = input.material.resolve(basis);
+        let wires = material::wires(
+            &hub,
+            &shroud,
+            basis,
+            &settings,
+            length,
+            (
+                input.hub_material.as_deref(),
+                input.shroud_material.as_deref(),
+            ),
+        )?;
         Ok(Self {
             hub_line,
             shroud_line,
             hub,
             shroud,
+            hub_material: wires.hub,
+            shroud_material: wires.shroud,
+            material: settings,
+            material_warnings: wires.warnings,
             axial_length: length,
             leading_edge,
             leading_edge_shape: input.leading_edge_shape,

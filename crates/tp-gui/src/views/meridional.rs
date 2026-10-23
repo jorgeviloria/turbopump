@@ -26,18 +26,28 @@ use super::{Palette, unavailable};
 use crate::app::EditCtx;
 use crate::i18n::{tf, tr};
 
-/// Hub or shroud.
+/// A wall of the meridional section: hub and shroud of the flow path, and the wires
+/// that close the hub disk and the shroud cover.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Side {
     Hub,
     Shroud,
+    HubMaterial,
+    ShroudMaterial,
 }
 
 impl Side {
-    fn wall(self, contour: &MeridionalContour) -> &Wall {
+    /// The walls of the flow path.
+    pub(crate) const WALLS: [Side; 2] = [Side::Hub, Side::Shroud];
+    /// The wires of the material.
+    pub(crate) const MATERIALS: [Side; 2] = [Side::HubMaterial, Side::ShroudMaterial];
+
+    pub(crate) fn wall(self, contour: &MeridionalContour) -> &Wall {
         match self {
             Side::Hub => &contour.hub,
             Side::Shroud => &contour.shroud,
+            Side::HubMaterial => &contour.hub_material,
+            Side::ShroudMaterial => &contour.shroud_material,
         }
     }
 
@@ -45,6 +55,8 @@ impl Side {
         match self {
             Side::Hub => &mut input.hub_segments,
             Side::Shroud => &mut input.shroud_segments,
+            Side::HubMaterial => &mut input.hub_material,
+            Side::ShroudMaterial => &mut input.shroud_material,
         }
     }
 
@@ -52,7 +64,28 @@ impl Side {
         match self {
             Side::Hub => input.hub_segments.is_some(),
             Side::Shroud => input.shroud_segments.is_some(),
+            Side::HubMaterial => input.hub_material.is_some(),
+            Side::ShroudMaterial => input.shroud_material.is_some(),
         }
+    }
+
+    pub(crate) fn is_material(self) -> bool {
+        matches!(self, Side::HubMaterial | Side::ShroudMaterial)
+    }
+
+    /// Whether it belongs to the hub side: the hub or the hub disk.
+    fn on_hub(self) -> bool {
+        matches!(self, Side::Hub | Side::HubMaterial)
+    }
+
+    /// Its name, as a menu heading.
+    fn title(self) -> &'static str {
+        tr(match self {
+            Side::Hub => "Hub",
+            Side::Shroud => "Shroud",
+            Side::HubMaterial => "Hub disk",
+            Side::ShroudMaterial => "Shroud cover",
+        })
     }
 }
 
@@ -96,6 +129,14 @@ impl Handle {
             Handle::TrailingEdge => "trailing edge",
             Handle::ArcCenter(Side::Hub, _) => "hub arc centre",
             Handle::ArcCenter(Side::Shroud, _) => "shroud arc centre",
+            Handle::Point(Side::HubMaterial, WallPoint::Joint { .. }) => "hub disk corner",
+            Handle::Point(Side::HubMaterial, WallPoint::Control { .. }) => "hub disk control point",
+            Handle::Point(Side::ShroudMaterial, WallPoint::Joint { .. }) => "shroud cover corner",
+            Handle::Point(Side::ShroudMaterial, WallPoint::Control { .. }) => {
+                "shroud cover control point"
+            }
+            Handle::ArcCenter(Side::HubMaterial, _) => "hub disk arc centre",
+            Handle::ArcCenter(Side::ShroudMaterial, _) => "shroud cover arc centre",
         })
     }
 
@@ -144,6 +185,28 @@ pub(crate) fn handles(contour: &MeridionalContour, input: &MeridionalInput) -> V
         handles.extend([Handle::LeadingEdgeControl(0), Handle::LeadingEdgeControl(1)]);
     }
     handles.extend([Handle::AxialLength, Handle::TrailingEdge]);
+    handles
+}
+
+/// The handles of the material wires: every point, drawn or automatic (dragging one
+/// turns its wire into drawn segments), and the centres of rounded corners.
+pub(crate) fn material_handles(contour: &MeridionalContour) -> Vec<Handle> {
+    let mut handles = Vec::new();
+    for side in Side::MATERIALS {
+        let wall = side.wall(contour);
+        handles.extend(
+            wall.points()
+                .into_iter()
+                .map(|(at, _)| Handle::Point(side, at)),
+        );
+        handles.extend(
+            wall.segments()
+                .iter()
+                .enumerate()
+                .filter(|(_, s)| s.fillet().is_some())
+                .map(|(i, _)| Handle::ArcCenter(side, i)),
+        );
+    }
     handles
 }
 
@@ -419,7 +482,9 @@ pub(crate) fn is_manual(handle: Handle, inputs: Inputs<'_>) -> bool {
                         .is_some_and(|d| !d.outlet_hub_diameter.is_auto())
         }
         Handle::TrailingEdge => inputs.main.is_some_and(|d| !d.outlet_diameter.is_auto()),
-        Handle::Point(..) | Handle::LeadingEdgeControl(_) | Handle::ArcCenter(..) => true,
+        // A material point belongs to a wire that may still be automatic.
+        Handle::Point(side, _) | Handle::ArcCenter(side, _) => !side.is_material() || side.drawn(m),
+        Handle::LeadingEdgeControl(_) => true,
     }
 }
 
@@ -428,6 +493,12 @@ pub(crate) fn is_manual(handle: Handle, inputs: Inputs<'_>) -> bool {
 pub(crate) fn reset_change(handle: Handle, inputs: Inputs<'_>) -> Option<Change> {
     if handle == Handle::TrailingEdge {
         return inputs.main(|d| d.outlet_diameter = Param::Auto);
+    }
+    // A material wire goes back to automatic as a whole.
+    if let Handle::Point(side, _) | Handle::ArcCenter(side, _) = handle
+        && side.is_material()
+    {
+        return inputs.geometry(|input| *side.segments(&mut input.meridional) = None);
     }
     if handle == Handle::AxialLength && inputs.semi_axial {
         return inputs.both(
@@ -481,6 +552,10 @@ pub(crate) struct Display {
     pub snap_points: bool,
     /// A dragged point lands on a line through two other points near it.
     pub snap_lines: bool,
+    /// The material wires are drawn, faintly unless they are being edited.
+    pub material_lines: bool,
+    /// The material wires are edited instead of the flow path.
+    pub materials: bool,
 }
 
 impl Display {
@@ -497,6 +572,8 @@ impl Display {
         snap: 0.0,
         snap_points: false,
         snap_lines: false,
+        material_lines: false,
+        materials: false,
     };
     pub(crate) const EDITOR: Display = Display {
         stream_lines: false,
@@ -511,6 +588,8 @@ impl Display {
         snap: 0.0,
         snap_points: true,
         snap_lines: false,
+        material_lines: true,
+        materials: false,
     };
 }
 
@@ -1017,12 +1096,12 @@ fn handle_color(handle: Handle, palette: &Palette) -> Color32 {
         Handle::HubInlet
         | Handle::HubOutlet
         | Handle::AxialLength
-        | Handle::Point(Side::Hub, _)
-        | Handle::ArcCenter(Side::Hub, _) => palette.hub,
+        | Handle::Point(Side::Hub | Side::HubMaterial, _)
+        | Handle::ArcCenter(Side::Hub | Side::HubMaterial, _) => palette.hub,
         Handle::ShroudInlet
         | Handle::ShroudOutlet
-        | Handle::Point(Side::Shroud, _)
-        | Handle::ArcCenter(Side::Shroud, _) => palette.shroud,
+        | Handle::Point(Side::Shroud | Side::ShroudMaterial, _)
+        | Handle::ArcCenter(Side::Shroud | Side::ShroudMaterial, _) => palette.shroud,
         Handle::LeadingEdgeHub | Handle::LeadingEdgeShroud | Handle::LeadingEdgeControl(_) => {
             palette.leading_edge
         }
@@ -1348,7 +1427,12 @@ impl MeridionalView {
             semi_axial: g.basis.outlet_inclination > 0.0,
         };
 
-        let handles: Vec<(Handle, DVec2)> = handles(&g.contour, &current.meridional)
+        let editable = if display.materials {
+            material_handles(&g.contour)
+        } else {
+            handles(&g.contour, &current.meridional)
+        };
+        let handles: Vec<(Handle, DVec2)> = editable
             .into_iter()
             .map(|h| (h, handle_position(h, &g.contour)))
             .collect();
@@ -1371,7 +1455,10 @@ impl MeridionalView {
             .dragging
             .and(self.transform.as_ref())
             .map(|t| *t.bounds());
-        let dimensions = dimension_lines(&g.contour, &g.basis, display.dimensions, active);
+        // The main dimensions belong to the flow path; the material shows only the
+        // point under the pointer.
+        let permanent = display.dimensions && !display.materials;
+        let dimensions = dimension_lines(&g.contour, &g.basis, permanent, active);
         // Dimension values as drawn, to find the one under the pointer.
         let font = egui::FontId::proportional(12.0);
         let texts: Vec<String> = dimensions
@@ -1408,6 +1495,11 @@ impl MeridionalView {
         };
         let mut outline: Vec<DVec2> = g.contour.hub.sample(120);
         outline.extend(g.contour.shroud.sample(120));
+        if display.material_lines || display.materials {
+            for side in Side::MATERIALS {
+                outline.extend(side.wall(&g.contour).sample(120));
+            }
+        }
         outline.extend(
             dimension_lines(&g.contour, &g.basis, display.dimensions, None)
                 .iter()
@@ -1497,6 +1589,26 @@ impl MeridionalView {
                     );
                 }
             }
+            if display.material_lines || display.materials {
+                // The closed material: strong while edited, faint otherwise.
+                for side in Side::MATERIALS {
+                    let color = if side.on_hub() {
+                        palette.hub
+                    } else {
+                        palette.shroud
+                    };
+                    let (color, width) = if display.materials {
+                        (color, 1.8)
+                    } else {
+                        (color.gamma_multiply(0.45), 1.0)
+                    };
+                    plot.line(
+                        Line::new("material", line(side.wall(&g.contour).sample(240), scale))
+                            .color(color)
+                            .width(width),
+                    );
+                }
+            }
             plot.line(
                 Line::new("hub", line(g.contour.hub.sample(240), scale))
                     .color(palette.hub)
@@ -1529,11 +1641,18 @@ impl MeridionalView {
             // Control polygons in the color of their curve: Bézier and B-spline
             // polygons, the corner lines of an arc and the radii to its centre.
             let mut polygons: Vec<(Vec<DVec2>, Color32)> = Vec::new();
-            for (wall, color) in [
-                (&g.contour.hub, palette.hub),
-                (&g.contour.shroud, palette.shroud),
-            ] {
-                for segment in wall.segments() {
+            let edited = if display.materials {
+                Side::MATERIALS
+            } else {
+                Side::WALLS
+            };
+            for side in edited {
+                let color = if side.on_hub() {
+                    palette.hub
+                } else {
+                    palette.shroud
+                };
+                for segment in side.wall(&g.contour).segments() {
                     if segment.kind() != SegmentKind::Line {
                         polygons.push((segment.control_points().to_vec(), color));
                     }
@@ -1544,7 +1663,9 @@ impl MeridionalView {
                     }
                 }
             }
-            if let Some(curve) = g.contour.leading_edge_curve().filter(|c| c.degree() > 1) {
+            if let Some(curve) = g.contour.leading_edge_curve().filter(|c| c.degree() > 1)
+                && !display.materials
+            {
                 polygons.push((curve.control_points().to_vec(), palette.leading_edge));
             }
             for (points, color) in polygons {
@@ -1765,7 +1886,12 @@ impl MeridionalView {
                     .inner
                     .and_then(|pointer| {
                         let pointer = DVec2::new(pointer.x / scale, pointer.y / scale);
-                        wall_under(&g.contour, pointer, &response.transform, scale)
+                        let sides = if display.materials {
+                            Side::MATERIALS
+                        } else {
+                            Side::WALLS
+                        };
+                        wall_under(&g.contour, &sides, pointer, &response.transform, scale)
                     })
                     .map_or(MenuTarget::Empty, |(side, segment, t)| {
                         MenuTarget::Segment(side, segment, t)
@@ -1981,6 +2107,7 @@ impl MenuTarget {
 /// The wall segment within reach of `pointer` on screen, with its curve parameter.
 fn wall_under(
     contour: &MeridionalContour,
+    sides: &[Side],
     pointer: DVec2,
     transform: &PlotTransform,
     scale: f64,
@@ -1988,9 +2115,9 @@ fn wall_under(
     let screen =
         |p: DVec2| transform.position_from_point(&PlotPoint::new(p.x * scale, p.y * scale));
     let at = screen(pointer);
-    [Side::Hub, Side::Shroud]
-        .into_iter()
-        .map(|side| {
+    sides
+        .iter()
+        .map(|&side| {
             let wall = side.wall(contour);
             let (segment, t) = wall.nearest(pointer);
             let d = screen(wall.segments()[segment].eval(t)).distance(at);
@@ -2255,6 +2382,50 @@ fn segment_menu(
     changed
 }
 
+/// Moving segment `segment` of `side` away from the channel by a distance typed here,
+/// kept between menus. The new segments when it was applied.
+fn offset_menu(
+    ui: &mut Ui,
+    contour: &MeridionalContour,
+    side: Side,
+    segment: usize,
+    units: &DisplayUnits,
+) -> Option<Vec<SegmentInput>> {
+    let key = egui::Id::new("segment_offset");
+    let mut distance = ui
+        .ctx()
+        .data(|d| d.get_temp::<f64>(key))
+        .unwrap_or(contour.material.wall_thickness);
+    let (moved, apply) = ui
+        .horizontal(|ui| {
+            let moved = length_field(ui, tr("offset"), &mut distance, units);
+            let apply = ui
+                .button(tr("Apply"))
+                .on_hover_text(tr(
+                    "Moves the segment this far away from the channel (negative: towards \
+                     it); its joints move along, the ends of the wall stay",
+                ))
+                .clicked();
+            (moved, apply)
+        })
+        .inner;
+    if moved {
+        ui.ctx().data_mut(|d| d.insert_temp(key, distance));
+    }
+    if !apply {
+        return None;
+    }
+    ui.close();
+    // A point inside the channel: the middle between hub and shroud.
+    let inside = contour.hub_at(0.5).lerp(contour.shroud_at(0.5), 0.5);
+    Some(wall::offset_segment(
+        side.wall(contour),
+        segment,
+        distance,
+        inside,
+    ))
+}
+
 /// The context menu of the meridional view, with a way back to automatic for the
 /// handles set by hand; the change when it changed something.
 fn context_menu(
@@ -2455,10 +2626,7 @@ fn edit_menu(
         MenuTarget::Segment(side, segment, t) => {
             let wall = side.wall(contour);
             wall.segments().get(segment)?;
-            ui.strong(match side {
-                Side::Hub => tr("Hub"),
-                Side::Shroud => tr("Shroud"),
-            });
+            ui.strong(side.title());
             if wall.segments().len() > 1 {
                 ui.weak(tf(
                     "segment {} of {}",
@@ -2472,6 +2640,9 @@ fn edit_menu(
             if let Some(segments) = segment_menu(ui, wall, segment, t, units) {
                 *side.segments(m) = Some(segments);
             }
+            if let Some(segments) = offset_menu(ui, contour, side, segment, units) {
+                *side.segments(m) = Some(segments);
+            }
             ui.separator();
             if ui
                 .button(tr("Keep a copy to compare"))
@@ -2480,12 +2651,8 @@ fn edit_menu(
                 ))
                 .clicked()
             {
-                let name = match side {
-                    Side::Hub => tr("hub copy"),
-                    Side::Shroud => tr("shroud copy"),
-                };
                 references.push(Reference {
-                    name: name.to_owned(),
+                    name: tf("{} copy", &[&side.title()]),
                     points: wall.sample(200),
                 });
                 ui.close();
@@ -2502,13 +2669,18 @@ fn edit_menu(
             }
             if side.drawn(&current.meridional) {
                 ui.separator();
-                if ui
-                    .button(tr("Back to the automatic contour"))
-                    .on_hover_text(tr(
-                        "One Bézier from the main dimensions, with its tangent lengths",
-                    ))
-                    .clicked()
-                {
+                let (name, hint) = if side.is_material() {
+                    (
+                        tr("Back to the automatic material"),
+                        tr("The wall thickness, the bore and the boss of the material settings"),
+                    )
+                } else {
+                    (
+                        tr("Back to the automatic contour"),
+                        tr("One Bézier from the main dimensions, with its tangent lengths"),
+                    )
+                };
+                if ui.button(name).on_hover_text(hint).clicked() {
                     *side.segments(m) = None;
                     ui.close();
                 }

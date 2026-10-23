@@ -1090,6 +1090,96 @@ pub fn set_smooth(wall: &Wall, segment: usize, smooth: bool) -> Vec<SegmentInput
     input
 }
 
+/// Offsets the curve through `points` (z, r) by `distance` along its normal, on the side
+/// away from `away_from`. Fails where the curvature radius is smaller than the offset,
+/// which would reverse the curve.
+pub fn offset_points(
+    points: &[DVec2],
+    distance: f64,
+    away_from: DVec2,
+) -> Result<Vec<DVec2>, DesignError> {
+    let n = points.len();
+    if n < 2 {
+        return Ok(points.to_vec());
+    }
+    let tangent =
+        |i: usize| (points[(i + 1).min(n - 1)] - points[i.saturating_sub(1)]).normalize_or_zero();
+    let mid = n / 2;
+    let normal = |t: DVec2| t.perp();
+    let side = if normal(tangent(mid)).dot(away_from - points[mid]) > 0.0 {
+        -1.0
+    } else {
+        1.0
+    };
+    let offset: Vec<DVec2> = (0..n)
+        .map(|i| points[i] + normal(tangent(i)) * (side * distance))
+        .collect();
+    for i in 0..n - 1 {
+        if (offset[i + 1] - offset[i]).dot(points[i + 1] - points[i]) <= 0.0 {
+            return Err(DesignError::InvalidInput(format!(
+                "a wall {:.1} mm thick exceeds the curvature radius of the contour",
+                distance * 1e3
+            )));
+        }
+    }
+    Ok(offset)
+}
+
+/// Moves segment `segment` by `distance` along its normal, away from `away_from`. A
+/// line stays a line, any other segment becomes a cubic B-spline through moved points
+/// of it. Its joints with the neighbouring segments move along; the two ends of the
+/// wall stay where they are.
+pub fn offset_segment(
+    wall: &Wall,
+    segment: usize,
+    distance: f64,
+    away_from: DVec2,
+) -> Vec<SegmentInput> {
+    let mut input = wall.to_input();
+    let n = input.len();
+    let Some(s) = wall.segments.get(segment) else {
+        return input;
+    };
+    let samples: Vec<DVec2> = (0..=16).map(|k| s.eval(f64::from(k) / 16.0)).collect();
+    let Ok(mut moved) = offset_points(&samples, distance, away_from) else {
+        return input;
+    };
+    if segment == 0 {
+        moved[0] = samples[0];
+    }
+    if segment + 1 == n {
+        *moved.last_mut().expect("samples") = *samples.last().expect("samples");
+    }
+    let end = *moved.last().expect("samples");
+    let next = if s.kind() == SegmentKind::Line {
+        SegmentInput {
+            kind: SegmentKind::Line,
+            end,
+            smooth: input[segment].smooth,
+            ..SegmentInput::default()
+        }
+    } else {
+        let Ok(curve) = BSpline::interpolate(&moved, DEFAULT_SPLINE_DEGREE) else {
+            return input;
+        };
+        let p = curve.control_points();
+        SegmentInput {
+            kind: SegmentKind::BSpline,
+            controls: p[1..p.len() - 1].to_vec(),
+            end,
+            smooth: input[segment].smooth,
+            degree: Some(DEFAULT_SPLINE_DEGREE),
+            knots: interior_knots(&curve),
+            ..SegmentInput::default()
+        }
+    };
+    input[segment] = next;
+    if segment > 0 {
+        input[segment - 1].end = moved[0];
+    }
+    input
+}
+
 /// Sets the corner radius of arc segment `segment`, m.
 pub fn set_radius(wall: &Wall, segment: usize, radius: f64) -> Vec<SegmentInput> {
     let mut input = wall.to_input();
@@ -1587,6 +1677,29 @@ mod tests {
         assert!(s.direction(0.0).distance(heading(0.2)) < 1e-12);
         assert!(s.direction(1.0).distance(heading(1.3)) < 1e-12);
         assert!(both.curvature(100)[0].1 < 1e-9);
+    }
+
+    #[test]
+    fn an_offset_segment_lies_its_distance_away() {
+        let wall = elbow();
+        let two = rebuild(&wall, &split(&wall, 0, 0.5));
+        // Away from a point inside the bend: outwards.
+        let inside = DVec2::new(0.04, 0.02);
+        let moved = rebuild(&two, &offset_segment(&two, 1, 0.002, inside));
+        let s = &moved.segments()[1];
+        assert_eq!(s.kind(), SegmentKind::BSpline);
+        // The wall end stays; the joint moved by the distance.
+        assert_eq!(moved.end(), wall.end());
+        let joint = (moved.segments()[0].end(), two.segments()[0].end());
+        assert!((joint.0.distance(joint.1) - 0.002).abs() < 1e-9);
+        let original = two.segments()[1].clone();
+        for k in 2..15 {
+            let p = s.eval(f64::from(k) / 16.0);
+            let d = (0..=2000)
+                .map(|i| original.eval(f64::from(i) / 2000.0).distance(p))
+                .fold(f64::INFINITY, f64::min);
+            assert!((d - 0.002).abs() < 1e-4, "{d}");
+        }
     }
 
     #[test]
