@@ -1310,6 +1310,43 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
             &units,
             0.0..=0.9,
         );
+        use crate::views::meridional::{extent_like, extent_name};
+        use tp_design::impeller::meridian::EdgeExtent;
+        label(
+            ui,
+            tr("Hub point"),
+            tr(
+                "Independent of the shroud point, or following it at a constant axial or \
+                 radial distance: 0 puts the edge normal to the axis or parallel to it",
+            ),
+        );
+        let before = m.leading_edge_extent;
+        ComboBox::from_id_salt("leading_edge_extent")
+            .selected_text(extent_name(before))
+            .show_ui(ui, |ui| {
+                for kind in [
+                    EdgeExtent::Independent,
+                    EdgeExtent::Axial(0.0),
+                    EdgeExtent::Radial(0.0),
+                ] {
+                    let same = std::mem::discriminant(&kind) == std::mem::discriminant(&before);
+                    if ui.selectable_label(same, extent_name(kind)).clicked() && !same {
+                        m.leading_edge_extent = g.map_or(kind, |g| extent_like(kind, g));
+                    }
+                }
+            });
+        ui.end_row();
+        changed |= m.leading_edge_extent != before;
+        let offset = match &mut m.leading_edge_extent {
+            EdgeExtent::Independent => None,
+            EdgeExtent::Axial(dz) => Some((tr("Axial offset Δz"), dz)),
+            EdgeExtent::Radial(dr) => Some((tr("Radial offset Δr"), dr)),
+        };
+        if let Some((name, value)) = offset {
+            label(ui, name, tr("From the shroud point to the hub point"));
+            changed |= widgets::quantity(ui, value, Length, &units, -1.0..=1.0);
+            ui.end_row();
+        }
     });
     if changed {
         edit_geometry(cx, id, "edit meridional contour", input);

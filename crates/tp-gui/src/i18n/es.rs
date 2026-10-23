@@ -129,6 +129,24 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("end angle", "ángulo final"),
     ("hub arc centre", "centro del arco del cubo"),
     ("shroud arc centre", "centro del arco de la carcasa"),
+    ("Hub point", "Punto del cubo"),
+    (
+        "Independent of the shroud point, or following it at a constant axial or radial distance: 0 puts the edge normal to the axis or parallel to it",
+        "Independiente del punto de la carcasa, o siguiéndolo a una distancia axial o radial constante: con 0 el borde queda normal al eje o paralelo a él",
+    ),
+    ("Axial offset Δz", "Desfase axial Δz"),
+    ("Radial offset Δr", "Desfase radial Δr"),
+    (
+        "From the shroud point to the hub point",
+        "Del punto de la carcasa al del cubo",
+    ),
+    ("independent", "independiente"),
+    ("same axial distance", "misma distancia axial"),
+    ("same radial distance", "misma distancia radial"),
+    (
+        "A radial outlet stays parallel to the axis; a semi-axial impeller (main dimensions) tilts it.",
+        "Una salida radial queda paralela al eje; un rodete semiaxial (dimensiones principales) la inclina.",
+    ),
     ("curvature maximum", "curvatura máxima"),
     (
         "Point of smallest radius of curvature of hub and shroud",

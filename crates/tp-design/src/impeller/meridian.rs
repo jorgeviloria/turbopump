@@ -35,12 +35,51 @@ pub struct MeridionalInput {
     pub leading_edge_shroud: Param<f64>,
     /// Shape of the leading edge between its hub and shroud points.
     pub leading_edge_shape: LeadingEdgeShape,
+    /// How the hub point of the leading edge follows the shroud point.
+    pub leading_edge_extent: EdgeExtent,
     /// Hub drawn segment by segment; `None` keeps the automatic Bézier and its tangents.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hub_segments: Option<Vec<SegmentInput>>,
     /// Shroud drawn segment by segment; `None` keeps the automatic Bézier.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shroud_segments: Option<Vec<SegmentInput>>,
+}
+
+/// How the hub point of the leading edge sits relative to its shroud point.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub enum EdgeExtent {
+    /// Each point has its own position along its wall.
+    #[default]
+    Independent,
+    /// The hub point lies this far downstream of the shroud point, z_hub − z_shroud
+    /// in m; 0 puts the edge in a plane normal to the axis.
+    Axial(f64),
+    /// The hub point lies this far above the shroud point, r_hub − r_shroud in m
+    /// (negative below it); 0 makes the edge parallel to the axis, as on impellers of
+    /// low n_q with blades curved in two dimensions.
+    Radial(f64),
+}
+
+/// Fraction of the arc length of `line` at the first point, from the inlet, where
+/// `coordinate` reaches `target`, interpolated between its vertices.
+fn fraction_reaching(
+    line: &Polyline<DVec2>,
+    coordinate: impl Fn(DVec2) -> f64,
+    target: f64,
+) -> Option<f64> {
+    let points = line.points();
+    let total = line.length();
+    let mut along = 0.0;
+    for w in points.windows(2) {
+        let (a, b) = (coordinate(w[0]), coordinate(w[1]));
+        let step = w[0].distance(w[1]);
+        if (a - target) * (b - target) <= 0.0 && (b - a).abs() > 0.0 {
+            let k = ((target - a) / (b - a)).clamp(0.0, 1.0);
+            return Some((along + k * step) / total);
+        }
+        along += step;
+    }
+    None
 }
 
 /// Shape of the leading edge in the meridional plane, from its hub point to its shroud
@@ -383,16 +422,34 @@ impl MeridionalContour {
                     .resolve(|| DEFAULT_LEADING_EDGE_SHROUD),
             )?,
         );
+        let line =
+            |w: &Wall| Polyline::new(w.sample(CONTOUR_SAMPLES)).expect("sampled curve has points");
+        let (hub_line, shroud_line) = (line(&hub), line(&shroud));
+        // The hub point where the extent puts it, from the shroud point.
+        let shroud_point = shroud_line.point_at_fraction(leading_edge.1);
+        let follow = |coordinate: fn(DVec2) -> f64, offset: f64, name: &str| {
+            fraction_reaching(&hub_line, coordinate, coordinate(shroud_point) + offset).ok_or_else(
+                || {
+                    DesignError::InvalidInput(format!(
+                        "the hub never reaches the {name} the leading edge needs there; \
+                         move its shroud point or change the offset"
+                    ))
+                },
+            )
+        };
+        let leading_edge = match input.leading_edge_extent {
+            EdgeExtent::Independent => leading_edge,
+            EdgeExtent::Axial(dz) => (follow(|p| p.x, dz, "axial position")?, leading_edge.1),
+            EdgeExtent::Radial(dr) => (follow(|p| p.y, dr, "radius")?, leading_edge.1),
+        };
         if leading_edge.0 >= 1.0 || leading_edge.1 >= 1.0 {
             return Err(DesignError::InvalidInput(
                 "the leading edge must lie upstream of the outlet".into(),
             ));
         }
-        let line =
-            |w: &Wall| Polyline::new(w.sample(CONTOUR_SAMPLES)).expect("sampled curve has points");
         Ok(Self {
-            hub_line: line(&hub),
-            shroud_line: line(&shroud),
+            hub_line,
+            shroud_line,
             hub,
             shroud,
             axial_length: length,
@@ -858,6 +915,32 @@ pub(crate) mod tests {
     }
 
     /// The Bézier a leading-edge shape stands for, between `hub` and `shroud`.
+    #[test]
+    fn the_hub_point_of_the_leading_edge_keeps_its_offset_from_the_shroud_point() {
+        let b = basis();
+        let shroud_at = |c: &MeridionalContour| c.shroud_at(c.leading_edge.1);
+        let hub_at = |c: &MeridionalContour| c.hub_at(c.leading_edge.0);
+        for shroud in [0.05, 0.2] {
+            let mut input = MeridionalInput {
+                leading_edge_shroud: Param::Manual(shroud),
+                leading_edge_extent: EdgeExtent::Radial(0.0),
+                ..MeridionalInput::default()
+            };
+            let c = MeridionalContour::build(&b, &input).unwrap();
+            // Parallel to the axis: the same radius on both walls.
+            assert!((hub_at(&c).y - shroud_at(&c).y).abs() < 1e-6);
+            input.leading_edge_extent = EdgeExtent::Axial(0.004);
+            let c = MeridionalContour::build(&b, &input).unwrap();
+            assert!((hub_at(&c).x - shroud_at(&c).x - 0.004).abs() < 1e-6);
+        }
+        // An offset the hub cannot reach is an error, not a wrong edge.
+        let input = MeridionalInput {
+            leading_edge_extent: EdgeExtent::Radial(1.0),
+            ..MeridionalInput::default()
+        };
+        assert!(MeridionalContour::build(&b, &input).is_err());
+    }
+
     fn edge_curve(shape: LeadingEdgeShape, hub: DVec2, shroud: DVec2) -> Bezier<DVec2> {
         match shape {
             LeadingEdgeShape::Bezier { controls } => Bezier::new(vec![

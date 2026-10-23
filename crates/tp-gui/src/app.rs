@@ -2043,4 +2043,112 @@ mod tests {
         let coupled = &shroud(harness.state())[0];
         assert!(coupled.coupled && coupled.controls.len() >= 3);
     }
+
+    #[test]
+    fn the_hub_point_of_the_leading_edge_follows_the_shroud_point() {
+        use tp_design::impeller::meridian::EdgeExtent;
+        let mut harness = editor();
+        let id = harness.state().active_impeller().unwrap();
+        let points = |app: &TurbopumpApp| {
+            let c = &app.derived.geometry(id).unwrap().contour;
+            (c.hub_at(c.leading_edge.0), c.shroud_at(c.leading_edge.1))
+        };
+        // The middle of the edge, away from its end handles.
+        let app = harness.state();
+        let g = app.derived.geometry(id).unwrap();
+        let middle = g.blade.sections[g.blade.sections.len() / 2].meridional[0];
+        let at = screen_of(app, middle);
+        right_click(&mut harness, at);
+        harness.get_by_label("same radial distance").click();
+        harness.run();
+        let EdgeExtent::Radial(dr) = meridional(harness.state()).leading_edge_extent else {
+            panic!("a radial extent");
+        };
+        let (hub, shroud) = points(harness.state());
+        assert!((hub.y - shroud.y - dr).abs() < 1e-6);
+
+        // The shroud point moves; the hub point keeps its radial distance.
+        let start = handle_on_screen(harness.state(), Handle::LeadingEdgeShroud);
+        drag_by(&mut harness, start, egui::vec2(25.0, -25.0));
+        let (moved_hub, moved_shroud) = points(harness.state());
+        assert!(
+            moved_shroud.distance(shroud) > 1e-3,
+            "the shroud point moved"
+        );
+        assert!((moved_hub.y - moved_shroud.y - dr).abs() < 1e-5);
+        assert!(is_manual_hub(harness.state()));
+
+        // A double click on the hub point frees it again.
+        let at = handle_on_screen(harness.state(), Handle::LeadingEdgeHub);
+        double_click(&mut harness, at);
+        assert_eq!(
+            meridional(harness.state()).leading_edge_extent,
+            EdgeExtent::Independent
+        );
+    }
+
+    fn is_manual_hub(app: &TurbopumpApp) -> bool {
+        let id = app.active_impeller().unwrap();
+        let geometry = app.doc.project().impeller_geometry_input(id).unwrap();
+        let main = app.doc.project().pump_impeller_input(id).ok();
+        crate::views::meridional::is_manual(
+            Handle::LeadingEdgeHub,
+            crate::views::meridional::Inputs {
+                geometry: &geometry,
+                main: main.as_ref(),
+                semi_axial: false,
+            },
+        )
+    }
+
+    #[test]
+    fn the_hub_end_of_a_semi_axial_outlet_drags_l_and_d2i() {
+        use std::f64::consts::PI;
+        use tp_project::{DesignPoint, EnergyTransfer, FlowRate, GlobalSetup, MachineType};
+        let setup = GlobalSetup::new(
+            MachineType::Pump,
+            DesignPoint {
+                flow: FlowRate::Volume(800.0 / 3600.0),
+                energy: EnergyTransfer::Head(12.0),
+                speed: 1450.0 * PI / 30.0,
+            },
+        );
+        let mut project = Project::new("Mixed flow", MachineType::Pump, setup).unwrap();
+        project
+            .add_component(ComponentKind::Impeller, None)
+            .unwrap();
+        let path = std::env::temp_dir().join("turbopump-semi-axial-drag.tpj");
+        project.save(&path).unwrap();
+        let mut harness = Harness::builder()
+            .with_size([1440.0, 900.0])
+            .build_eframe(|cc| TurbopumpApp::new(cc, Some(&path)));
+        harness.run();
+        harness.state_mut().focus_view(View::MeridianEditor);
+        harness.run();
+        let id = harness.state().active_impeller().unwrap();
+        let basis = |app: &TurbopumpApp| app.derived.geometry(id).unwrap().basis;
+        assert!(
+            basis(harness.state()).outlet_inclination > 0.0,
+            "semi-axial"
+        );
+        let before = basis(harness.state()).outlet_hub_diameter;
+
+        // Down on screen: a smaller hub diameter at the outlet, set by hand with L.
+        let start = handle_on_screen(harness.state(), Handle::AxialLength);
+        drag_by(&mut harness, start, egui::vec2(0.0, 30.0));
+        let d2i = main_dimensions(harness.state()).outlet_hub_diameter;
+        assert!(
+            d2i.manual_value().is_some_and(|d| d < before),
+            "{d2i:?} vs {before}"
+        );
+        assert!(!meridional(harness.state()).axial_length.is_auto());
+        // One undo step takes both back.
+        harness.state_mut().undo();
+        assert!(
+            main_dimensions(harness.state())
+                .outlet_hub_diameter
+                .is_auto()
+        );
+        assert!(meridional(harness.state()).axial_length.is_auto());
+    }
 }

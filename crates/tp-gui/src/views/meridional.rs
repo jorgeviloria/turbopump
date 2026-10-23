@@ -11,7 +11,7 @@ use egui_plot::{
     PlotTransform, Points, Text,
 };
 use tp_design::impeller::meridian::{
-    LeadingEdgeShape, MeridionalContour, MeridionalInput, chord_coordinates,
+    EdgeExtent, LeadingEdgeShape, MeridionalContour, MeridionalInput, chord_coordinates,
 };
 use tp_design::impeller::potential::{self, PotentialFlow, PotentialMesh};
 use tp_design::impeller::wall::{self, Segment, SegmentInput, SegmentKind, Wall, WallPoint};
@@ -270,8 +270,21 @@ pub(crate) fn apply_drag(
                 Param::Manual(tangent_fraction(shroud[3], shroud_corner, pointer));
         }
         Handle::LeadingEdgeHub => {
-            input.leading_edge_hub =
-                Param::Manual(nearest_fraction(|t| contour.hub_at(t), pointer));
+            let hub = nearest_fraction(|t| contour.hub_at(t), pointer);
+            let (p, shroud) = (
+                contour.hub_at(hub),
+                contour.shroud_at(contour.leading_edge.1),
+            );
+            // A hub point that follows the shroud point takes a new offset instead.
+            match input.leading_edge_extent {
+                EdgeExtent::Independent => input.leading_edge_hub = Param::Manual(hub),
+                EdgeExtent::Axial(_) => {
+                    input.leading_edge_extent = EdgeExtent::Axial(p.x - shroud.x)
+                }
+                EdgeExtent::Radial(_) => {
+                    input.leading_edge_extent = EdgeExtent::Radial(p.y - shroud.y);
+                }
+            }
         }
         Handle::LeadingEdgeShroud => {
             input.leading_edge_shroud =
@@ -296,6 +309,8 @@ pub(crate) fn apply_drag(
 pub(crate) enum Change {
     Geometry(ImpellerGeometryInput),
     Main(CentrifugalPumpInput),
+    /// Both at once, as the hub end of a semi-axial outlet: L and d₂i.
+    Both(Box<(ImpellerGeometryInput, CentrifugalPumpInput)>),
 }
 
 impl Change {
@@ -305,6 +320,11 @@ impl Change {
             Change::Geometry(input) => cx.edit(label, |p| p.set_impeller_geometry(id, input)),
             Change::Main(input) => cx.edit(label, |p| {
                 p.set_main_dimensions(id, MainDimensionsInput::CentrifugalPump(input))
+            }),
+            Change::Both(both) => cx.edit(label, |p| {
+                let (geometry, main) = *both;
+                p.set_main_dimensions(id, MainDimensionsInput::CentrifugalPump(main))?;
+                p.set_impeller_geometry(id, geometry)
             }),
         };
     }
@@ -316,6 +336,8 @@ pub(crate) struct Inputs<'a> {
     pub geometry: &'a ImpellerGeometryInput,
     /// None when the impeller has no pump main dimensions.
     pub main: Option<&'a CentrifugalPumpInput>,
+    /// Whether the outlet is semi-axial: its hub end has a diameter d₂i of its own.
+    pub semi_axial: bool,
 }
 
 impl Inputs<'_> {
@@ -324,6 +346,19 @@ impl Inputs<'_> {
         let mut input = self.geometry.clone();
         edit(&mut input);
         (input != *self.geometry).then_some(Change::Geometry(input))
+    }
+
+    /// Both inputs changed by their edits, if either changes.
+    fn both(
+        &self,
+        geometry: impl FnOnce(&mut ImpellerGeometryInput),
+        main: impl FnOnce(&mut CentrifugalPumpInput),
+    ) -> Option<Change> {
+        let current = self.main?;
+        let (mut g, mut m) = (self.geometry.clone(), current.clone());
+        geometry(&mut g);
+        main(&mut m);
+        (g != *self.geometry || m != *current).then(|| Change::Both(Box::new((g, m))))
     }
 
     /// The main dimensions changed by `edit`, if that changes them.
@@ -350,6 +385,15 @@ pub(crate) fn drag_change(
         let d2 = (2.0 * radius).clamp(b.inlet_diameter * 1.05, b.inlet_diameter * 8.0);
         return inputs.main(|m| m.outlet_diameter = Param::Manual(d2));
     }
+    if handle == Handle::AxialLength && inputs.semi_axial {
+        // The hub end of a semi-axial outlet: L along the axis, d₂i across it.
+        let b = &g.basis;
+        let d2i = (2.0 * pointer.y).clamp(b.hub_diameter * 1.05, b.outlet_diameter);
+        return inputs.both(
+            |input| apply_drag(handle, pointer, &g.contour, b, &mut input.meridional),
+            |m| m.outlet_hub_diameter = Param::Manual(d2i),
+        );
+    }
     inputs
         .geometry(|input| apply_drag(handle, pointer, &g.contour, &g.basis, &mut input.meridional))
 }
@@ -363,9 +407,17 @@ pub(crate) fn is_manual(handle: Handle, inputs: Inputs<'_>) -> bool {
         Handle::HubOutlet => !m.hub_outlet_tangent.is_auto(),
         Handle::ShroudInlet => !m.shroud_inlet_tangent.is_auto(),
         Handle::ShroudOutlet => !m.shroud_outlet_tangent.is_auto(),
-        Handle::LeadingEdgeHub => !m.leading_edge_hub.is_auto(),
+        Handle::LeadingEdgeHub => {
+            !m.leading_edge_hub.is_auto() || m.leading_edge_extent != EdgeExtent::Independent
+        }
         Handle::LeadingEdgeShroud => !m.leading_edge_shroud.is_auto(),
-        Handle::AxialLength => !m.axial_length.is_auto(),
+        Handle::AxialLength => {
+            !m.axial_length.is_auto()
+                || inputs.semi_axial
+                    && inputs
+                        .main
+                        .is_some_and(|d| !d.outlet_hub_diameter.is_auto())
+        }
         Handle::TrailingEdge => inputs.main.is_some_and(|d| !d.outlet_diameter.is_auto()),
         Handle::Point(..) | Handle::LeadingEdgeControl(_) | Handle::ArcCenter(..) => true,
     }
@@ -377,8 +429,17 @@ pub(crate) fn reset_change(handle: Handle, inputs: Inputs<'_>) -> Option<Change>
     if handle == Handle::TrailingEdge {
         return inputs.main(|d| d.outlet_diameter = Param::Auto);
     }
+    if handle == Handle::AxialLength && inputs.semi_axial {
+        return inputs.both(
+            |input| input.meridional.axial_length = Param::Auto,
+            |d| d.outlet_hub_diameter = Param::Auto,
+        );
+    }
     inputs.geometry(|input| {
         let m = &mut input.meridional;
+        if handle == Handle::LeadingEdgeHub {
+            m.leading_edge_extent = EdgeExtent::Independent;
+        }
         let param = match handle {
             Handle::HubInlet => &mut m.hub_inlet_tangent,
             Handle::HubOutlet => &mut m.hub_outlet_tangent,
@@ -1189,6 +1250,7 @@ impl MeridionalView {
         let inputs = Inputs {
             geometry: current,
             main: main.as_ref(),
+            semi_axial: g.basis.outlet_inclination > 0.0,
         };
 
         let handles: Vec<(Handle, DVec2)> = handles(&g.contour, &current.meridional)
@@ -1854,6 +1916,59 @@ pub(crate) fn bezier_along_edge(g: &ImpellerGeometry) -> LeadingEdgeShape {
 }
 
 /// The shape choice of the leading edge.
+/// The names of the ways the hub point of the leading edge can follow its shroud point.
+pub(crate) fn extent_name(extent: EdgeExtent) -> &'static str {
+    tr(match extent {
+        EdgeExtent::Independent => "independent",
+        EdgeExtent::Axial(_) => "same axial distance",
+        EdgeExtent::Radial(_) => "same radial distance",
+    })
+}
+
+/// `extent` of kind `kind` with the offset of the edge as it is now in `g`.
+pub(crate) fn extent_like(kind: EdgeExtent, g: &ImpellerGeometry) -> EdgeExtent {
+    let c = &g.contour;
+    let (hub, shroud) = (c.hub_at(c.leading_edge.0), c.shroud_at(c.leading_edge.1));
+    match kind {
+        EdgeExtent::Independent => EdgeExtent::Independent,
+        EdgeExtent::Axial(_) => EdgeExtent::Axial(hub.x - shroud.x),
+        EdgeExtent::Radial(_) => EdgeExtent::Radial(hub.y - shroud.y),
+    }
+}
+
+/// How the hub point of the leading edge follows its shroud point, with the offset.
+pub(crate) fn leading_edge_extent(
+    ui: &mut Ui,
+    g: &ImpellerGeometry,
+    m: &mut MeridionalInput,
+    units: &DisplayUnits,
+) {
+    ui.label(tr("Hub point")).on_hover_text(tr(
+        "Independent of the shroud point, or following it at a constant axial or \
+             radial distance: 0 puts the edge normal to the axis or parallel to it",
+    ));
+    let current = m.leading_edge_extent;
+    for kind in [
+        EdgeExtent::Independent,
+        EdgeExtent::Axial(0.0),
+        EdgeExtent::Radial(0.0),
+    ] {
+        let same = std::mem::discriminant(&kind) == std::mem::discriminant(&current);
+        if ui.radio(same, extent_name(kind)).clicked() && !same {
+            m.leading_edge_extent = extent_like(kind, g);
+        }
+    }
+    match &mut m.leading_edge_extent {
+        EdgeExtent::Independent => {}
+        EdgeExtent::Axial(offset) => {
+            length_field(ui, "Δz", offset, units);
+        }
+        EdgeExtent::Radial(offset) => {
+            length_field(ui, "Δr", offset, units);
+        }
+    }
+}
+
 pub(crate) fn leading_edge_shape(ui: &mut Ui, g: &ImpellerGeometry, m: &mut MeridionalInput) {
     let contour = &g.contour;
     let current = contour.leading_edge_shape;
@@ -2055,11 +2170,36 @@ fn trailing_edge_menu(
     units: &DisplayUnits,
 ) -> Option<Change> {
     ui.strong(tr("Trailing edge"));
-    let (mut d2, mut b2) = (g.basis.outlet_diameter, g.basis.outlet_width);
+    let b = &g.basis;
+    let (mut d2, mut b2, mut d2i) = (b.outlet_diameter, b.outlet_width, b.outlet_hub_diameter);
     let diameter = length_field(ui, "d₂", &mut d2, units);
     let width = length_field(ui, "b₂", &mut b2, units);
+    // A semi-axial outlet tilts: its hub end and its inclination are inputs too.
+    let (mut hub, mut tilt) = (false, false);
+    let mut degrees = b.outlet_inclination.to_degrees();
+    if inputs.semi_axial {
+        hub = length_field(ui, "d₂i", &mut d2i, units);
+        tilt = ui
+            .horizontal(|ui| {
+                ui.label("ε_s");
+                ui.add(
+                    DragValue::new(&mut degrees)
+                        .speed(0.2)
+                        .range(0.5..=80.0)
+                        .max_decimals(2)
+                        .suffix("°"),
+                )
+                .changed()
+            })
+            .inner;
+    } else {
+        ui.weak(tr(
+            "A radial outlet stays parallel to the axis; a semi-axial impeller (main \
+             dimensions) tilts it.",
+        ));
+    }
     ui.weak(tr("A main dimension: typing a value sets it by hand."));
-    if !(diameter || width) {
+    if !(diameter || width || hub || tilt) {
         return None;
     }
     inputs.main(|m| {
@@ -2068,6 +2208,12 @@ fn trailing_edge_menu(
         }
         if width {
             m.outlet_width = Param::Manual(b2.max(1e-4));
+        }
+        if hub {
+            m.outlet_hub_diameter = Param::Manual(d2i.max(1e-4));
+        }
+        if tilt {
+            m.outlet_inclination = Param::Manual(degrees.to_radians());
         }
     })
 }
@@ -2099,6 +2245,8 @@ fn edit_menu(
         MenuTarget::LeadingEdge => {
             ui.strong(tr("Leading edge"));
             leading_edge_shape(ui, g, m);
+            ui.separator();
+            leading_edge_extent(ui, g, m, units);
         }
         MenuTarget::Handle(Handle::LeadingEdgeControl(index)) => {
             ui.strong(Handle::LeadingEdgeControl(index).label());
@@ -2119,24 +2267,30 @@ fn edit_menu(
                 (&mut m.leading_edge_shroud, contour.leading_edge.1)
             };
             let mut percent = value * 100.0;
-            let changed = ui
-                .horizontal(|ui| {
-                    ui.label(tr("Position along the wall"));
-                    ui.add(
-                        DragValue::new(&mut percent)
-                            .speed(0.2)
-                            .range(0.0..=90.0)
-                            .max_decimals(2)
-                            .suffix(" %"),
-                    )
-                    .changed()
-                })
-                .inner;
+            // A hub point that follows the shroud point has no position of its own.
+            let free = handle == Handle::LeadingEdgeShroud
+                || m.leading_edge_extent == EdgeExtent::Independent;
+            let changed = free
+                && ui
+                    .horizontal(|ui| {
+                        ui.label(tr("Position along the wall"));
+                        ui.add(
+                            DragValue::new(&mut percent)
+                                .speed(0.2)
+                                .range(0.0..=90.0)
+                                .max_decimals(2)
+                                .suffix(" %"),
+                        )
+                        .changed()
+                    })
+                    .inner;
             if changed {
                 *param = Param::Manual(percent / 100.0);
             }
             ui.separator();
             leading_edge_shape(ui, g, m);
+            ui.separator();
+            leading_edge_extent(ui, g, m, units);
         }
         MenuTarget::Handle(handle @ Handle::ArcCenter(side, segment)) => {
             ui.strong(handle.label());
@@ -2388,6 +2542,7 @@ mod tests {
         let inputs = Inputs {
             geometry: &input,
             main: Some(&main),
+            semi_axial: false,
         };
         let drawn = tp_design::impeller::build(&g.basis, &input).unwrap();
         let joint = Handle::Point(Side::Hub, WallPoint::Joint { segment: 0 });
@@ -2431,6 +2586,7 @@ mod tests {
         let geometry_only = Inputs {
             geometry: &input,
             main: None,
+            semi_axial: false,
         };
         assert_eq!(
             set_dimension(Dimension::OutletDiameter, 0.2, &drawn, geometry_only),
@@ -2446,6 +2602,7 @@ mod tests {
         let inputs = Inputs {
             geometry: &input,
             main: Some(&main),
+            semi_axial: false,
         };
         // Dragged 5 mm outwards, the trailing edge sets d₂ 10 mm larger, by hand.
         let edge = handle_position(Handle::TrailingEdge, &g.contour);
@@ -2463,6 +2620,7 @@ mod tests {
         let after = Inputs {
             geometry: &input,
             main: Some(&dragged),
+            semi_axial: false,
         };
         assert!(is_manual(Handle::TrailingEdge, after));
         assert_eq!(
@@ -2479,6 +2637,7 @@ mod tests {
         let moved_inputs = Inputs {
             geometry: &moved,
             main: Some(&main),
+            semi_axial: false,
         };
         assert!(is_manual(Handle::ShroudInlet, moved_inputs));
         assert_eq!(

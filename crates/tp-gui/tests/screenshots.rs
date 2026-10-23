@@ -527,6 +527,9 @@ fn semi_axial() {
     harness.state_mut().focus_view(View::Meridional);
     harness.run();
     save(&mut harness, "semi-axial-meridional");
+    harness.state_mut().focus_view(View::MeridianEditor);
+    harness.run();
+    save(&mut harness, "semi-axial-editor");
     harness.state_mut().focus_view(View::View3d);
     harness.run();
     save(&mut harness, "semi-axial-3d");
@@ -625,6 +628,9 @@ fn meridian_segment_kinds() {
     let shroud = wall::set_kind(&g.contour.shroud, 0, SegmentKind::BSpline);
     let shroud = rebuild(&g.contour.shroud, &shroud);
     input.meridional.shroud_segments = Some(wall::insert_knot(&shroud, 0, 0.6));
+    // A leading edge parallel to the axis, its hub point following the shroud point.
+    input.meridional.leading_edge_shroud = tp_design::Param::Manual(0.15);
+    input.meridional.leading_edge_extent = tp_design::impeller::meridian::EdgeExtent::Radial(0.0);
     project.set_impeller_geometry(id, input).unwrap();
     let path = std::env::temp_dir().join("turbopump-meridian-kinds.tpj");
     project.save(&path).unwrap();
