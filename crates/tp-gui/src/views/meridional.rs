@@ -11,7 +11,7 @@ use egui_plot::{
     PlotTransform, Points, Text,
 };
 use tp_design::impeller::meridian::{
-    EdgeExtent, LeadingEdgeShape, MeridionalContour, MeridionalInput, chord_coordinates,
+    DesignMode, EdgeExtent, LeadingEdgeShape, MeridionalContour, MeridionalInput, chord_coordinates,
 };
 use tp_design::impeller::potential::{self, PotentialFlow, PotentialMesh};
 use tp_design::impeller::wall::{self, Segment, SegmentInput, SegmentKind, Wall, WallPoint};
@@ -37,6 +37,8 @@ pub(crate) enum Side {
     /// The casing walls of the side chambers.
     FrontCasing,
     RearCasing,
+    /// The center line the walls follow in its design mode.
+    Center,
 }
 
 impl Side {
@@ -46,6 +48,8 @@ impl Side {
     pub(crate) const MATERIALS: [Side; 2] = [Side::HubMaterial, Side::ShroudMaterial];
     /// The casing walls of the side chambers.
     pub(crate) const CASINGS: [Side; 2] = [Side::FrontCasing, Side::RearCasing];
+    /// The center line alone.
+    pub(crate) const CENTER: [Side; 1] = [Side::Center];
 
     pub(crate) fn wall(self, contour: &MeridionalContour) -> &Wall {
         match self {
@@ -55,6 +59,7 @@ impl Side {
             Side::ShroudMaterial => &contour.shroud_material,
             Side::FrontCasing => &contour.chambers.front_casing,
             Side::RearCasing => &contour.chambers.rear_casing,
+            Side::Center => &contour.center_line,
         }
     }
 
@@ -66,6 +71,7 @@ impl Side {
             Side::ShroudMaterial => &mut input.shroud_material,
             Side::FrontCasing => &mut input.chambers.front,
             Side::RearCasing => &mut input.chambers.rear,
+            Side::Center => &mut input.center_line,
         }
     }
 
@@ -77,6 +83,7 @@ impl Side {
             Side::ShroudMaterial => input.shroud_material.is_some(),
             Side::FrontCasing => input.chambers.front.is_some(),
             Side::RearCasing => input.chambers.rear.is_some(),
+            Side::Center => input.center_line.is_some(),
         }
     }
 
@@ -92,6 +99,7 @@ impl Side {
             Side::Hub | Side::HubMaterial => palette.hub,
             Side::Shroud | Side::ShroudMaterial => palette.shroud,
             Side::FrontCasing | Side::RearCasing => palette.volute,
+            Side::Center => palette.stator,
         }
     }
 
@@ -104,6 +112,7 @@ impl Side {
             Side::ShroudMaterial => "Shroud cover",
             Side::FrontCasing => "Front casing wall",
             Side::RearCasing => "Rear casing wall",
+            Side::Center => "Center line",
         })
     }
 }
@@ -166,6 +175,9 @@ impl Handle {
             }
             Handle::ArcCenter(Side::FrontCasing, _) => "front casing arc centre",
             Handle::ArcCenter(Side::RearCasing, _) => "rear casing arc centre",
+            Handle::Point(Side::Center, WallPoint::Joint { .. }) => "center line corner",
+            Handle::Point(Side::Center, WallPoint::Control { .. }) => "center line control point",
+            Handle::ArcCenter(Side::Center, _) => "center line arc centre",
         })
     }
 
@@ -187,10 +199,17 @@ impl Handle {
 /// drawn ones, the leading edge and the axial length.
 pub(crate) fn handles(contour: &MeridionalContour, input: &MeridionalInput) -> Vec<Handle> {
     let mut handles = Vec::new();
-    for (side, automatic) in [
-        (Side::Hub, [Handle::HubInlet, Handle::HubOutlet]),
-        (Side::Shroud, [Handle::ShroudInlet, Handle::ShroudOutlet]),
-    ] {
+    // Walls that follow the center line have no handles of their own: it has them.
+    let walls: &[(Side, [Handle; 2])] = if input.design_mode == DesignMode::CenterLine {
+        handles.extend(wire_handles(contour, &Side::CENTER));
+        &[]
+    } else {
+        &[
+            (Side::Hub, [Handle::HubInlet, Handle::HubOutlet]),
+            (Side::Shroud, [Handle::ShroudInlet, Handle::ShroudOutlet]),
+        ]
+    };
+    for &(side, automatic) in walls {
         if side.drawn(input) {
             let wall = side.wall(contour);
             handles.extend(
@@ -602,12 +621,14 @@ pub(crate) enum Page {
 }
 
 impl Display {
-    /// The walls the handles and the menus edit.
-    pub(crate) fn edited(&self) -> [Side; 2] {
+    /// The walls the handles and the menus edit; on the flow path, the center line
+    /// instead of hub and shroud when they follow it (`center`).
+    pub(crate) fn edited(&self, center: bool) -> &'static [Side] {
         match self.page {
-            Page::FlowPath => Side::WALLS,
-            Page::Materials => Side::MATERIALS,
-            Page::Chambers => Side::CASINGS,
+            Page::FlowPath if center => &Side::CENTER,
+            Page::FlowPath => &Side::WALLS,
+            Page::Materials => &Side::MATERIALS,
+            Page::Chambers => &Side::CASINGS,
         }
     }
 }
@@ -1475,9 +1496,10 @@ impl MeridionalView {
             semi_axial: g.basis.outlet_inclination > 0.0,
         };
 
+        let center_mode = current.meridional.design_mode == DesignMode::CenterLine;
         let editable = match display.page {
             Page::FlowPath => handles(&g.contour, &current.meridional),
-            _ => wire_handles(&g.contour, &display.edited()),
+            _ => wire_handles(&g.contour, display.edited(false)),
         };
         let handles: Vec<(Handle, DVec2)> = editable
             .into_iter()
@@ -1649,7 +1671,7 @@ impl MeridionalView {
                 .filter(|_| display.material_lines || display.page != Page::FlowPath)
                 .chain(Side::CASINGS.into_iter().filter(|_| chambers));
             for side in wires {
-                let (color, width) = if display.edited().contains(&side) {
+                let (color, width) = if display.edited(center_mode).contains(&side) {
                     (side.color(&palette), 1.8)
                 } else {
                     (side.color(&palette).gamma_multiply(0.45), 1.0)
@@ -1673,6 +1695,17 @@ impl MeridionalView {
                             .width(1.0),
                     );
                 }
+            }
+            if center_mode {
+                plot.line(
+                    Line::new(
+                        "center line",
+                        line(g.contour.center_line.sample(240), scale),
+                    )
+                    .color(palette.stator)
+                    .style(LineStyle::dashed_loose())
+                    .width(1.5),
+                );
             }
             plot.line(
                 Line::new("hub", line(g.contour.hub.sample(240), scale))
@@ -1706,7 +1739,7 @@ impl MeridionalView {
             // Control polygons in the color of their curve: Bézier and B-spline
             // polygons, the corner lines of an arc and the radii to its centre.
             let mut polygons: Vec<(Vec<DVec2>, Color32)> = Vec::new();
-            for side in display.edited() {
+            for &side in display.edited(center_mode) {
                 let color = side.color(&palette);
                 for segment in side.wall(&g.contour).segments() {
                     if segment.kind() != SegmentKind::Line {
@@ -1942,8 +1975,8 @@ impl MeridionalView {
                     .inner
                     .and_then(|pointer| {
                         let pointer = DVec2::new(pointer.x / scale, pointer.y / scale);
-                        let sides = display.edited();
-                        wall_under(&g.contour, &sides, pointer, &response.transform, scale)
+                        let sides = display.edited(center_mode);
+                        wall_under(&g.contour, sides, pointer, &response.transform, scale)
                     })
                     .map_or(MenuTarget::Empty, |(side, segment, t)| {
                         MenuTarget::Segment(side, segment, t)

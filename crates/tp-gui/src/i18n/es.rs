@@ -282,6 +282,44 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "The wire as the values of the properties panel draw it",
         "El alambre como lo trazan los valores de la barra de propiedades",
     ),
+    ("Design mode", "Modo de diseño"),
+    (
+        "Hub and shroud drawn directly, or a center line and a cross-section distribution the walls follow (suited to mixed-flow impellers)",
+        "Cubo y carcasa dibujados directamente, o una línea media y una distribución de área que siguen las paredes (adecuado para rodetes semiaxiales)",
+    ),
+    ("hub and shroud", "cubo y carcasa"),
+    ("center line and area", "línea media y área"),
+    (
+        "Center line drawn by segments",
+        "Línea media dibujada por tramos",
+    ),
+    (
+        "Drawn in the editor; hub and shroud follow it",
+        "Dibujada en el editor; cubo y carcasa la siguen",
+    ),
+    (
+        "A_rel along the center line, 0 at the inlet section and 1 at the outlet one",
+        "A_rel a lo largo de la línea media: 0 en la sección de entrada y 1 en la de salida",
+    ),
+    (
+        "x A_rel per line, x from 0 at the inlet to 1 at the outlet",
+        "x A_rel por línea, con x de 0 en la entrada a 1 en la salida",
+    ),
+    (
+        "At least two points with x rising",
+        "Al menos dos puntos con x creciente",
+    ),
+    ("Linear", "Lineal"),
+    ("Center line", "Línea media"),
+    ("center line corner", "esquina de la línea media"),
+    (
+        "center line control point",
+        "punto de control de la línea media",
+    ),
+    (
+        "center line arc centre",
+        "centro del arco de la línea media",
+    ),
     ("curvature maximum", "curvatura máxima"),
     (
         "Point of smallest radius of curvature of hub and shroud",

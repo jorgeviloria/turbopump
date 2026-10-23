@@ -663,3 +663,43 @@ fn meridian_segment_kinds() {
     harness.run();
     save(&mut harness, "meridian-kinds");
 }
+
+/// A mixed-flow impeller designed by its center line and a cross-section distribution.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn center_line_mode() {
+    use std::f64::consts::PI;
+    use tp_design::impeller::meridian::DesignMode;
+    use tp_project::{
+        ComponentKind, DesignPoint, EnergyTransfer, FlowRate, GlobalSetup, MachineType, Project,
+    };
+    let setup = GlobalSetup::new(
+        MachineType::Pump,
+        DesignPoint {
+            flow: FlowRate::Volume(800.0 / 3600.0),
+            energy: EnergyTransfer::Head(12.0),
+            speed: 1450.0 * PI / 30.0,
+        },
+    );
+    let mut project = Project::new("Mixed flow", MachineType::Pump, setup).unwrap();
+    let id = project
+        .add_component(ComponentKind::Impeller, None)
+        .unwrap();
+    let mut input = project.impeller_geometry_input(id).unwrap();
+    input.meridional.design_mode = DesignMode::CenterLine;
+    input.meridional.area_progression = vec![[0.0, 0.0], [0.4, 0.55], [1.0, 1.0]];
+    project.set_impeller_geometry(id, input).unwrap();
+    let path = std::env::temp_dir().join("turbopump-center-line.tpj");
+    project.save(&path).unwrap();
+    let mut harness = Harness::builder()
+        .with_size([1440.0, 900.0])
+        .with_pixels_per_point(1.5)
+        .with_theme(egui::Theme::Light)
+        .wgpu()
+        .build_eframe(|cc| TurbopumpApp::new(cc, Some(&path)));
+    harness.run();
+    harness.state_mut().focus_view(View::MeridianEditor);
+    harness.run();
+    harness.run();
+    save(&mut harness, "editor-center-line");
+}

@@ -2314,4 +2314,59 @@ mod tests {
         double_click(&mut harness, at);
         assert!(meridional(harness.state()).chambers.front.is_none());
     }
+
+    #[test]
+    fn in_the_center_line_mode_the_walls_follow_the_dragged_center_line() {
+        use crate::views::meridional::Side;
+        use tp_design::impeller::meridian::DesignMode;
+        use tp_design::impeller::wall::WallPoint;
+        let mut harness = editor();
+        let id = harness.state().active_impeller().unwrap();
+        let mut input = harness
+            .state()
+            .doc
+            .project()
+            .impeller_geometry_input(id)
+            .unwrap();
+        input.meridional.design_mode = DesignMode::CenterLine;
+        harness
+            .state_mut()
+            .doc
+            .edit_gesture("mode", |p| p.set_impeller_geometry(id, input))
+            .unwrap();
+        harness.run();
+        harness.run();
+        // The handles are those of the center line, not of hub and shroud.
+        let app = harness.state();
+        let g = app.derived.geometry(id).unwrap();
+        let shown = crate::views::meridional::handles(&g.contour, &meridional(app));
+        assert!(!shown.contains(&Handle::HubInlet));
+        let at = WallPoint::Control {
+            segment: 0,
+            index: 0,
+        };
+        let handle = Handle::Point(Side::Center, at);
+        assert!(shown.contains(&handle));
+        let hub_before = g.contour.hub.sample(50);
+        let start = handle_on_screen(app, handle);
+        drag_by(&mut harness, start, egui::vec2(20.0, 0.0));
+        assert!(meridional(harness.state()).center_line.is_some());
+        let hub_after = harness
+            .state()
+            .derived
+            .geometry(id)
+            .unwrap()
+            .contour
+            .hub
+            .sample(50);
+        let moved = hub_before
+            .iter()
+            .zip(&hub_after)
+            .map(|(a, b)| a.distance(*b))
+            .fold(0.0, f64::max);
+        assert!(moved > 1e-4, "the hub follows the center line: {moved}");
+        let at = handle_on_screen(harness.state(), handle);
+        double_click(&mut harness, at);
+        assert!(meridional(harness.state()).center_line.is_none());
+    }
 }

@@ -11,6 +11,8 @@ use serde::{Deserialize, Serialize};
 use tp_math::{Bezier, DVec2, Polyline};
 
 use super::ImpellerBasis;
+use super::center;
+pub use super::center::DesignMode;
 use super::chambers::{self, ChamberSettings, Chambers};
 use super::material::{self, Material, MaterialSettings};
 use super::wall::{SegmentInput, Wall};
@@ -57,6 +59,15 @@ pub struct MeridionalInput {
     pub shroud_material: Option<Vec<SegmentInput>>,
     /// The side chambers between the impeller and the casing.
     pub chambers: ChamberSettings,
+    /// Hub and shroud drawn, or following a center line.
+    pub design_mode: DesignMode,
+    /// Center line drawn segment by segment, from the middle of the inlet to the middle
+    /// of the outlet; `None` keeps the automatic one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub center_line: Option<Vec<SegmentInput>>,
+    /// Cross section along the center line, (x, A_rel) pairs; empty for linear.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub area_progression: Vec<[f64; 2]>,
 }
 
 /// How the hub point of the leading edge sits relative to its shroud point.
@@ -355,6 +366,10 @@ pub struct MeridionalContour {
     pub material_warnings: Vec<String>,
     /// The side chambers beside the material, built whether designed or not.
     pub chambers: Chambers,
+    /// Center line of the channel, from the middle of the inlet to the middle of the
+    /// outlet: the one the walls follow in [`DesignMode::CenterLine`], the automatic one
+    /// otherwise.
+    pub center_line: Wall,
     pub axial_length: f64,
     /// Leading edge on the hub and on the shroud, as fractions of each contour length.
     pub leading_edge: (f64, f64),
@@ -434,6 +449,31 @@ impl MeridionalContour {
                 tangent("shroud outlet tangent", &input.shroud_outlet_tangent)?,
             )),
         };
+        // The center line, and the walls that follow it in its design mode.
+        let (center_start, center_end) = (
+            hub_start.lerp(shroud_start, 0.5),
+            hub_end.lerp(shroud_end, 0.5),
+        );
+        let center_line = match &input.center_line {
+            Some(segments) => Wall::build(center_start, center_end, segments)?,
+            None => Wall::single(corner_curve(
+                center_start,
+                corner(center_end, center_start.y),
+                center_end,
+                DEFAULT_TANGENT,
+                DEFAULT_TANGENT,
+            )),
+        };
+        let (hub, shroud) = match input.design_mode {
+            DesignMode::Walls => (hub, shroud),
+            DesignMode::CenterLine => center::walls(
+                &center_line,
+                (hub_start, hub_end),
+                (shroud_start, shroud_end),
+                b2,
+                &input.area_progression,
+            )?,
+        };
         let leading_edge = (
             fraction(
                 "leading edge on the hub",
@@ -492,6 +532,7 @@ impl MeridionalContour {
             hub_line,
             shroud_line,
             chambers: side_chambers,
+            center_line,
             hub,
             shroud,
             hub_material: wires.hub,

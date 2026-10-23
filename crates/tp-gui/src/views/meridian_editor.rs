@@ -372,6 +372,7 @@ fn recover(ui: &mut Ui, cx: &mut EditCtx<'_>, id: ComponentId, reason: &str) {
         &m.shroud_segments,
         &m.hub_material,
         &m.shroud_material,
+        &m.center_line,
     ];
     if drawn.iter().all(|s| s.is_none()) {
         unavailable(ui, reason);
@@ -395,6 +396,7 @@ fn recover(ui: &mut Ui, cx: &mut EditCtx<'_>, id: ComponentId, reason: &str) {
             m.shroud_segments = None;
             m.hub_material = None;
             m.shroud_material = None;
+            m.center_line = None;
             cx.edit("edit wall segments", |p| p.set_impeller_geometry(id, input));
         }
         ui.weak(tr("Or undo the last change."));

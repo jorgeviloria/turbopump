@@ -4,6 +4,7 @@
 //! so the same code serves any machine type that produces them.
 
 pub mod blade;
+pub mod center;
 pub mod chambers;
 pub mod guide;
 pub mod loading;

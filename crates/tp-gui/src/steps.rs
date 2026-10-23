@@ -1187,8 +1187,33 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
     let g = cx.derived.geometry(id);
     let m: &mut MeridionalInput = &mut input.meridional;
     let mut changed = false;
+    use tp_design::impeller::meridian::DesignMode;
     section(ui, tr("Contour"));
     props(ui, "contour", |ui| {
+        label(
+            ui,
+            tr("Design mode"),
+            tr(
+                "Hub and shroud drawn directly, or a center line and a cross-section \
+                 distribution the walls follow (suited to mixed-flow impellers)",
+            ),
+        );
+        let mode = m.design_mode;
+        let mode_name = |mode: DesignMode| {
+            tr(match mode {
+                DesignMode::Walls => "hub and shroud",
+                DesignMode::CenterLine => "center line and area",
+            })
+        };
+        ComboBox::from_id_salt("design_mode")
+            .selected_text(mode_name(mode))
+            .show_ui(ui, |ui| {
+                for option in [DesignMode::Walls, DesignMode::CenterLine] {
+                    ui.selectable_value(&mut m.design_mode, option, mode_name(option));
+                }
+            });
+        ui.end_row();
+        changed |= m.design_mode != mode;
         changed |= param_f64(
             ui,
             tr("Axial length L"),
@@ -1217,6 +1242,44 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                 ],
             ),
         ];
+        if m.design_mode == DesignMode::CenterLine {
+            if let Some(list) = &m.center_line {
+                let count = list.len();
+                label(
+                    ui,
+                    tr("Center line drawn by segments"),
+                    tr("Drawn in the editor; hub and shroud follow it"),
+                );
+                let automatic = ui
+                    .horizontal(|ui| {
+                        ui.label(tf("{} segments", &[&count]));
+                        ui.button(tr("Automatic")).clicked()
+                    })
+                    .inner;
+                ui.end_row();
+                if automatic {
+                    m.center_line = None;
+                    changed = true;
+                }
+            }
+            label(
+                ui,
+                tr("Cross section"),
+                tr("A_rel along the center line, 0 at the inlet section and 1 at the outlet one"),
+            );
+            ui.label(if m.area_progression.is_empty() {
+                tr("linear").to_owned()
+            } else {
+                tf("{} points", &[&m.area_progression.len()])
+            });
+            ui.end_row();
+        }
+        // Walls that follow the center line have no inputs of their own.
+        let walls = if m.design_mode == DesignMode::CenterLine {
+            Vec::new()
+        } else {
+            walls.into_iter().collect()
+        };
         for (drawn, segments, tangents) in walls {
             if let Some(list) = segments {
                 let count = list.len();
@@ -1255,6 +1318,9 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
             }
         }
     });
+    if m.design_mode == DesignMode::CenterLine {
+        changed |= area_progression(ui, id, &mut m.area_progression);
+    }
     section(ui, tr("Leading edge"));
     props(ui, "leading_edge", |ui| {
         use tp_design::impeller::meridian::LeadingEdgeShape;
@@ -1562,6 +1628,56 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
         );
         crate::views::meridian_editor::guide_table(ui, g, &units);
     }
+}
+
+/// The cross-section distribution of the center-line mode, pasted as (x, A_rel) lines;
+/// true when it changed.
+fn area_progression(ui: &mut Ui, id: ComponentId, table: &mut Vec<[f64; 2]>) -> bool {
+    let key = egui::Id::new(("area_progression", id.0));
+    let mut text = ui
+        .ctx()
+        .data(|d| d.get_temp::<String>(key))
+        .unwrap_or_else(|| table.iter().map(|[x, a]| format!("{x} {a}\n")).collect());
+    ui.add(
+        egui::TextEdit::multiline(&mut text)
+            .desired_rows(3)
+            .desired_width(f32::INFINITY)
+            .hint_text(tr(
+                "x A_rel per line, x from 0 at the inlet to 1 at the outlet",
+            )),
+    );
+    let parsed: Vec<[f64; 2]> = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .filter_map(|line| {
+            let fields: Vec<f64> = line
+                .split(|c: char| c.is_whitespace() || c == ';' || c == '\t')
+                .filter(|f| !f.is_empty())
+                .filter_map(|f| f.replace(',', ".").parse().ok())
+                .collect();
+            (fields.len() == 2).then(|| [fields[0], fields[1]])
+        })
+        .collect();
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        let sorted = parsed.windows(2).all(|w| w[0][0] < w[1][0]);
+        if ui
+            .add_enabled(parsed.len() >= 2 && sorted, egui::Button::new(tr("Apply")))
+            .on_hover_text(tr("At least two points with x rising"))
+            .clicked()
+        {
+            *table = parsed.clone();
+            changed = true;
+        }
+        if ui.button(tr("Linear")).clicked() {
+            table.clear();
+            text.clear();
+            changed = true;
+        }
+    });
+    ui.ctx().data_mut(|d| d.insert_temp(key, text));
+    changed
 }
 
 fn blade_properties(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: ComponentId) {
