@@ -16,6 +16,7 @@ use super::ImpellerBasis;
 use super::center;
 pub use super::center::DesignMode;
 use super::chambers::{self, ChamberSettings, Chambers};
+use super::crossings::{Crossing, crossings};
 use super::material::{self, Material, MaterialSettings};
 use super::wall::{SegmentInput, Wall};
 use crate::{DesignError, Param};
@@ -434,6 +435,9 @@ pub struct MeridionalContour {
     pub material_warnings: Vec<String>,
     /// The side chambers beside the material, built whether designed or not.
     pub chambers: Chambers,
+    /// Where walls cross each other or themselves; the casing walls only when the
+    /// chambers are designed.
+    pub crossings: Vec<Crossing>,
     /// Center line of the channel, from the middle of the inlet to the middle of the
     /// outlet: the one the walls follow in [`DesignMode::CenterLine`], the automatic one
     /// otherwise.
@@ -612,9 +616,24 @@ impl MeridionalContour {
             .lerp(shroud_line.point_at_fraction(0.5), 0.5);
         let side_chambers =
             chambers::build(&wires.shroud, &wires.hub, inside, basis, &input.chambers)?;
+        // Walls dragged across each other.
+        let mut walls: Vec<(&'static str, &Wall)> = vec![
+            ("hub", &hub),
+            ("shroud", &shroud),
+            ("hub disk", &wires.hub),
+            ("shroud cover", &wires.shroud),
+        ];
+        let mut pairs = vec![(0, 1), (2, 0), (2, 1), (3, 1), (3, 0), (2, 3)];
+        if side_chambers.enabled {
+            walls.push(("front casing wall", &side_chambers.front_casing));
+            walls.push(("rear casing wall", &side_chambers.rear_casing));
+            pairs.extend([(4, 3), (4, 1), (5, 2), (5, 0)]);
+        }
+        let found = crossings(&walls, &pairs);
         Ok(Self {
             hub_line,
             shroud_line,
+            crossings: found,
             chambers: side_chambers,
             center_line,
             axial_reference: input.axial_reference,

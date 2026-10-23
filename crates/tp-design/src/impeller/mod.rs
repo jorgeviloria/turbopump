@@ -6,6 +6,7 @@
 pub mod blade;
 pub mod center;
 pub mod chambers;
+pub mod crossings;
 pub mod guide;
 pub mod loading;
 pub mod material;
@@ -245,6 +246,20 @@ pub fn build(
     }
     let mut warnings = contour.material_warnings.clone();
     warnings.extend(contour.chambers.warnings.iter().cloned());
+    for c in &contour.crossings {
+        let (z, r) = (c.at.x * 1e3, c.at.y * 1e3);
+        warnings.push(if c.walls.0 == c.walls.1 {
+            format!(
+                "a wire crosses itself: {} at z = {z:.1} mm, r = {r:.1} mm",
+                c.walls.0
+            )
+        } else {
+            format!(
+                "walls cross: {} and {} at z = {z:.1} mm, r = {r:.1} mm",
+                c.walls.0, c.walls.1
+            )
+        });
+    }
     // The quasi-orthogonals keep the quasi-one-dimensional flow; the blade sections lie
     // on the stream surfaces of the chosen flow, solved on the same stations so that a
     // span point's index stays its channel position.

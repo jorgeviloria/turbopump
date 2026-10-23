@@ -367,6 +367,10 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "From the normal to the axis; positive with the shroud point downstream",
         "Desde la normal al eje; positivo con el punto de la carcasa aguas abajo",
     ),
+    ("hub disk", "disco del cubo"),
+    ("shroud cover", "tapa"),
+    ("front casing wall", "pared de carcasa delantera"),
+    ("rear casing wall", "pared de carcasa trasera"),
     ("curvature maximum", "curvatura máxima"),
     (
         "Point of smallest radius of curvature of hub and shroud",
@@ -2935,6 +2939,14 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
 
 /// Messages of the design code, most specific first.
 pub(super) static MESSAGES: &[(&str, &str)] = &[
+    (
+        "walls cross: {} and {} at z = {} mm, r = {} mm",
+        "paredes que se cruzan: {} y {}, en z = {} mm, r = {} mm",
+    ),
+    (
+        "a wire crosses itself: {} at z = {} mm, r = {} mm",
+        "un alambre se cruza consigo mismo: {}, en z = {} mm, r = {} mm",
+    ),
     // Spiral development of the volute.
     (
         "the spiral must wrap between 300° and 360°, got {}°",

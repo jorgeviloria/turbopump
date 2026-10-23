@@ -1398,6 +1398,21 @@ fn paint_potential(
     }
 }
 
+/// Where walls cross, ringed in the error color.
+fn paint_crossings(
+    ui: &Ui,
+    transform: &PlotTransform,
+    crossings: &[tp_design::impeller::crossings::Crossing],
+    scale: f64,
+) {
+    let painter = ui.painter_at(*transform.frame());
+    let stroke = egui::Stroke::new(2.0, ui.visuals().error_fg_color);
+    for c in crossings {
+        let at = transform.position_from_point(&PlotPoint::new(c.at.x * scale, c.at.y * scale));
+        painter.circle_stroke(at, 7.0, stroke);
+    }
+}
+
 /// The pointer position in the bottom-right corner of the diagram.
 fn paint_pointer(ui: &Ui, transform: &PlotTransform, p: DVec2, units: &DisplayUnits) {
     let frame = *transform.frame();
@@ -2203,6 +2218,7 @@ impl MeridionalView {
             );
         }
         paint_handles(ui, &response.transform, &handles, active, inputs, scale);
+        paint_crossings(ui, &response.transform, &g.contour.crossings, scale);
         self.pointer = response.inner.map(|p| DVec2::new(p.x / scale, p.y / scale));
         if let Some(p) = self.pointer {
             paint_pointer(ui, &response.transform, p, &units);
