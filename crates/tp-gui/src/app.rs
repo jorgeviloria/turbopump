@@ -2151,4 +2151,64 @@ mod tests {
         );
         assert!(meridional(harness.state()).axial_length.is_auto());
     }
+
+    #[test]
+    fn a_dragged_point_snaps_to_the_z_of_another_point_unless_ctrl_is_held() {
+        use crate::views::meridional::Side;
+        use tp_design::impeller::wall::WallPoint;
+        let mut harness = editor();
+        let id = harness.state().active_impeller().unwrap();
+        // The shroud as lines and an arc: its corner is a free point.
+        let app = harness.state();
+        let g = app.derived.geometry(id).unwrap();
+        let mut input = app.doc.project().impeller_geometry_input(id).unwrap();
+        let shroud = &g.contour.shroud;
+        let segments = tp_design::impeller::wall::set_kind(
+            shroud,
+            0,
+            tp_design::impeller::wall::SegmentKind::Arc,
+        );
+        input.meridional.shroud_segments = Some(segments);
+        harness
+            .state_mut()
+            .doc
+            .edit_gesture("arc", |p| p.set_impeller_geometry(id, input))
+            .unwrap();
+        harness.run();
+        let corner = Handle::Point(
+            Side::Shroud,
+            WallPoint::Control {
+                segment: 0,
+                index: 0,
+            },
+        );
+        let corner_x =
+            |app: &TurbopumpApp| meridional(app).shroud_segments.unwrap()[0].controls[0].x;
+        // The z of the leading edge on the hub: the corner passes 3 px from it.
+        let c = &harness.state().derived.geometry(id).unwrap().contour;
+        let goal = c.hub_at(c.leading_edge.0).x;
+        let target = |harness: &Harness<'_, TurbopumpApp>| {
+            let app = harness.state();
+            let edge = handle_on_screen(app, Handle::LeadingEdgeHub);
+            let start = handle_on_screen(app, corner);
+            (start, egui::pos2(edge.x + 3.0, start.y + 40.0))
+        };
+        let (start, to) = target(&harness);
+        drag_by(&mut harness, start, to - start);
+        assert!((corner_x(harness.state()) - goal).abs() < 1e-12);
+
+        harness.state_mut().undo();
+        harness.run();
+        let (start, to) = target(&harness);
+        harness
+            .input_mut()
+            .events
+            .push(egui::Event::ModifiersChanged(egui::Modifiers::COMMAND));
+        drag_by(&mut harness, start, to - start);
+        harness
+            .input_mut()
+            .events
+            .push(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+        assert!((corner_x(harness.state()) - goal).abs() > 1e-5);
+    }
 }

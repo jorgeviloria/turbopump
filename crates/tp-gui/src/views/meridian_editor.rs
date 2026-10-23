@@ -162,6 +162,15 @@ impl MeridionalView {
                     }
                 }
             });
+        ui.checkbox(&mut self.editor.snap_points, tr("point snap"))
+            .on_hover_text(tr(
+                "A dragged point takes the z or r of another point near it; hold Ctrl \
+                 (Cmd) to drag freely",
+            ));
+        ui.checkbox(&mut self.editor.snap_lines, tr("line snap"))
+            .on_hover_text(tr(
+                "A dragged point lands on the line through two other points near it",
+            ));
         ui.weak(icon::QUESTION).on_hover_text(tr(
             "Drag a point to shape the meridian: hollow points are automatic, filled \
              ones set by hand. Double-click a point to make it automatic again. \

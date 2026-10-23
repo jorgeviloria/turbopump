@@ -147,6 +147,16 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "A radial outlet stays parallel to the axis; a semi-axial impeller (main dimensions) tilts it.",
         "Una salida radial queda paralela al eje; un rodete semiaxial (dimensiones principales) la inclina.",
     ),
+    ("point snap", "imán a puntos"),
+    (
+        "A dragged point takes the z or r of another point near it; hold Ctrl (Cmd) to drag freely",
+        "El punto arrastrado toma la z o la r de otro punto cercano; mantén Ctrl (Cmd) para arrastrar libremente",
+    ),
+    ("line snap", "imán a rectas"),
+    (
+        "A dragged point lands on the line through two other points near it",
+        "El punto arrastrado cae en la recta que pasa por otros dos puntos cercanos",
+    ),
     ("curvature maximum", "curvatura máxima"),
     (
         "Point of smallest radius of curvature of hub and shroud",

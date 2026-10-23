@@ -477,6 +477,10 @@ pub(crate) struct Display {
     pub charts: bool,
     /// Grid that dragged points snap to, m; 0 leaves them free.
     pub snap: f64,
+    /// A dragged point takes the z or r of another point near it.
+    pub snap_points: bool,
+    /// A dragged point lands on a line through two other points near it.
+    pub snap_lines: bool,
 }
 
 impl Display {
@@ -491,6 +495,8 @@ impl Display {
         legend: true,
         charts: false,
         snap: 0.0,
+        snap_points: false,
+        snap_lines: false,
     };
     pub(crate) const EDITOR: Display = Display {
         stream_lines: false,
@@ -503,6 +509,8 @@ impl Display {
         legend: false,
         charts: false,
         snap: 0.0,
+        snap_points: true,
+        snap_lines: false,
     };
 }
 
@@ -896,6 +904,90 @@ fn paint_dimensions(
     }
 }
 
+/// Screen distance within which a dragged point snaps, px.
+const SNAP_REACH: f32 = 6.0;
+
+/// `pointer` ((z, r) in m) snapped to the points `others`: their z or r when the
+/// pointer passes within reach on screen, else the nearest line through two of them.
+/// Returns the point and the guide lines to show.
+fn snap_to(
+    pointer: DVec2,
+    others: &[DVec2],
+    display: Display,
+    transform: &PlotTransform,
+    scale: f64,
+) -> (DVec2, Vec<[DVec2; 2]>) {
+    let screen =
+        |p: DVec2| transform.position_from_point(&PlotPoint::new(p.x * scale, p.y * scale));
+    let at = screen(pointer);
+    let mut snapped = pointer;
+    let mut guides = Vec::new();
+    if display.snap_points {
+        let nearest = |axis: fn(egui::Pos2) -> f32| {
+            others
+                .iter()
+                .map(|&o| (o, (axis(screen(o)) - axis(at)).abs()))
+                .filter(|&(_, d)| d < SNAP_REACH)
+                .min_by(|a, b| a.1.total_cmp(&b.1))
+                .map(|(o, _)| o)
+        };
+        let column = nearest(|p| p.x);
+        let row = nearest(|p| p.y);
+        if let Some(o) = column {
+            snapped.x = o.x;
+        }
+        if let Some(o) = row {
+            snapped.y = o.y;
+        }
+        guides.extend(column.map(|o| [o, snapped]));
+        guides.extend(row.map(|o| [o, snapped]));
+    }
+    if display.snap_lines && guides.is_empty() {
+        let mut best: Option<(f32, DVec2, DVec2)> = None;
+        for (i, &a) in others.iter().enumerate() {
+            for &b in &others[i + 1..] {
+                let (sa, sb) = (screen(a), screen(b));
+                let ab = sb - sa;
+                if ab.length() < 2.0 * SNAP_REACH {
+                    continue;
+                }
+                let distance = (at - sa).dot(ab.rot90().normalized()).abs();
+                if distance < SNAP_REACH && best.is_none_or(|(d, ..)| distance < d) {
+                    best = Some((distance, a, b));
+                }
+            }
+        }
+        if let Some((_, a, b)) = best {
+            let ab = b - a;
+            snapped = a + ab * ((pointer - a).dot(ab) / ab.length_squared());
+            // The guide runs from the farther point through the snapped one.
+            let from = if a.distance(snapped) > b.distance(snapped) {
+                a
+            } else {
+                b
+            };
+            guides.push([from, snapped]);
+        }
+    }
+    (snapped, guides)
+}
+
+/// The guide lines of the snap acting on the dragged point, dotted.
+fn paint_guides(ui: &Ui, transform: &PlotTransform, guides: &[[DVec2; 2]], scale: f64) {
+    let painter = ui.painter_at(*transform.frame());
+    let screen =
+        |p: DVec2| transform.position_from_point(&PlotPoint::new(p.x * scale, p.y * scale));
+    let stroke = egui::Stroke::new(1.0, ui.visuals().error_fg_color);
+    for [a, b] in guides {
+        painter.extend(egui::Shape::dotted_line(
+            &[screen(*a), screen(*b)],
+            stroke.color,
+            4.0,
+            1.0,
+        ));
+    }
+}
+
 /// The pointer position in the bottom-right corner of the diagram.
 fn paint_pointer(ui: &Ui, transform: &PlotTransform, p: DVec2, units: &DisplayUnits) {
     let frame = *transform.frame();
@@ -1066,6 +1158,8 @@ pub(crate) struct MeridionalView {
     pub(crate) framed: bool,
     /// The distance being measured with Alt and a drag, from and to (z, r) in m.
     measure: Option<(DVec2, DVec2)>,
+    /// Guide lines of the snap acting on the dragged point, (z, r) in m.
+    guides: Vec<[DVec2; 2]>,
     /// Curves drawn for comparison: pasted points or copies of a wall.
     pub(crate) references: Vec<Reference>,
     /// Points typed or pasted for a new reference curve.
@@ -1087,6 +1181,7 @@ impl Default for MeridionalView {
             pointer: None,
             framed: false,
             measure: None,
+            guides: Vec::new(),
             references: Vec::new(),
             reference_text: String::new(),
             potential: None,
@@ -1613,7 +1708,9 @@ impl MeridionalView {
         }
         if !ui.input(|i| i.pointer.primary_down()) {
             self.dragging = None;
+            self.guides.clear();
         }
+        paint_guides(ui, &response.transform, &self.guides, scale);
         if let Some(handle) = active {
             ui.ctx().set_cursor_icon(if self.dragging.is_some() {
                 CursorIcon::Grabbing
@@ -1691,6 +1788,25 @@ impl MeridionalView {
                 DVec2::new(pointer.x / scale, pointer.y / scale),
                 display.snap,
             );
+            // Command (Ctrl) held drags freely.
+            let free = ui.input(|i| i.modifiers.command);
+            let others: Vec<DVec2> = handles
+                .iter()
+                .filter(|(h, _)| *h != handle)
+                .map(|&(_, p)| p)
+                .chain([
+                    g.contour.hub.start(),
+                    g.contour.hub.end(),
+                    g.contour.shroud.start(),
+                    g.contour.shroud.end(),
+                ])
+                .collect();
+            let (pointer, guides) = if free {
+                (pointer, Vec::new())
+            } else {
+                snap_to(pointer, &others, display, &response.transform, scale)
+            };
+            self.guides = guides;
             if let Some(change) = drag_change(handle, pointer, g, inputs) {
                 change.apply(cx, id, &tf("drag {}", &[&handle.label()]));
                 // Show the new geometry even if the pointer stops here.
