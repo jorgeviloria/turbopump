@@ -149,11 +149,13 @@ pub fn automatic_hub(
         )));
     }
     let points = hub.sample(OFFSET_SAMPLES);
-    let behind = offset_points(
+    let mut behind = offset_points(
         &points,
         t,
         shroud.sample(OFFSET_SAMPLES)[OFFSET_SAMPLES / 2],
     )?;
+    // The rim on the outlet radius: across the wall at the outlet, whatever the normal.
+    behind[OFFSET_SAMPLES - 1].y = hub.end().y;
     // The back of the wall, from the outlet inward, until it meets the boss.
     let mut back: Vec<DVec2> = Vec::new();
     for p in behind.iter().rev().copied() {
@@ -207,7 +209,9 @@ pub fn automatic_shroud(
         m.wall_thickness,
         hub.sample(OFFSET_SAMPLES)[OFFSET_SAMPLES / 2],
     )?;
-    let back: Vec<DVec2> = outer.iter().rev().copied().collect();
+    let mut back: Vec<DVec2> = outer.iter().rev().copied().collect();
+    // The rim on the outlet radius, as on the hub disk.
+    back[0].y = shroud.end().y;
     let mut wire = vec![line(back[0]), curve(&back)?];
     let eye = *back.last().expect("points");
     if m.neck_length > 0.0 {

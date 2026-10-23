@@ -206,6 +206,32 @@ pub(crate) fn run(args: CadArgs) -> CliResult {
                 write(shape, &path, format, deflection)?;
             }
         }
+        // One flow domain for CFD: with the side chambers and the volute after them.
+        let next = project
+            .components()
+            .iter()
+            .skip_while(|c| c.id() != *id)
+            .nth(1)
+            .filter(|c| c.kind() == ComponentKind::Volute)
+            .map(|c| c.id());
+        if let (Some(_), Some(volute)) = (&cad.side_chambers, next) {
+            let joined = project.compute_volute(volute).map_err(err).and_then(|vg| {
+                let v = tp_cad::build_volute(&vg).map_err(|e| e.to_string())?;
+                tp_cad::join_fluid(&cad, &geometry, &v, &vg).map_err(|e| e.to_string())
+            });
+            match joined {
+                Ok((shape, warnings)) => {
+                    for w in warnings {
+                        eprintln!("warning: {w}");
+                    }
+                    for &format in &args.format {
+                        let path = dir.join(format!("fluid-joined.{}", format.extension()));
+                        write(&shape, &path, format, deflection)?;
+                    }
+                }
+                Err(e) => eprintln!("warning: the joined fluid was not built: {e}"),
+            }
+        }
         println!();
     }
 

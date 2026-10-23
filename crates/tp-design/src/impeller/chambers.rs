@@ -201,7 +201,10 @@ pub fn build(
             outer_face[outer_face.len() - 1] + DVec2::new(-axial_gap, axial_gap),
         ]
     });
-    let front_start = casing_face[0];
+    // At the radius of the rim, so that the chamber opens on one radius.
+    let front_start = DVec2::new(casing_face[0].x, outer_face[0].y);
+    let mut casing_face = casing_face;
+    casing_face[0] = front_start;
     let front_end = DVec2::new(tip.x, neck_radius + clearance);
     let automatic_front = || {
         let mut wire = Vec::new();

@@ -550,12 +550,19 @@ fn blade_angle_at(g: &ImpellerGeometry, r: f64) -> f64 {
 }
 
 #[cfg(test)]
-mod tests_support {
+pub(crate) mod tests_support {
     use super::*;
     use tp_design::impeller::{self, ImpellerBasis, ImpellerGeometryInput};
-    use tp_design::pump::{CentrifugalPumpInput, PumpDuty, design};
+    use tp_design::pump::{CentrifugalPumpDesign, CentrifugalPumpInput, PumpDuty, design};
 
-    pub(super) fn reference() -> ImpellerGeometry {
+    pub(crate) fn reference() -> ImpellerGeometry {
+        reference_with(&ImpellerGeometryInput::default()).0
+    }
+
+    /// The reference impeller built from `geometry`, with its main dimensions and duty.
+    pub(crate) fn reference_with(
+        geometry: &ImpellerGeometryInput,
+    ) -> (ImpellerGeometry, CentrifugalPumpDesign, PumpDuty) {
         let duty = PumpDuty {
             flow: 100.0 / 3600.0,
             head: 32.0,
@@ -570,7 +577,7 @@ mod tests_support {
         let input = CentrifugalPumpInput::default();
         let main = design(&duty, &input).unwrap();
         let basis = ImpellerBasis::from_pump(&main, &input, 1.0);
-        impeller::build(&basis, &ImpellerGeometryInput::default()).unwrap()
+        (impeller::build(&basis, geometry).unwrap(), main, duty)
     }
 }
 

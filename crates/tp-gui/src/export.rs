@@ -363,6 +363,7 @@ mod cad {
         formats: &[&str],
     ) -> Result<CadReport, String> {
         let cad = tp_cad::build_impeller(g, options).map_err(|e| e.to_string())?;
+        let volute_geometry = volute;
         let volute = volute
             .map(|g| {
                 let cad = tp_cad::build_volute(g)?;
@@ -390,6 +391,22 @@ mod cad {
                 files.push(path);
             }
         }
+        // One flow domain for CFD when the side chambers are designed.
+        let mut joined_warnings = Vec::new();
+        if let (Some((v, _, _)), Some(vg), Some(_)) = (&volute, volute_geometry, &cad.side_chambers)
+        {
+            match tp_cad::join_fluid(&cad, g, v, vg) {
+                Ok((joined, warnings)) => {
+                    joined_warnings = warnings;
+                    for format in formats {
+                        let path = folder.join(format!("fluid-joined.{format}"));
+                        write(&joined, &path, format, deflection)?;
+                        files.push(path);
+                    }
+                }
+                Err(e) => joined_warnings.push(format!("the joined fluid was not built: {e}")),
+            }
+        }
         if let Some((v, casing, _)) = &volute {
             for format in formats {
                 for (stem, shape) in [("volute", &v.fluid), ("volute-casing", &casing.solid)] {
@@ -413,6 +430,7 @@ mod cad {
             }
         }
         let mut problems: Vec<String> = cad.warnings.clone();
+        problems.extend(joined_warnings);
         if let Some((_, casing, _)) = &volute {
             problems.extend(casing.warnings.iter().cloned());
         }

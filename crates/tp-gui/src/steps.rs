@@ -1623,7 +1623,7 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
             ui,
             tr("Design the side chambers"),
             tr(
-                "Export their fluid with the CAD model; shape them on the Side chambers page of the editor",
+                "Export their fluid with the CAD model, alone and, with a volute after them, joined to the impeller and the volute in one flow domain for CFD; shape them on the Side chambers page of the editor",
             ),
         );
         changed |= ui.checkbox(&mut chambers.enabled, "").changed();

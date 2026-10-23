@@ -217,10 +217,6 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "De la tapa aguas arriba de la entrada, donde va el sello anular; automático: 0,12·d_sp (Gülich, cap. 3.6.2); 0 para ninguno",
     ),
     ("Design the side chambers", "Diseñar las cámaras laterales"),
-    (
-        "Export their fluid with the CAD model; shape them on the Side chambers page of the editor",
-        "Exporta su fluido con el modelo CAD; se modelan en la página Cámaras laterales del editor",
-    ),
     ("Axial gap s_ax", "Holgura axial s_ax"),
     (
         "Between the impeller and the casing walls; automatic: 0.05·r₂ (our choice; Gülich finds its effect small, Chap. 3.6.1)",
@@ -371,6 +367,23 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Hub end of the outlet edge; d₂ is the shroud end d₂a. Automatic: Gülich eqs. 7.13–7.14 on a semi-axial impeller, d₂ on a radial one; set by hand on a radial one it slants the edge and the design takes the mean diameter",
         "Extremo del cubo del borde de salida; d₂ es el extremo de la carcasa d₂a. Automático: Gülich, ec. 7.13–7.14 en un rodete semiaxial, d₂ en uno radial; fijado a mano en uno radial inclina el borde y el diseño usa el diámetro medio",
     ),
+    (
+        "Export their fluid with the CAD model, alone and, with a volute after them, joined to the impeller and the volute in one flow domain for CFD; shape them on the Side chambers page of the editor",
+        "Exporta su fluido con el modelo CAD, solo y, con una voluta detrás, unido al rodete y a la voluta en un único dominio para CFD; se modelan en la página Cámaras laterales del editor",
+    ),
+    (
+        "the joined fluid needs a radial outlet edge parallel to the axis (d₂i = d₂): the chambers then open at one radius",
+        "el fluido unido necesita un borde de salida radial paralelo al eje (d₂i = d₂): así las cámaras abren en un único radio",
+    ),
+    (
+        "the volute inlet does not face the impeller outlet between the casing walls",
+        "la entrada de la voluta no queda frente a la salida del rodete entre las paredes de carcasa",
+    ),
+    (
+        "the joined fluid needs the side chambers to be designed",
+        "el fluido unido necesita diseñar las cámaras laterales",
+    ),
+    (", not valid", ", no válido"),
     ("curvature maximum", "curvatura máxima"),
     (
         "Point of smallest radius of curvature of hub and shroud",
@@ -2935,6 +2948,14 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
 
 /// Messages of the design code, most specific first.
 pub(super) static MESSAGES: &[(&str, &str)] = &[
+    (
+        "the joined fluid came out as {} solids{}; check the faces at r₂",
+        "el fluido unido salió en {} sólidos{}; revisa las caras en r₂",
+    ),
+    (
+        "the joined fluid was not built: {}",
+        "no se construyó el fluido unido: {}",
+    ),
     (
         "walls cross: {} and {} at z = {} mm, r = {} mm",
         "paredes que se cruzan: {} y {}, en z = {} mm, r = {} mm",
