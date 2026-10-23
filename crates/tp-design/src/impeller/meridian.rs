@@ -696,8 +696,8 @@ pub(crate) mod tests {
             DVec2::new(l - b.outlet_width, b.outlet_diameter / 2.0)
         );
         // Axial inflow, radial outflow.
-        let d_in = c.shroud.segments()[0].derivative().eval(0.0);
-        let d_out = c.hub.segments()[0].derivative().eval(1.0);
+        let d_in = c.shroud.segments()[0].pieces()[0].derivative().eval(0.0);
+        let d_out = c.hub.segments()[0].pieces()[0].derivative().eval(1.0);
         assert!(d_in.y.abs() < 1e-12 && d_in.x > 0.0);
         assert!(d_out.x.abs() < 1e-12 && d_out.y > 0.0);
     }

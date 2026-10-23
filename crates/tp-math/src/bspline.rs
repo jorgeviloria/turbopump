@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::linalg::Lu;
-use crate::{MathError, Point};
+use crate::{Bezier, MathError, Point};
 
 /// A non-rational B-spline curve.
 ///
@@ -200,6 +200,74 @@ impl<P: Point> BSpline<P> {
             .map(|i| self.eval(u0 + (u1 - u0) * i as f64 / (count - 1) as f64))
             .collect()
     }
+
+    /// The same curve with knot `u` inserted once, one control point more (Boehm's
+    /// algorithm, Piegl & Tiller Algorithm A5.1 with r = 1). Unchanged when `u` lies
+    /// outside the open domain or is already a knot of multiplicity `degree`.
+    pub fn insert_knot(&self, u: f64) -> BSpline<P> {
+        let p = self.degree;
+        let n = self.control_points.len();
+        let (u0, u1) = self.domain();
+        let multiplicity = multiplicity(&self.knots, u);
+        if !(u > u0 && u < u1) || multiplicity >= p {
+            return self.clone();
+        }
+        let k = find_span(&self.knots, p, n, u);
+        let s = multiplicity;
+        let old = &self.control_points;
+        let control_points = (0..=n)
+            .map(|i| {
+                if i + p <= k {
+                    old[i]
+                } else if i + s <= k {
+                    let alpha = (u - self.knots[i]) / (self.knots[i + p] - self.knots[i]);
+                    old[i] * alpha + old[i - 1] * (1.0 - alpha)
+                } else {
+                    old[i - 1]
+                }
+            })
+            .collect();
+        let mut knots = self.knots.clone();
+        knots.insert(k + 1, u);
+        BSpline {
+            degree: p,
+            knots,
+            control_points,
+        }
+    }
+
+    /// A clamped curve as Bézier pieces of its degree, one per non-empty knot span in
+    /// order: every interior knot is inserted up to multiplicity `degree` (Piegl &
+    /// Tiller §5.4). Each piece covers its span with t ∈ [0, 1].
+    pub fn to_beziers(&self) -> Vec<Bezier<P>> {
+        let p = self.degree.max(1);
+        let (u0, u1) = self.domain();
+        let mut interior: Vec<f64> = self
+            .knots
+            .iter()
+            .copied()
+            .filter(|&k| k > u0 && k < u1)
+            .collect();
+        interior.dedup();
+        let mut spline = self.clone();
+        for u in interior {
+            while multiplicity(&spline.knots, u) < p {
+                spline = spline.insert_knot(u);
+            }
+        }
+        spline
+            .control_points
+            .windows(p + 1)
+            .step_by(p)
+            .map(|w| Bezier::new(w.to_vec()).expect("pieces have degree + 1 points"))
+            .collect()
+    }
+}
+
+/// How many times `u` appears in `knots`; inserted knots repeat their value exactly, so
+/// the margin only absorbs rounding in stored files.
+pub fn multiplicity(knots: &[f64], u: f64) -> usize {
+    knots.iter().filter(|k| (**k - u).abs() <= 1e-12).count()
 }
 
 /// Index of the knot span containing `u` (Piegl & Tiller, Algorithm A2.1).
@@ -354,6 +422,43 @@ mod tests {
         assert_eq!(serde_json::from_str::<BSpline<f64>>(&json).unwrap(), s);
         let broken = r#"{"degree":2,"knots":[0,1],"control_points":[0,1,3]}"#;
         assert!(serde_json::from_str::<BSpline<f64>>(broken).is_err());
+    }
+
+    #[test]
+    fn inserting_a_knot_keeps_the_curve() {
+        let s = BSpline::clamped_uniform(3, points()).unwrap();
+        let more = s.insert_knot(0.3);
+        assert_eq!(more.control_points().len(), 6);
+        assert_eq!(more.knots().len(), 10);
+        for k in 0..=20 {
+            let u = k as f64 / 20.0;
+            assert!(more.eval(u).distance(s.eval(u)) < 1e-12, "u = {u}");
+        }
+        // Outside the domain, or at full multiplicity, nothing changes.
+        assert_eq!(s.insert_knot(1.0), s);
+        let full = s.insert_knot(0.5).insert_knot(0.5);
+        assert_eq!(full.insert_knot(0.5), full);
+    }
+
+    #[test]
+    fn a_spline_splits_into_bezier_pieces_on_its_spans() {
+        for degree in 2..=4 {
+            let s = BSpline::clamped_uniform(degree, points())
+                .unwrap()
+                .insert_knot(0.37);
+            let pieces = s.to_beziers();
+            let mut spans: Vec<f64> = s.knots().to_vec();
+            spans.dedup();
+            assert_eq!(pieces.len(), spans.len() - 1, "degree {degree}");
+            for (piece, w) in pieces.iter().zip(spans.windows(2)) {
+                assert_eq!(piece.degree(), degree);
+                for k in 0..=10 {
+                    let t = k as f64 / 10.0;
+                    let u = w[0] + (w[1] - w[0]) * t;
+                    assert!(piece.eval(t).distance(s.eval(u)) < 1e-12, "degree {degree}");
+                }
+            }
+        }
     }
 
     proptest! {

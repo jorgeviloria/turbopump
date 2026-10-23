@@ -235,7 +235,7 @@ pub fn meridional(g: &ImpellerGeometry) -> Drawing {
         d.polyline(STREAMLINES, span.points.clone(), false);
     }
     for wall in [&g.contour.hub, &g.contour.shroud] {
-        for segment in wall.segments() {
+        for segment in wall.pieces() {
             d.add(
                 CONTOUR,
                 if segment.degree() == 1 {
@@ -372,8 +372,8 @@ mod tests {
         assert_eq!(
             curves,
             [
-                &g.contour.hub.segments()[0],
-                &g.contour.shroud.segments()[0]
+                &g.contour.hub.segments()[0].pieces()[0],
+                &g.contour.shroud.segments()[0].pieces()[0]
             ]
         );
         assert_eq!(

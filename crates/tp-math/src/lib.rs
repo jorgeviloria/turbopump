@@ -17,7 +17,7 @@ pub mod roots;
 pub mod sparse;
 
 pub use bezier::Bezier;
-pub use bspline::BSpline;
+pub use bspline::{BSpline, multiplicity};
 pub use error::MathError;
 pub use glam::{DVec2, DVec3};
 pub use interp::Table1D;

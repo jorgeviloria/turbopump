@@ -1951,4 +1951,96 @@ mod tests {
         let g = harness.state().derived.geometry(id).unwrap();
         assert!((g.basis.outlet_diameter - 0.18).abs() < 1e-9);
     }
+
+    /// Screen position of `p` ((z, r) in m) in the last frame of the diagram.
+    fn screen_of(app: &TurbopumpApp, p: tp_math::DVec2) -> egui::Pos2 {
+        let scale = app
+            .doc
+            .project()
+            .display_units
+            .to_display(QuantityKind::Length, 1.0);
+        app.meridional
+            .transform()
+            .unwrap()
+            .position_from_point(&PlotPoint::new(p.x * scale, p.y * scale))
+    }
+
+    #[test]
+    fn the_segment_menu_offers_arcs_b_splines_and_coupled_beziers() {
+        use crate::views::meridional::Side;
+        use tp_design::impeller::wall::SegmentKind;
+        let mut harness = editor();
+        let id = harness.state().active_impeller().unwrap();
+        let shroud = |app: &TurbopumpApp| meridional(app).shroud_segments.unwrap_or_default();
+        // A point of the shroud near `t`, clear of every handle.
+        let wall_point = |harness: &Harness<'_, TurbopumpApp>, t: f64| {
+            let app = harness.state();
+            let g = app.derived.geometry(id).unwrap();
+            let input = meridional(app);
+            let handles: Vec<egui::Pos2> = crate::views::meridional::handles(&g.contour, &input)
+                .into_iter()
+                .map(|h| handle_on_screen(app, h))
+                .collect();
+            (0..=40)
+                .map(|k| t - 0.2 + 0.4 * k as f64 / 40.0)
+                .map(|u| screen_of(app, g.contour.shroud_at(u)))
+                .max_by(|a, b| {
+                    let clear = |p: &egui::Pos2| {
+                        handles
+                            .iter()
+                            .map(|h| h.distance(*p))
+                            .fold(f32::INFINITY, f32::min)
+                    };
+                    clear(a).total_cmp(&clear(b))
+                })
+                .unwrap()
+        };
+
+        let at = wall_point(&harness, 0.6);
+        right_click(&mut harness, at);
+        harness.get_by_label("Lines and arc").click();
+        harness.run();
+        assert_eq!(shroud(harness.state())[0].kind, SegmentKind::Arc);
+        let radius = |app: &TurbopumpApp| {
+            app.derived.geometry(id).unwrap().contour.shroud.segments()[0]
+                .fillet()
+                .unwrap()
+                .radius
+        };
+        let before = radius(harness.state());
+        // The centre moves away from the corner: a larger radius.
+        let center = handle_on_screen(harness.state(), Handle::ArcCenter(Side::Shroud, 0));
+        let app = harness.state();
+        let s = &app.derived.geometry(id).unwrap().contour.shroud.segments()[0];
+        let corner = screen_of(app, s.control_points()[1]);
+        drag_by(&mut harness, center, (center - corner).normalized() * 20.0);
+        let after = radius(harness.state());
+        assert!(after > before * 1.05, "{after} vs {before}");
+
+        let at = wall_point(&harness, 0.5);
+        right_click(&mut harness, at);
+        harness.get_by_label("B-spline").click();
+        harness.run();
+        let spline = shroud(harness.state());
+        assert_eq!(spline[0].kind, SegmentKind::BSpline);
+        let at = wall_point(&harness, 0.5);
+        right_click(&mut harness, at);
+        harness.get_by_label("Insert knot here").click();
+        harness.run();
+        assert_eq!(
+            shroud(harness.state())[0].controls.len(),
+            spline[0].controls.len() + 1
+        );
+
+        let at = wall_point(&harness, 0.5);
+        right_click(&mut harness, at);
+        harness.get_by_label("Bézier").click();
+        harness.run();
+        let at = wall_point(&harness, 0.5);
+        right_click(&mut harness, at);
+        harness.get_by_label("Coupled control points").click();
+        harness.run();
+        let coupled = &shroud(harness.state())[0];
+        assert!(coupled.coupled && coupled.controls.len() >= 3);
+    }
 }

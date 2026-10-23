@@ -603,3 +603,39 @@ fn meridian_editor() {
     harness.run();
     save(&mut harness, "editor-analysis");
 }
+
+/// The segment types of a drawn wall: the hub as lines and an arc, the shroud as a
+/// B-spline with its menu open.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn meridian_segment_kinds() {
+    use tp_design::impeller::wall::{self, SegmentKind};
+    let mut project = tp_gui::default_project();
+    let id = project.components()[0].id();
+    let g = project.compute_impeller_geometry(id).unwrap();
+    let mut input = project.impeller_geometry_input(id).unwrap();
+    let rebuild = |w: &wall::Wall, s: &[wall::SegmentInput]| {
+        wall::Wall::build(w.start(), w.end(), s).unwrap()
+    };
+    let hub = rebuild(
+        &g.contour.hub,
+        &wall::set_kind(&g.contour.hub, 0, SegmentKind::Arc),
+    );
+    input.meridional.hub_segments = Some(hub.to_input());
+    let shroud = wall::set_kind(&g.contour.shroud, 0, SegmentKind::BSpline);
+    let shroud = rebuild(&g.contour.shroud, &shroud);
+    input.meridional.shroud_segments = Some(wall::insert_knot(&shroud, 0, 0.6));
+    project.set_impeller_geometry(id, input).unwrap();
+    let path = std::env::temp_dir().join("turbopump-meridian-kinds.tpj");
+    project.save(&path).unwrap();
+    let mut harness = Harness::builder()
+        .with_size([1440.0, 900.0])
+        .with_pixels_per_point(1.5)
+        .with_theme(egui::Theme::Light)
+        .wgpu()
+        .build_eframe(|cc| TurbopumpApp::new(cc, Some(&path)));
+    harness.run();
+    harness.state_mut().focus_view(View::MeridianEditor);
+    harness.run();
+    save(&mut harness, "meridian-kinds");
+}

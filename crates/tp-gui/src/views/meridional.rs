@@ -14,7 +14,7 @@ use tp_design::impeller::meridian::{
     LeadingEdgeShape, MeridionalContour, MeridionalInput, chord_coordinates,
 };
 use tp_design::impeller::potential::{self, PotentialFlow, PotentialMesh};
-use tp_design::impeller::wall::{self, SegmentInput, SegmentKind, Wall, WallPoint};
+use tp_design::impeller::wall::{self, Segment, SegmentInput, SegmentKind, Wall, WallPoint};
 use tp_design::impeller::{ImpellerBasis, ImpellerGeometry, ImpellerGeometryInput};
 use tp_design::pump::CentrifugalPumpInput;
 use tp_design::{MainDimensionsInput, Param};
@@ -73,6 +73,9 @@ pub(crate) enum Handle {
     AxialLength,
     /// Middle of the trailing edge: it moves radially and sets d₂.
     TrailingEdge,
+    /// Centre of the rounded corner of arc segment `.1`: it moves along the bisector
+    /// and sets the radius.
+    ArcCenter(Side, usize),
 }
 
 impl Handle {
@@ -91,6 +94,8 @@ impl Handle {
             Handle::LeadingEdgeControl(_) => "leading edge control point",
             Handle::AxialLength => "axial length",
             Handle::TrailingEdge => "trailing edge",
+            Handle::ArcCenter(Side::Hub, _) => "hub arc centre",
+            Handle::ArcCenter(Side::Shroud, _) => "shroud arc centre",
         })
     }
 
@@ -117,8 +122,19 @@ pub(crate) fn handles(contour: &MeridionalContour, input: &MeridionalInput) -> V
         (Side::Shroud, [Handle::ShroudInlet, Handle::ShroudOutlet]),
     ] {
         if side.drawn(input) {
-            let points = side.wall(contour).points();
-            handles.extend(points.into_iter().map(|(at, _)| Handle::Point(side, at)));
+            let wall = side.wall(contour);
+            handles.extend(
+                wall.points()
+                    .into_iter()
+                    .map(|(at, _)| Handle::Point(side, at)),
+            );
+            handles.extend(
+                wall.segments()
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, s)| s.fillet().is_some())
+                    .map(|(i, _)| Handle::ArcCenter(side, i)),
+            );
         } else {
             handles.extend(automatic);
         }
@@ -138,6 +154,13 @@ pub(crate) fn handle_position(handle: Handle, contour: &MeridionalContour) -> DV
         Handle::LeadingEdgeShroud => contour.shroud_at(contour.leading_edge.1),
         Handle::AxialLength => contour.hub.end(),
         Handle::TrailingEdge => contour.hub.end().lerp(contour.shroud.end(), 0.5),
+        Handle::ArcCenter(side, segment) => {
+            let wall = side.wall(contour);
+            wall.segments()
+                .get(segment)
+                .and_then(|s| s.fillet())
+                .map_or_else(|| wall.end(), |f| f.center)
+        }
         Handle::LeadingEdgeControl(i) => contour
             .leading_edge_curve()
             .and_then(|c| c.control_points().get(i + 1).copied())
@@ -207,6 +230,13 @@ pub(crate) fn apply_drag(
 ) {
     match handle {
         Handle::Point(side, at) => return place(side, at, pointer, contour, input),
+        Handle::ArcCenter(side, segment) => {
+            let wall = side.wall(contour);
+            if let Some(radius) = wall::radius_for_center(wall, segment, pointer) {
+                *side.segments(input) = Some(wall::set_radius(wall, segment, radius));
+            }
+            return;
+        }
         Handle::LeadingEdgeControl(i) => return place_edge_control(i, pointer, contour, input),
         _ => {}
     }
@@ -253,7 +283,10 @@ pub(crate) fn apply_drag(
             input.axial_length = Param::Manual(pointer.x.clamp(min, max));
         }
         // The outlet belongs to the main dimensions: see `drag_change`.
-        Handle::Point(..) | Handle::LeadingEdgeControl(_) | Handle::TrailingEdge => {}
+        Handle::Point(..)
+        | Handle::LeadingEdgeControl(_)
+        | Handle::TrailingEdge
+        | Handle::ArcCenter(..) => {}
     }
 }
 
@@ -334,7 +367,7 @@ pub(crate) fn is_manual(handle: Handle, inputs: Inputs<'_>) -> bool {
         Handle::LeadingEdgeShroud => !m.leading_edge_shroud.is_auto(),
         Handle::AxialLength => !m.axial_length.is_auto(),
         Handle::TrailingEdge => inputs.main.is_some_and(|d| !d.outlet_diameter.is_auto()),
-        Handle::Point(..) | Handle::LeadingEdgeControl(_) => true,
+        Handle::Point(..) | Handle::LeadingEdgeControl(_) | Handle::ArcCenter(..) => true,
     }
 }
 
@@ -354,7 +387,10 @@ pub(crate) fn reset_change(handle: Handle, inputs: Inputs<'_>) -> Option<Change>
             Handle::LeadingEdgeHub => &mut m.leading_edge_hub,
             Handle::LeadingEdgeShroud => &mut m.leading_edge_shroud,
             Handle::AxialLength => &mut m.axial_length,
-            Handle::Point(..) | Handle::LeadingEdgeControl(_) | Handle::TrailingEdge => return,
+            Handle::Point(..)
+            | Handle::LeadingEdgeControl(_)
+            | Handle::TrailingEdge
+            | Handle::ArcCenter(..) => return,
         };
         *param = Param::Auto;
     })
@@ -427,6 +463,8 @@ pub(crate) enum Dimension {
     HubDiameter,
     InletDiameter,
     OutletDiameter,
+    /// Radius of the rounded corner of an arc segment of a wall.
+    ArcRadius(Side, usize),
     /// Axial position of a handle, from the inlet plane.
     Z(Handle),
     /// Radius of a handle, from the axis.
@@ -441,6 +479,7 @@ impl Dimension {
             Dimension::HubDiameter => tr("Hub diameter d_n").to_owned(),
             Dimension::InletDiameter => tr("Eye diameter d₁").to_owned(),
             Dimension::OutletDiameter => tr("Outlet diameter d₂").to_owned(),
+            Dimension::ArcRadius(..) => tr("Corner radius R").to_owned(),
             Dimension::Z(h) => tf("z of the {}", &[&h.label()]),
             Dimension::R(h) => tf("r of the {}", &[&h.label()]),
         }
@@ -454,6 +493,7 @@ impl Dimension {
             Dimension::HubDiameter => Some("d_n"),
             Dimension::InletDiameter => Some("d₁"),
             Dimension::OutletDiameter => Some("d₂"),
+            Dimension::ArcRadius(..) => Some("R"),
             Dimension::Z(_) | Dimension::R(_) => None,
         }
     }
@@ -587,7 +627,24 @@ pub(crate) fn dimension_lines(
             }
         }
     }
-    if let Some(h) = hovered
+    if let Some(Handle::ArcCenter(side, segment)) = hovered
+        && let Some(f) = side
+            .wall(contour)
+            .segments()
+            .get(segment)
+            .and_then(|s| s.fillet())
+    {
+        // From the centre to the middle of the arc.
+        let middle = f.tangent_points[0].lerp(f.tangent_points[1], 0.5);
+        let to = f.center + (middle - f.center).normalize_or_zero() * f.radius;
+        lines.push(DimensionLine {
+            dimension: Dimension::ArcRadius(side, segment),
+            from: f.center,
+            to,
+            extensions: Vec::new(),
+            value: f.radius,
+        });
+    } else if let Some(h) = hovered
         && !matches!(h, Handle::AxialLength | Handle::TrailingEdge)
     {
         let p = handle_position(h, contour);
@@ -624,6 +681,13 @@ fn set_dimension(
         }
         Dimension::OutletDiameter => {
             return inputs.main(|m| m.outlet_diameter = Param::Manual(length));
+        }
+        Dimension::ArcRadius(side, segment) => {
+            return inputs.geometry(|input| {
+                let wall = side.wall(contour);
+                *side.segments(&mut input.meridional) =
+                    Some(wall::set_radius(wall, segment, value.max(0.0)));
+            });
         }
         Dimension::Z(_) | Dimension::R(_) => {}
     }
@@ -800,10 +864,12 @@ fn handle_color(handle: Handle, palette: &Palette) -> Color32 {
         Handle::HubInlet
         | Handle::HubOutlet
         | Handle::AxialLength
-        | Handle::Point(Side::Hub, _) => palette.hub,
-        Handle::ShroudInlet | Handle::ShroudOutlet | Handle::Point(Side::Shroud, _) => {
-            palette.shroud
-        }
+        | Handle::Point(Side::Hub, _)
+        | Handle::ArcCenter(Side::Hub, _) => palette.hub,
+        Handle::ShroudInlet
+        | Handle::ShroudOutlet
+        | Handle::Point(Side::Shroud, _)
+        | Handle::ArcCenter(Side::Shroud, _) => palette.shroud,
         Handle::LeadingEdgeHub | Handle::LeadingEdgeShroud | Handle::LeadingEdgeControl(_) => {
             palette.leading_edge
         }
@@ -840,7 +906,12 @@ fn paint_handles(
             background
         };
         let stroke = egui::Stroke::new(1.8, color);
-        if matches!(handle, Handle::Point(_, WallPoint::Joint { .. })) {
+        if matches!(handle, Handle::ArcCenter(..)) {
+            painter.circle_stroke(at, radius - 1.0, stroke);
+            for d in [egui::vec2(radius, 0.0), egui::vec2(0.0, radius)] {
+                painter.line_segment([at - d, at + d], stroke);
+            }
+        } else if matches!(handle, Handle::Point(_, WallPoint::Joint { .. })) {
             let square = egui::Rect::from_center_size(at, egui::Vec2::splat(2.0 * radius));
             painter.rect(square, 0.0, fill, stroke, egui::StrokeKind::Middle);
         } else {
@@ -1298,22 +1369,34 @@ impl MeridionalView {
                 .color(palette.trailing_edge)
                 .width(2.0),
             );
-            // Bézier control polygons, in the color of their curve.
-            let edge = g.contour.leading_edge_curve();
-            let curves = [
-                (g.contour.hub.segments(), palette.hub),
-                (g.contour.shroud.segments(), palette.shroud),
-                (edge.as_slice(), palette.leading_edge),
-            ];
-            for (segments, color) in curves {
-                for curve in segments.iter().filter(|c| c.degree() > 1) {
-                    plot.line(
-                        Line::new("", line(curve.control_points().iter().copied(), scale))
-                            .color(color.gamma_multiply(0.7))
-                            .style(LineStyle::dashed_dense())
-                            .width(1.0),
-                    );
+            // Control polygons in the color of their curve: Bézier and B-spline
+            // polygons, the corner lines of an arc and the radii to its centre.
+            let mut polygons: Vec<(Vec<DVec2>, Color32)> = Vec::new();
+            for (wall, color) in [
+                (&g.contour.hub, palette.hub),
+                (&g.contour.shroud, palette.shroud),
+            ] {
+                for segment in wall.segments() {
+                    if segment.kind() != SegmentKind::Line {
+                        polygons.push((segment.control_points().to_vec(), color));
+                    }
+                    if let Some(f) = segment.fillet() {
+                        for t in f.tangent_points {
+                            polygons.push((vec![f.center, t], color));
+                        }
+                    }
                 }
+            }
+            if let Some(curve) = g.contour.leading_edge_curve().filter(|c| c.degree() > 1) {
+                polygons.push((curve.control_points().to_vec(), palette.leading_edge));
+            }
+            for (points, color) in polygons {
+                plot.line(
+                    Line::new("", line(points, scale))
+                        .color(color.gamma_multiply(0.7))
+                        .style(LineStyle::dashed_dense())
+                        .width(1.0),
+                );
             }
             if display.curvature {
                 for (wall, color) in [
@@ -1820,6 +1903,127 @@ fn length_field(ui: &mut Ui, label: &str, value: &mut f64, units: &DisplayUnits)
     changed
 }
 
+/// Whether an inner point of `segment` can go: a Bézier keeps one, a B-spline as many
+/// as its degree needs, an arc its corner.
+fn removable(segment: &Segment) -> bool {
+    let points = segment.control_points().len();
+    match segment.kind() {
+        SegmentKind::Bezier => points > 3,
+        SegmentKind::BSpline => points > segment.degree() + 1,
+        SegmentKind::Line | SegmentKind::Arc => false,
+    }
+}
+
+/// A direction fixed or free: a check box and its angle in degrees from the z axis,
+/// starting at `current` when it is first fixed. The new value when it changed.
+fn angle_field(ui: &mut Ui, label: &str, value: Option<f64>, current: f64) -> Option<Option<f64>> {
+    ui.horizontal(|ui| {
+        let mut fixed = value.is_some();
+        let mut degrees = value.unwrap_or(current).to_degrees();
+        let toggled = ui.checkbox(&mut fixed, label).changed();
+        let typed = ui
+            .add_enabled(
+                fixed,
+                DragValue::new(&mut degrees)
+                    .speed(0.2)
+                    .range(-180.0..=180.0)
+                    .max_decimals(2)
+                    .suffix("°"),
+            )
+            .changed();
+        (toggled || typed).then(|| fixed.then(|| degrees.to_radians()))
+    })
+    .inner
+}
+
+/// The shape of wall segment `segment`: its type and what that type offers. The new
+/// segments when something changed.
+fn segment_menu(
+    ui: &mut Ui,
+    wall: &Wall,
+    segment: usize,
+    t: f64,
+    units: &DisplayUnits,
+) -> Option<Vec<SegmentInput>> {
+    let curve = wall.segments().get(segment)?;
+    let mut changed = None;
+    let mut kind = curve.kind();
+    ui.horizontal_wrapped(|ui| {
+        for (option, name) in [
+            (SegmentKind::Bezier, tr("Bézier")),
+            (SegmentKind::Line, tr("Straight line")),
+            (SegmentKind::Arc, tr("Lines and arc")),
+            (SegmentKind::BSpline, tr("B-spline")),
+        ] {
+            ui.radio_value(&mut kind, option, name);
+        }
+    });
+    if kind != curve.kind() {
+        return Some(wall::set_kind(wall, segment, kind));
+    }
+    match curve.kind() {
+        SegmentKind::Arc => {
+            let mut radius = curve.fillet().map_or(0.0, |f| f.radius);
+            if length_field(ui, tr("corner radius"), &mut radius, units) {
+                changed = Some(wall::set_radius(wall, segment, radius));
+            }
+        }
+        SegmentKind::BSpline => {
+            ui.horizontal(|ui| {
+                ui.label(tr("degree"));
+                let mut degree = curve.degree();
+                for d in wall::SPLINE_DEGREES {
+                    ui.radio_value(&mut degree, d, d.to_string());
+                }
+                if degree != curve.degree() {
+                    changed = Some(wall::set_degree(wall, segment, degree));
+                }
+            });
+            if ui
+                .button(tr("Insert knot here"))
+                .on_hover_text(tr("One more control point here; the curve keeps its shape"))
+                .clicked()
+            {
+                changed = Some(wall::insert_knot(wall, segment, t));
+                ui.close();
+            }
+        }
+        SegmentKind::Bezier => {
+            let mut coupled = curve.coupled();
+            if ui
+                .checkbox(&mut coupled, tr("Coupled control points"))
+                .on_hover_text(tr(
+                    "The second and the second-last points stay on their lines to the \
+                     middle points, so the curvature is zero at both ends; the curve \
+                     becomes of degree 4",
+                ))
+                .changed()
+            {
+                changed = Some(wall::set_coupled(wall, segment, coupled));
+            }
+            let (start, end) = curve.angles();
+            let heading = |t: f64| curve.direction(t).to_angle();
+            if let Some(start) = angle_field(ui, tr("start angle"), start, heading(0.0)) {
+                changed = Some(wall::set_angles(wall, segment, start, end));
+            }
+            if let Some(end) = angle_field(ui, tr("end angle"), end, heading(1.0)) {
+                changed = Some(wall::set_angles(wall, segment, start, end));
+            }
+        }
+        SegmentKind::Line => {}
+    }
+    if curve.kind() != SegmentKind::Arc
+        && ui
+            .button(tr("Add control point"))
+            .on_hover_text(tr("One more control point; the curve keeps its shape"))
+            .clicked()
+    {
+        changed = Some(wall::add_control(wall, segment));
+        ui.close();
+    }
+    changed
+}
+
 /// The context menu of the meridional view, with a way back to automatic for the
 /// handles set by hand; the change when it changed something.
 fn context_menu(
@@ -1934,6 +2138,14 @@ fn edit_menu(
             ui.separator();
             leading_edge_shape(ui, g, m);
         }
+        MenuTarget::Handle(handle @ Handle::ArcCenter(side, segment)) => {
+            ui.strong(handle.label());
+            let wall = side.wall(contour);
+            let mut radius = wall.segments().get(segment)?.fillet()?.radius;
+            if length_field(ui, "R", &mut radius, units) {
+                *side.segments(m) = Some(wall::set_radius(wall, segment, radius));
+            }
+        }
         MenuTarget::Handle(handle) => {
             let (side, at) = handle.wall_point()?;
             let wall = side.wall(contour);
@@ -1952,7 +2164,7 @@ fn edit_menu(
             }
             if let WallPoint::Control { segment, index } = at
                 && side.drawn(&current.meridional)
-                && wall.segments()[segment].control_points().len() > 3
+                && removable(&wall.segments()[segment])
                 && ui.button(tr("Remove control point")).clicked()
             {
                 *side.segments(m) = Some(wall::remove_control(wall, segment, index));
@@ -1972,7 +2184,7 @@ fn edit_menu(
         }
         MenuTarget::Segment(side, segment, t) => {
             let wall = side.wall(contour);
-            let curve = wall.segments().get(segment)?;
+            wall.segments().get(segment)?;
             ui.strong(match side {
                 Side::Hub => tr("Hub"),
                 Side::Shroud => tr("Shroud"),
@@ -1987,26 +2199,8 @@ fn edit_menu(
                 *side.segments(m) = Some(wall::split(wall, segment, t));
                 ui.close();
             }
-            let mut kind = if curve.degree() == 1 {
-                SegmentKind::Line
-            } else {
-                SegmentKind::Bezier
-            };
-            let before = kind;
-            ui.horizontal(|ui| {
-                ui.radio_value(&mut kind, SegmentKind::Bezier, tr("Bézier"));
-                ui.radio_value(&mut kind, SegmentKind::Line, tr("Straight line"));
-            });
-            if kind != before {
-                *side.segments(m) = Some(wall::set_kind(wall, segment, kind));
-            }
-            if ui
-                .button(tr("Add control point"))
-                .on_hover_text(tr("One more control point; the curve keeps its shape"))
-                .clicked()
-            {
-                *side.segments(m) = Some(wall::add_control(wall, segment));
-                ui.close();
+            if let Some(segments) = segment_menu(ui, wall, segment, t, units) {
+                *side.segments(m) = Some(segments);
             }
             ui.separator();
             if ui
