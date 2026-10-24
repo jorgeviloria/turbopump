@@ -298,7 +298,9 @@ mientras se edite el rodete.
 - **Cruces:** si dos paredes se cruzan, o una se cruza consigo misma, el punto se
   marca en rojo y sale un aviso.
 - **Análisis:** la curvatura de las paredes, los círculos de área, las gráficas de área
-  y de curvatura a lo largo del canal y curvas de referencia.
+  y de curvatura a lo largo del canal, la del momento estático S = ∫ r dm de cada
+  sección del álabe (el de la fórmula de deslizamiento de Pfleiderer: cuanto mayor,
+  menos deslizamiento; Gülich, cap. 3.3) y curvas de referencia.
 - **Flujo potencial:** líneas de corriente, isolíneas y mapa de color de c_m y
   vectores de velocidad, con el bloqueo de los álabes o sin él.
 - **Comprobación:** el panel de propiedades compara el contorno con las
