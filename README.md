@@ -37,7 +37,14 @@ Hace falta:
 - **cmake**;
 - un **compilador C++17** (Xcode Command Line Tools, GCC/Clang o Visual Studio).
 
-La primera compilación construye Open CASCADE 7.8.1 desde el código fuente y tarda de 5 a
+El código de Open CASCADE 8.0.1 viene como submódulo de git: clona con
+`git clone --recursive` o, en un clon ya hecho, ejecuta:
+
+```bash
+git submodule update --init
+```
+
+La primera compilación construye Open CASCADE desde el código fuente y tarda de 5 a
 15 minutos; las siguientes lo reutilizan. Para compilar sin CAD:
 
 ```bash

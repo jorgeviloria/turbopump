@@ -35,6 +35,9 @@ jobs:
       CARGO_PROFILE_DEV_OPT_LEVEL: ${{ matrix.os == 'windows-latest' && '1' || '0' }}
     steps:
       - uses: actions/checkout@v5
+        # The OCCT sources are a git submodule.
+        with:
+          submodules: true
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -45,15 +48,15 @@ jobs:
         id: occt
         uses: actions/cache/restore@v4
         with:
-          path: target/OCCT
-          key: occt-7.8.1-v2-${{ runner.os }}-${{ hashFiles('crates/tp-cad/build.rs', '.cargo/config.toml') }}
+          path: target/OCCT-8.0.1
+          key: occt-8.0.1-v1-${{ runner.os }}-${{ hashFiles('crates/tp-cad/build.rs', 'crates/tp-occt-sys/src/lib.rs', '.cargo/config.toml') }}
       - name: Compilar OCCT
         run: cargo build -p tp-cad
       - name: Guardar la caché de OCCT
         if: steps.occt.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: target/OCCT
+          path: target/OCCT-8.0.1
           key: ${{ steps.occt.outputs.cache-primary-key }}
       - run: cargo clippy --workspace --all-targets
       # A limit per step, so that a hang fails here instead of using up the job.
@@ -91,11 +94,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        # The OCCT sources are a git submodule.
+        with:
+          submodules: true
       - uses: dtolnay/rust-toolchain@1.95
       - uses: Swatinem/rust-cache@v2
       - name: Caché de OCCT (se compila desde el código fuente la primera vez)
         uses: actions/cache@v4
         with:
-          path: target/OCCT
-          key: occt-7.8.1-v2-${{ runner.os }}-${{ hashFiles('crates/tp-cad/build.rs', '.cargo/config.toml') }}
+          path: target/OCCT-8.0.1
+          key: occt-8.0.1-v1-${{ runner.os }}-${{ hashFiles('crates/tp-cad/build.rs', 'crates/tp-occt-sys/src/lib.rs', '.cargo/config.toml') }}
       - run: cargo check --workspace --all-targets

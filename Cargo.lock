@@ -2903,15 +2903,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "occt-sys"
-version = "7.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3d2199ccf5331d261cf293abbc6b6b6ca1eb7187ef2113c181c49f9365cd9ae"
-dependencies = [
- "cmake",
-]
-
-[[package]]
 name = "oem_cp"
 version = "2.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4040,10 +4031,10 @@ dependencies = [
  "approx",
  "cxx",
  "cxx-build",
- "occt-sys",
  "thiserror 2.0.21",
  "tp-design",
  "tp-math",
+ "tp-occt-sys",
 ]
 
 [[package]]
@@ -4127,6 +4118,13 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "tp-occt-sys"
+version = "0.1.0"
+dependencies = [
+ "cmake",
 ]
 
 [[package]]
