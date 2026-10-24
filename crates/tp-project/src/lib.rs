@@ -14,6 +14,7 @@ mod history;
 mod machine;
 mod project;
 mod setup;
+pub mod validation;
 
 pub use component::{Component, ComponentId, ComponentKind, Coupling, DesignStep, StepStatus};
 pub use design::{GEOMETRY_STEPS, VANED_STEPS, VANELESS_STEPS, VOLUTE_STEPS};

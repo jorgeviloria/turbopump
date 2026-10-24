@@ -45,7 +45,8 @@ pub(crate) struct CadArgs {
     /// File formats to write.
     #[arg(long, value_enum, value_delimiter = ',', default_value = "step")]
     format: Vec<Format>,
-    /// Wall thickness of hub disk and shroud (default: max(3 mm, 0.02·d2)).
+    /// Wall thickness of hub disk and shroud, over the project's automatic material
+    /// (default: the project's, max(3 mm, 0.02·d2) unless set).
     #[arg(long)]
     wall: Option<String>,
     /// Bore diameter of the hub (default: hub diameter at the eye).
@@ -92,12 +93,15 @@ pub(crate) fn run(args: CadArgs) -> CliResult {
     let project = Project::load(&args.file).map_err(|e| format!("{}: {e}", args.file.display()))?;
     let units = project.display_units.clone();
     let options = CadOptions {
-        wall_thickness: length(&args.wall, &units)?,
-        bore_diameter: length(&args.bore, &units)?,
-        boss_diameter: length(&args.boss, &units)?,
         fillet_radius: length(&args.fillet, &units)?,
         ..CadOptions::default()
     };
+    // Wall, bore and boss given here replace the project's for the automatic material.
+    let material = [
+        length(&args.wall, &units)?,
+        length(&args.bore, &units)?,
+        length(&args.boss, &units)?,
+    ];
     let density = parse_quantity_or(
         &args.density,
         QuantityKind::Density,
@@ -151,7 +155,27 @@ pub(crate) fn run(args: CadArgs) -> CliResult {
                 args.file.display()
             ));
         }
-        let geometry = project.compute_impeller_geometry(*id).map_err(err)?;
+        let geometry = if material.iter().any(Option::is_some) {
+            let mut input = project.impeller_geometry_input(*id).map_err(err)?;
+            let m = &mut input.meridional.material;
+            for (value, param) in material.iter().zip([
+                &mut m.wall_thickness,
+                &mut m.bore_diameter,
+                &mut m.boss_diameter,
+            ]) {
+                if let Some(v) = value {
+                    *param = tp_design::Param::Manual(*v);
+                }
+            }
+            let mut adjusted = project.clone();
+            adjusted.set_impeller_geometry(*id, input).map_err(err)?;
+            adjusted.compute_impeller_geometry(*id).map_err(err)?
+        } else {
+            project.compute_impeller_geometry(*id).map_err(err)?
+        };
+        for warning in &geometry.contour.material_warnings {
+            eprintln!("warning: {warning}");
+        }
         let options = CadOptions {
             balance_holes: if args.balance_holes {
                 Some(balance_holes(&project, *id)?)
@@ -173,9 +197,39 @@ pub(crate) fn run(args: CadArgs) -> CliResult {
         // STL chordal deflection: 1/2000 of the outlet diameter, in mm.
         let deflection = geometry.basis.outlet_diameter * 1e3 / 2000.0;
         for &format in &args.format {
-            for (stem, shape) in [("impeller", &cad.impeller), ("fluid", &cad.fluid)] {
+            let chambers = cad.side_chambers.as_ref().map(|s| ("side-chambers", s));
+            for (stem, shape) in [("impeller", &cad.impeller), ("fluid", &cad.fluid)]
+                .into_iter()
+                .chain(chambers)
+            {
                 let path = dir.join(format!("{stem}.{}", format.extension()));
                 write(shape, &path, format, deflection)?;
+            }
+        }
+        // One flow domain for CFD: with the side chambers and the volute after them.
+        let next = project
+            .components()
+            .iter()
+            .skip_while(|c| c.id() != *id)
+            .nth(1)
+            .filter(|c| c.kind() == ComponentKind::Volute)
+            .map(|c| c.id());
+        if let (Some(_), Some(volute)) = (&cad.side_chambers, next) {
+            let joined = project.compute_volute(volute).map_err(err).and_then(|vg| {
+                let v = tp_cad::build_volute(&vg).map_err(|e| e.to_string())?;
+                tp_cad::join_fluid(&cad, &geometry, &v, &vg).map_err(|e| e.to_string())
+            });
+            match joined {
+                Ok((shape, warnings)) => {
+                    for w in warnings {
+                        eprintln!("warning: {w}");
+                    }
+                    for &format in &args.format {
+                        let path = dir.join(format!("fluid-joined.{}", format.extension()));
+                        write(&shape, &path, format, deflection)?;
+                    }
+                }
+                Err(e) => eprintln!("warning: the joined fluid was not built: {e}"),
             }
         }
         println!();

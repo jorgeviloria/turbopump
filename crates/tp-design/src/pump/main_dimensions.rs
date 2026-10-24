@@ -85,7 +85,10 @@ pub struct CentrifugalPumpInput {
     /// Inclination ε_s of the outer streamline at a semi-axial outlet to a normal to the
     /// axis, rad (Gülich eq. 7.12).
     pub outlet_inclination: Param<f64>,
-    /// Hub diameter d₂i of a semi-axial outlet, m (Gülich eqs. 7.13–7.14).
+    /// Hub diameter d₂i of the outlet edge, m. Automatic: Gülich eqs. 7.13–7.14 on a
+    /// semi-axial impeller, d₂ on a radial one (an edge parallel to the axis). Set by
+    /// hand on a radial impeller it slants the edge, and the design takes the mean
+    /// diameter d₂m as on a semi-axial one (our choice).
     pub outlet_hub_diameter: Param<f64>,
     /// Normal or suction impeller; sets the automatic eye-diameter factor.
     pub inlet_design: corr::InletDesign,
@@ -188,6 +191,8 @@ pub struct CentrifugalPumpDesign {
     pub outlet: OutletSection,
     /// m
     pub npsh_required: f64,
+    /// NPSH₃ at the design point by several published methods.
+    pub npsh_band: crate::npsh::NpshBand,
     /// m
     pub npsh_available: f64,
     /// Correlation set used for the automatic efficiencies.
@@ -214,6 +219,19 @@ pub struct CentrifugalPumpDesign {
     /// Fig. 3-12).
     pub inlet_area_ratio: f64,
     pub warnings: Vec<String>,
+}
+
+impl CentrifugalPumpDesign {
+    /// `triangle` with the meridional velocity of the pump flow Q = η_v·Q_La instead of
+    /// the impeller flow Q_La, for comparison with references that size the triangles
+    /// with Q. The design itself keeps Q_La, which is what passes the impeller.
+    pub fn at_pump_flow(&self, triangle: &VelocityTriangle) -> VelocityTriangle {
+        VelocityTriangle::new(
+            triangle.u,
+            triangle.cm * self.efficiencies.volumetric,
+            triangle.cu,
+        )
+    }
 }
 
 const MIN_BLADES: u32 = 3;
@@ -578,27 +596,26 @@ pub fn design(
 
     // 6. Velocity triangles and blades.
     let mean_diameter = ((inlet_diameter.powi(2) + hub_diameter.powi(2)) / 2.0).sqrt();
-    // Outlet edge of a semi-axial impeller: d₂i and the d₂m that sets the outlet area.
+    // Outlet edge: d₂i and the d₂m that sets the outlet area, from the correlations of a
+    // semi-axial impeller or from a d₂i set by hand on any impeller.
     let f1 = if semi_axial {
         f1_semi_axial(nq)
     } else {
         F1_RADIAL
     };
     let (mean_ratio, hub_ratio) = corr::outlet_diameter_ratios(nq);
-    if let Param::Manual(d2i) = input.outlet_hub_diameter
-        && semi_axial
-    {
+    if let Param::Manual(d2i) = input.outlet_hub_diameter {
         positive("outlet hub diameter", d2i)?;
     }
     let outlet_hub_for = |d2: f64| match (semi_axial, input.outlet_hub_diameter) {
-        (false, _) => d2,
-        (true, Param::Manual(d2i)) => d2i,
+        (_, Param::Manual(d2i)) => d2i,
         (true, Param::Auto) => hub_ratio * d2,
+        (false, Param::Auto) => d2,
     };
     let outlet_mean_for = |d2: f64| match (semi_axial, input.outlet_hub_diameter) {
-        (false, _) => d2,
-        (true, Param::Manual(d2i)) => corr::mean_outlet_diameter(d2, d2i),
+        (_, Param::Manual(d2i)) => corr::mean_outlet_diameter(d2, d2i),
         (true, Param::Auto) => mean_ratio * d2,
+        (false, Param::Auto) => d2,
     };
     let cm1 = q_la_eye / (PI / 4.0 * (inlet_diameter.powi(2) - hub_diameter.powi(2)));
     let width_for = |d2: f64| {
@@ -861,6 +878,14 @@ pub fn design(
     let n_rpm = omega * 30.0 / PI;
     let npsh_required = (n_rpm * q_eye.sqrt() / nss).powf(4.0 / 3.0);
     let npsh_available = (duty.inlet_total_pressure - duty.vapor_pressure) / (rho * G);
+    let shroud = &inlet_shroud.triangle;
+    let npsh_band = crate::npsh::npsh3_band(
+        omega,
+        q_eye,
+        shroud.cm,
+        shroud.w(),
+        crate::npsh::suction_specific_speed_band(layout, input.inlet_design, shroud.u),
+    );
     if npsh_available < npsh_required {
         warnings.push(format!(
             "NPSH available {npsh_available:.2} m is below the estimated NPSH3 \
@@ -899,6 +924,7 @@ pub fn design(
         inlet_shroud,
         outlet,
         npsh_required,
+        npsh_band,
         npsh_available,
         layout,
         efficiency_tolerance: corr::efficiency_tolerance(eta),
@@ -933,6 +959,19 @@ mod tests {
             inlet_total_pressure: 101_325.0,
             kinematic_viscosity: 1.0e-6,
         }
+    }
+
+    #[test]
+    fn triangles_with_the_pump_flow_satisfy_continuity_with_q() {
+        let d = design(&duty(), &CentrifugalPumpInput::default()).unwrap();
+        let outlet = d.at_pump_flow(&d.outlet.triangle);
+        let area = PI * d.outlet_mean_diameter * d.outlet_width;
+        assert_relative_eq!(outlet.cm * area, duty().flow, max_relative = 1e-12);
+        assert_relative_eq!(outlet.cu, d.outlet.triangle.cu);
+        assert_relative_eq!(outlet.u, d.outlet.triangle.u);
+        let inlet = d.at_pump_flow(&d.inlet_mean.triangle);
+        let eye = PI / 4.0 * (d.inlet_diameter.powi(2) - d.hub_diameter.powi(2));
+        assert_relative_eq!(inlet.cm * eye, duty().flow, max_relative = 1e-12);
     }
 
     #[test]
@@ -1287,6 +1326,27 @@ mod tests {
                 .unwrap()
                 .semi_axial
         );
+    }
+
+    #[test]
+    fn a_radial_impeller_takes_a_slanted_outlet_edge_set_by_hand() {
+        let plain = design(&duty(), &CentrifugalPumpInput::default()).unwrap();
+        assert!(!plain.semi_axial);
+        assert_eq!(plain.outlet_mean_diameter, plain.outlet_diameter);
+        let d2i = 0.9 * plain.outlet_diameter;
+        let input = CentrifugalPumpInput {
+            outlet_hub_diameter: Param::Manual(d2i),
+            ..Default::default()
+        };
+        let slanted = design(&duty(), &input).unwrap();
+        assert!(!slanted.semi_axial, "still radial");
+        assert_eq!(slanted.outlet_hub_diameter, d2i);
+        assert_relative_eq!(
+            slanted.outlet_mean_diameter,
+            corr::mean_outlet_diameter(slanted.outlet_diameter, d2i),
+            max_relative = 1e-12
+        );
+        delivers_head(&slanted);
     }
 
     #[test]

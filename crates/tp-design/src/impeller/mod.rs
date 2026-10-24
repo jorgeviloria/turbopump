@@ -4,8 +4,13 @@
 //! so the same code serves any machine type that produces them.
 
 pub mod blade;
+pub mod center;
+pub mod chambers;
+pub mod crossings;
+pub mod edge;
 pub mod guide;
 pub mod loading;
+pub mod material;
 pub mod meridian;
 pub mod potential;
 pub mod wall;
@@ -186,11 +191,7 @@ pub struct ImpellerGeometry {
     pub warnings: Vec<String>,
 }
 
-/// Thickness of the hub disk and the shroud of the CAD model unless given: 0.02·d₂, at
-/// least 3 mm (our choice for a cast impeller).
-pub fn default_wall_thickness(outlet_diameter: f64) -> f64 {
-    (0.02 * outlet_diameter).max(0.003)
-}
+pub use material::default_wall_thickness;
 
 impl ImpellerGeometry {
     /// The outer faces of the impeller of walls `wall` thick, as the casing beside it sees
@@ -201,7 +202,8 @@ impl ImpellerGeometry {
     pub fn sides(&self, wall: f64, double_entry: bool) -> crate::outlet::ImpellerSides {
         use crate::outlet::SIDE_POINTS;
         let c = &self.contour;
-        let length = c.axial_length;
+        // The axial position of the hub at the outlet.
+        let length = c.hub.end().x;
         let last = (SIDE_POINTS - 1) as f64;
         // The shroud from the outlet (t = 1) to the eye (t = 0), (z, r), moved outward:
         // to the left of the way from the eye to the outlet.
@@ -243,7 +245,22 @@ pub fn build(
             "at least 2 spans (hub and shroud) are needed".into(),
         ));
     }
-    let mut warnings = Vec::new();
+    let mut warnings = contour.material_warnings.clone();
+    warnings.extend(contour.chambers.warnings.iter().cloned());
+    for c in &contour.crossings {
+        let (z, r) = (c.at.x * 1e3, c.at.y * 1e3);
+        warnings.push(if c.walls.0 == c.walls.1 {
+            format!(
+                "a wire crosses itself: {} at z = {z:.1} mm, r = {r:.1} mm",
+                c.walls.0
+            )
+        } else {
+            format!(
+                "walls cross: {} and {} at z = {z:.1} mm, r = {r:.1} mm",
+                c.walls.0, c.walls.1
+            )
+        });
+    }
     // The quasi-orthogonals keep the quasi-one-dimensional flow; the blade sections lie
     // on the stream surfaces of the chosen flow, solved on the same stations so that a
     // span point's index stays its channel position.
@@ -278,7 +295,7 @@ pub fn build(
         basis,
         &contour,
         &channel,
-        input.properties.shape,
+        &input.properties,
         &input.mean_lines,
         &input.profiles,
         &input.edges,

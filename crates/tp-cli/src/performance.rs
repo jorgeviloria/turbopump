@@ -274,6 +274,12 @@ fn print_report(
                     s(Head, h.volute)
                 );
             }
+            if let Some(b) = &c.breakdown {
+                println!(
+                    "           η {:.3} = η_h {:.3} · η_v {:.3} · η_RR {:.3} (disk) · η_m {:.3}   inner η_i {:.3}; for water, Gülich Table 3.5",
+                    b.overall, b.hydraulic, b.volumetric, b.disk_friction, b.mechanical, b.inner
+                );
+            }
         }
         None => println!(
             "Losses     from the statistics of the design: η {:.3} (Gülich Table 3.9)",
@@ -283,6 +289,7 @@ fn print_report(
     let source = match c.shutoff_source {
         ShutoffSource::Blades => "head rise of z and β2B, Lobanoff & Ross Fig. 3-2",
         ShutoffSource::SpecificSpeed => "Gülich eqs. 3.27–3.28",
+        ShutoffSource::Curve => "raised to fall into the computed curve",
         ShutoffSource::Manual => "manual",
     };
     println!(
@@ -346,6 +353,13 @@ fn print_report(
             d.area_ratio,
             d.matching,
             v.matched_flow.map_or("—".into(), ratio)
+        );
+    }
+    if let Some(q) = c.throat_best_flow {
+        println!(
+            "           its throat puts the best-efficiency point at {} ({:.0} % of the design flow, Gülich eq. T4.1.3)",
+            s(VolumeFlow, q),
+            100.0 * q / c.design.flow
         );
     }
     if let Some(r) = &c.radial {

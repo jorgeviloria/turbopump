@@ -21,8 +21,8 @@ pub(crate) struct DiffuserArgs {
     component: Option<u32>,
     /// Fix an input as KEY=VALUE, or KEY=auto. Keys: flow-factor (Q_Le/Q), d3, b3, d4,
     /// b4, incidence; for vaned stators also z (vanes), fa3 (throat factor), e3, e4
-    /// (thickness), alpha4 (outlet vane angle), points, le and te (cut, round or
-    /// ellipse:RATIO).
+    /// (thickness), alpha4 (outlet vane angle), points, le and te (edge shapes, as in
+    /// `turbopump geometry`).
     #[arg(long = "set", value_name = "KEY=VALUE")]
     settings: Vec<String>,
     /// Compute and print without saving the project.

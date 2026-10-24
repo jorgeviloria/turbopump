@@ -624,6 +624,41 @@ el empuje radial (cap. 9.3.4 y tabla 9.4). Se elige en el paso de datos de parti
   cambios de dirección del flujo, y definir su espesor por un círculo (mismo punto).
   Por defecto la nariz es un semicírculo; una relación mayor la alarga.
 
+**Compensación del nervio** (`--set rib_comp=on`, `rib_comp_start=…`; construcción
+propia, como la compensación del corte de agua):
+
+- Sin ella, el nervio ocupa en la nariz una franja de su espesor sobre $r'_z$, y el canal
+  exterior arranca con la garganta de la primera voluta parcial menos esa franja. Es una
+  aceleración local.
+- Con ella, desde el ángulo $\varphi_C$ hasta la nariz (por defecto, a mitad de camino),
+  la primera voluta parcial se dimensiona por encima de una base que sube linealmente de
+  $r'_z$ a $r'_z + e_{nervio}$, continuando el mismo trapecio.
+  - En la nariz, la parte por encima del nervio lleva el caudal de la regla: el mismo
+    $\int b/r\,dr$, algo más de área porque está a mayor radio.
+  - Antes de $\varphi_C$ no cambia nada.
+  - La voluta interior no se toca.
+  - Sustituye a la ec. 7.28 para el nervio.
+- En el caso de 240,8 m³/h y 83 m con el nervio a 180° y la compensación desde 90°, el
+  canal exterior pasa de 1298 a 1634 mm² en la nariz.
+  - El rozamiento en las paredes de la voluta baja de 11,0 a 8,2 m.
+  - $\eta_h$ de la suma de pérdidas sube de 0,805 a 0,843.
+  - El punto óptimo según la garganta (más abajo) pasa del 93 % al 101 % del caudal de
+    diseño.
+
+**Punto óptimo según la garganta** (Gülich, tabla 4.1, ec. T4.1.3). La garganta fija dónde
+se cruzan la característica del rodete y la de la voluta:
+
+$$Q_{opt,th} = \frac{\eta_v\,A_2\,u_2\,\gamma}{\tau_2/\tan\beta_{2B} + 2\pi b_2\,Q_{Le}/(J_{sp}\,Q_{La})}$$
+
+- $J_{sp} = \sum \iint dA/r$ sobre las gargantas por donde entra el flujo:
+  - en una voluta simple, su garganta;
+  - en una doble, la de la voluta interior más el canal exterior en la nariz, por encima
+    del nervio.
+- $A_2$ y $b_2$ son los del rodete entero, sin prerrotación, y $Q_{Le} = Q$.
+- La curva da el resultado y su porcentaje del caudal de diseño.
+- Una voluta dimensionada por momento angular lo deja cerca del 100 %. Una garganta un
+  40 % mayor lo desplaza a más caudal, y una prueba lo comprueba.
+
 **En la predicción:**
 
 - La garganta del colector del NPSH₃ es la media de las dos, con $z_{Le} = 2$.

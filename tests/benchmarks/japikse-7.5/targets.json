@@ -1,0 +1,131 @@
+{
+  "format": "turbopump-targets",
+  "version": 1,
+  "case": "japikse-7.5",
+  "description": "Ejemplo de diseño de Japikse, Marscher y Furst, Centrifugal Pump Design and Performance (1997), cap. 7.5, Fig. 7.73: 5000 gpm, 84,05 ft, 1000 rpm, 7 álabes.",
+  "notes": [
+    "Entradas tomadas del libro: r2 = 8,8208 in, b2 = 3,1544 in, r1t = 6,2178 in y r1h = 3,3750 in (Fig. 7.73), z = 7 (p. 7-86) y agua a 100 °F. β2B no se fija: Turbopump lo despeja para dar la altura.",
+    "El libro usa un modelo de dos zonas (chorro y estela) a la salida del rodete. Se compara su estado mezclado (2M) con el triángulo 1D de Turbopump, que usa el deslizamiento de Wiesner y Gülich.",
+    "Tolerancias por defecto del banco de pruebas, fijadas antes de calcular: triángulos ±3 % en cu2 y la velocidad relativa, ±5 % en las velocidades meridionales (el libro incluye bloqueo y fugas, que Turbopump no modela igual), ±1° en ángulos, ±3 % en potencia, ±2 puntos en rendimiento y ±1 % en nq.",
+    "Las magnitudes sin tolerancia se muestran solo a título informativo: el factor de deslizamiento sale de modelos distintos y el NPSH del libro es un criterio propio de cavitación del álabe, no NPSH3.",
+    "La estación 1 del libro está sobre un borde de ataque inclinado (PHI1 = 40°, LEN1 = 3,39 in): Q/CM1 da un área 1,5 veces la del ojo, así que no es el plano del ojo donde Turbopump calcula su triángulo de entrada. Por eso cm1, w1_shroud y beta1_shroud pasaron a informativas tras la primera ejecución; sus tolerancias no se ajustaron para que pasen.",
+    "La voluta usa el ancho de entrada B5 = 3,1304 in del libro y el difusor sin álabes va de r2 a R5 = 12 in con ese ancho."
+  ],
+  "targets": [
+    {
+      "id": "nq",
+      "value": 49.29,
+      "tolerance": {
+        "relative": 1
+      },
+      "note": "Ns(US) = 2545,7; nq = Ns/51,65"
+    },
+    {
+      "id": "cu2",
+      "value": 39.887,
+      "unit": "ft/s",
+      "tolerance": {
+        "relative": 3
+      },
+      "note": "CT2M, estado mezclado"
+    },
+    {
+      "id": "cm2",
+      "value": 9.222,
+      "unit": "ft/s",
+      "tolerance": {
+        "relative": 5
+      },
+      "note": "CM2M, estado mezclado"
+    },
+    {
+      "id": "alpha2",
+      "value": 13.0,
+      "unit": "°",
+      "tolerance": {
+        "absolute": 1
+      },
+      "note": "ALPH2M"
+    },
+    {
+      "id": "beta2",
+      "value": 14.0,
+      "unit": "°",
+      "tolerance": {
+        "absolute": 1
+      },
+      "note": "BETA2M"
+    },
+    {
+      "id": "beta2B",
+      "value": 22.5,
+      "unit": "°",
+      "tolerance": {
+        "absolute": 1
+      },
+      "note": "ángulo de salida del álabe final, p. 7-86"
+    },
+    {
+      "id": "slip",
+      "value": 0.807,
+      "note": "SIG2, deslizamiento del modelo de dos zonas"
+    },
+    {
+      "id": "cm1",
+      "value": 12.47,
+      "unit": "ft/s",
+      "note": "CM1, radio cuadrático medio"
+    },
+    {
+      "id": "w1_shroud",
+      "value": 55.88,
+      "unit": "ft/s",
+      "note": "W1T"
+    },
+    {
+      "id": "beta1_shroud",
+      "value": 13.8,
+      "unit": "°",
+      "note": "BETA1T"
+    },
+    {
+      "id": "eta",
+      "value": 81.8,
+      "unit": "%",
+      "tolerance": {
+        "absolute": 2
+      },
+      "note": "rendimiento de la etapa, total a total"
+    },
+    {
+      "id": "power",
+      "value": 130.26,
+      "unit": "hp",
+      "tolerance": {
+        "relative": 3
+      }
+    },
+    {
+      "id": "perf.volute_swirl",
+      "value": 4.18,
+      "tolerance": {
+        "relative": 5
+      },
+      "note": "CT5/CM5 = 28,58/6,84 a la entrada de la voluta"
+    },
+    {
+      "id": "perf.volute_loss_coefficient",
+      "value": 0.054,
+      "tolerance": {
+        "absolute": 0.003
+      },
+      "note": "LC57"
+    },
+    {
+      "id": "npsh3",
+      "value": 12.47,
+      "unit": "ft",
+      "note": "NPSH del libro con BldCavC = 0,2"
+    }
+  ]
+}

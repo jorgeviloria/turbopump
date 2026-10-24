@@ -23,6 +23,7 @@ tp-cad = { workspace = true, optional = true }
 tp-design.workspace = true
 tp-fluids.workspace = true
 tp-io.workspace = true
+tp-math.workspace = true
 tp-project.workspace = true
 tp-units.workspace = true
 

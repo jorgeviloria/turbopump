@@ -30,6 +30,24 @@ pub struct BladePropertiesInput {
     pub shape: BladeShape,
     /// Which meridional flow places the sections and gives their meridional velocity.
     pub meridional_flow: MeridionalFlow,
+    /// Which meridional velocity sets the leading-edge angles.
+    pub inlet_velocity: InletVelocity,
+}
+
+/// The meridional velocity the leading-edge triangles are designed with.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InletVelocity {
+    /// Each section's own c_m where its stream line meets the leading edge, from the
+    /// chosen meridional flow.
+    #[default]
+    Local,
+    /// The same c₁m = Q_La/(π/4·(d₁² − d_n²)) at every section: Gülich (2nd ed.,
+    /// Table 7.1, eq. T7.1.7) designs the inlet blade angles "with constant c1m", and
+    /// draws the stream surfaces of equal part flows "frequently with the assumption
+    /// cm = constant" (Chap. 7.2.2.2, step 1). The stream surfaces and the c_m along
+    /// the blade still come from the meridional flow.
+    Uniform,
 }
 
 /// The meridional flow the blade sections are built on.
@@ -181,8 +199,12 @@ pub struct MeanLineInput {
     pub points: Param<u32>,
     pub wrap: WrapMode,
     /// Wrap angle every free-form section shares with [`WrapMode::Common`], rad;
-    /// automatic: the mean of the wraps their own β distributions give them.
+    /// automatic: the mean of the wraps their own β distributions give them. With
+    /// [`WrapMode::Linear`], the wrap at the hub; automatic: the hub section's own.
     pub wrap_angle: Param<f64>,
+    /// Wrap at the shroud with [`WrapMode::Linear`], rad; automatic: the shroud
+    /// section's own.
+    pub wrap_angle_shroud: Param<f64>,
 }
 
 /// How the wrap angles of the sections relate.
@@ -197,10 +219,19 @@ pub enum WrapMode {
     Common,
     /// Each section wraps what its own β distribution gives.
     Free,
+    /// The wrap goes linearly with the flow fraction of the section from the hub value
+    /// to the shroud value (our construction), with the same bump as the common wrap.
+    /// Gülich (2nd ed., Chap. 7.2.2.2, step 7) gives 120°–140° for six blades.
+    Linear,
 }
 
 /// Blade angles the wrap bump may reach, rad.
 const BUMP_BETA_RANGE: (f64, f64) = (5.0 * PI / 180.0, FRAC_PI_2);
+
+/// How far the bump of a common or linear wrap may lift β above both edge angles of a
+/// section before a warning, rad. Gülich (2nd ed., Chap. 7.2.2.2, Fig. 7.6) develops
+/// β smoothly between its edge values; the limit is our criterion.
+pub const WRAP_HUMP_WARNING: f64 = 15.0 * PI / 180.0;
 
 /// Inputs of the blade-profile step: normal blade thickness, varying linearly from
 /// leading to trailing edge before the edges are shaped. Default: the thickness of the
@@ -212,37 +243,51 @@ pub struct ProfileInput {
     pub thickness_trailing: Param<f64>,
 }
 
-/// Shape of a blade edge.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum EdgeShape {
-    /// Blunt: full thickness up to the edge.
-    Cut,
-    /// Elliptic nose whose length along the mean line is `ratio` times the half
-    /// thickness (1 = round).
-    Ellipse { ratio: f64 },
-}
+pub use super::edge::{EdgeProfile, EdgeShape};
 
-/// Inputs of the blade-edge step.
+/// Inputs of the blade-edge step: the shapes at the hub, and at the shroud when they
+/// vary linearly from hub to shroud.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct EdgeInput {
     pub leading: EdgeShape,
     pub trailing: EdgeShape,
+    /// The leading edge at the shroud, the spans between blending it with `leading`
+    /// parameter by parameter; `None`: `leading` on every span.
+    pub leading_shroud: Option<EdgeShape>,
+    /// The trailing edge at the shroud, as `leading_shroud`.
+    pub trailing_shroud: Option<EdgeShape>,
 }
 
-impl EdgeShape {
-    /// Minimum pressure coefficient c_p,min = Δp_min/(½ρw₁²) of the leading-edge
-    /// profile at shockless entry: c_p = 2x + x² with x = 0.373·e/L_p, L_p being the
-    /// length of the nose (Gülich 2nd ed., eq. 7.1a). `None` for a blunt edge.
-    pub fn min_pressure_coefficient(&self) -> Option<f64> {
-        match *self {
-            EdgeShape::Cut => None,
-            EdgeShape::Ellipse { ratio } => {
-                let x = 0.373 * 2.0 / ratio;
-                Some(2.0 * x + x * x)
-            }
-        }
+impl EdgeInput {
+    /// The (leading, trailing) shapes of the span at flow fraction `span`.
+    pub fn at(&self, span: f64) -> Result<(EdgeShape, EdgeShape), DesignError> {
+        let blend = |hub: EdgeShape, shroud: Option<EdgeShape>, error: &str| match shroud {
+            None => Ok(hub),
+            Some(shroud) => hub
+                .lerp(shroud, span)
+                .ok_or_else(|| DesignError::InvalidInput(error.into())),
+        };
+        Ok((
+            blend(
+                self.leading,
+                self.leading_shroud,
+                "the leading edge needs the same kind of shape at hub and shroud",
+            )?,
+            blend(
+                self.trailing,
+                self.trailing_shroud,
+                "the trailing edge needs the same kind of shape at hub and shroud",
+            )?,
+        ))
+    }
+
+    /// Every shape given, hub and shroud.
+    pub fn shapes(&self) -> impl Iterator<Item = EdgeShape> + '_ {
+        [self.leading, self.trailing]
+            .into_iter()
+            .chain(self.leading_shroud)
+            .chain(self.trailing_shroud)
     }
 }
 
@@ -253,6 +298,8 @@ impl Default for EdgeInput {
         Self {
             leading: EdgeShape::Ellipse { ratio: 4.0 },
             trailing: EdgeShape::Cut,
+            leading_shroud: None,
+            trailing_shroud: None,
         }
     }
 }
@@ -422,8 +469,8 @@ fn index_of(values: &[f64], target: f64, from_start: bool) -> Option<f64> {
     }
 }
 
-/// One face of a section: the mean line offset by half the thickness along its normal in
-/// the conformal plane, toward +θ for `side` = +1 (pressure) and −θ for −1 (suction).
+/// One face of a section: the mean line moved by `offsets` (m, + toward +θ: the pressure
+/// face) along its normal in the conformal plane.
 /// A blunt edge is cut on the meridional edge, where the face is trimmed or carried on
 /// along its end segment; only the quarter of the points next to a cut edge moves, so
 /// a rounded nose keeps one face point beside each mean-line point.
@@ -435,26 +482,25 @@ fn face(
     m: &[f64],
     beta: &[f64],
     theta: &[f64],
-    thickness: &[f64],
+    offsets: &[f64],
     edges: (EdgeShape, EdgeShape),
-    side: f64,
 ) -> Face {
     let n = m.len();
     let (mut x, mut y) = (Vec::with_capacity(n), Vec::with_capacity(n));
     for k in 0..n {
         let s = s_le + m[k];
-        let h = 0.5 * thickness[k] / line.point_at_length(s).y;
-        x.push(conformal.at(s) + side * h * beta[k].cos());
-        y.push(theta[k] + side * h * beta[k].sin());
+        let h = offsets[k] / line.point_at_length(s).y;
+        x.push(conformal.at(s) + h * beta[k].cos());
+        y.push(theta[k] + h * beta[k].sin());
     }
     let start = match edges.0 {
         EdgeShape::Cut => index_of(&x, conformal.at(s_le), true).unwrap_or(0.0),
-        EdgeShape::Ellipse { .. } => 0.0,
+        _ => 0.0,
     };
     let last = (n - 1) as f64;
     let end = match edges.1 {
         EdgeShape::Cut => index_of(&x, conformal.at(s_le + m[n - 1]), false).unwrap_or(last),
-        EdgeShape::Ellipse { .. } => last,
+        _ => last,
     };
     // The first and last quarter of the points stretch to the cut edges.
     let (head, tail) = (
@@ -518,22 +564,6 @@ fn beta_at(distribution: BetaDistribution, beta1: f64, beta2: f64, mbar: f64) ->
     }
 }
 
-/// Thickness reduction factor of an edge at distance `s` from it along the mean line.
-pub(crate) fn edge_factor(shape: EdgeShape, thickness: f64, s: f64) -> f64 {
-    match shape {
-        EdgeShape::Cut => 1.0,
-        EdgeShape::Ellipse { ratio } => {
-            let a = ratio * thickness / 2.0;
-            if s >= a {
-                1.0
-            } else {
-                let x = (a - s.max(0.0)) / a;
-                (1.0 - x * x).max(0.0).sqrt()
-            }
-        }
-    }
-}
-
 /// Arc length along a span polyline at channel position `t` (its points are evenly
 /// spaced in t).
 fn length_at(line: &Polyline<DVec2>, t: f64) -> f64 {
@@ -575,6 +605,8 @@ struct SectionSettings {
     thickness_leading: f64,
     thickness_trailing: f64,
     edges: (EdgeShape, EdgeShape),
+    /// c_m of every leading edge with [`InletVelocity::Uniform`].
+    inlet_cm: Option<f64>,
 }
 
 fn leading_edge(basis: &ImpellerBasis, position: DVec2, cm: f64, thickness: f64) -> LeadingEdge {
@@ -702,7 +734,7 @@ fn frame<'a>(
     let le = leading_edge(
         basis,
         le_position,
-        span.cm_at(t_le),
+        settings.inlet_cm.unwrap_or_else(|| span.cm_at(t_le)),
         settings.thickness_leading,
     );
     if !le.blockage.is_finite() {
@@ -805,17 +837,41 @@ fn section(
     }
     let total = *along.last().expect("at least two stations");
     let (e1, e2) = (settings.thickness_leading, settings.thickness_trailing);
-    let thickness: Vec<f64> = mbars
+    let profile = |shape, e| EdgeProfile::new(shape, e).map_err(DesignError::InvalidInput);
+    let (leading, trailing) = (
+        profile(settings.edges.0, e1)?,
+        profile(settings.edges.1, e2)?,
+    );
+    if leading.length() + trailing.length() > total {
+        return Err(DesignError::Infeasible(format!(
+            "the leading- and trailing-edge shapes overlap at span {:.2}: shorten them",
+            span.fraction
+        )));
+    }
+    // Signed offsets of both faces from the mean line, m: (pressure, suction).
+    let offsets: Vec<(f64, f64)> = mbars
         .iter()
         .zip(&along)
         .map(|(&mbar, &s)| {
-            let e = e1 + (e2 - e1) * mbar;
-            e * edge_factor(settings.edges.0, e1, s) * edge_factor(settings.edges.1, e2, total - s)
+            let half = 0.5 * (e1 + (e2 - e1) * mbar);
+            let (p, q) = if s < leading.length() {
+                leading.at(s)
+            } else if total - s < trailing.length() {
+                trailing.at(total - s)
+            } else {
+                (1.0, -1.0)
+            };
+            (half * p, half * q)
         })
         .collect();
+    let thickness: Vec<f64> = offsets.iter().map(|(p, q)| p - q).collect();
 
     let conformal = ConformalLine::new(line);
-    let faces = [1.0, -1.0].map(|side| {
+    let faces = [true, false].map(|pressure| {
+        let face_offsets: Vec<f64> = offsets
+            .iter()
+            .map(|&(p, q)| if pressure { p } else { q })
+            .collect();
         face(
             line,
             &conformal,
@@ -823,9 +879,8 @@ fn section(
             &m,
             &betas,
             &theta,
-            &thickness,
+            &face_offsets,
             settings.edges,
-            side,
         )
     });
     let [pressure, suction] = faces;
@@ -869,7 +924,7 @@ fn span_leading_edge(
     contour: &MeridionalContour,
     channel: &Channel,
     index: usize,
-    thickness: f64,
+    settings: &SectionSettings,
 ) -> (LeadingEdge, f64) {
     let span = &channel.spans[index];
     let line = Polyline::new(span.points.clone()).expect("channel spans have points");
@@ -877,7 +932,12 @@ fn span_leading_edge(
     let s = length_at(&line, t_le);
     let position = line.point_at_length(s);
     (
-        leading_edge(basis, position, span.cm_at(t_le), thickness),
+        leading_edge(
+            basis,
+            position,
+            settings.inlet_cm.unwrap_or_else(|| span.cm_at(t_le)),
+            settings.thickness_leading,
+        ),
         radial_slope(&line, s),
     )
 }
@@ -892,7 +952,7 @@ fn plan_view(
     settings: &SectionSettings,
 ) -> Result<PlanView, DesignError> {
     let edges: Vec<(LeadingEdge, f64)> = (0..channel.spans.len())
-        .map(|j| span_leading_edge(basis, contour, channel, j, settings.thickness_leading))
+        .map(|j| span_leading_edge(basis, contour, channel, j, settings))
         .collect();
     let (middle, slope) = edges
         .iter()
@@ -939,7 +999,7 @@ impl Blade {
         basis: &ImpellerBasis,
         contour: &MeridionalContour,
         channel: &Channel,
-        shape: BladeShape,
+        properties: &BladePropertiesInput,
         mean_lines: &MeanLineInput,
         profiles: &ProfileInput,
         edges: &EdgeInput,
@@ -959,14 +1019,8 @@ impl Blade {
                 ));
             }
         }
-        for edge in [edges.leading, edges.trailing] {
-            if let EdgeShape::Ellipse { ratio } = edge
-                && !(ratio.is_finite() && ratio > 0.0)
-            {
-                return Err(DesignError::InvalidInput(format!(
-                    "edge ellipse ratio must be positive, got {ratio}"
-                )));
-            }
+        for edge in edges.shapes() {
+            edge.validate().map_err(DesignError::InvalidInput)?;
         }
         let positive = |name: &str, v: f64| {
             if v.is_finite() && v > 0.0 {
@@ -991,7 +1045,15 @@ impl Blade {
                     .resolve(|| basis.blade_thickness),
             )?,
             edges: (edges.leading, edges.trailing),
+            inlet_cm: match properties.inlet_velocity {
+                InletVelocity::Local => None,
+                InletVelocity::Uniform => {
+                    let (d1, dn) = (basis.inlet_diameter, basis.hub_diameter);
+                    Some(basis.flow / (PI / 4.0 * (d1 * d1 - dn * dn)))
+                }
+            },
         };
+        let shape = properties.shape;
         if shape.is_cylindrical() && basis.is_semi_axial() {
             return Err(DesignError::InvalidInput(
                 "cylindrical blades need a radial outlet; a semi-axial impeller takes the \
@@ -1008,42 +1070,86 @@ impl Blade {
             .map(|j| frame(basis, contour, channel, j, &settings))
             .collect::<Result<Vec<_>, _>>()?;
         let mut warnings = Vec::new();
-        // A common wrap: each free-form section gets the bump that takes it there.
-        let bumps: Vec<f64> = match mean_lines.wrap {
+        // A common or linear wrap: each free-form section gets the bump that takes it
+        // to its target.
+        let own = |f: &SpanFrame| f.wrap(settings.beta, 0.0);
+        let targets: Option<Vec<f64>> = match mean_lines.wrap {
             WrapMode::Common if plan.is_none() => {
                 let target = match mean_lines.wrap_angle {
                     Param::Manual(w) => positive("wrap angle", w)?,
-                    Param::Auto => {
-                        frames
-                            .iter()
-                            .map(|f| f.wrap(settings.beta, 0.0))
-                            .sum::<f64>()
-                            / frames.len() as f64
-                    }
+                    Param::Auto => frames.iter().map(own).sum::<f64>() / frames.len() as f64,
                 };
-                frames
-                    .iter()
-                    .map(|f| {
-                        f.bump_for(settings.beta, target).unwrap_or_else(|nearest| {
-                            warnings.push(format!(
-                                "the common wrap of {:.0}° is out of reach at span {:.2}: the \
-                                 section wraps {:.0}°",
-                                target.to_degrees(),
-                                f.span.fraction,
-                                f.wrap(settings.beta, nearest).to_degrees()
-                            ));
-                            nearest
-                        })
-                    })
-                    .collect()
+                Some(vec![target; frames.len()])
             }
-            _ => vec![0.0; frames.len()],
+            WrapMode::Linear if plan.is_none() => {
+                let (first, last) = (&frames[0], &frames[frames.len() - 1]);
+                let hub = match mean_lines.wrap_angle {
+                    Param::Manual(w) => positive("hub wrap angle", w)?,
+                    Param::Auto => own(first),
+                };
+                let shroud = match mean_lines.wrap_angle_shroud {
+                    Param::Manual(w) => positive("shroud wrap angle", w)?,
+                    Param::Auto => own(last),
+                };
+                Some(
+                    frames
+                        .iter()
+                        .map(|f| hub + (shroud - hub) * f.span.fraction)
+                        .collect(),
+                )
+            }
+            _ => None,
         };
-        let sections = frames
+        let bumps: Vec<f64> = match targets {
+            Some(targets) => frames
+                .iter()
+                .zip(targets)
+                .map(|(f, target)| {
+                    f.bump_for(settings.beta, target).unwrap_or_else(|nearest| {
+                        warnings.push(format!(
+                            "the wrap of {:.0}° is out of reach at span {:.2}: the \
+                                 section wraps {:.0}°",
+                            target.to_degrees(),
+                            f.span.fraction,
+                            f.wrap(settings.beta, nearest).to_degrees()
+                        ));
+                        nearest
+                    })
+                })
+                .collect(),
+            None => vec![0.0; frames.len()],
+        };
+        let sections: Vec<BladeSection> = frames
             .iter()
             .zip(bumps)
-            .map(|(f, bump)| section(f, basis, &settings, plan.as_ref(), bump))
+            .map(|(f, bump)| {
+                let settings = SectionSettings {
+                    edges: edges.at(f.span.fraction)?,
+                    ..settings
+                };
+                section(f, basis, &settings, plan.as_ref(), bump)
+            })
             .collect::<Result<_, _>>()?;
+        // A wrap far from what the edge angles give bends the blade into a hump of β.
+        // Only an imposed wrap does that; a cylindrical blade turns axial on purpose.
+        let imposed =
+            plan.is_none() && matches!(mean_lines.wrap, WrapMode::Common | WrapMode::Linear);
+        for s in sections.iter().filter(|_| imposed) {
+            let (Some(&first), Some(&last)) = (s.beta.first(), s.beta.last()) else {
+                continue;
+            };
+            let peak = s.beta.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+            if peak - first.max(last) > WRAP_HUMP_WARNING {
+                warnings.push(format!(
+                    "the wrap of {:.0}° lifts β to {:.0}° at span {:.2}, {:.0}° above its edge \
+                     angles: a freer wrap or larger inlet angles keep the blade smoother",
+                    s.wrap_angle().to_degrees(),
+                    peak.to_degrees(),
+                    s.span,
+                    (peak - first.max(last)).to_degrees()
+                ));
+            }
+        }
         Ok(Self {
             count: basis.blade_count,
             rotation_sign: basis.rotation_sign,
@@ -1069,7 +1175,7 @@ mod tests {
             &b,
             &contour,
             &channel,
-            BladeShape::FreeForm,
+            &BladePropertiesInput::default(),
             &mean_lines,
             &ProfileInput::default(),
             &edges,
@@ -1195,6 +1301,7 @@ mod tests {
             EdgeInput {
                 leading: EdgeShape::Cut,
                 trailing: EdgeShape::Cut,
+                ..EdgeInput::default()
             },
         );
         let r2 = basis().outlet_diameter / 2.0;
@@ -1226,11 +1333,105 @@ mod tests {
             EdgeInput {
                 leading: EdgeShape::Cut,
                 trailing: EdgeShape::Ellipse { ratio: 1.0 },
+                ..EdgeInput::default()
             },
         );
         let s = &blunt.sections[0];
         assert_relative_eq!(s.thickness[0], basis().blade_thickness);
         assert_eq!(*s.thickness.last().unwrap(), 0.0);
+    }
+
+    #[test]
+    fn edges_can_change_from_hub_to_shroud() {
+        let blade = blade_with(
+            MeanLineInput::default(),
+            EdgeInput {
+                leading: EdgeShape::Ellipse { ratio: 2.0 },
+                leading_shroud: Some(EdgeShape::Ellipse { ratio: 6.0 }),
+                ..EdgeInput::default()
+            },
+        );
+        // The nose is longer toward the shroud: at the same distance from the edge the
+        // blade is thinner there.
+        let thin = |s: &BladeSection| s.thickness[2] / s.thickness.last().unwrap();
+        let (hub, shroud) = (&blade.sections[0], blade.sections.last().unwrap());
+        assert!(
+            thin(hub) > thin(shroud),
+            "{} vs {}",
+            thin(hub),
+            thin(shroud)
+        );
+        let mixed = EdgeInput {
+            leading_shroud: Some(EdgeShape::Cut),
+            ..EdgeInput::default()
+        };
+        let b = basis();
+        let contour = MeridionalContour::build(&b, &MeridionalInput::default()).unwrap();
+        let channel = Channel::build(&contour, b.flow, 61, 5);
+        let built = Blade::build(
+            &b,
+            &contour,
+            &channel,
+            &BladePropertiesInput::default(),
+            &MeanLineInput::default(),
+            &ProfileInput::default(),
+            &mixed,
+        );
+        assert!(built.is_err());
+    }
+
+    #[test]
+    fn an_asymmetric_nose_closes_off_the_mean_line() {
+        let lean = EdgeShape::Bezier {
+            start: [2.0, 2.0],
+            pull: [0.6, 0.6],
+            tip: 0.5,
+            symmetric: false,
+        };
+        let blade = blade_with(
+            MeanLineInput::default(),
+            EdgeInput {
+                leading: lean,
+                ..EdgeInput::default()
+            },
+        );
+        for s in &blade.sections {
+            let (ps, ss) = (s.pressure_side(1.0), s.suction_side(1.0));
+            let mean = s.mean_line(1.0);
+            // Both faces close on the tip of the nose, off the mean line.
+            assert!(ps[0].distance(ss[0]) < 1e-9);
+            let e = basis().blade_thickness;
+            let tip = EdgeProfile::new(lean, e).unwrap().faces()[0][0];
+            assert!(tip.y > 0.1);
+            assert_relative_eq!(
+                ps[0].distance(mean[0]),
+                tip.y * e / 2.0,
+                max_relative = 0.02
+            );
+            assert!(s.thickness[0].abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn overlapping_edges_are_rejected() {
+        let b = basis();
+        let contour = MeridionalContour::build(&b, &MeridionalInput::default()).unwrap();
+        let channel = Channel::build(&contour, b.flow, 61, 5);
+        let long = EdgeShape::Ellipse { ratio: 60.0 };
+        let built = Blade::build(
+            &b,
+            &contour,
+            &channel,
+            &BladePropertiesInput::default(),
+            &MeanLineInput::default(),
+            &ProfileInput::default(),
+            &EdgeInput {
+                leading: long,
+                trailing: long,
+                ..EdgeInput::default()
+            },
+        );
+        assert!(matches!(built, Err(DesignError::Infeasible(m)) if m.contains("overlap")));
     }
 
     #[test]
@@ -1252,6 +1453,123 @@ mod tests {
         // Monotone between the edge values.
         let (lo, hi) = (22f64.to_radians(), s.beta[0]);
         assert!(s.beta.iter().all(|&b| b >= lo - 1e-9 && b <= hi + 1e-9));
+    }
+
+    #[test]
+    fn a_linear_wrap_goes_from_hub_to_shroud() {
+        let free = blade_with(
+            MeanLineInput {
+                wrap: WrapMode::Free,
+                ..Default::default()
+            },
+            EdgeInput::default(),
+        );
+        let linear = |hub: Param<f64>, shroud: Param<f64>| {
+            blade_with(
+                MeanLineInput {
+                    wrap: WrapMode::Linear,
+                    wrap_angle: hub,
+                    wrap_angle_shroud: shroud,
+                    ..Default::default()
+                },
+                EdgeInput::default(),
+            )
+        };
+        let (hub, shroud) = (120f64.to_radians(), 125f64.to_radians());
+        let blade = linear(Param::Manual(hub), Param::Manual(shroud));
+        assert!(blade.warnings.is_empty(), "{:?}", blade.warnings);
+        for (s, f) in blade.sections.iter().zip(&free.sections) {
+            let expected = hub + (shroud - hub) * s.span;
+            assert_relative_eq!(s.wrap_angle(), expected, max_relative = 1e-6);
+            // The edge angles stay those of the section.
+            assert_relative_eq!(s.beta[0], f.beta[0], epsilon = 1e-12);
+        }
+        // Automatic ends keep the hub and shroud sections as they are.
+        let own = linear(Param::Auto, Param::Auto);
+        let (first, last) = (&free.sections[0], free.sections.last().unwrap());
+        assert_relative_eq!(
+            own.sections[0].wrap_angle(),
+            first.wrap_angle(),
+            max_relative = 1e-6
+        );
+        assert_relative_eq!(
+            own.sections.last().unwrap().wrap_angle(),
+            last.wrap_angle(),
+            max_relative = 1e-6
+        );
+    }
+
+    #[test]
+    fn a_wrap_that_bends_the_blade_is_flagged() {
+        let wrapped = |degrees: f64| {
+            blade_with(
+                MeanLineInput {
+                    wrap_angle: Param::Manual(degrees.to_radians()),
+                    ..Default::default()
+                },
+                EdgeInput::default(),
+            )
+        };
+        let hump = |b: &Blade| b.warnings.iter().any(|w| w.contains("lifts β"));
+        // The reference sections wrap about 120° on their own: that keeps β smooth.
+        assert!(!hump(&wrapped(120.0)));
+        // Far less needs a hump of β well above its edge angles.
+        let bent = wrapped(70.0);
+        assert!(hump(&bent), "{:?}", bent.warnings);
+        let rise = |s: &BladeSection| {
+            let peak = s.beta.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+            peak - s.beta[0].max(*s.beta.last().unwrap())
+        };
+        assert!(bent.sections.iter().any(|s| rise(s) > WRAP_HUMP_WARNING));
+        // A free wrap never bends the blade.
+        let free = blade_with(
+            MeanLineInput {
+                wrap: WrapMode::Free,
+                ..Default::default()
+            },
+            EdgeInput::default(),
+        );
+        assert!(!hump(&free));
+    }
+
+    #[test]
+    fn a_uniform_inlet_velocity_sets_every_leading_edge_with_the_eye_velocity() {
+        let b = basis();
+        let contour = MeridionalContour::build(&b, &MeridionalInput::default()).unwrap();
+        let channel = Channel::build(&contour, b.flow, 61, 5);
+        let blade = Blade::build(
+            &b,
+            &contour,
+            &channel,
+            &BladePropertiesInput {
+                inlet_velocity: InletVelocity::Uniform,
+                ..Default::default()
+            },
+            &MeanLineInput::default(),
+            &ProfileInput::default(),
+            &EdgeInput::default(),
+        )
+        .unwrap();
+        let eye = PI / 4.0 * (b.inlet_diameter.powi(2) - b.hub_diameter.powi(2));
+        for s in &blade.sections {
+            let le = &s.leading_edge;
+            assert_relative_eq!(le.cm, b.flow / eye, max_relative = 1e-12);
+            // Gülich eq. T7.1.7: tan β1B = τ1·c1m/u1 with incidence 0.
+            let u = b.omega * le.position.y;
+            assert_relative_eq!(
+                le.blade_angle.tan(),
+                le.blockage * le.cm / u,
+                max_relative = 1e-9
+            );
+        }
+        // With constant c1m and τ1 the angles follow r·tan β1B ≈ constant (eq. T7.1.7):
+        // the hub angle is the steepest.
+        let angles: Vec<f64> = blade
+            .sections
+            .iter()
+            .map(|s| s.leading_edge.blade_angle)
+            .collect();
+        assert!(angles.windows(2).all(|w| w[0] >= w[1]), "{angles:?}");
     }
 
     #[test]
@@ -1321,7 +1639,7 @@ mod tests {
             &b,
             &contour,
             &channel,
-            BladeShape::FreeForm,
+            &BladePropertiesInput::default(),
             &MeanLineInput::default(),
             &profiles,
             &EdgeInput::default(),

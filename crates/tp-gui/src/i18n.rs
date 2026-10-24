@@ -189,6 +189,15 @@ mod tests {
     }
 
     #[test]
+    fn crossing_walls_are_named_in_spanish() {
+        let text = spanish(|| message("walls cross: hub disk and hub at z = 7.1 mm, r = 9.6 mm"));
+        assert_eq!(
+            text,
+            "paredes que se cruzan: disco del cubo y cubo, en z = 7.1 mm, r = 9.6 mm"
+        );
+    }
+
+    #[test]
     fn english_is_the_identity() {
         set(Language::English);
         assert_eq!(tr("Accept step"), "Accept step");

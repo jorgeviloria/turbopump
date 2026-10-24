@@ -190,6 +190,7 @@ impl Project {
                 throat: Some(throat),
                 volute: Some(VoluteLossGeometry::from_design(&design)),
                 double_volute_wrap: design.rib.map(|r| r.wrap),
+                throat_integral: Some(design.throat_integral()?),
             })
         };
         let kind = |at: usize| components.get(at).map(|c| c.kind());
@@ -204,6 +205,7 @@ impl Project {
                     }),
                     volute: None,
                     double_volute_wrap: None,
+                    throat_integral: None,
                 }
             }
             Some(ComponentKind::Stator { vaned: false })
@@ -215,14 +217,49 @@ impl Project {
         })
     }
 
+    /// The performance input of impeller `id` with the seals and gaps of its side
+    /// chambers, when they are designed, wherever `input` leaves them automatic: the
+    /// annular seal on the neck, its clearance and length, the shaft seal and the axial
+    /// gap. Values set by hand in `input` stay.
+    pub fn with_chamber_seals(
+        &self,
+        id: ComponentId,
+        input: &PerformanceInput,
+    ) -> PerformanceInput {
+        let mut input = input.clone();
+        let Ok(geometry) = self.compute_impeller_geometry(id) else {
+            return input;
+        };
+        let chambers = &geometry.contour.chambers;
+        if !chambers.enabled {
+            return input;
+        }
+        let v = chambers.values;
+        let set = |param: &mut tp_design::Param<f64>, value: f64| {
+            if param.is_auto() && value > 0.0 {
+                *param = tp_design::Param::Manual(value);
+            }
+        };
+        // Worn seals stay twice as wide, as the analysis takes them.
+        let wear = if input.wide_seal_clearances { 2.0 } else { 1.0 };
+        set(&mut input.axial.seal_diameter, v.seal_diameter);
+        set(&mut input.axial.shaft_seal_diameter, v.shaft_seal_diameter);
+        set(&mut input.losses.seal_clearance, wear * v.seal_clearance);
+        set(&mut input.losses.seal_length, v.seal_length);
+        set(&mut input.losses.axial_gap, v.axial_gap);
+        input
+    }
+
     /// Predicts the characteristic of impeller `id` from its main dimensions and the
-    /// collector after it. A collector that cannot be computed is left out with a
-    /// warning.
+    /// collector after it, with the seals of its side chambers when they are designed
+    /// (see [`Project::with_chamber_seals`]). A collector that cannot be computed is left
+    /// out with a warning.
     pub fn compute_performance(
         &self,
         id: ComponentId,
         input: &PerformanceInput,
     ) -> Result<PumpPerformance, ProjectError> {
+        let input = &self.with_chamber_seals(id, input);
         let duty = self.pump_duty(id)?;
         let design = self.compute_main_dimensions(id)?;
         let (collector, problem) = match self.collector_data_after(id) {
@@ -450,7 +487,8 @@ impl Project {
         let geometry = self.compute_impeller_geometry(impeller)?;
         // A double-entry impeller is modelled as one half whose hub is the plane of
         // symmetry; a single-entry impeller discharges between shroud and hub.
-        let length = geometry.contour.axial_length;
+        // The hub end of the outlet, wherever the meridian is placed.
+        let length = geometry.contour.hub.end().x;
         let midplane = match self.pump_impeller_input(impeller)?.suction {
             Suction::Single => length - geometry.basis.outlet_width / 2.0,
             Suction::Double => length,
@@ -458,7 +496,7 @@ impl Project {
         // The faces of the impeller, with the walls of its CAD model, for a casing
         // beside it.
         let double_entry = self.pump_impeller_input(impeller)?.suction == Suction::Double;
-        let wall = tp_design::impeller::default_wall_thickness(geometry.basis.outlet_diameter);
+        let wall = geometry.contour.material.wall_thickness;
         Ok(ImpellerOutlet {
             sides: Some(geometry.sides(wall, double_entry)),
             ..ImpellerOutlet::from_pump(&main, &duty, midplane, geometry.blade.rotation_sign)
@@ -706,8 +744,48 @@ mod tests {
     }
 
     #[test]
+    fn designed_side_chambers_lend_their_seals_to_the_performance() {
+        let (mut p, impeller, _) = pump_with_volute();
+        let base = p.performance_input(impeller).unwrap();
+        // Without chambers nothing changes.
+        assert_eq!(p.with_chamber_seals(impeller, &base), base);
+        let mut input = p.impeller_geometry_input(impeller).unwrap();
+        input.meridional.chambers.enabled = true;
+        input.meridional.chambers.seal_clearance = Param::Manual(0.0004);
+        p.set_impeller_geometry(impeller, input).unwrap();
+        let v = p
+            .compute_impeller_geometry(impeller)
+            .unwrap()
+            .contour
+            .chambers
+            .values;
+        let shared = p.with_chamber_seals(impeller, &base);
+        assert_eq!(shared.losses.seal_clearance, Param::Manual(0.0004));
+        assert_eq!(shared.axial.seal_diameter, Param::Manual(v.seal_diameter));
+        assert_eq!(shared.losses.axial_gap, Param::Manual(v.axial_gap));
+        assert_eq!(shared.losses.seal_length, Param::Manual(v.seal_length));
+        // A value set in the performance step stays; worn seals stay twice as wide.
+        let mut own = base.clone();
+        own.losses.axial_gap = Param::Manual(0.01);
+        own.wide_seal_clearances = true;
+        let kept = p.with_chamber_seals(impeller, &own);
+        assert_eq!(kept.losses.axial_gap, Param::Manual(0.01));
+        assert_eq!(kept.losses.seal_clearance, Param::Manual(0.0008));
+        // A wider seal on the neck leaks more: the efficiency drops.
+        let tight = {
+            let mut q = p.clone();
+            let mut input = q.impeller_geometry_input(impeller).unwrap();
+            input.meridional.chambers.seal_clearance = Param::Manual(0.0001);
+            q.set_impeller_geometry(impeller, input).unwrap();
+            q.compute_performance(impeller, &base).unwrap()
+        };
+        let loose = p.compute_performance(impeller, &base).unwrap();
+        assert!(loose.design.efficiency < tight.design.efficiency);
+    }
+
+    #[test]
     fn the_collector_sets_the_performance_prediction() {
-        use tp_design::performance::Collector;
+        use tp_design::performance::{Collector, ShutoffSource};
         let (mut p, impeller, _) = pump_with_volute();
         assert_eq!(p.collector_after(impeller).unwrap(), Collector::Volute);
         let volute_curve = p
@@ -731,8 +809,15 @@ mod tests {
         let diffuser_curve = p
             .compute_performance(impeller, &p.performance_input(impeller).unwrap())
             .unwrap();
-        // Diffuser pumps reach a higher head against a closed valve.
-        assert!(diffuser_curve.shutoff_head > volute_curve.shutoff_head);
+        // Diffuser pumps reach a higher head against a closed valve, but in this pump the
+        // computed curve lies above both correlations, so both are raised to it.
+        assert_eq!(diffuser_curve.shutoff_source, ShutoffSource::Curve);
+        assert_eq!(volute_curve.shutoff_source, ShutoffSource::Curve);
+        assert_relative_eq!(
+            diffuser_curve.shutoff_head,
+            volute_curve.shutoff_head,
+            max_relative = 0.01
+        );
         // The vane passages are the throat; the volute behind them is not modelled.
         let data = p.collector_data_after(impeller).unwrap();
         let vanes = p.compute_diffuser(p.components()[1].id()).unwrap();

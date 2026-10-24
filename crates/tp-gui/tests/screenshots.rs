@@ -221,6 +221,23 @@ fn potential_flow() {
     harness.remove_cursor();
     harness.run();
     save(&mut harness, "potential-flow");
+    // The color map of c_m with its iso-lines and vectors, the blades blocking the flow.
+    harness.get_by_label_contains("Potential").click();
+    harness.run();
+    for option in [
+        "c_m iso-lines",
+        "c_m color map",
+        "velocity vectors",
+        "blade blockage",
+    ] {
+        harness.get_by_label(option).click();
+        harness.run();
+    }
+    harness.key_press(egui::Key::Escape);
+    harness.remove_cursor();
+    harness.run();
+    harness.run();
+    save(&mut harness, "potential-maps");
 }
 
 /// The properties folded to a strip: the view takes the whole window.
@@ -261,6 +278,7 @@ fn spanish() {
         (View::Report, "es-report"),
         (View::Performance, "es-curves"),
         (View::Meridional, "es-meridional"),
+        (View::MeridianEditor, "es-editor"),
         (View::View3d, "es-3d"),
     ] {
         harness.state_mut().focus_view(view);
@@ -526,6 +544,9 @@ fn semi_axial() {
     harness.state_mut().focus_view(View::Meridional);
     harness.run();
     save(&mut harness, "semi-axial-meridional");
+    harness.state_mut().focus_view(View::MeridianEditor);
+    harness.run();
+    save(&mut harness, "semi-axial-editor");
     harness.state_mut().focus_view(View::View3d);
     harness.run();
     save(&mut harness, "semi-axial-3d");
@@ -579,4 +600,172 @@ fn meridional_segments() {
     harness.state_mut().focus_view(View::MeridianEditor);
     harness.run();
     save(&mut harness, "meridian-editor");
+}
+
+/// The meridian editor on the automatic contour of a new impeller.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn meridian_editor() {
+    for (theme, suffix) in [(egui::Theme::Dark, "dark"), (egui::Theme::Light, "light")] {
+        let mut harness = harness(theme);
+        harness.state_mut().focus_view(View::MeridianEditor);
+        harness.run();
+        save(&mut harness, &format!("editor-{suffix}"));
+    }
+    // The analysis menu open, with the charts under the diagram.
+    let mut harness = harness(egui::Theme::Light);
+    harness.state_mut().focus_view(View::MeridianEditor);
+    harness.run();
+    harness.get_by_label_contains("Analysis").click();
+    harness.run();
+    harness.get_by_label("area and curvature charts").click();
+    harness.get_by_label("curvature maximum").click();
+    harness.run();
+    save(&mut harness, "editor-analysis");
+    // The closed material of hub disk and shroud cover.
+    harness.get_by_label_contains("Analysis").click();
+    harness.run();
+    harness.get_by_label("Materials").click();
+    harness.run();
+    harness.run();
+    save(&mut harness, "editor-materials");
+    // The side chambers, designed.
+    harness
+        .get_all_by_label("Side chambers")
+        .next()
+        .unwrap()
+        .click();
+    harness.run();
+    harness.get_by_label("design the side chambers").click();
+    harness.run();
+    harness.run();
+    save(&mut harness, "editor-chambers");
+}
+
+/// The segment types of a drawn wall: the hub as lines and an arc, the shroud as a
+/// B-spline with its menu open.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn meridian_segment_kinds() {
+    use tp_design::impeller::wall::{self, SegmentKind};
+    let mut project = tp_gui::default_project();
+    let id = project.components()[0].id();
+    // An inlet line leaning 15° from the normal to the axis, before the walls are drawn.
+    let mut input = project.impeller_geometry_input(id).unwrap();
+    input.meridional.inlet_tilt =
+        tp_design::impeller::meridian::InletTilt::Angle(15f64.to_radians());
+    project.set_impeller_geometry(id, input).unwrap();
+    let g = project.compute_impeller_geometry(id).unwrap();
+    let mut input = project.impeller_geometry_input(id).unwrap();
+    let rebuild = |w: &wall::Wall, s: &[wall::SegmentInput]| {
+        wall::Wall::build(w.start(), w.end(), s).unwrap()
+    };
+    let hub = rebuild(
+        &g.contour.hub,
+        &wall::set_kind(&g.contour.hub, 0, SegmentKind::Arc),
+    );
+    input.meridional.hub_segments = Some(hub.to_input());
+    let shroud = wall::set_kind(&g.contour.shroud, 0, SegmentKind::BSpline);
+    let shroud = rebuild(&g.contour.shroud, &shroud);
+    input.meridional.shroud_segments = Some(wall::insert_knot(&shroud, 0, 0.6));
+    // A leading edge parallel to the axis, its hub point following the shroud point.
+    input.meridional.leading_edge_shroud = tp_design::Param::Manual(0.15);
+    input.meridional.leading_edge_extent = tp_design::impeller::meridian::EdgeExtent::Radial(0.0);
+    project.set_impeller_geometry(id, input).unwrap();
+    let path = std::env::temp_dir().join("turbopump-meridian-kinds.tpj");
+    project.save(&path).unwrap();
+    let mut harness = Harness::builder()
+        .with_size([1440.0, 900.0])
+        .with_pixels_per_point(1.5)
+        .with_theme(egui::Theme::Light)
+        .wgpu()
+        .build_eframe(|cc| TurbopumpApp::new(cc, Some(&path)));
+    harness.run();
+    harness.state_mut().focus_view(View::MeridianEditor);
+    harness.run();
+    save(&mut harness, "meridian-kinds");
+}
+
+/// A mixed-flow impeller designed by its center line and a cross-section distribution.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn center_line_mode() {
+    use std::f64::consts::PI;
+    use tp_design::impeller::meridian::DesignMode;
+    use tp_project::{
+        ComponentKind, DesignPoint, EnergyTransfer, FlowRate, GlobalSetup, MachineType, Project,
+    };
+    let setup = GlobalSetup::new(
+        MachineType::Pump,
+        DesignPoint {
+            flow: FlowRate::Volume(800.0 / 3600.0),
+            energy: EnergyTransfer::Head(12.0),
+            speed: 1450.0 * PI / 30.0,
+        },
+    );
+    let mut project = Project::new("Mixed flow", MachineType::Pump, setup).unwrap();
+    let id = project
+        .add_component(ComponentKind::Impeller, None)
+        .unwrap();
+    let mut input = project.impeller_geometry_input(id).unwrap();
+    input.meridional.design_mode = DesignMode::CenterLine;
+    input.meridional.area_progression = vec![[0.0, 0.0], [0.4, 0.55], [1.0, 1.0]];
+    project.set_impeller_geometry(id, input).unwrap();
+    let path = std::env::temp_dir().join("turbopump-center-line.tpj");
+    project.save(&path).unwrap();
+    let mut harness = Harness::builder()
+        .with_size([1440.0, 900.0])
+        .with_pixels_per_point(1.5)
+        .with_theme(egui::Theme::Light)
+        .wgpu()
+        .build_eframe(|cc| TurbopumpApp::new(cc, Some(&path)));
+    harness.run();
+    harness.state_mut().focus_view(View::MeridianEditor);
+    harness.run();
+    harness.run();
+    save(&mut harness, "editor-center-line");
+}
+
+/// The blade edges in true shape: a Bézier leading edge that leans toward the shroud and
+/// a tapered trailing edge.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn blade_edges() {
+    use tp_design::impeller::blade::EdgeShape;
+    let mut project = tp_gui::default_project();
+    let id = project.components()[0].id();
+    let mut input = project.impeller_geometry_input(id).unwrap();
+    input.edges.leading = EdgeShape::BEZIER;
+    input.edges.leading_shroud = Some(EdgeShape::Bezier {
+        start: [2.5, 1.6],
+        pull: [0.7, 0.5],
+        tip: 0.35,
+        symmetric: false,
+    });
+    input.edges.trailing = EdgeShape::Taper {
+        length: 4.0,
+        nose: 0.5,
+        ratio: 1.6,
+        asymmetry: 0.3,
+    };
+    project.set_impeller_geometry(id, input).unwrap();
+    let path = std::env::temp_dir().join("turbopump-blade-edges.tpj");
+    project.save(&path).unwrap();
+    for (theme, suffix) in [(egui::Theme::Light, "light"), (egui::Theme::Dark, "dark")] {
+        let mut harness = Harness::builder()
+            .with_size([1440.0, 900.0])
+            .with_pixels_per_point(1.5)
+            .with_theme(theme)
+            .wgpu()
+            .build_eframe(|cc| TurbopumpApp::new(cc, Some(&path)));
+        harness.run();
+        harness
+            .get_all_by_label("Blade edges")
+            .next()
+            .unwrap()
+            .click();
+        harness.run();
+        harness.run();
+        save(&mut harness, &format!("blade-edges-{suffix}"));
+    }
 }

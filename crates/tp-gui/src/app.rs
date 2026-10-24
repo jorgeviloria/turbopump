@@ -251,7 +251,7 @@ fn view_for(kind: ComponentKind, step: DesignStep) -> Option<View> {
     use DesignStep::*;
     match (kind, step) {
         (_, ModelSettings) => Some(View::View3d),
-        (ComponentKind::Impeller, MeridionalContour) => Some(View::Meridional),
+        (ComponentKind::Impeller, MeridionalContour) => Some(View::MeridianEditor),
         (
             ComponentKind::Impeller,
             BladeProperties | BladeMeanLines | BladeProfiles | BladeEdges,
@@ -303,6 +303,8 @@ pub struct TurbopumpApp {
     sidebar_open: bool,
     /// The selection the dialog and the view last followed.
     followed: Option<Selection>,
+    /// The view shown last frame.
+    shown: Option<View>,
     /// The main view changes to suit the step that opens.
     follow_step: bool,
     /// Whether the tree panel is open.
@@ -317,6 +319,7 @@ pub struct TurbopumpApp {
     meridional: MeridionalView,
     cross_section: CrossSectionView,
     performance: PerformanceView,
+    blade: blade::BladeView,
     viewer: Viewer,
     exports: Exports,
     status: Option<Status>,
@@ -385,6 +388,7 @@ impl TurbopumpApp {
             view: View::View3d,
             sidebar_open: true,
             followed: None,
+            shown: None,
             follow_step: true,
             tree_open: true,
             language: Language::English,
@@ -394,6 +398,7 @@ impl TurbopumpApp {
             meridional: MeridionalView::default(),
             cross_section: CrossSectionView::default(),
             performance: PerformanceView::default(),
+            blade: blade::BladeView::default(),
             viewer: Viewer::default(),
             exports: Exports::default(),
             status: None,
@@ -584,6 +589,14 @@ impl TurbopumpApp {
             // The width the floating properties panel hides on the right of the view.
             let cover = self.sidebar_extent(ui.ctx(), main_area) + SIDEBAR_MARGIN;
             let active = self.active_impeller();
+            // The editor opens on the meridian, framed, with its step in the panel.
+            if self.view == View::MeridianEditor && self.shown != Some(View::MeridianEditor) {
+                self.meridional.framed = false;
+                if let Some(id) = active {
+                    self.selection = Selection::Step(id, DesignStep::MeridionalContour);
+                }
+            }
+            self.shown = Some(self.view);
             let stator = self.active_stator();
             let volute = self.active_volute();
             let mut cx = EditCtx {
@@ -624,7 +637,7 @@ impl TurbopumpApp {
                             .show_editor(ui, &mut cx, id, stator, volute, cover);
                     }
                     View::CrossSection => self.cross_section.show(ui, &mut cx, volute, cover),
-                    View::Blade => blade::show(ui, cx.derived, id, &units, cover),
+                    View::Blade => self.blade.show(ui, &mut cx, id, &units, cover),
                     View::FrontView => {
                         front::show(ui, cx.derived, id, stator, volute, &units);
                     }
@@ -1517,8 +1530,7 @@ mod tests {
         let id = harness.state().active_impeller().unwrap();
         let app = harness.state();
         let g = app.derived.geometry(id).unwrap();
-        let input = app.doc.project().impeller_geometry_input(id).unwrap();
-        let lines = dimension_lines(&g.contour, &input.meridional, &g.basis, true, None);
+        let lines = dimension_lines(&g.contour, &g.basis, true, None);
         let length = lines
             .iter()
             .find(|l| l.dimension == Dimension::AxialLength)
@@ -1757,5 +1769,739 @@ mod tests {
 
         harness.state_mut().undo();
         assert_eq!(shape(harness.state()), LeadingEdgeShape::Channel);
+    }
+
+    /// The editor with the default pump, framed and settled.
+    #[test]
+    fn the_blade_edge_step_opens_its_edges_to_drag() {
+        use crate::views::blade::BladePage;
+        use crate::views::blade_edges::{Edge, Span, grips, to_plot};
+        use tp_design::impeller::blade::EdgeShape;
+        let mut harness = Harness::builder()
+            .with_size([1440.0, 900.0])
+            .build_eframe(|cc| TurbopumpApp::new(cc, None));
+        harness.run();
+        let id = harness.state().active_impeller().unwrap();
+        harness.state_mut().selection = Selection::Step(id, DesignStep::BladeEdges);
+        harness.run();
+        harness.run();
+        assert_eq!(harness.state().view, View::Blade);
+        assert_eq!(harness.state().blade.page, BladePage::Edges);
+        let leading = |app: &TurbopumpApp| {
+            app.doc
+                .project()
+                .impeller_geometry_input(id)
+                .unwrap()
+                .edges
+                .leading
+        };
+        assert_eq!(leading(harness.state()), EdgeShape::Ellipse { ratio: 4.0 });
+        // The end of the nose, dragged along the face, makes it longer.
+        let start = {
+            let app = harness.state();
+            let g = app.derived.geometry(id).unwrap();
+            let e = g.basis.blade_thickness;
+            let scale = app
+                .doc
+                .project()
+                .display_units
+                .to_display(QuantityKind::Length, 1.0);
+            let (_, end) = grips(leading(app), e)[0];
+            app.blade
+                .edges
+                .transform(Edge::Leading, Span::Hub)
+                .unwrap()
+                .position_from_point(&to_plot(Edge::Leading, end, e, scale))
+        };
+        drag_by(&mut harness, start, egui::vec2(60.0, 0.0));
+        let EdgeShape::Ellipse { ratio } = leading(harness.state()) else {
+            panic!("still an ellipse");
+        };
+        assert!(ratio > 4.5, "{ratio}");
+        // One drag, one undo step.
+        harness.state_mut().doc.undo();
+        harness.run();
+        assert_eq!(leading(harness.state()), EdgeShape::Ellipse { ratio: 4.0 });
+    }
+
+    fn editor() -> Harness<'static, TurbopumpApp> {
+        let mut harness = Harness::builder()
+            .with_size([1440.0, 900.0])
+            .build_eframe(|cc| TurbopumpApp::new(cc, None));
+        harness.run();
+        harness.state_mut().focus_view(View::MeridianEditor);
+        harness.run();
+        harness
+    }
+
+    /// Drags from `start` by `delta` in a few steps, as a hand would.
+    fn drag_by(harness: &mut Harness<'_, TurbopumpApp>, start: egui::Pos2, delta: egui::Vec2) {
+        harness.hover_at(start);
+        harness.run();
+        harness.drag_at(start);
+        harness.run();
+        // A fixed number of frames per step: the geometry repaints while it follows.
+        for step in 1..=6 {
+            harness.hover_at(start + delta * (step as f32 / 6.0));
+            harness.run_steps(3);
+        }
+        harness.drop_at(start + delta);
+        harness.run();
+    }
+
+    /// Two clicks at `at` in one frame: each kittest frame lasts a quarter of a second,
+    /// longer than a double click.
+    fn double_click(harness: &mut Harness<'_, TurbopumpApp>, at: egui::Pos2) {
+        harness.hover_at(at);
+        harness.run();
+        for pressed in [true, false, true, false] {
+            harness.input_mut().events.push(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+        }
+        harness.run();
+    }
+
+    fn meridional(app: &TurbopumpApp) -> tp_design::impeller::meridian::MeridionalInput {
+        let id = app.active_impeller().unwrap();
+        app.doc
+            .project()
+            .impeller_geometry_input(id)
+            .unwrap()
+            .meridional
+    }
+
+    fn main_dimensions(app: &TurbopumpApp) -> tp_design::pump::CentrifugalPumpInput {
+        let id = app.active_impeller().unwrap();
+        app.doc.project().pump_impeller_input(id).unwrap()
+    }
+
+    #[test]
+    fn the_editor_opens_with_the_meridional_contour_in_the_panel() {
+        let mut harness = editor();
+        let id = harness.state().active_impeller().unwrap();
+        assert_eq!(
+            harness.state().selection(),
+            Selection::Step(id, DesignStep::MeridionalContour)
+        );
+        assert_eq!(harness.state().view(), View::MeridianEditor);
+        assert!(harness.state().sidebar_open());
+        harness.get_by_label("Check against Gülich");
+        // Another step keeps the editor; from another view the meridional step opens it.
+        harness
+            .get_all_by_label("Main dimensions")
+            .last()
+            .unwrap()
+            .click();
+        harness.run();
+        assert_eq!(harness.state().view(), View::MeridianEditor);
+        harness.state_mut().focus_view(View::Blade);
+        harness.run();
+        harness
+            .get_all_by_label("Meridional contour")
+            .last()
+            .unwrap()
+            .click();
+        harness.run();
+        assert_eq!(harness.state().view(), View::MeridianEditor);
+    }
+
+    #[test]
+    fn a_dragged_tangent_turns_manual_and_a_double_click_makes_it_automatic() {
+        let mut harness = editor();
+        let start = handle_on_screen(harness.state(), Handle::ShroudInlet);
+        drag_by(&mut harness, start, egui::vec2(30.0, 0.0));
+        let dragged = meridional(harness.state()).shroud_inlet_tangent;
+        assert!(
+            dragged.manual_value().is_some_and(|t| t > DEFAULT_TANGENT),
+            "{dragged:?}"
+        );
+        let at = handle_on_screen(harness.state(), Handle::ShroudInlet);
+        double_click(&mut harness, at);
+        assert!(meridional(harness.state()).shroud_inlet_tangent.is_auto());
+        // Undo brings the hand-set value back.
+        harness.state_mut().undo();
+        assert_eq!(meridional(harness.state()).shroud_inlet_tangent, dragged);
+    }
+
+    #[test]
+    fn the_leading_edge_goes_back_to_automatic_from_its_menu() {
+        let mut harness = editor();
+        let start = handle_on_screen(harness.state(), Handle::LeadingEdgeHub);
+        drag_by(&mut harness, start, egui::vec2(20.0, -10.0));
+        assert!(!meridional(harness.state()).leading_edge_hub.is_auto());
+        let at = handle_on_screen(harness.state(), Handle::LeadingEdgeHub);
+        right_click(&mut harness, at);
+        harness.get_by_label("Back to automatic").click();
+        harness.run();
+        assert!(meridional(harness.state()).leading_edge_hub.is_auto());
+    }
+
+    #[test]
+    fn the_trailing_edge_drags_d2_and_resets_it() {
+        let mut harness = editor();
+        let d2 = |app: &TurbopumpApp| main_dimensions(app).outlet_diameter;
+        let before = harness
+            .state()
+            .derived
+            .geometry(harness.state().active_impeller().unwrap())
+            .unwrap()
+            .basis
+            .outlet_diameter;
+        let start = handle_on_screen(harness.state(), Handle::TrailingEdge);
+        // Upwards on screen: a larger radius.
+        drag_by(&mut harness, start, egui::vec2(0.0, -30.0));
+        let dragged = d2(harness.state()).manual_value();
+        assert!(
+            dragged.is_some_and(|d| d > before),
+            "{dragged:?} vs {before}"
+        );
+        let at = handle_on_screen(harness.state(), Handle::TrailingEdge);
+        double_click(&mut harness, at);
+        assert!(d2(harness.state()).is_auto());
+    }
+
+    #[test]
+    fn the_outlet_diameter_is_typed_on_its_dimension() {
+        use crate::views::meridional::{Dimension, dimension_lines};
+        let mut harness = editor();
+        let id = harness.state().active_impeller().unwrap();
+        let app = harness.state();
+        let g = app.derived.geometry(id).unwrap();
+        let lines = dimension_lines(&g.contour, &g.basis, true, None);
+        let d2 = lines
+            .iter()
+            .find(|l| l.dimension == Dimension::OutletDiameter)
+            .unwrap();
+        let middle = d2.from.lerp(d2.to, 0.5);
+        let scale = app
+            .doc
+            .project()
+            .display_units
+            .to_display(QuantityKind::Length, 1.0);
+        let at = app
+            .meridional
+            .transform()
+            .unwrap()
+            .position_from_point(&PlotPoint::new(middle.x * scale, middle.y * scale));
+        click_with(&mut harness, at, egui::PointerButton::Primary);
+        harness
+            .input_mut()
+            .events
+            .push(egui::Event::Text("180".into()));
+        harness.run();
+        harness.key_press(egui::Key::Enter);
+        harness.run();
+        let typed = main_dimensions(harness.state()).outlet_diameter;
+        assert!(
+            typed
+                .manual_value()
+                .is_some_and(|d| (d - 0.18).abs() < 1e-12),
+            "{typed:?}"
+        );
+        let g = harness.state().derived.geometry(id).unwrap();
+        assert!((g.basis.outlet_diameter - 0.18).abs() < 1e-9);
+    }
+
+    /// Screen position of `p` ((z, r) in m) in the last frame of the diagram.
+    fn screen_of(app: &TurbopumpApp, p: tp_math::DVec2) -> egui::Pos2 {
+        let scale = app
+            .doc
+            .project()
+            .display_units
+            .to_display(QuantityKind::Length, 1.0);
+        app.meridional
+            .transform()
+            .unwrap()
+            .position_from_point(&PlotPoint::new(p.x * scale, p.y * scale))
+    }
+
+    #[test]
+    fn the_segment_menu_offers_arcs_b_splines_and_coupled_beziers() {
+        use crate::views::meridional::Side;
+        use tp_design::impeller::wall::SegmentKind;
+        let mut harness = editor();
+        let id = harness.state().active_impeller().unwrap();
+        let shroud = |app: &TurbopumpApp| meridional(app).shroud_segments.unwrap_or_default();
+        // A point of the shroud near `t`, clear of every handle.
+        let wall_point = |harness: &Harness<'_, TurbopumpApp>, t: f64| {
+            let app = harness.state();
+            let g = app.derived.geometry(id).unwrap();
+            let input = meridional(app);
+            let handles: Vec<egui::Pos2> = crate::views::meridional::handles(&g.contour, &input)
+                .into_iter()
+                .map(|h| handle_on_screen(app, h))
+                .collect();
+            (0..=40)
+                .map(|k| t - 0.2 + 0.4 * k as f64 / 40.0)
+                .map(|u| screen_of(app, g.contour.shroud_at(u)))
+                .max_by(|a, b| {
+                    let clear = |p: &egui::Pos2| {
+                        handles
+                            .iter()
+                            .map(|h| h.distance(*p))
+                            .fold(f32::INFINITY, f32::min)
+                    };
+                    clear(a).total_cmp(&clear(b))
+                })
+                .unwrap()
+        };
+
+        let at = wall_point(&harness, 0.6);
+        right_click(&mut harness, at);
+        harness.get_by_label("Lines and arc").click();
+        harness.run();
+        assert_eq!(shroud(harness.state())[0].kind, SegmentKind::Arc);
+        let radius = |app: &TurbopumpApp| {
+            app.derived.geometry(id).unwrap().contour.shroud.segments()[0]
+                .fillet()
+                .unwrap()
+                .radius
+        };
+        let before = radius(harness.state());
+        // The centre moves away from the corner: a larger radius.
+        let center = handle_on_screen(harness.state(), Handle::ArcCenter(Side::Shroud, 0));
+        let app = harness.state();
+        let s = &app.derived.geometry(id).unwrap().contour.shroud.segments()[0];
+        let corner = screen_of(app, s.control_points()[1]);
+        drag_by(&mut harness, center, (center - corner).normalized() * 20.0);
+        let after = radius(harness.state());
+        assert!(after > before * 1.05, "{after} vs {before}");
+
+        let at = wall_point(&harness, 0.5);
+        right_click(&mut harness, at);
+        harness.get_by_label("B-spline").click();
+        harness.run();
+        let spline = shroud(harness.state());
+        assert_eq!(spline[0].kind, SegmentKind::BSpline);
+        let at = wall_point(&harness, 0.5);
+        right_click(&mut harness, at);
+        harness.get_by_label("Insert knot here").click();
+        harness.run();
+        assert_eq!(
+            shroud(harness.state())[0].controls.len(),
+            spline[0].controls.len() + 1
+        );
+
+        let at = wall_point(&harness, 0.5);
+        right_click(&mut harness, at);
+        harness.get_by_label("Bézier").click();
+        harness.run();
+        let at = wall_point(&harness, 0.5);
+        right_click(&mut harness, at);
+        harness.get_by_label("Coupled control points").click();
+        harness.run();
+        let coupled = &shroud(harness.state())[0];
+        assert!(coupled.coupled && coupled.controls.len() >= 3);
+    }
+
+    #[test]
+    fn the_hub_point_of_the_leading_edge_follows_the_shroud_point() {
+        use tp_design::impeller::meridian::EdgeExtent;
+        let mut harness = editor();
+        let id = harness.state().active_impeller().unwrap();
+        let points = |app: &TurbopumpApp| {
+            let c = &app.derived.geometry(id).unwrap().contour;
+            (c.hub_at(c.leading_edge.0), c.shroud_at(c.leading_edge.1))
+        };
+        // The middle of the edge, away from its end handles.
+        let app = harness.state();
+        let g = app.derived.geometry(id).unwrap();
+        let middle = g.blade.sections[g.blade.sections.len() / 2].meridional[0];
+        let at = screen_of(app, middle);
+        right_click(&mut harness, at);
+        harness.get_by_label("same radial distance").click();
+        harness.run();
+        let EdgeExtent::Radial(dr) = meridional(harness.state()).leading_edge_extent else {
+            panic!("a radial extent");
+        };
+        let (hub, shroud) = points(harness.state());
+        assert!((hub.y - shroud.y - dr).abs() < 1e-6);
+
+        // The shroud point moves; the hub point keeps its radial distance.
+        let start = handle_on_screen(harness.state(), Handle::LeadingEdgeShroud);
+        drag_by(&mut harness, start, egui::vec2(25.0, -25.0));
+        let (moved_hub, moved_shroud) = points(harness.state());
+        assert!(
+            moved_shroud.distance(shroud) > 1e-3,
+            "the shroud point moved"
+        );
+        assert!((moved_hub.y - moved_shroud.y - dr).abs() < 1e-5);
+        assert!(is_manual_hub(harness.state()));
+
+        // A double click on the hub point frees it again.
+        let at = handle_on_screen(harness.state(), Handle::LeadingEdgeHub);
+        double_click(&mut harness, at);
+        assert_eq!(
+            meridional(harness.state()).leading_edge_extent,
+            EdgeExtent::Independent
+        );
+    }
+
+    fn is_manual_hub(app: &TurbopumpApp) -> bool {
+        let id = app.active_impeller().unwrap();
+        let geometry = app.doc.project().impeller_geometry_input(id).unwrap();
+        let main = app.doc.project().pump_impeller_input(id).ok();
+        crate::views::meridional::is_manual(
+            Handle::LeadingEdgeHub,
+            crate::views::meridional::Inputs {
+                geometry: &geometry,
+                main: main.as_ref(),
+                semi_axial: false,
+            },
+        )
+    }
+
+    #[test]
+    fn the_hub_end_of_a_semi_axial_outlet_drags_l_and_d2i() {
+        use std::f64::consts::PI;
+        use tp_project::{DesignPoint, EnergyTransfer, FlowRate, GlobalSetup, MachineType};
+        let setup = GlobalSetup::new(
+            MachineType::Pump,
+            DesignPoint {
+                flow: FlowRate::Volume(800.0 / 3600.0),
+                energy: EnergyTransfer::Head(12.0),
+                speed: 1450.0 * PI / 30.0,
+            },
+        );
+        let mut project = Project::new("Mixed flow", MachineType::Pump, setup).unwrap();
+        project
+            .add_component(ComponentKind::Impeller, None)
+            .unwrap();
+        let path = std::env::temp_dir().join("turbopump-semi-axial-drag.tpj");
+        project.save(&path).unwrap();
+        let mut harness = Harness::builder()
+            .with_size([1440.0, 900.0])
+            .build_eframe(|cc| TurbopumpApp::new(cc, Some(&path)));
+        harness.run();
+        harness.state_mut().focus_view(View::MeridianEditor);
+        harness.run();
+        let id = harness.state().active_impeller().unwrap();
+        let basis = |app: &TurbopumpApp| app.derived.geometry(id).unwrap().basis;
+        assert!(
+            basis(harness.state()).outlet_inclination > 0.0,
+            "semi-axial"
+        );
+        let before = basis(harness.state()).outlet_hub_diameter;
+
+        // Down on screen: a smaller hub diameter at the outlet, set by hand with L.
+        let start = handle_on_screen(harness.state(), Handle::AxialLength);
+        drag_by(&mut harness, start, egui::vec2(0.0, 30.0));
+        let d2i = main_dimensions(harness.state()).outlet_hub_diameter;
+        assert!(
+            d2i.manual_value().is_some_and(|d| d < before),
+            "{d2i:?} vs {before}"
+        );
+        assert!(!meridional(harness.state()).axial_length.is_auto());
+        // One undo step takes both back.
+        harness.state_mut().undo();
+        assert!(
+            main_dimensions(harness.state())
+                .outlet_hub_diameter
+                .is_auto()
+        );
+        assert!(meridional(harness.state()).axial_length.is_auto());
+    }
+
+    #[test]
+    fn a_dragged_point_snaps_to_the_z_of_another_point_unless_ctrl_is_held() {
+        use crate::views::meridional::Side;
+        use tp_design::impeller::wall::WallPoint;
+        let mut harness = editor();
+        let id = harness.state().active_impeller().unwrap();
+        // The shroud as lines and an arc: its corner is a free point.
+        let app = harness.state();
+        let g = app.derived.geometry(id).unwrap();
+        let mut input = app.doc.project().impeller_geometry_input(id).unwrap();
+        let shroud = &g.contour.shroud;
+        let segments = tp_design::impeller::wall::set_kind(
+            shroud,
+            0,
+            tp_design::impeller::wall::SegmentKind::Arc,
+        );
+        input.meridional.shroud_segments = Some(segments);
+        harness
+            .state_mut()
+            .doc
+            .edit_gesture("arc", |p| p.set_impeller_geometry(id, input))
+            .unwrap();
+        harness.run();
+        let corner = Handle::Point(
+            Side::Shroud,
+            WallPoint::Control {
+                segment: 0,
+                index: 0,
+            },
+        );
+        let corner_x =
+            |app: &TurbopumpApp| meridional(app).shroud_segments.unwrap()[0].controls[0].x;
+        // The z of the leading edge on the hub: the corner passes 3 px from it.
+        let c = &harness.state().derived.geometry(id).unwrap().contour;
+        let goal = c.hub_at(c.leading_edge.0).x;
+        let target = |harness: &Harness<'_, TurbopumpApp>| {
+            let app = harness.state();
+            let edge = handle_on_screen(app, Handle::LeadingEdgeHub);
+            let start = handle_on_screen(app, corner);
+            (start, egui::pos2(edge.x + 3.0, start.y + 40.0))
+        };
+        let (start, to) = target(&harness);
+        drag_by(&mut harness, start, to - start);
+        assert!((corner_x(harness.state()) - goal).abs() < 1e-12);
+
+        harness.state_mut().undo();
+        harness.run();
+        let (start, to) = target(&harness);
+        harness
+            .input_mut()
+            .events
+            .push(egui::Event::ModifiersChanged(egui::Modifiers::COMMAND));
+        drag_by(&mut harness, start, to - start);
+        harness
+            .input_mut()
+            .events
+            .push(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+        assert!((corner_x(harness.state()) - goal).abs() > 1e-5);
+    }
+
+    #[test]
+    fn the_materials_page_edits_the_closed_hub_disk_and_shroud_cover() {
+        use crate::views::meridional::Side;
+        use tp_design::impeller::wall::WallPoint;
+        let mut harness = editor();
+        let id = harness.state().active_impeller().unwrap();
+        harness.get_by_label("Materials").click();
+        harness.run();
+        harness.run();
+        // The corner of the boss: dragging it draws the hub disk by hand.
+        let app = harness.state();
+        let wire = &app.derived.geometry(id).unwrap().contour.hub_material;
+        let (corner, _) = wire
+            .points()
+            .into_iter()
+            .find(|(at, _)| matches!(at, WallPoint::Joint { .. }))
+            .unwrap();
+        let handle = Handle::Point(Side::HubMaterial, corner);
+        let before = wire.point(corner).unwrap();
+        let start = handle_on_screen(app, handle);
+        drag_by(&mut harness, start, egui::vec2(15.0, 0.0));
+        let drawn = meridional(harness.state()).hub_material;
+        assert!(drawn.is_some(), "the hub disk is drawn by hand");
+        let after = harness
+            .state()
+            .derived
+            .geometry(id)
+            .unwrap()
+            .contour
+            .hub_material
+            .point(corner)
+            .unwrap();
+        assert!(after.x > before.x + 1e-4, "{after} vs {before}");
+        assert!(
+            meridional(harness.state()).hub_segments.is_none(),
+            "the hub stays"
+        );
+        // A double click puts the automatic disk back.
+        let at = handle_on_screen(harness.state(), handle);
+        double_click(&mut harness, at);
+        assert!(meridional(harness.state()).hub_material.is_none());
+
+        // The shroud cover, offset outwards by a wall thickness: twice as thick there.
+        let app = harness.state();
+        let c = &app.derived.geometry(id).unwrap().contour;
+        let thickness = c.material.wall_thickness;
+        let cover = c.shroud_material.segments()[1].eval(0.5);
+        let at = screen_of(app, cover);
+        right_click(&mut harness, at);
+        harness.get_by_label("Apply").click();
+        harness.run();
+        let c = &harness.state().derived.geometry(id).unwrap().contour;
+        assert!(meridional(harness.state()).shroud_material.is_some());
+        let moved = c.shroud_material.segments()[1].eval(0.5);
+        let wall = c.shroud.sample(2000);
+        let gap = |p: tp_math::DVec2| {
+            wall.iter()
+                .map(|q| q.distance(p))
+                .fold(f64::INFINITY, f64::min)
+        };
+        assert!(
+            (gap(moved) - 2.0 * thickness).abs() < 0.1 * thickness,
+            "{}",
+            gap(moved)
+        );
+    }
+
+    #[test]
+    fn the_side_chambers_page_designs_and_shapes_the_casing_walls() {
+        use crate::views::meridional::{Page, Side};
+        use tp_design::impeller::wall::WallPoint;
+        let mut harness = editor();
+        let id = harness.state().active_impeller().unwrap();
+        harness.state_mut().meridional.editor.page = Page::Chambers;
+        harness.run();
+        harness.run();
+        harness.get_by_label("design the side chambers").click();
+        harness.run();
+        assert!(meridional(harness.state()).chambers.enabled);
+
+        // A control point of the front wall: dragged away from the shroud, the wall is
+        // drawn by hand and the chamber widens there.
+        let app = harness.state();
+        let c = &app.derived.geometry(id).unwrap().contour;
+        let at = WallPoint::Control {
+            segment: 0,
+            index: 3,
+        };
+        let before = c.chambers.front_casing.point(at).unwrap();
+        let handle = Handle::Point(Side::FrontCasing, at);
+        let start = handle_on_screen(app, handle);
+        drag_by(&mut harness, start, egui::vec2(-20.0, 0.0));
+        assert!(meridional(harness.state()).chambers.front.is_some());
+        let c = &harness.state().derived.geometry(id).unwrap().contour;
+        let after = c.chambers.front_casing.point(at).unwrap();
+        assert!(after.x < before.x - 1e-4, "{after} vs {before}");
+        // The rear wall stays automatic.
+        assert!(meridional(harness.state()).chambers.rear.is_none());
+        let at = handle_on_screen(harness.state(), handle);
+        double_click(&mut harness, at);
+        assert!(meridional(harness.state()).chambers.front.is_none());
+    }
+
+    #[test]
+    fn in_the_center_line_mode_the_walls_follow_the_dragged_center_line() {
+        use crate::views::meridional::Side;
+        use tp_design::impeller::meridian::DesignMode;
+        use tp_design::impeller::wall::WallPoint;
+        let mut harness = editor();
+        let id = harness.state().active_impeller().unwrap();
+        let mut input = harness
+            .state()
+            .doc
+            .project()
+            .impeller_geometry_input(id)
+            .unwrap();
+        input.meridional.design_mode = DesignMode::CenterLine;
+        harness
+            .state_mut()
+            .doc
+            .edit_gesture("mode", |p| p.set_impeller_geometry(id, input))
+            .unwrap();
+        harness.run();
+        harness.run();
+        // The handles are those of the center line, not of hub and shroud.
+        let app = harness.state();
+        let g = app.derived.geometry(id).unwrap();
+        let shown = crate::views::meridional::handles(&g.contour, &meridional(app));
+        assert!(!shown.contains(&Handle::HubInlet));
+        let at = WallPoint::Control {
+            segment: 0,
+            index: 0,
+        };
+        let handle = Handle::Point(Side::Center, at);
+        assert!(shown.contains(&handle));
+        let hub_before = g.contour.hub.sample(50);
+        let start = handle_on_screen(app, handle);
+        drag_by(&mut harness, start, egui::vec2(20.0, 0.0));
+        assert!(meridional(harness.state()).center_line.is_some());
+        let hub_after = harness
+            .state()
+            .derived
+            .geometry(id)
+            .unwrap()
+            .contour
+            .hub
+            .sample(50);
+        let moved = hub_before
+            .iter()
+            .zip(&hub_after)
+            .map(|(a, b)| a.distance(*b))
+            .fold(0.0, f64::max);
+        assert!(moved > 1e-4, "the hub follows the center line: {moved}");
+        let at = handle_on_screen(harness.state(), handle);
+        double_click(&mut harness, at);
+        assert!(meridional(harness.state()).center_line.is_none());
+    }
+
+    #[test]
+    fn the_reference_point_moves_the_meridian_and_the_inlet_point_leans_it() {
+        use tp_design::impeller::meridian::InletTilt;
+        let mut harness = editor();
+        let id = harness.state().active_impeller().unwrap();
+        // A drawn hub, to see it move along.
+        let mut input = harness
+            .state()
+            .doc
+            .project()
+            .impeller_geometry_input(id)
+            .unwrap();
+        let g = harness.state().derived.geometry(id).unwrap();
+        input.meridional.hub_segments =
+            Some(tp_design::impeller::wall::split(&g.contour.hub, 0, 0.5));
+        harness
+            .state_mut()
+            .doc
+            .edit_gesture("drawn", |p| p.set_impeller_geometry(id, input))
+            .unwrap();
+        harness.run();
+        let joint =
+            |app: &TurbopumpApp| app.derived.geometry(id).unwrap().contour.hub.segments()[0].end();
+        let before = joint(harness.state());
+        let start = handle_on_screen(harness.state(), Handle::AxialReference);
+        drag_by(&mut harness, start, egui::vec2(-30.0, 0.0));
+        let m = meridional(harness.state());
+        assert!(m.axial_position < -1e-3, "{}", m.axial_position);
+        let after = joint(harness.state());
+        assert!(
+            (after.x - before.x - m.axial_position).abs() < 1e-9,
+            "the drawn hub moves along"
+        );
+        assert!((after.y - before.y).abs() < 1e-12);
+
+        // The shroud point of the inlet, dragged downstream: the line leans.
+        let start = handle_on_screen(harness.state(), Handle::InletShroud);
+        drag_by(&mut harness, start, egui::vec2(12.0, 0.0));
+        let InletTilt::Axial(dz) = meridional(harness.state()).inlet_tilt else {
+            panic!("an axial tilt");
+        };
+        assert!(dz > 1e-4, "{dz}");
+        let at = handle_on_screen(harness.state(), Handle::InletShroud);
+        double_click(&mut harness, at);
+        assert_eq!(meridional(harness.state()).inlet_tilt, InletTilt::Normal);
+        let at = handle_on_screen(harness.state(), Handle::AxialReference);
+        double_click(&mut harness, at);
+        let m = meridional(harness.state());
+        assert!(m.axial_position.abs() < 1e-15);
+        assert!((joint(harness.state()).x - before.x).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_hub_end_of_a_radial_outlet_slants_the_trailing_edge() {
+        let mut harness = editor();
+        let id = harness.state().active_impeller().unwrap();
+        // Along the axis alone: L by hand, d₂i still automatic.
+        let start = handle_on_screen(harness.state(), Handle::AxialLength);
+        drag_by(&mut harness, start, egui::vec2(15.0, 0.0));
+        assert!(!meridional(harness.state()).axial_length.is_auto());
+        assert!(
+            main_dimensions(harness.state())
+                .outlet_hub_diameter
+                .is_auto()
+        );
+        harness.state_mut().undo();
+        harness.run();
+        // Down: a smaller d₂i, the edge slants and the impeller stays radial.
+        let start = handle_on_screen(harness.state(), Handle::AxialLength);
+        drag_by(&mut harness, start, egui::vec2(0.0, 30.0));
+        let d2i = main_dimensions(harness.state()).outlet_hub_diameter;
+        let g = harness.state().derived.geometry(id).unwrap();
+        assert!(
+            d2i.manual_value()
+                .is_some_and(|d| d < g.basis.outlet_diameter),
+            "{d2i:?}"
+        );
+        assert!(g.basis.outlet_inclination.abs() < 1e-12, "radial");
+        assert!(g.contour.hub.end().y < g.contour.shroud.end().y - 1e-4);
     }
 }

@@ -17,8 +17,6 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Draws the wall as it is now, dashed, to compare changes",
         "Dibuja la pared tal como está ahora, a trazos, para comparar los cambios",
     ),
-    ("hub copy", "copia del cubo"),
-    ("shroud copy", "copia de la carcasa"),
     ("Copy the wall points", "Copiar los puntos de la pared"),
     (
         "100 lines of z and r, tab separated, to paste elsewhere",
@@ -29,10 +27,6 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     (
         "Dragged points snap to this grid",
         "Los puntos arrastrados se ajustan a esta rejilla",
-    ),
-    (
-        "Hold Alt and drag on the diagram to measure a distance",
-        "Mantén Alt y arrastra sobre el diagrama para medir una distancia",
     ),
     ("Check against Gülich", "Comprobación con Gülich"),
     (
@@ -82,13 +76,314 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Meridian editor", "Editor del meridiano"),
     ("Editor", "Editor"),
     ("edit dimension", "editar cota"),
+    ("reset to automatic", "volver a automático"),
     ("z of the {}", "{}: z"),
     ("r of the {}", "{}: r"),
     ("{}: click to type it", "{} (haz clic para escribirla)"),
     (
-        "L, b₂ and the joints of the drawn walls, with guide lines at d_n, d₁ and d₂. Click a value to type it.",
-        "L, b₂ y las uniones de las paredes dibujadas, con líneas guía en d_n, d₁ y d₂. Haz clic en un valor para escribirlo.",
+        "The main dimensions d_n, d₁, d₂, b₂ and L. Click a value to type it.",
+        "Las dimensiones principales d_n, d₁, d₂, b₂ y L. Haz clic en un valor para escribirlo.",
     ),
+    ("Analysis", "Análisis"),
+    ("area and curvature charts", "gráficas de área y curvatura"),
+    (
+        "Cross-section area along the channel and curvature along the walls, under the diagram: both should change smoothly",
+        "Área de paso a lo largo del canal y curvatura a lo largo de las paredes, bajo el dibujo: las dos deben variar con suavidad",
+    ),
+    (
+        "Drag a point to shape the meridian: hollow points are automatic, filled ones set by hand. Double-click a point to make it automatic again. Right-click a point or a wall for exact values, segments and joints. Click a dimension to type it. Hold Alt and drag to measure a distance.",
+        "Arrastra un punto para dar forma al meridiano: los huecos son automáticos y los rellenos, manuales. Doble clic en un punto lo vuelve automático. Clic derecho en un punto o en una pared para valores exactos, tramos y uniones. Clic en una cota para escribirla. Mantén Alt y arrastra para medir una distancia.",
+    ),
+    (
+        "set by hand; double-click to make it automatic",
+        "manual; doble clic para volver a automático",
+    ),
+    (
+        "automatic; drag it to set it by hand",
+        "automático; arrástralo para fijarlo a mano",
+    ),
+    (
+        "A main dimension: typing a value sets it by hand.",
+        "Es una dimensión principal: al escribir un valor pasa a manual.",
+    ),
+    ("Back to automatic", "Volver a automático"),
+    ("trailing edge", "borde de salida"),
+    ("Corner radius R", "Radio de esquina R"),
+    ("Lines and arc", "Rectas y arco"),
+    ("B-spline", "B-spline"),
+    ("corner radius", "radio de esquina"),
+    ("degree", "grado"),
+    ("Insert knot here", "Insertar nudo aquí"),
+    (
+        "One more control point here; the curve keeps its shape",
+        "Un punto de control más aquí; la curva conserva su forma",
+    ),
+    ("Coupled control points", "Puntos de control acoplados"),
+    (
+        "The second and the second-last points stay on their lines to the middle points, so the curvature is zero at both ends; the curve becomes of degree 4",
+        "El segundo y el penúltimo punto se quedan en sus rectas hacia los puntos centrales, así que la curvatura es nula en los dos extremos; la curva pasa a grado 4",
+    ),
+    ("start angle", "ángulo inicial"),
+    ("end angle", "ángulo final"),
+    ("hub arc centre", "centro del arco del cubo"),
+    ("shroud arc centre", "centro del arco de la carcasa"),
+    ("Hub point", "Punto del cubo"),
+    (
+        "Independent of the shroud point, or following it at a constant axial or radial distance: 0 puts the edge normal to the axis or parallel to it",
+        "Independiente del punto de la carcasa, o siguiéndolo a una distancia axial o radial constante: con 0 el borde queda normal al eje o paralelo a él",
+    ),
+    ("Axial offset Δz", "Desfase axial Δz"),
+    ("Radial offset Δr", "Desfase radial Δr"),
+    (
+        "From the shroud point to the hub point",
+        "Del punto de la carcasa al del cubo",
+    ),
+    ("independent", "independiente"),
+    ("same axial distance", "misma distancia axial"),
+    ("same radial distance", "misma distancia radial"),
+    ("point snap", "imán a puntos"),
+    (
+        "A dragged point takes the z or r of another point near it; hold Ctrl (Cmd) to drag freely",
+        "El punto arrastrado toma la z o la r de otro punto cercano; mantén Ctrl (Cmd) para arrastrar libremente",
+    ),
+    ("line snap", "imán a rectas"),
+    (
+        "A dragged point lands on the line through two other points near it",
+        "El punto arrastrado cae en la recta que pasa por otros dos puntos cercanos",
+    ),
+    ("Flow path", "Canal"),
+    (
+        "Hub, shroud and blade edges",
+        "Cubo, carcasa y bordes del álabe",
+    ),
+    ("Materials", "Materiales"),
+    (
+        "The closed contours of the hub disk and the shroud cover: drag their points, right-click a wire for its segments",
+        "Los contornos cerrados del disco del cubo y de la tapa: arrastra sus puntos; clic derecho en un alambre para sus tramos",
+    ),
+    (
+        "Hub and shroud as one Bézier each, and the automatic material; undo brings them back",
+        "Cubo y carcasa como una Bézier cada uno, y el material automático; deshacer los recupera",
+    ),
+    ("Material", "Material"),
+    (
+        "The closed contours of the hub disk and the shroud cover, for the CAD model: automatic from these values, or drawn on the Materials page of the editor",
+        "Los contornos cerrados del disco del cubo y de la tapa, para el modelo CAD: automáticos con estos valores, o dibujados en la página Materiales del editor",
+    ),
+    (
+        "Hub disk drawn by segments",
+        "Disco del cubo dibujado por tramos",
+    ),
+    ("Shroud cover drawn by segments", "Tapa dibujada por tramos"),
+    (
+        "Drawn on the Materials page of the editor; the values above do not apply",
+        "Dibujado en la página Materiales del editor; los valores de arriba no se aplican",
+    ),
+    (
+        "Set in the meridional editor, Materials page",
+        "Se fija en el editor meridional, página Materiales",
+    ),
+    ("Hub disk", "Disco del cubo"),
+    ("Shroud cover", "Tapa"),
+    ("hub disk corner", "esquina del disco del cubo"),
+    (
+        "hub disk control point",
+        "punto de control del disco del cubo",
+    ),
+    ("shroud cover corner", "esquina de la tapa"),
+    ("shroud cover control point", "punto de control de la tapa"),
+    ("hub disk arc centre", "centro del arco del disco del cubo"),
+    ("shroud cover arc centre", "centro del arco de la tapa"),
+    ("{} copy", "{} (copia)"),
+    ("offset", "desplazamiento"),
+    ("Apply", "Aplicar"),
+    (
+        "Moves the segment this far away from the channel (negative: towards it); its joints move along, the ends of the wall stay",
+        "Desplaza el tramo esta distancia alejándolo del canal (negativa: hacia él); sus uniones lo acompañan y los extremos de la pared se quedan",
+    ),
+    ("design the side chambers", "diseñar las cámaras laterales"),
+    (
+        "Export their fluid with the CAD model and check them in the design; the walls can be shaped either way",
+        "Exporta su fluido con el modelo CAD y las revisa en el diseño; las paredes se pueden modelar en cualquier caso",
+    ),
+    ("Side chambers", "Cámaras laterales"),
+    (
+        "The casing walls beside the impeller: the front chamber down to the annular seal, the rear one down to the shaft seal",
+        "Las paredes de carcasa junto al rodete: la cámara delantera hasta el sello anular y la trasera hasta el sello del eje",
+    ),
+    ("Neck length", "Longitud del cuello"),
+    (
+        "Of the shroud upstream of the inlet, where the annular seal runs; automatic: 0.12·d_sp (Gülich Chap. 3.6.2); 0 for none",
+        "De la tapa aguas arriba de la entrada, donde va el sello anular; automático: 0,12·d_sp (Gülich, cap. 3.6.2); 0 para ninguno",
+    ),
+    ("Design the side chambers", "Diseñar las cámaras laterales"),
+    ("Axial gap s_ax", "Holgura axial s_ax"),
+    (
+        "Between the impeller and the casing walls; automatic: 0.05·r₂ (our choice; Gülich finds its effect small, Chap. 3.6.1)",
+        "Entre el rodete y las paredes de carcasa; automático: 0,05·r₂ (elección nuestra; Gülich ve su efecto pequeño, cap. 3.6.1)",
+    ),
+    ("Seal clearance s", "Holgura del sello s"),
+    (
+        "Radial, of the annular seal on the neck; automatic: Gülich eq. 3.12",
+        "Radial, del sello anular del cuello; automático: Gülich, ec. 3.12",
+    ),
+    ("Shaft seal diameter d_D", "Diámetro del sello del eje d_D"),
+    (
+        "Where the rear chamber ends; automatic: the hub diameter",
+        "Donde termina la cámara trasera; automático: el diámetro del cubo",
+    ),
+    ("Seal diameter d_sp", "Diámetro del sello d_sp"),
+    ("Seal length L_sp", "Longitud del sello L_sp"),
+    (
+        "Front casing drawn by segments",
+        "Carcasa delantera dibujada por tramos",
+    ),
+    (
+        "Rear casing drawn by segments",
+        "Carcasa trasera dibujada por tramos",
+    ),
+    (
+        "Drawn on the Side chambers page of the editor; the gap above does not apply",
+        "Dibujada en la página Cámaras laterales del editor; la holgura de arriba no se aplica",
+    ),
+    ("Front casing wall", "Pared de carcasa delantera"),
+    ("Rear casing wall", "Pared de carcasa trasera"),
+    ("front casing corner", "esquina de la carcasa delantera"),
+    (
+        "front casing control point",
+        "punto de control de la carcasa delantera",
+    ),
+    ("rear casing corner", "esquina de la carcasa trasera"),
+    (
+        "rear casing control point",
+        "punto de control de la carcasa trasera",
+    ),
+    (
+        "front casing arc centre",
+        "centro del arco de la carcasa delantera",
+    ),
+    (
+        "rear casing arc centre",
+        "centro del arco de la carcasa trasera",
+    ),
+    (
+        "The wire as the values of the properties panel draw it",
+        "El alambre como lo trazan los valores de la barra de propiedades",
+    ),
+    ("Design mode", "Modo de diseño"),
+    (
+        "Hub and shroud drawn directly, or a center line and a cross-section distribution the walls follow (suited to mixed-flow impellers)",
+        "Cubo y carcasa dibujados directamente, o una línea media y una distribución de área que siguen las paredes (adecuado para rodetes semiaxiales)",
+    ),
+    ("hub and shroud", "cubo y carcasa"),
+    ("center line and area", "línea media y área"),
+    (
+        "Center line drawn by segments",
+        "Línea media dibujada por tramos",
+    ),
+    (
+        "Drawn in the editor; hub and shroud follow it",
+        "Dibujada en el editor; cubo y carcasa la siguen",
+    ),
+    (
+        "A_rel along the center line, 0 at the inlet section and 1 at the outlet one",
+        "A_rel a lo largo de la línea media: 0 en la sección de entrada y 1 en la de salida",
+    ),
+    (
+        "x A_rel per line, x from 0 at the inlet to 1 at the outlet",
+        "x A_rel por línea, con x de 0 en la entrada a 1 en la salida",
+    ),
+    (
+        "At least two points with x rising",
+        "Al menos dos puntos con x creciente",
+    ),
+    ("Linear", "Lineal"),
+    ("Center line", "Línea media"),
+    ("center line corner", "esquina de la línea media"),
+    (
+        "center line control point",
+        "punto de control de la línea media",
+    ),
+    (
+        "center line arc centre",
+        "centro del arco de la línea media",
+    ),
+    ("Potential", "Potencial"),
+    ("c_m iso-lines", "isolíneas de c_m"),
+    ("c_m color map", "mapa de color de c_m"),
+    ("velocity vectors", "vectores de velocidad"),
+    ("blade blockage", "bloqueo de los álabes"),
+    (
+        "Solve with the thickness of the blades: among them only the open part of the circumference carries the flow (Gülich eqs. 3.1.7 and 3.2.3)",
+        "Resuelve con el espesor de los álabes: entre ellos solo la parte libre de la circunferencia lleva el caudal (Gülich, ec. 3.1.7 y 3.2.3)",
+    ),
+    ("axial reference point", "punto de referencia axial"),
+    (
+        "shroud point of the inlet",
+        "punto de la carcasa en la entrada",
+    ),
+    ("reference", "referencia"),
+    ("middle of the inlet", "centro de la entrada"),
+    ("middle of the outlet", "centro de la salida"),
+    ("axial position z", "posición axial z"),
+    ("normal to the axis", "normal al eje"),
+    ("axial distance", "distancia axial"),
+    ("angle", "ángulo"),
+    ("from the normal to the axis", "desde la normal al eje"),
+    ("Axial reference", "Referencia axial"),
+    (
+        "The point whose axial position is given: the middle of the inlet line or of the outlet line; the other end follows from L",
+        "El punto cuya posición axial se da: el centro de la línea de entrada o de la de salida; el otro extremo sale de L",
+    ),
+    ("Axial position z", "Posición axial z"),
+    (
+        "Of the reference point; changing it moves the whole meridian, drawn points included",
+        "Del punto de referencia; cambiarla mueve todo el meridiano, puntos dibujados incluidos",
+    ),
+    ("Inlet line", "Línea de entrada"),
+    (
+        "Normal to the axis, or leaning: the shroud point an axial distance downstream of the hub point, or the line at an angle from the normal",
+        "Normal al eje, o inclinada: el punto de la carcasa una distancia axial aguas abajo del punto del cubo, o la línea con un ángulo respecto a la normal",
+    ),
+    ("Shroud point Δz", "Punto de la carcasa Δz"),
+    (
+        "Downstream of the hub point",
+        "Aguas abajo del punto del cubo",
+    ),
+    ("Inlet angle", "Ángulo de entrada"),
+    (
+        "From the normal to the axis; positive with the shroud point downstream",
+        "Desde la normal al eje; positivo con el punto de la carcasa aguas abajo",
+    ),
+    ("hub disk", "disco del cubo"),
+    ("shroud cover", "tapa"),
+    ("front casing wall", "pared de carcasa delantera"),
+    ("rear casing wall", "pared de carcasa trasera"),
+    (
+        "Between the impeller and the casing: the front one down to the annular seal on the neck, the rear one down to the shaft seal. Once designed, the axial thrust and the loss analysis take these seals and gaps wherever theirs are automatic",
+        "Entre el rodete y la carcasa: la delantera hasta el sello anular del cuello y la trasera hasta el sello del eje. Una vez diseñadas, el empuje axial y el análisis de pérdidas toman estos sellos y holguras donde los suyos están en automático",
+    ),
+    (
+        "Hub end of the outlet edge; d₂ is the shroud end d₂a. Automatic: Gülich eqs. 7.13–7.14 on a semi-axial impeller, d₂ on a radial one; set by hand on a radial one it slants the edge and the design takes the mean diameter",
+        "Extremo del cubo del borde de salida; d₂ es el extremo de la carcasa d₂a. Automático: Gülich, ec. 7.13–7.14 en un rodete semiaxial, d₂ en uno radial; fijado a mano en uno radial inclina el borde y el diseño usa el diámetro medio",
+    ),
+    (
+        "Export their fluid with the CAD model, alone and, with a volute after them, joined to the impeller and the volute in one flow domain for CFD; shape them on the Side chambers page of the editor",
+        "Exporta su fluido con el modelo CAD, solo y, con una voluta detrás, unido al rodete y a la voluta en un único dominio para CFD; se modelan en la página Cámaras laterales del editor",
+    ),
+    (
+        "the joined fluid needs a radial outlet edge parallel to the axis (d₂i = d₂): the chambers then open at one radius",
+        "el fluido unido necesita un borde de salida radial paralelo al eje (d₂i = d₂): así las cámaras abren en un único radio",
+    ),
+    (
+        "the volute inlet does not face the impeller outlet between the casing walls",
+        "la entrada de la voluta no queda frente a la salida del rodete entre las paredes de carcasa",
+    ),
+    (
+        "the joined fluid needs the side chambers to be designed",
+        "el fluido unido necesita diseñar las cámaras laterales",
+    ),
+    (", not valid", ", no válido"),
     ("curvature maximum", "curvatura máxima"),
     (
         "Point of smallest radius of curvature of hub and shroud",
@@ -111,28 +406,6 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "fraction of the wall length",
         "fracción de la longitud de la pared",
     ),
-    ("Points of the meridian", "Puntos del meridiano"),
-    (
-        "Coordinates in {}: z from the inlet plane, r from the axis.",
-        "Coordenadas en {}: z desde el plano de entrada, r desde el eje.",
-    ),
-    (
-        "Automatic: one Bézier from the main dimensions.",
-        "Automática: una Bézier a partir de las dimensiones principales.",
-    ),
-    ("inlet tangent", "tangente de entrada"),
-    ("outlet tangent", "tangente de salida"),
-    ("Draw by segments", "Dibujar por tramos"),
-    (
-        "Turn this wall into segments you can split, join and type point by point",
-        "Convierte esta pared en tramos que puedes dividir, unir y escribir punto a punto",
-    ),
-    ("segment {}", "tramo {}"),
-    ("Split this segment in two", "Dividir este tramo en dos"),
-    ("control point", "punto de control"),
-    ("joint {}", "unión {}"),
-    ("on the hub", "en el cubo"),
-    ("on the shroud", "en la carcasa"),
     (
         "leading edge control point",
         "punto de control del borde de ataque",
@@ -1769,6 +2042,23 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Deviation δ₂ = β₂B − β₂", "Desviación δ₂ = β₂B − β₂"),
     ("De Haller w₂/w₁", "De Haller w₂/w₁"),
     ("NPSH3 (estimate)", "NPSH3 (estimación)"),
+    (
+        "NPSH3 band of the published methods",
+        "Banda de NPSH3 de los métodos publicados",
+    ),
+    (
+        "{} to {} (estimates; NPSH3 is a test result)",
+        "{} a {} (estimaciones; el NPSH3 es un resultado de ensayo)",
+    ),
+    ("{} to {}", "{} a {}"),
+    (
+        "inlet coefficients λc, λw",
+        "coeficientes de entrada λc, λw",
+    ),
+    (
+        "suction specific speed nss",
+        "velocidad específica de aspiración nss",
+    ),
     ("Geometry", "Geometría"),
     ("Area inlet / outlet", "Área de entrada / salida"),
     ("Blade loading ξ_eff / ξ_al", "Carga del álabe ξ_eff / ξ_al"),
@@ -1996,6 +2286,27 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "A partir de φ_C el radio interior de las secciones sube linealmente hasta r'_z + e en la garganta: la sección final gana una franja tan gruesa como el corte de agua. Es una alternativa a la corrección de la ec. 7.28, para volutas simples externas.",
     ),
     ("Compensate the cutwater", "Compensar el corte de agua"),
+    ("Compensate the rib", "Compensar el nervio"),
+    (
+        "From φ_C to the rib nose the first partial volute grows by the rib, so the outer channel starts with the flow area of the rule instead of accelerating past the rib. Our construction, in place of eq. 7.28 for the rib",
+        "Desde φ_C hasta la nariz del nervio, la primera voluta parcial crece en lo que ocupa el nervio, así que el canal exterior empieza con el área de paso de la regla en vez de acelerar al pasar el nervio. Construcción propia, en lugar de la ec. 7.28 para el nervio",
+    ),
+    (
+        "Rib compensation start φ_C",
+        "Inicio de la compensación del nervio φ_C",
+    ),
+    (
+        "Wrap angle from the cutwater where the base starts to rise; automatic: halfway to the rib nose",
+        "Ángulo desde el corte de agua donde la base empieza a subir; automático: a mitad de camino hasta la nariz del nervio",
+    ),
+    (
+        "Best-efficiency flow of the volute throat",
+        "Caudal óptimo que fija la garganta de la voluta",
+    ),
+    (
+        "{} ({} of the design flow, Gülich eq. T4.1.3)",
+        "{} ({} del caudal de diseño, Gülich ec. T4.1.3)",
+    ),
     ("Thickness e", "Espesor e"),
     (
         "Rise of the inner radius at the throat; automatic: the cutwater thickness e₃",
@@ -2256,6 +2567,16 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     (
         "front {}, rear {}, mechanical {} (Gülich eqs. T3.6.2, T3.6.3, T3.5.6a)",
         "delantero {}, trasero {}, mecánicas {} (Gülich ecs. T3.6.2, T3.6.3, T3.5.6a)",
+    ),
+    ("Efficiency breakdown", "Desglose del rendimiento"),
+    (
+        "η {} = η_h {} · η_v {} · η_RR {} (disk) · η_m {}, inner η_i {} (water, Gülich Table 3.5)",
+        "η {} = η_h {} · η_v {} · η_RR {} (disco) · η_m {}, interno η_i {} (agua, Gülich tabla 3.5)",
+    ),
+    ("With the pump flow Q", "Con el caudal de la bomba Q"),
+    (
+        "c_m1 {}, c_m2 {}, w₂ {}, β₂ {} (Q = η_v·Q_La instead of Q_La)",
+        "c_m1 {}, c_m2 {}, w₂ {}, β₂ {} (Q = η_v·Q_La en lugar de Q_La)",
     ),
     ("System curve", "Curva de la instalación"),
     (
@@ -2567,6 +2888,10 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Gülich eqs. 3.27–3.28", "Gülich, ecs. 3.27–3.28"),
     ("manual", "manual"),
     (
+        "raised to fall into the computed curve",
+        "subida para caer hacia la curva calculada",
+    ),
+    (
         "Automatic: semi-axial above nq = 60, where it beats a radial outlet (Gülich Chap. 7.5)",
         "Automático: semiaxial por encima de nq = 60, donde supera a la salida radial (Gülich, cap. 7.5)",
     ),
@@ -2576,10 +2901,6 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     (
         "Outlet hub diameter d₂i",
         "Diámetro de salida en el cubo d₂i",
-    ),
-    (
-        "Hub end of the outlet edge; d₂ is the shroud end d₂a (Gülich eqs. 7.13–7.14)",
-        "Extremo del cubo del borde de salida; d₂ es el extremo de la cubierta, d₂a (Gülich, ecs. 7.13–7.14)",
     ),
     ("Outlet inclination ε_s", "Inclinación de la salida ε_s"),
     (
@@ -2593,19 +2914,150 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("potential (2D)", "potencial (2D)"),
     ("quasi-1D", "cuasi-1D"),
     (
-        "Common: every section wraps the same angle, so the leading edge has no tangential sweep; each keeps its edge angles and a bump in its β distribution takes it there. Free: each wraps what its β distribution gives",
-        "Común: todas las secciones envuelven el mismo ángulo, así que el borde de ataque no queda barrido; cada una conserva sus ángulos en los bordes y una joroba en su distribución de β la lleva hasta él. Libre: cada una envuelve lo que da su distribución de β",
+        "Common: every section wraps the same angle, so the leading edge has no tangential sweep; each keeps its edge angles and a bump in its β distribution takes it there. Linear: from the hub wrap to the shroud wrap with the flow fraction. Free: each wraps what its β distribution gives",
+        "Común: todas las secciones envuelven el mismo ángulo, así que el borde de ataque no queda barrido; cada una conserva sus ángulos en los bordes y una joroba en su distribución de β la lleva hasta él. Lineal: del envolvimiento del cubo al de la carcasa según la fracción del caudal. Libre: cada una envuelve lo que da su distribución de β",
     ),
     ("common wrap", "envolvimiento común"),
+    ("linear hub to shroud", "lineal de cubo a carcasa"),
     ("each its own", "cada una el suyo"),
+    ("Hub wrap φ_hub", "Envolvimiento en el cubo φ_cubo"),
+    (
+        "Shroud wrap φ_shroud",
+        "Envolvimiento en la carcasa φ_carcasa",
+    ),
+    (
+        "Automatic: what the hub section's own β distribution gives",
+        "Automático: lo que da la distribución de β de la sección del cubo",
+    ),
+    (
+        "Automatic: what the shroud section's own β distribution gives",
+        "Automático: lo que da la distribución de β de la sección de la carcasa",
+    ),
+    ("Inlet velocity", "Velocidad de entrada"),
+    (
+        "The c_m the leading-edge angles are designed with. Local: each section's own, from the meridional flow. Uniform: the eye value c1m = Q_La/A1 at every section, as Gülich designs the inlet angles (eq. T7.1.7)",
+        "La c_m con la que se diseñan los ángulos del borde de ataque. Local: la de cada sección, del flujo meridional. Uniforme: la del ojo, c1m = Q_La/A1, en todas las secciones, como diseña Gülich los ángulos de entrada (ec. T7.1.7)",
+    ),
+    ("local", "local"),
+    ("uniform c1m", "c1m uniforme"),
     (
         "Shared by every section; automatic: the mean of the wraps their own β distributions give",
         "Común a todas las secciones; automático: la media de los envolvimientos que da a cada una su distribución de β",
+    ),
+    ("taper and rounding", "afilado y redondeo"),
+    (" e", " e"),
+    ("Taper length", "Longitud del afilado"),
+    (
+        "From full thickness to the edge, in blade thicknesses e",
+        "Desde el espesor completo hasta el borde, en espesores del álabe e",
+    ),
+    ("Nose length", "Longitud de la nariz"),
+    (
+        "Length of the rounding at the end of the taper, in e",
+        "Longitud del redondeo al final del afilado, en e",
+    ),
+    (
+        "Length of the rounding over its half width; the rounding is tangent to the taper",
+        "Longitud del redondeo entre su semiancho; el redondeo es tangente al afilado",
+    ),
+    ("Asymmetry", "Asimetría"),
+    (
+        "Moves the tip toward the pressure face (+) or the suction face (−), as a fraction of the half width of the nose",
+        "Lleva la punta hacia la cara de presión (+) o la de succión (−), como fracción del semiancho de la nariz",
+    ),
+    ("Symmetric", "Simétrico"),
+    (
+        "The same on both faces, the tip on the mean line",
+        "Igual en las dos caras, con la punta sobre la línea media",
+    ),
+    (
+        "Where the nose meets the faces, from the edge, in e",
+        "Donde la nariz se une a las caras, desde el borde, en e",
+    ),
+    ("Pull", "Tiro"),
+    (
+        "How far points 1 and 3 reach toward the edge (0 to 1)",
+        "Cuánto se acercan al borde los puntos 1 y 3 (de 0 a 1)",
+    ),
+    (
+        "Length on the pressure face",
+        "Longitud en la cara de presión",
+    ),
+    (
+        "Where the nose meets the pressure face, from the edge, in e",
+        "Donde la nariz se une a la cara de presión, desde el borde, en e",
+    ),
+    (
+        "Length on the suction face",
+        "Longitud en la cara de succión",
+    ),
+    (
+        "Where the nose meets the suction face, from the edge, in e",
+        "Donde la nariz se une a la cara de succión, desde el borde, en e",
+    ),
+    ("Pull on the pressure face", "Tiro en la cara de presión"),
+    (
+        "How far point 1 reaches toward the edge (0 to 1)",
+        "Cuánto se acerca al borde el punto 1 (de 0 a 1)",
+    ),
+    ("Pull on the suction face", "Tiro en la cara de succión"),
+    (
+        "How far point 3 reaches toward the edge (0 to 1)",
+        "Cuánto se acerca al borde el punto 3 (de 0 a 1)",
+    ),
+    ("Tip offset", "Desvío de la punta"),
+    (
+        "Point 2 off the mean line, in half thicknesses (+ pressure face)",
+        "El punto 2 fuera de la línea media, en semiespesores (+ cara de presión)",
+    ),
+    ("Hub to shroud", "Del cubo a la carcasa"),
+    (
+        "The same shape on every span, or one at the hub and one at the shroud with the spans between blended linearly",
+        "La misma forma en todas las secciones, o una en el cubo y otra en la carcasa, con las secciones intermedias mezcladas linealmente",
+    ),
+    ("uniform", "uniforme"),
+    ("At the hub", "En el cubo"),
+    ("At the shroud", "En la carcasa"),
+    ("c_p,min at the shroud", "c_p,min en la carcasa"),
+    (
+        "At shockless entry (Gülich eq. 7.1a, for elliptic noses; an estimate with the nose length for the other shapes)",
+        "Con entrada sin choque (Gülich, ec. 7.1a, para narices elípticas; una estimación con la longitud de la nariz para las demás formas)",
+    ),
+    ("Blade plots", "Gráficas del álabe"),
+    ("points to drag", "puntos para arrastrar"),
+    ("blunt", "romo"),
+    ("nose {}", "nariz {}"),
+    ("nose {}, c_p,min {}", "nariz {}, c_p,min {}"),
+    ("Leading edge at the hub", "Borde de ataque en el cubo"),
+    (
+        "Leading edge at the shroud",
+        "Borde de ataque en la carcasa",
+    ),
+    ("Trailing edge at the hub", "Borde de salida en el cubo"),
+    (
+        "Trailing edge at the shroud",
+        "Borde de salida en la carcasa",
     ),
 ];
 
 /// Messages of the design code, most specific first.
 pub(super) static MESSAGES: &[(&str, &str)] = &[
+    (
+        "the joined fluid came out as {} solids{}; check the faces at r₂",
+        "el fluido unido salió en {} sólidos{}; revisa las caras en r₂",
+    ),
+    (
+        "the joined fluid was not built: {}",
+        "no se construyó el fluido unido: {}",
+    ),
+    (
+        "walls cross: {} and {} at z = {} mm, r = {} mm",
+        "paredes que se cruzan: {} y {}, en z = {} mm, r = {} mm",
+    ),
+    (
+        "a wire crosses itself: {} at z = {} mm, r = {} mm",
+        "un alambre se cruza consigo mismo: {}, en z = {} mm, r = {} mm",
+    ),
     // Spiral development of the volute.
     (
         "the spiral must wrap between 300° and 360°, got {}°",
@@ -2953,8 +3405,8 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
     ("invalid input: {}", "dato no válido: {}"),
     ("no feasible design: {}", "no hay diseño posible: {}"),
     (
-        "the head rises with flow somewhere below the design point: the Q-H curve may be unstable (Gülich Chap. 4 and 5)",
-        "la altura sube con el caudal en algún tramo por debajo del punto de diseño: la curva Q-H puede ser inestable (Gülich, caps. 4 y 5)",
+        "the head rises with flow somewhere below the design point: the Q-H curve may be unstable, which a prediction from the design point cannot really tell (Gülich Chap. 4.3 and 5)",
+        "la altura sube con el caudal en algún tramo por debajo del punto de diseño: la curva Q-H puede ser inestable, aunque una predicción desde el punto de diseño no permite asegurarlo (Gülich, caps. 4.3 y 5)",
     ),
     (
         "the predicted best efficiency is at {} % of the design flow",
@@ -3457,7 +3909,71 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
         "el flujo potencial falló ({}); los álabes usan el flujo cuasi-unidimensional",
     ),
     (
-        "the common wrap of {}° is out of reach at span {}: the section wraps {}°",
-        "el envolvimiento común de {}° no se alcanza en la sección {}: envuelve {}°",
+        "the wrap of {}° is out of reach at span {}: the section wraps {}°",
+        "el envolvimiento de {}° no se alcanza en la sección {}: envuelve {}°",
+    ),
+    (
+        "the wrap of {}° lifts β to {}° at span {}, {}° above its edge angles: a freer wrap or larger inlet angles keep the blade smoother",
+        "el envolvimiento de {}° sube β hasta {}° en la sección {}, {}° por encima de sus ángulos en los bordes: un envolvimiento más libre o ángulos de entrada mayores dejan el álabe más suave",
+    ),
+    (
+        "edge taper length must be positive, got {}",
+        "la longitud del afilado del borde debe ser positiva; se dio {}",
+    ),
+    (
+        "edge nose length must be positive, got {}",
+        "la longitud de la nariz del borde debe ser positiva; se dio {}",
+    ),
+    (
+        "edge nose ratio must be positive, got {}",
+        "la relación de la nariz del borde debe ser positiva; se dio {}",
+    ),
+    (
+        "edge Bézier length must be positive, got {}",
+        "la longitud de la Bézier del borde debe ser positiva; se dio {}",
+    ),
+    (
+        "the edge nose ({} e) must be shorter than its taper ({} e)",
+        "la nariz del borde ({} e) debe ser más corta que su afilado ({} e)",
+    ),
+    (
+        "the edge nose is as wide as the blade: with {} e it needs a ratio above {}",
+        "la nariz del borde es tan ancha como el álabe: con {} e necesita una relación mayor que {}",
+    ),
+    (
+        "the edge asymmetry must lie between −1 and 1, got {}",
+        "la asimetría del borde debe estar entre −1 y 1; se dio {}",
+    ),
+    (
+        "the pull of a Bézier edge lies between 0 and 1, got {}",
+        "el tiro de un borde Bézier está entre 0 y 1; se dio {}",
+    ),
+    (
+        "the tip of a Bézier edge lies within the blade (−1 to 1), got {}",
+        "la punta de un borde Bézier queda dentro del álabe (de −1 a 1); se dio {}",
+    ),
+    (
+        "the edge nose is too short to round off its taper: lengthen the nose or the taper",
+        "la nariz del borde es demasiado corta para redondear su afilado: alarga la nariz o el afilado",
+    ),
+    (
+        "the edge nose folds back: move its points",
+        "la nariz del borde se dobla hacia atrás: mueve sus puntos",
+    ),
+    (
+        "the faces of the edge nose cross: move its points",
+        "las caras de la nariz del borde se cruzan: mueve sus puntos",
+    ),
+    (
+        "the leading edge needs the same kind of shape at hub and shroud",
+        "el borde de ataque necesita el mismo tipo de forma en el cubo y en la carcasa",
+    ),
+    (
+        "the trailing edge needs the same kind of shape at hub and shroud",
+        "el borde de salida necesita el mismo tipo de forma en el cubo y en la carcasa",
+    ),
+    (
+        "the leading- and trailing-edge shapes overlap at span {}: shorten them",
+        "las formas de los bordes de ataque y de salida se solapan en la sección {}: acórtalas",
     ),
 ];

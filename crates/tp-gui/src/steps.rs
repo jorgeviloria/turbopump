@@ -3,8 +3,8 @@
 use eframe::egui::{self, ComboBox, DragValue, Grid, RichText, Ui};
 use tp_design::MainDimensionsInput;
 use tp_design::impeller::blade::{
-    BetaDistribution, BladeShape, DEFAULT_POINTS, DEFAULT_SPANS, EdgeShape, MeridionalFlow,
-    WrapMode,
+    BetaDistribution, BladeShape, DEFAULT_POINTS, DEFAULT_SPANS, EdgeShape, InletVelocity,
+    MeridionalFlow, WrapMode,
 };
 use tp_design::impeller::meridian::{
     DEFAULT_LEADING_EDGE_HUB, DEFAULT_LEADING_EDGE_SHROUD, DEFAULT_TANGENT,
@@ -983,17 +983,19 @@ fn main_dimensions(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Com
             &units,
             0.0005..=1.0,
         );
+        changed |= param_f64(
+            ui,
+            tr("Outlet hub diameter d₂i"),
+            tr(
+                "Hub end of the outlet edge; d₂ is the shroud end d₂a. Automatic: Gülich eqs. 7.13–7.14 on a semi-axial impeller, d₂ on a radial one; set by hand on a radial one it slants the edge and the design takes the mean diameter",
+            ),
+            &mut input.outlet_hub_diameter,
+            Length,
+            d.map(|d| d.outlet_hub_diameter),
+            &units,
+            0.005..=5.0,
+        );
         if d.is_some_and(|d| d.semi_axial) {
-            changed |= param_f64(
-                ui,
-                tr("Outlet hub diameter d₂i"),
-                tr("Hub end of the outlet edge; d₂ is the shroud end d₂a (Gülich eqs. 7.13–7.14)"),
-                &mut input.outlet_hub_diameter,
-                Length,
-                d.map(|d| d.outlet_hub_diameter),
-                &units,
-                0.005..=5.0,
-            );
             changed |= param_f64(
                 ui,
                 tr("Outlet inclination ε_s"),
@@ -1187,8 +1189,33 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
     let g = cx.derived.geometry(id);
     let m: &mut MeridionalInput = &mut input.meridional;
     let mut changed = false;
+    use tp_design::impeller::meridian::DesignMode;
     section(ui, tr("Contour"));
     props(ui, "contour", |ui| {
+        label(
+            ui,
+            tr("Design mode"),
+            tr(
+                "Hub and shroud drawn directly, or a center line and a cross-section \
+                 distribution the walls follow (suited to mixed-flow impellers)",
+            ),
+        );
+        let mode = m.design_mode;
+        let mode_name = |mode: DesignMode| {
+            tr(match mode {
+                DesignMode::Walls => "hub and shroud",
+                DesignMode::CenterLine => "center line and area",
+            })
+        };
+        ComboBox::from_id_salt("design_mode")
+            .selected_text(mode_name(mode))
+            .show_ui(ui, |ui| {
+                for option in [DesignMode::Walls, DesignMode::CenterLine] {
+                    ui.selectable_value(&mut m.design_mode, option, mode_name(option));
+                }
+            });
+        ui.end_row();
+        changed |= m.design_mode != mode;
         changed |= param_f64(
             ui,
             tr("Axial length L"),
@@ -1199,6 +1226,116 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
             &units,
             0.001..=5.0,
         );
+        if let Some(g) = g {
+            use tp_design::impeller::meridian::{AxialReference, InletTilt};
+            let contour = &g.contour;
+            label(
+                ui,
+                tr("Axial reference"),
+                tr(
+                    "The point whose axial position is given: the middle of the inlet line or \
+                     of the outlet line; the other end follows from L",
+                ),
+            );
+            let before = (m.axial_reference, m.axial_position);
+            let name = |r: AxialReference| {
+                tr(match r {
+                    AxialReference::Inlet => "middle of the inlet",
+                    AxialReference::Outlet => "middle of the outlet",
+                })
+            };
+            ComboBox::from_id_salt("axial_reference")
+                .selected_text(name(m.axial_reference))
+                .show_ui(ui, |ui| {
+                    for (reference, point) in [
+                        (
+                            AxialReference::Inlet,
+                            contour.hub.start().lerp(contour.shroud.start(), 0.5),
+                        ),
+                        (
+                            AxialReference::Outlet,
+                            contour.hub.end().lerp(contour.shroud.end(), 0.5),
+                        ),
+                    ] {
+                        // The meridian stays where it is: the position follows.
+                        if ui
+                            .selectable_label(m.axial_reference == reference, name(reference))
+                            .clicked()
+                        {
+                            m.axial_reference = reference;
+                            m.axial_position = point.x;
+                        }
+                    }
+                });
+            ui.end_row();
+            label(
+                ui,
+                tr("Axial position z"),
+                tr(
+                    "Of the reference point; changing it moves the whole meridian, drawn points included",
+                ),
+            );
+            let mut position = m.axial_position;
+            if widgets::quantity(ui, &mut position, Length, &units, -10.0..=10.0) {
+                m.shift(position - m.axial_position);
+                m.axial_position = position;
+            }
+            ui.end_row();
+            changed |= (m.axial_reference, m.axial_position) != before;
+            label(
+                ui,
+                tr("Inlet line"),
+                tr(
+                    "Normal to the axis, or leaning: the shroud point an axial distance \
+                     downstream of the hub point, or the line at an angle from the normal",
+                ),
+            );
+            let height = (contour.shroud.start().y - contour.hub.start().y).max(1e-9);
+            let offset = m.inlet_tilt.offset(height);
+            let tilt = m.inlet_tilt;
+            let tilt_name = |t: &InletTilt| {
+                tr(match t {
+                    InletTilt::Normal => "normal to the axis",
+                    InletTilt::Axial(_) => "axial distance",
+                    InletTilt::Angle(_) => "angle",
+                })
+            };
+            ComboBox::from_id_salt("inlet_tilt")
+                .selected_text(tilt_name(&tilt))
+                .show_ui(ui, |ui| {
+                    for option in [
+                        InletTilt::Normal,
+                        InletTilt::Axial(offset),
+                        InletTilt::Angle((offset / height).atan()),
+                    ] {
+                        let same = std::mem::discriminant(&option) == std::mem::discriminant(&tilt);
+                        if ui.selectable_label(same, tilt_name(&option)).clicked() && !same {
+                            m.inlet_tilt = option;
+                        }
+                    }
+                });
+            ui.end_row();
+            match &mut m.inlet_tilt {
+                InletTilt::Normal => {}
+                InletTilt::Axial(dz) => {
+                    label(ui, tr("Shroud point Δz"), tr("Downstream of the hub point"));
+                    changed |= widgets::quantity(ui, dz, Length, &units, -1.0..=1.0);
+                    ui.end_row();
+                }
+                InletTilt::Angle(angle) => {
+                    label(
+                        ui,
+                        tr("Inlet angle"),
+                        tr(
+                            "From the normal to the axis; positive with the shroud point downstream",
+                        ),
+                    );
+                    changed |= widgets::quantity(ui, angle, Angle, &units, -1.0..=1.0);
+                    ui.end_row();
+                }
+            }
+            changed |= m.inlet_tilt != tilt;
+        }
         let walls = [
             (
                 "Hub drawn by segments",
@@ -1217,6 +1354,44 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                 ],
             ),
         ];
+        if m.design_mode == DesignMode::CenterLine {
+            if let Some(list) = &m.center_line {
+                let count = list.len();
+                label(
+                    ui,
+                    tr("Center line drawn by segments"),
+                    tr("Drawn in the editor; hub and shroud follow it"),
+                );
+                let automatic = ui
+                    .horizontal(|ui| {
+                        ui.label(tf("{} segments", &[&count]));
+                        ui.button(tr("Automatic")).clicked()
+                    })
+                    .inner;
+                ui.end_row();
+                if automatic {
+                    m.center_line = None;
+                    changed = true;
+                }
+            }
+            label(
+                ui,
+                tr("Cross section"),
+                tr("A_rel along the center line, 0 at the inlet section and 1 at the outlet one"),
+            );
+            ui.label(if m.area_progression.is_empty() {
+                tr("linear").to_owned()
+            } else {
+                tf("{} points", &[&m.area_progression.len()])
+            });
+            ui.end_row();
+        }
+        // Walls that follow the center line have no inputs of their own.
+        let walls = if m.design_mode == DesignMode::CenterLine {
+            Vec::new()
+        } else {
+            walls.into_iter().collect()
+        };
         for (drawn, segments, tangents) in walls {
             if let Some(list) = segments {
                 let count = list.len();
@@ -1255,6 +1430,9 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
             }
         }
     });
+    if m.design_mode == DesignMode::CenterLine {
+        changed |= area_progression(ui, id, &mut m.area_progression);
+    }
     section(ui, tr("Leading edge"));
     props(ui, "leading_edge", |ui| {
         use tp_design::impeller::meridian::LeadingEdgeShape;
@@ -1310,6 +1488,215 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
             &units,
             0.0..=0.9,
         );
+        use crate::views::meridional::{extent_like, extent_name};
+        use tp_design::impeller::meridian::EdgeExtent;
+        label(
+            ui,
+            tr("Hub point"),
+            tr(
+                "Independent of the shroud point, or following it at a constant axial or \
+                 radial distance: 0 puts the edge normal to the axis or parallel to it",
+            ),
+        );
+        let before = m.leading_edge_extent;
+        ComboBox::from_id_salt("leading_edge_extent")
+            .selected_text(extent_name(before))
+            .show_ui(ui, |ui| {
+                for kind in [
+                    EdgeExtent::Independent,
+                    EdgeExtent::Axial(0.0),
+                    EdgeExtent::Radial(0.0),
+                ] {
+                    let same = std::mem::discriminant(&kind) == std::mem::discriminant(&before);
+                    if ui.selectable_label(same, extent_name(kind)).clicked() && !same {
+                        m.leading_edge_extent = g.map_or(kind, |g| extent_like(kind, g));
+                    }
+                }
+            });
+        ui.end_row();
+        changed |= m.leading_edge_extent != before;
+        let offset = match &mut m.leading_edge_extent {
+            EdgeExtent::Independent => None,
+            EdgeExtent::Axial(dz) => Some((tr("Axial offset Δz"), dz)),
+            EdgeExtent::Radial(dr) => Some((tr("Radial offset Δr"), dr)),
+        };
+        if let Some((name, value)) = offset {
+            label(ui, name, tr("From the shroud point to the hub point"));
+            changed |= widgets::quantity(ui, value, Length, &units, -1.0..=1.0);
+            ui.end_row();
+        }
+    });
+    section_info(
+        ui,
+        tr("Material"),
+        tr(
+            "The closed contours of the hub disk and the shroud cover, for the CAD model: \
+             automatic from these values, or drawn on the Materials page of the editor",
+        ),
+    );
+    props(ui, "material", |ui| {
+        let used = g.map(|g| g.contour.material);
+        let settings = &mut m.material;
+        changed |= param_f64(
+            ui,
+            tr("Wall thickness"),
+            tr("Hub disk and shroud; automatic: max(3 mm, 0.02·d₂)"),
+            &mut settings.wall_thickness,
+            Length,
+            used.map(|u| u.wall_thickness),
+            &units,
+            0.0005..=0.2,
+        );
+        changed |= param_f64(
+            ui,
+            tr("Bore diameter"),
+            tr("Automatic: the hub diameter at the eye"),
+            &mut settings.bore_diameter,
+            Length,
+            used.map(|u| u.bore_diameter),
+            &units,
+            0.0..=1.0,
+        );
+        changed |= param_f64(
+            ui,
+            tr("Boss diameter"),
+            tr(
+                "Around the bore; automatic: the bore plus a wall of a quarter of it, no thinner than the wall",
+            ),
+            &mut settings.boss_diameter,
+            Length,
+            used.map(|u| u.boss_diameter),
+            &units,
+            0.0..=1.0,
+        );
+        changed |= param_f64(
+            ui,
+            tr("Neck length"),
+            tr(
+                "Of the shroud upstream of the inlet, where the annular seal runs; automatic: 0.12·d_sp (Gülich Chap. 3.6.2); 0 for none",
+            ),
+            &mut settings.neck_length,
+            Length,
+            used.map(|u| u.neck_length),
+            &units,
+            0.0..=0.5,
+        );
+        for (name, wire) in [
+            (tr("Hub disk drawn by segments"), &mut m.hub_material),
+            (tr("Shroud cover drawn by segments"), &mut m.shroud_material),
+        ] {
+            let Some(list) = wire else {
+                continue;
+            };
+            let count = list.len();
+            label(
+                ui,
+                name,
+                tr("Drawn on the Materials page of the editor; the values above do not apply"),
+            );
+            let automatic = ui
+                .horizontal(|ui| {
+                    ui.label(tf("{} segments", &[&count]));
+                    ui.button(tr("Automatic")).clicked()
+                })
+                .inner;
+            ui.end_row();
+            if automatic {
+                *wire = None;
+                changed = true;
+            }
+        }
+    });
+    section_info(
+        ui,
+        tr("Side chambers"),
+        tr(
+            "Between the impeller and the casing: the front one down to the annular seal on \
+             the neck, the rear one down to the shaft seal. Once designed, the axial thrust \
+             and the loss analysis take these seals and gaps wherever theirs are automatic",
+        ),
+    );
+    props(ui, "chambers", |ui| {
+        let built = g.map(|g| g.contour.chambers.values);
+        let chambers = &mut m.chambers;
+        label(
+            ui,
+            tr("Design the side chambers"),
+            tr(
+                "Export their fluid with the CAD model, alone and, with a volute after them, joined to the impeller and the volute in one flow domain for CFD; shape them on the Side chambers page of the editor",
+            ),
+        );
+        changed |= ui.checkbox(&mut chambers.enabled, "").changed();
+        ui.end_row();
+        changed |= param_f64(
+            ui,
+            tr("Axial gap s_ax"),
+            tr(
+                "Between the impeller and the casing walls; automatic: 0.05·r₂ (our choice; Gülich finds its effect small, Chap. 3.6.1)",
+            ),
+            &mut chambers.axial_gap,
+            Length,
+            built.map(|v| v.axial_gap),
+            &units,
+            0.0001..=0.2,
+        );
+        changed |= param_f64(
+            ui,
+            tr("Seal clearance s"),
+            tr("Radial, of the annular seal on the neck; automatic: Gülich eq. 3.12"),
+            &mut chambers.seal_clearance,
+            Length,
+            built.map(|v| v.seal_clearance),
+            &units,
+            0.00001..=0.01,
+        );
+        changed |= param_f64(
+            ui,
+            tr("Shaft seal diameter d_D"),
+            tr("Where the rear chamber ends; automatic: the hub diameter"),
+            &mut chambers.shaft_seal_diameter,
+            Length,
+            built.map(|v| v.shaft_seal_diameter),
+            &units,
+            0.001..=2.0,
+        );
+        if let Some(v) = built {
+            value_row(
+                ui,
+                tr("Seal diameter d_sp"),
+                units.show(Length, v.seal_diameter),
+            );
+            value_row(
+                ui,
+                tr("Seal length L_sp"),
+                units.show(Length, v.seal_length),
+            );
+        }
+        for (name, wire) in [
+            (tr("Front casing drawn by segments"), &mut chambers.front),
+            (tr("Rear casing drawn by segments"), &mut chambers.rear),
+        ] {
+            let Some(list) = wire else {
+                continue;
+            };
+            let count = list.len();
+            label(
+                ui,
+                name,
+                tr("Drawn on the Side chambers page of the editor; the gap above does not apply"),
+            );
+            let automatic = ui
+                .horizontal(|ui| {
+                    ui.label(tf("{} segments", &[&count]));
+                    ui.button(tr("Automatic")).clicked()
+                })
+                .inner;
+            ui.end_row();
+            if automatic {
+                *wire = None;
+                changed = true;
+            }
+        }
     });
     if changed {
         edit_geometry(cx, id, "edit meridional contour", input);
@@ -1343,7 +1730,66 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                 format!("{:.1} %", g.channel.max_cm_rise() * 100.0),
             );
         });
+        section_info(
+            ui,
+            tr("Check against Gülich"),
+            tr(
+                "Recommendations for the meridional section of radial impellers: Gülich, \
+                 Centrifugal Pumps, chap. 7.2.2.1 and eq. 7.2",
+            ),
+        );
+        crate::views::meridian_editor::guide_table(ui, g, &units);
     }
+}
+
+/// The cross-section distribution of the center-line mode, pasted as (x, A_rel) lines;
+/// true when it changed.
+fn area_progression(ui: &mut Ui, id: ComponentId, table: &mut Vec<[f64; 2]>) -> bool {
+    let key = egui::Id::new(("area_progression", id.0));
+    let mut text = ui
+        .ctx()
+        .data(|d| d.get_temp::<String>(key))
+        .unwrap_or_else(|| table.iter().map(|[x, a]| format!("{x} {a}\n")).collect());
+    ui.add(
+        egui::TextEdit::multiline(&mut text)
+            .desired_rows(3)
+            .desired_width(f32::INFINITY)
+            .hint_text(tr(
+                "x A_rel per line, x from 0 at the inlet to 1 at the outlet",
+            )),
+    );
+    let parsed: Vec<[f64; 2]> = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .filter_map(|line| {
+            let fields: Vec<f64> = line
+                .split(|c: char| c.is_whitespace() || c == ';' || c == '\t')
+                .filter(|f| !f.is_empty())
+                .filter_map(|f| f.replace(',', ".").parse().ok())
+                .collect();
+            (fields.len() == 2).then(|| [fields[0], fields[1]])
+        })
+        .collect();
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        let sorted = parsed.windows(2).all(|w| w[0][0] < w[1][0]);
+        if ui
+            .add_enabled(parsed.len() >= 2 && sorted, egui::Button::new(tr("Apply")))
+            .on_hover_text(tr("At least two points with x rising"))
+            .clicked()
+        {
+            *table = parsed.clone();
+            changed = true;
+        }
+        if ui.button(tr("Linear")).clicked() {
+            table.clear();
+            text.clear();
+            changed = true;
+        }
+    });
+    ui.ctx().data_mut(|d| d.insert_temp(key, text));
+    changed
 }
 
 fn blade_properties(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: ComponentId) {
@@ -1380,6 +1826,29 @@ fn blade_properties(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Co
                 ] {
                     changed |= ui
                         .selectable_value(&mut input.properties.meridional_flow, flow, text)
+                        .changed();
+                }
+            });
+        ui.end_row();
+        label(
+            ui,
+            tr("Inlet velocity"),
+            tr(
+                "The c_m the leading-edge angles are designed with. Local: each section's own, from the meridional flow. Uniform: the eye value c1m = Q_La/A1 at every section, as Gülich designs the inlet angles (eq. T7.1.7)",
+            ),
+        );
+        ComboBox::from_id_salt("inlet_velocity")
+            .selected_text(match input.properties.inlet_velocity {
+                InletVelocity::Local => tr("local"),
+                InletVelocity::Uniform => tr("uniform c1m"),
+            })
+            .show_ui(ui, |ui| {
+                for (velocity, text) in [
+                    (InletVelocity::Local, tr("local")),
+                    (InletVelocity::Uniform, tr("uniform c1m")),
+                ] {
+                    changed |= ui
+                        .selectable_value(&mut input.properties.inlet_velocity, velocity, text)
                         .changed();
                 }
             });
@@ -1510,17 +1979,19 @@ fn mean_lines(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                 ui,
                 tr("Sections"),
                 tr(
-                    "Common: every section wraps the same angle, so the leading edge has no tangential sweep; each keeps its edge angles and a bump in its β distribution takes it there. Free: each wraps what its β distribution gives",
+                    "Common: every section wraps the same angle, so the leading edge has no tangential sweep; each keeps its edge angles and a bump in its β distribution takes it there. Linear: from the hub wrap to the shroud wrap with the flow fraction. Free: each wraps what its β distribution gives",
                 ),
             );
             ComboBox::from_id_salt("wrap_mode")
                 .selected_text(match input.mean_lines.wrap {
                     WrapMode::Common => tr("common wrap"),
+                    WrapMode::Linear => tr("linear hub to shroud"),
                     WrapMode::Free => tr("each its own"),
                 })
                 .show_ui(ui, |ui| {
                     for (mode, text) in [
                         (WrapMode::Common, tr("common wrap")),
+                        (WrapMode::Linear, tr("linear hub to shroud")),
                         (WrapMode::Free, tr("each its own")),
                     ] {
                         changed |= ui
@@ -1539,6 +2010,29 @@ fn mean_lines(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                     &mut input.mean_lines.wrap_angle,
                     QuantityKind::Angle,
                     g.map(|g| g.blade.sections[0].wrap_angle()),
+                    &units,
+                    20f64.to_radians()..=360f64.to_radians(),
+                );
+            }
+            if input.mean_lines.wrap == WrapMode::Linear {
+                changed |= param_f64(
+                    ui,
+                    tr("Hub wrap φ_hub"),
+                    tr("Automatic: what the hub section's own β distribution gives"),
+                    &mut input.mean_lines.wrap_angle,
+                    QuantityKind::Angle,
+                    g.map(|g| g.blade.sections[0].wrap_angle()),
+                    &units,
+                    20f64.to_radians()..=360f64.to_radians(),
+                );
+                changed |= param_f64(
+                    ui,
+                    tr("Shroud wrap φ_shroud"),
+                    tr("Automatic: what the shroud section's own β distribution gives"),
+                    &mut input.mean_lines.wrap_angle_shroud,
+                    QuantityKind::Angle,
+                    g.and_then(|g| g.blade.sections.last())
+                        .map(|s| s.wrap_angle()),
                     &units,
                     20f64.to_radians()..=360f64.to_radians(),
                 );
@@ -1615,37 +2109,236 @@ fn profiles(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: ComponentI
     }
 }
 
+/// The name of an edge shape in the panel.
+fn edge_shape_name(shape: &EdgeShape) -> &'static str {
+    tr(match shape {
+        EdgeShape::Cut => "blunt (cut)",
+        EdgeShape::Ellipse { .. } => "elliptic",
+        EdgeShape::Taper { .. } => "taper and rounding",
+        EdgeShape::Bezier { .. } => "Bézier",
+    })
+}
+
+/// One edge-shape parameter in blade thicknesses (or a plain ratio with `suffix`).
+fn edge_value(
+    ui: &mut Ui,
+    name: &str,
+    hint: &str,
+    value: &mut f64,
+    range: std::ops::RangeInclusive<f64>,
+    suffix: &str,
+) -> bool {
+    label(ui, name, hint);
+    let changed = ui
+        .add(
+            DragValue::new(value)
+                .range(range)
+                .speed(0.01)
+                .max_decimals(3)
+                .suffix(suffix),
+        )
+        .changed();
+    ui.end_row();
+    changed
+}
+
 fn edge_shape(ui: &mut Ui, salt: &str, shape: &mut EdgeShape) -> bool {
     let mut changed = false;
-    let ellipse = matches!(shape, EdgeShape::Ellipse { .. });
     ComboBox::from_id_salt(salt)
-        .selected_text(tr(if ellipse { "elliptic" } else { "blunt (cut)" }))
+        .selected_text(edge_shape_name(shape))
         .show_ui(ui, |ui| {
-            if ui.selectable_label(ellipse, tr("elliptic")).clicked() && !ellipse {
-                *shape = EdgeShape::Ellipse { ratio: 4.0 };
-                changed = true;
-            }
-            if ui.selectable_label(!ellipse, tr("blunt (cut)")).clicked() && ellipse {
-                *shape = EdgeShape::Cut;
-                changed = true;
+            for option in [
+                EdgeShape::Ellipse { ratio: 4.0 },
+                EdgeShape::TAPER,
+                EdgeShape::BEZIER,
+                EdgeShape::Cut,
+            ] {
+                let selected = shape.same_kind(&option);
+                if ui
+                    .selectable_label(selected, edge_shape_name(&option))
+                    .clicked()
+                    && !selected
+                {
+                    *shape = option;
+                    changed = true;
+                }
             }
         });
     ui.end_row();
-    if let EdgeShape::Ellipse { ratio } = shape {
-        label(
-            ui,
-            tr("Nose ratio"),
-            tr("Length of the nose over the half thickness (1 = round)"),
-        );
-        changed |= ui
-            .add(
-                DragValue::new(ratio)
-                    .range(1.0..=8.0)
-                    .speed(0.02)
-                    .suffix(" : 1"),
-            )
-            .changed();
-        ui.end_row();
+    let thick = tr(" e");
+    match shape {
+        EdgeShape::Cut => {}
+        EdgeShape::Ellipse { ratio } => {
+            changed |= edge_value(
+                ui,
+                tr("Nose ratio"),
+                tr("Length of the nose over the half thickness (1 = round)"),
+                ratio,
+                1.0..=8.0,
+                " : 1",
+            );
+        }
+        EdgeShape::Taper {
+            length,
+            nose,
+            ratio,
+            asymmetry,
+        } => {
+            changed |= edge_value(
+                ui,
+                tr("Taper length"),
+                tr("From full thickness to the edge, in blade thicknesses e"),
+                length,
+                0.2..=20.0,
+                thick,
+            );
+            changed |= edge_value(
+                ui,
+                tr("Nose length"),
+                tr("Length of the rounding at the end of the taper, in e"),
+                nose,
+                0.05..=(*length - 0.01).max(0.05),
+                thick,
+            );
+            changed |= edge_value(
+                ui,
+                tr("Nose ratio"),
+                tr(
+                    "Length of the rounding over its half width; the rounding is tangent \
+                     to the taper",
+                ),
+                ratio,
+                (2.0 * *nose + 0.01)..=20.0,
+                " : 1",
+            );
+            changed |= edge_value(
+                ui,
+                tr("Asymmetry"),
+                tr(
+                    "Moves the tip toward the pressure face (+) or the suction face (−), \
+                     as a fraction of the half width of the nose",
+                ),
+                asymmetry,
+                -0.95..=0.95,
+                "",
+            );
+        }
+        EdgeShape::Bezier {
+            start,
+            pull,
+            tip,
+            symmetric,
+        } => {
+            label(
+                ui,
+                tr("Symmetric"),
+                tr("The same on both faces, the tip on the mean line"),
+            );
+            changed |= ui.checkbox(symmetric, "").changed();
+            ui.end_row();
+            if *symmetric {
+                changed |= edge_value(
+                    ui,
+                    tr("Length"),
+                    tr("Where the nose meets the faces, from the edge, in e"),
+                    &mut start[0],
+                    0.1..=10.0,
+                    thick,
+                );
+                changed |= edge_value(
+                    ui,
+                    tr("Pull"),
+                    tr("How far points 1 and 3 reach toward the edge (0 to 1)"),
+                    &mut pull[0],
+                    0.0..=1.0,
+                    "",
+                );
+            } else {
+                changed |= edge_value(
+                    ui,
+                    tr("Length on the pressure face"),
+                    tr("Where the nose meets the pressure face, from the edge, in e"),
+                    &mut start[0],
+                    0.1..=10.0,
+                    thick,
+                );
+                changed |= edge_value(
+                    ui,
+                    tr("Length on the suction face"),
+                    tr("Where the nose meets the suction face, from the edge, in e"),
+                    &mut start[1],
+                    0.1..=10.0,
+                    thick,
+                );
+                changed |= edge_value(
+                    ui,
+                    tr("Pull on the pressure face"),
+                    tr("How far point 1 reaches toward the edge (0 to 1)"),
+                    &mut pull[0],
+                    0.0..=1.0,
+                    "",
+                );
+                changed |= edge_value(
+                    ui,
+                    tr("Pull on the suction face"),
+                    tr("How far point 3 reaches toward the edge (0 to 1)"),
+                    &mut pull[1],
+                    0.0..=1.0,
+                    "",
+                );
+                changed |= edge_value(
+                    ui,
+                    tr("Tip offset"),
+                    tr("Point 2 off the mean line, in half thicknesses (+ pressure face)"),
+                    tip,
+                    -0.95..=0.95,
+                    "",
+                );
+            }
+        }
+    }
+    changed
+}
+
+/// One edge: hub to shroud mode, then the shape at the hub (or on every span) and, when
+/// it varies, at the shroud.
+fn edge_rows(ui: &mut Ui, salt: &str, hub: &mut EdgeShape, shroud: &mut Option<EdgeShape>) -> bool {
+    let mut changed = false;
+    label(
+        ui,
+        tr("Hub to shroud"),
+        tr(
+            "The same shape on every span, or one at the hub and one at the shroud with the spans between blended linearly",
+        ),
+    );
+    let mut linear = shroud.is_some();
+    ComboBox::from_id_salt((salt, "mode"))
+        .selected_text(tr(if linear { "linear" } else { "uniform" }))
+        .show_ui(ui, |ui| {
+            changed |= ui
+                .selectable_value(&mut linear, false, tr("uniform"))
+                .changed();
+            changed |= ui
+                .selectable_value(&mut linear, true, tr("linear"))
+                .changed();
+        });
+    ui.end_row();
+    if linear != shroud.is_some() {
+        *shroud = linear.then_some(*hub);
+    }
+    if let Some(shroud) = shroud {
+        label(ui, tr("At the hub"), "");
+        changed |= edge_shape(ui, &format!("{salt}_hub"), hub);
+        label(ui, tr("At the shroud"), "");
+        changed |= edge_shape(ui, &format!("{salt}_shroud"), shroud);
+        // Blending needs one kind of shape: the shroud follows a change at the hub.
+        if !shroud.same_kind(hub) {
+            *shroud = *hub;
+            changed = true;
+        }
+    } else {
+        label(ui, tr("Shape"), "");
+        changed |= edge_shape(ui, salt, hub);
     }
     changed
 }
@@ -1653,28 +2346,50 @@ fn edge_shape(ui: &mut Ui, salt: &str, shape: &mut EdgeShape) -> bool {
 fn edges(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: ComponentId) {
     let mut input = project.impeller_geometry_input(id).unwrap_or_default();
     let mut changed = false;
-    section(ui, tr("Edge shapes"));
-    props(ui, "edges", |ui| {
-        label(ui, tr("Leading edge"), "");
-        changed |= edge_shape(ui, "leading_edge_shape", &mut input.edges.leading);
-        label(ui, tr("Trailing edge"), "");
-        changed |= edge_shape(ui, "trailing_edge_shape", &mut input.edges.trailing);
+    let e = &mut input.edges;
+    section(ui, tr("Leading edge"));
+    props(ui, "leading_edge_shape_rows", |ui| {
+        changed |= edge_rows(
+            ui,
+            "leading_edge_shape",
+            &mut e.leading,
+            &mut e.leading_shroud,
+        );
+    });
+    section(ui, tr("Trailing edge"));
+    props(ui, "trailing_edge_shape_rows", |ui| {
+        changed |= edge_rows(
+            ui,
+            "trailing_edge_shape",
+            &mut e.trailing,
+            &mut e.trailing_shroud,
+        );
     });
     section(ui, tr("Results"));
     props(ui, "edges_results", |ui| {
-        match input.edges.leading.min_pressure_coefficient() {
-            Some(cp) => value_info(
-                ui,
-                tr("c_p,min of the leading edge"),
-                tr("At shockless entry (Gülich eq. 7.1a)"),
-                format!("{cp:.2}"),
-            ),
-            None => value_info(
-                ui,
-                tr("c_p,min of the leading edge"),
-                tr("A blunt leading edge causes a strong local pressure drop."),
-                "—",
-            ),
+        let spans = [
+            (tr("c_p,min of the leading edge"), Some(e.leading)),
+            (tr("c_p,min at the shroud"), e.leading_shroud),
+        ];
+        for (name, shape) in spans {
+            let Some(shape) = shape else { continue };
+            match shape.min_pressure_coefficient() {
+                Some(cp) => value_info(
+                    ui,
+                    name,
+                    tr(
+                        "At shockless entry (Gülich eq. 7.1a, for elliptic noses; an \
+                         estimate with the nose length for the other shapes)",
+                    ),
+                    format!("{cp:.2}"),
+                ),
+                None => value_info(
+                    ui,
+                    name,
+                    tr("A blunt leading edge causes a strong local pressure drop."),
+                    "—",
+                ),
+            }
         }
     });
     if changed {

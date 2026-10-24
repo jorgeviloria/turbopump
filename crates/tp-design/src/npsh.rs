@@ -18,9 +18,11 @@
 
 use std::f64::consts::PI;
 
+use serde::Serialize;
+
 use tp_units::STANDARD_GRAVITY as G;
 
-use crate::pump::CentrifugalPumpDesign;
+use crate::pump::{CentrifugalPumpDesign, InletDesign, PumpLayout};
 
 /// λ_c for axial inflow (Gülich Chap. 6.3.2); radial inlet casings take 1.2 to 1.35.
 pub const AXIAL_INLET_COEFFICIENT: f64 = 1.1;
@@ -221,6 +223,148 @@ impl NpshCurve {
     }
 }
 
+/// One way of estimating NPSH₃ at the best-efficiency point.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum NpshMethod {
+    /// NPSH₃ = λ_c·c₁m²/2g + λ_w·w₁²/2g with λ_c from 1.1 (axial inflow) to 1.35 (radial
+    /// inlet casings) and λ_w,3 from 0.1 to 0.3 for impellers (Gülich 2nd ed., eq. 6.10,
+    /// Chap. 6.3.2 and Table D6.3); the coefficients of Pfleiderer's method.
+    InletCoefficients,
+    /// NPSH₃ = (n·√(Q/f_q)/n_ss)^(4/3), n in rpm, with the n_ss range of the impeller
+    /// type (Gülich 2nd ed., eq. 6.7 and Table D6.1).
+    SuctionSpecificSpeed,
+    /// The suction specific speed S = N·√gpm/NPSH^(3/4) = 7900 of single-suction pumps
+    /// (11 200 for double suction with the whole flow, i.e. 7900 per eye) in US units
+    /// (Stepanoff, *Centrifugal and Axial Flow Pumps*, 2nd ed., 1957, eqs. 12.16 and
+    /// 12.18, p. 254). The same as the Thoma number σ = 1.22·10⁻³·nq^(4/3).
+    Stepanoff,
+    /// NPSH₃ = (n·√Q/S_q)^(4/3)/g with n in 1/s and the suction number S_q = 0.4 to 0.45
+    /// (Petermann, in Pfleiderer and Petermann, *Strömungsmaschinen*).
+    Petermann,
+    /// NPSH₃ = (0.3 to 0.5)·n·√Q with n in 1/s, Q in m³/s and NPSH₃ in m (Europump, *NPSH
+    /// for Rotodynamic Pumps: a Reference Guide*, 1999).
+    Europump,
+}
+
+impl NpshMethod {
+    /// Every method, in the order they are reported.
+    pub const ALL: [NpshMethod; 5] = [
+        NpshMethod::InletCoefficients,
+        NpshMethod::SuctionSpecificSpeed,
+        NpshMethod::Stepanoff,
+        NpshMethod::Petermann,
+        NpshMethod::Europump,
+    ];
+
+    /// Short English name.
+    pub fn name(self) -> &'static str {
+        match self {
+            NpshMethod::InletCoefficients => "inlet coefficients λc, λw",
+            NpshMethod::SuctionSpecificSpeed => "suction specific speed nss",
+            NpshMethod::Stepanoff => "Stepanoff",
+            NpshMethod::Petermann => "Petermann",
+            NpshMethod::Europump => "Europump",
+        }
+    }
+}
+
+/// The NPSH₃ of one method: a range, or one value when `low == high`, m.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct NpshEstimate {
+    pub method: NpshMethod,
+    pub low: f64,
+    pub high: f64,
+}
+
+/// NPSH₃ at the best-efficiency point by several published methods. Their scatter is
+/// wide: they are estimates for the preliminary design, and NPSH₃ itself is a test result
+/// (3 % head drop).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct NpshBand {
+    pub estimates: Vec<NpshEstimate>,
+    /// Lowest and highest value of all the methods, m.
+    pub low: f64,
+    pub high: f64,
+}
+
+/// λ_c of radial inlet casings, the top of Gülich's range (Chap. 6.3.2).
+pub const RADIAL_INLET_COEFFICIENT: f64 = 1.35;
+/// λ_w,3 of impellers at shockless entry (Gülich Table D6.3).
+pub const BLADE_COEFFICIENT_BAND: (f64, f64) = (0.1, 0.3);
+/// S of single-suction pumps in US units: rpm, US gpm, ft (Stepanoff eq. 12.18).
+pub const STEPANOFF_SUCTION_SPEED: f64 = 7900.0;
+/// Suction number S_q of Petermann's method.
+pub const PETERMANN_SUCTION_NUMBER: (f64, f64) = (0.4, 0.45);
+/// Factor of n·√Q in Europump's estimate.
+pub const EUROPUMP_FACTOR: (f64, f64) = (0.3, 0.5);
+
+/// Range of the suction specific speed n_ss (rpm, m³/s, m) of an impeller type (Gülich
+/// 2nd ed., Table D6.1):
+/// - standard impellers with axial inlet or of between-bearing pumps, 160–220;
+/// - suction impellers with axial inlet, 220–280;
+/// - suction impellers of between-bearing pumps, single or double entry, 180–240;
+/// - high-pressure pumps for short cavities (u₁ > 50 m/s), 160–190.
+pub fn suction_specific_speed_band(layout: PumpLayout, inlet: InletDesign, u1: f64) -> (f64, f64) {
+    match (layout, inlet) {
+        (PumpLayout::DoubleEntry, InletDesign::Suction) => (180.0, 240.0),
+        (_, InletDesign::Suction) => (220.0, 280.0),
+        _ if u1 > 50.0 => (160.0, 190.0),
+        _ => (160.0, 220.0),
+    }
+}
+
+/// NPSH₃ by every [`NpshMethod`] for speed `omega` (rad/s) and flow `flow_per_eye`
+/// (m³/s), with c₁m and w₁ at the outer streamline of the eye and the n_ss range
+/// `nss` (rpm, m³/s, m).
+pub fn npsh3_band(omega: f64, flow_per_eye: f64, cm1: f64, w1: f64, nss: (f64, f64)) -> NpshBand {
+    const FOOT: f64 = 0.3048;
+    const US_GALLON: f64 = 3.785_411_784e-3;
+    let rpm = omega * 30.0 / PI;
+    let per_second = omega / (2.0 * PI);
+    let root_q = flow_per_eye.sqrt();
+    let suction_speed = |n: f64, s: f64| (n * root_q / s).powf(4.0 / 3.0);
+    let gpm = flow_per_eye * 60.0 / US_GALLON;
+    let stepanoff = FOOT * (rpm * gpm.sqrt() / STEPANOFF_SUCTION_SPEED).powf(4.0 / 3.0);
+    let (lw, hw) = BLADE_COEFFICIENT_BAND;
+    let (sq_low, sq_high) = PETERMANN_SUCTION_NUMBER;
+    let (e_low, e_high) = EUROPUMP_FACTOR;
+    let estimates: Vec<NpshEstimate> = NpshMethod::ALL
+        .iter()
+        .map(|&method| {
+            let (low, high) = match method {
+                NpshMethod::InletCoefficients => (
+                    npsh(AXIAL_INLET_COEFFICIENT, lw, cm1, w1),
+                    npsh(RADIAL_INLET_COEFFICIENT, hw, cm1, w1),
+                ),
+                // A higher suction specific speed means a lower NPSH₃.
+                NpshMethod::SuctionSpecificSpeed => {
+                    (suction_speed(rpm, nss.1), suction_speed(rpm, nss.0))
+                }
+                NpshMethod::Stepanoff => (stepanoff, stepanoff),
+                NpshMethod::Petermann => (
+                    suction_speed(per_second, sq_high) / G,
+                    suction_speed(per_second, sq_low) / G,
+                ),
+                NpshMethod::Europump => (e_low * per_second * root_q, e_high * per_second * root_q),
+            };
+            NpshEstimate { method, low, high }
+        })
+        .collect();
+    let low = estimates
+        .iter()
+        .map(|e| e.low)
+        .fold(f64::INFINITY, f64::min);
+    let high = estimates
+        .iter()
+        .map(|e| e.high)
+        .fold(f64::NEG_INFINITY, f64::max);
+    NpshBand {
+        estimates,
+        low,
+        high,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -228,6 +372,86 @@ mod tests {
     use approx::assert_relative_eq;
 
     const FT: f64 = 0.3048;
+
+    #[test]
+    fn the_band_of_each_method_follows_its_formula() {
+        // 0.06687 m³/s at 1750 rpm, c₁m 4.554 m/s and w₁ 13.62 m/s at the eye diameter.
+        let omega = 1750.0 * PI / 30.0;
+        let (q, cm1, w1) = (0.06687, 4.554, 13.62);
+        let band = npsh3_band(omega, q, cm1, w1, (160.0, 220.0));
+        let get = |m: NpshMethod| *band.estimates.iter().find(|e| e.method == m).unwrap();
+        let g2 = 2.0 * G;
+        let c = get(NpshMethod::InletCoefficients);
+        assert_relative_eq!(
+            c.low,
+            (1.1 * cm1 * cm1 + 0.1 * w1 * w1) / g2,
+            max_relative = 1e-12
+        );
+        assert_relative_eq!(
+            c.high,
+            (1.35 * cm1 * cm1 + 0.3 * w1 * w1) / g2,
+            max_relative = 1e-12
+        );
+        let n = get(NpshMethod::SuctionSpecificSpeed);
+        assert_relative_eq!(
+            n.high,
+            (1750.0 * q.sqrt() / 160.0).powf(4.0 / 3.0),
+            max_relative = 1e-12
+        );
+        assert_relative_eq!(
+            n.low,
+            (1750.0 * q.sqrt() / 220.0).powf(4.0 / 3.0),
+            max_relative = 1e-12
+        );
+        // Stepanoff in US units: 1060 gpm at 1750 rpm and S = 7900 give 13.94 ft; the
+        // Thoma form σ = 1.22e-3·nq^(4/3) gives the same within 0.3 %.
+        let s = get(NpshMethod::Stepanoff);
+        assert_relative_eq!(s.low / FT, 13.94, max_relative = 2e-3);
+        let nq = tp_units::SpecificSpeed::from_head(q, 83.0, omega).nq();
+        assert_relative_eq!(
+            s.low,
+            1.22e-3 * nq.powf(4.0 / 3.0) * 83.0,
+            max_relative = 3e-3
+        );
+        let p = get(NpshMethod::Petermann);
+        let rev = 1750.0 / 60.0;
+        assert_relative_eq!(
+            p.high,
+            (rev * q.sqrt() / 0.4).powf(4.0 / 3.0) / G,
+            max_relative = 1e-12
+        );
+        let e = get(NpshMethod::Europump);
+        assert_relative_eq!(e.low, 0.3 * rev * q.sqrt(), max_relative = 1e-12);
+        assert_relative_eq!(e.high, 0.5 * rev * q.sqrt(), max_relative = 1e-12);
+        for m in &band.estimates {
+            assert!(
+                m.low <= m.high && m.low >= band.low && m.high <= band.high,
+                "{m:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn suction_impellers_reach_a_higher_suction_specific_speed() {
+        use crate::pump::{InletDesign, PumpLayout};
+        let at = |layout, inlet| suction_specific_speed_band(layout, inlet, 30.0);
+        assert_eq!(
+            at(PumpLayout::SingleStage, InletDesign::Normal),
+            (160.0, 220.0)
+        );
+        assert_eq!(
+            at(PumpLayout::SingleStage, InletDesign::Suction),
+            (220.0, 280.0)
+        );
+        assert_eq!(
+            at(PumpLayout::DoubleEntry, InletDesign::Suction),
+            (180.0, 240.0)
+        );
+        assert_eq!(
+            suction_specific_speed_band(PumpLayout::Multistage, InletDesign::Normal, 60.0),
+            (160.0, 190.0)
+        );
+    }
 
     #[test]
     fn eq_6_10_reproduces_the_npsh_of_the_book_example() {

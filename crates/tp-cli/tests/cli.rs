@@ -376,6 +376,25 @@ fn design_reports_verified_checks() {
         geometry.contains("ellipse 2:1, c_p,min at shockless entry 0.89"),
         "{geometry}"
     );
+    // A taper at the hub blending into a longer one at the shroud.
+    let tapered = stdout(&turbopump(&[
+        "geometry",
+        file_arg,
+        "--set",
+        "le=taper",
+        "--set",
+        "le-shroud-shape=taper:4,0.6,2",
+    ]));
+    assert!(
+        tapered.contains("taper over 3 e to a 0.6 e nose of 2:1, asymmetry 0 at the hub, c_p,min at shockless entry 0.26"),
+        "{tapered}"
+    );
+    assert!(
+        tapered.contains("at the shroud, c_p,min at shockless entry 0.20"),
+        "{tapered}"
+    );
+    let wrong = turbopump(&["geometry", file_arg, "--set", "le=bezier:1,2,3"]);
+    assert_ne!(wrong.status.code(), Some(0));
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

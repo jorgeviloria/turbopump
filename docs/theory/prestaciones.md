@@ -38,10 +38,12 @@ señalan como tales.
 
 ![Curvas de la bomba de referencia](../img/curvas-referencia.jpg)
 
-*Bomba de referencia (100 m³/h, 32 m, 2900 rpm, voluta). De arriba abajo: altura con la
-altura teórica de Euler, rendimiento total e hidráulico, y potencia. Las líneas a trazos
-son la parte estimada, por debajo del inicio de la recirculación. Los marcadores son el
-punto de diseño (círculo) y el de máximo rendimiento (rombo).*
+*Bomba de referencia (100 m³/h, 32 m, 2900 rpm, voluta), con el análisis de pérdidas.
+Arriba, la altura con la altura teórica de Euler y la curva de la instalación, y el
+rendimiento total e hidráulico; abajo, la potencia y el NPSH₃ con la pérdida de la voluta.
+Las líneas a trazos son la parte estimada, por debajo del inicio de la recirculación, y
+las punteadas verticales limitan el funcionamiento continuo. Los marcadores son el punto
+de diseño (círculo) y el de máximo rendimiento (rombo).*
 
 El libro advierte que ni las pérdidas hidráulicas ni la recirculación a carga parcial se
 pueden calcular de antemano. Por eso la predicción es empírica y parte del punto de diseño
@@ -57,9 +59,21 @@ $$c_{2u} = u_2\,\gamma - \frac{c_{2m}\,\tau_2}{\tan\beta_{2B}}, \qquad
 c_{2m} = \frac{Q_{La}}{\pi d_2 b_2}$$
 
 $Q_{La}$ es el caudal por el rodete: el de la bomba más las fugas. En un rodete semiaxial
-$u_2$ es el de la cubierta ($d_{2a}$) y el área es $\pi d_{2m} b_2$ (ec. 3.2.2). Como primera
-aproximación, el deslizamiento no depende del caudal mientras no haya recirculación
-(cap. 4.1.1). Con eso, $H_{th}$ es una recta que baja al crecer el caudal (ec. 4.1).
+$u_2$ es el de la cubierta ($d_{2a}$) y el área es $\pi d_{2m} b_2$ (ec. 3.2.2). Con el
+deslizamiento constante, $H_{th}$ sería una recta que baja al crecer el caudal (ec. 4.1).
+Los ensayos muestran que el deslizamiento disminuye a carga parcial: $\gamma$ crece
+(fig. 4.15, cap. 4.3). Turbopump multiplica el $\gamma$ del diseño por un ajuste propio de la
+línea media de esa figura:
+
+$$\frac{\gamma}{\gamma_{opt}} =
+\begin{cases}
+1 + 0{,}138\,(1 - q^*)^2 + 0{,}233\,(1 - q^*)^3 & q^* < 1 \\
+1 & 1 \le q^* \le 1{,}3 \\
+1 - 0{,}21\,(q^* - 1{,}3)^2 & q^* > 1{,}3
+\end{cases}$$
+
+Da 1,10 en $q^* = 0{,}4$, 1,04 en 0,6 y 0,98 en 1,6, como la figura. Los datos cubren
+$0{,}4 \le q^* \le 1{,}6$; fuera de ese rango se mantiene el valor del extremo.
 
 ### Rendimiento hidráulico y altura
 
@@ -70,7 +84,9 @@ $$\frac{\eta_h}{\eta_{h,max}} = 1 - 0{,}6\,(q^* - 0{,}9)^2 - 0{,}25\,(q^* - 0{,}
 \qquad q^* = \frac{Q}{Q_{opt}}$$
 
 El máximo cae en $q^* = 0{,}9$. $\eta_{h,max}$ se ajusta para que en el punto de diseño
-$\eta_h$ sea el del diseño. La altura es $H = \eta_h\,H_{th}$ (ec. T3.3.7).
+$\eta_h$ sea el del diseño. La altura es $H = \eta_h\,H_{th}$ (ec. T3.3.7). Es el
+procedimiento del libro (cap. 4.3): la fig. 4.15 para $\gamma$ y la ec. 4.14 para
+$\eta_h$, solo en el tramo sin recirculación.
 
 **Fugas:** por defecto salen del análisis de pérdidas (sección 9): el caudal por los
 anillos se calcula a cada altura. Con los rendimientos de la estadística
@@ -127,17 +143,51 @@ El colector sale del componente que sigue al rodete. Un difusor sin álabes inte
 menos cantidad de movimiento con el rodete que uno con álabes (cap. 4.1.4), así que usa el
 valor de la voluta.
 
+Con el $\gamma$ de la fig. 4.15, la curva calculada puede llegar al inicio de la
+recirculación por encima de ese $H_0$. Las curvas medidas de bombas con voluta bajan desde
+válvula cerrada (fig. 4.13), y el libro advierte que este método no permite reconocer
+una curva inestable (cap. 4.3). Por eso un $H_0$ automático nunca queda por debajo del
+mínimo que deja a la cúbica bajar sin escalón hasta la curva calculada (ver abajo):
+
+$$H_0 \ge H(q_{rec}) - \tfrac{1}{3}\,q_{rec}\,\frac{dH}{dq^*}\Big|_{q_{rec}}$$
+
+En ese caso el programa indica que lo ha subido. Un $\psi_0$ manual se respeta.
+
+**Potencia a válvula cerrada:** el libro la da con el coeficiente
+$\lambda_0 = 2P_0/(\rho\,\pi\,d_2\,b_2\,u_2^3)$ de la fig. 4.10 (ec. T3.4.9). Turbopump
+usa un ajuste propio de las bombas con voluta de esa figura, dentro de ±16 % de sus puntos
+para $n_q$ = 10-92:
+
+$$\lambda_0 = 0{,}0276\left(\frac{n_q}{10}\right)^{0{,}552}$$
+
+Fuera de ese rango se mantiene el valor del extremo. Las bombas con difusor por encima de
+$n_q \approx 20$ quedan algo más arriba en la figura; para ellas el ajuste es un límite
+inferior. La potencia nunca baja de las pérdidas secundarias.
+
 **Tramo entre válvula cerrada y recirculación:**
 
 - la altura sigue una cúbica que sale plana de $H_0$ y se une a la curva calculada;
 - la pendiente de unión se limita (criterio de monotonía de Fritsch y Carlson) para que la
   cúbica no añada un máximo propio;
-- si aun así la curva sube en algún tramo, el programa avisa de que puede ser inestable;
-- la potencia sigue la tangente de la curva calculada hasta $Q = 0$, o hasta un valor que
-  da el usuario.
+- si aun así la curva de agua sube en algún tramo (solo con un $\psi_0$ manual bajo), el
+  programa avisa de que puede ser inestable, aunque el método no permite asegurarlo;
+- la potencia sigue una recta desde la de válvula cerrada, de la fig. 4.10 o la que da el
+  usuario, hasta la curva calculada.
 
-Todo este tramo se marca como estimación. El libro tampoco da una correlación de la
-potencia a válvula cerrada más allá de una figura.
+Todo este tramo se marca como estimación (cap. 4.3.5: se interpola «según la
+experiencia»).
+
+**Comprobación con la fig. 4.13** (prueba automática): una bomba de $n_q$ = 16 con su
+voluta, diseñada por Turbopump, frente a la curva medida del rodete de $n_q$ = 16 de esa
+figura, normalizadas en su punto óptimo:
+
+| $Q/Q_{opt}$ | 0 | 0,35 | 0,5 | 0,7 | 0,8 | 1,2 | 1,4 |
+|---|---|---|---|---|---|---|---|
+| Fig. 4.13 | 1,21 | 1,175 | 1,15 | 1,10 | 1,075 | 0,89 | 0,79 |
+| Turbopump | 1,22 | 1,15 | 1,12 | 1,09 | 1,06 | 0,90 | 0,74 |
+
+La curva baja en todo el rango, sin la caída a carga parcial que daba el deslizamiento
+constante.
 
 **Caudal máximo:** el cálculo llega a 1,5 $Q_{opt}$, dentro del rango de la estadística de
 la ec. 4.14, o hasta que la altura se anula.
@@ -149,17 +199,20 @@ rendimiento del diseño a 0,854.
 
 | Punto | Q | H | P | η |
 |---|---|---|---|---|
-| Válvula cerrada | 0 | 39,8 m | 3,0 kW (estimación) | 0 |
-| Inicio de la recirculación | 53,2 m³/h (53 %) | 38,6 m | 7,77 kW | 0,717 |
-| 75 % | 75,0 m³/h | 36,6 m | 9,45 kW | 0,791 |
-| Máximo rendimiento | 95,9 m³/h (96 %) | 32,9 m | 10,53 kW | 0,815 |
+| Válvula cerrada | 0 | 44,2 m | 4,71 kW (estimación) | 0 |
+| Inicio de la recirculación | 53,2 m³/h (53 %) | 41,2 m | 8,26 kW | 0,721 |
+| 75 % | 75,0 m³/h | 37,3 m | 9,60 kW | 0,791 |
+| Máximo rendimiento | 95,9 m³/h (96 %) | 33,0 m | 10,53 kW | 0,815 |
 | Diseño | 100,0 m³/h | 32,00 m | 10,68 kW | 0,814 |
 | 125 % | 125,0 m³/h | 25,0 m | 11,20 kW | 0,760 |
-| 150 % | 150,0 m³/h | 16,4 m | 10,99 kW | 0,609 |
+| 150 % | 150,0 m³/h | 16,1 m | 10,80 kW | 0,608 |
 
 Datos de partida: $\beta_{2B} = 22{,}0°$, $\gamma = 0{,}826$, $\tau_2 = 1{,}116$,
 $\varphi_2 = 0{,}116$, $n_q = 35{,}9$ y 7 álabes, que dan $\Delta h$ = 24,5 % y
-$\psi_0 = 1{,}142$ (las ecs. 3.27-3.28 darían 1,122).
+$\psi_0 = 1{,}142$ (las ecs. 3.27-3.28 darían 1,122). La curva calculada llega al inicio
+de la recirculación a 41,2 m, por encima de esos 40,2 m, así que $H_0$ sube a 44,2 m
+($\psi_0 = 1{,}267$). La fig. 4.10 da $\lambda_0 = 0{,}056$, el 44 % de la potencia de
+diseño.
 
 ## 2. Flujo potencial meridional
 
@@ -385,14 +438,18 @@ Solo entra en el análisis de pérdidas del punto de diseño (sección 9); la cu
 voluta frente al caudal sigue siendo la de Japikse.
 
 **Cómo entra en la curva (reparto propio).** La estadística de la ec. 4.14 describe
-bombas con volutas bien dimensionadas. Por eso:
+bombas con volutas bien dimensionadas, y su forma frente al caudal ya incluye lo que esas
+volutas pierden a carga parcial y en sobrecarga. Contar además la curva de pérdidas de la
+voluta real duplicaría esa parte. Por eso:
 
-1. En el punto de diseño, las pérdidas hidráulicas $(1 - \eta_h)H_{th}$ se reparten entre
-   una **voluta ajustada equivalente** (la misma con la garganta que da
-   $\lambda_6 \cdot AR = 1$) y el resto de la etapa.
-2. El resto conserva la forma estadística de la ec. 4.14.
-3. La voluta real añade sus propias pérdidas a cada caudal:
-   $H = H_{th} - h_{voluta}(Q) - h_{resto}(Q)$.
+1. Se define una **voluta ajustada equivalente**: la misma con la garganta que da
+   $\lambda_6 \cdot AR = 1$ en el punto de diseño.
+2. La ec. 4.14 da la forma de todas las pérdidas hidráulicas, las de esa voluta incluidas.
+3. La voluta real solo añade lo que pierde de más (o de menos) que la ajustada a cada
+   caudal: $H = \eta_h(Q)\,H_{th}(Q) - [h_{voluta}(Q) - h_{ajustada}(Q)]$.
+
+Con el análisis de pérdidas, $\eta_{h,max}$ sale de la suma con la voluta ajustada en lugar
+de la real, así que en el diseño la altura es la de la suma.
 
 Una voluta ajustada deja la curva casi igual. Una garganta pequeña pierde altura en el
 diseño, adelanta el máximo rendimiento y pierde mucha altura en sobrecarga. Una garganta
@@ -424,7 +481,7 @@ $\lambda = 4{,}23$ frente a 4,18 y $K = 0{,}053$ frente a 0,054.
 | Menor pérdida | al 99 % del caudal de diseño |
 | Rozamiento en las paredes | 0,81 m |
 | Altura en el diseño | 31,97 m con la estadística (la voluta está ajustada al 99 %); 32,32 m con el análisis de pérdidas, que deja menos fuga |
-| Máximo rendimiento | 93 % del caudal, η = 0,817 |
+| Máximo rendimiento | 95 % del caudal, η = 0,815, con la estadística; 94 %, η = 0,858, con el análisis de pérdidas |
 
 ## 6. Empuje radial
 
@@ -747,6 +804,62 @@ La suma queda a 0,2 puntos de la estadística en esta bomba. Una garganta de vol
 pierden 1,34 m y la espiral 1,54 m, y $\eta_h$ baja a 0,886: Gülich advierte de las
 pérdidas añadidas del canal exterior (cap. 7.8.1).
 
+**Rozamiento en la voluta con $n_q$ bajo.**
+
+- **Por qué crece.** En una voluta dimensionada por momento angular, la velocidad es el
+  vórtice libre del rodete, $c_u \approx c_{2u} r_2/r$, en toda la vuelta, así que no
+  depende del caudal que ya recogió cada sección. La potencia que disipan las paredes
+  queda $\approx (c_f + 0{,}0015)\,\rho\,c^3 A_{pared}$, y la pérdida de altura,
+  $Z \approx (c_f + 0{,}0015)\,c^3 A_{pared}/(2 g Q)$. Con $n_q$ bajo, $Q$ es pequeño
+  frente al área mojada y a $c^3$, así que la ec. T3.8.21 da una parte de $H_{th}$
+  varias veces mayor que con $n_q$ medio.
+- **Bomba de 240,8 m³/h, 83 m, 1750 rpm** ($n_q$ = 16,5, $c$ ≈ 18–22 m/s en toda la
+  espiral):
+
+  | Voluta | Paredes | Parte de $H_{th}$ |
+  |---|---|---|
+  | Simple | 6,6 m | 6,9 % |
+  | Doble con el nervio compensado | 8,2 m | — |
+  | Doble sin compensar | 11,0 m | — |
+
+  El canal exterior de la voluta doble suma pared, y sin compensar va a 20–26 m/s.
+- **Comparación:** la bomba de referencia ($n_q$ = 36) pierde en las paredes un 2,3 %.
+- **Comprobaciones hechas:**
+  - la ecuación sigue la T3.8.21;
+  - el modelo de Japikse que se suma no incluye rozamiento, así que no hay doble cuenta.
+- **Cuánto fiarse.** Con el nervio compensado, la suma de pérdidas queda 2,8 puntos por
+  debajo de la estadística ($\eta_h$ 0,843 frente a 0,871). Es coherente con lo que advierte Gülich: los valores
+  absolutos de la tabla 3.8 son imprecisos. Además, para el rodete, el mismo método da
+  un rozamiento que crece al bajar $n_q$ y que los ensayos no confirman (p. 110). No
+  aplicamos ninguna corrección.
+
+**Desglose del rendimiento.** Con el análisis de pérdidas, el rendimiento del diseño
+(con agua) se da también como producto:
+
+$$\eta = \eta_h\,\eta_v\,\eta_{RR}\,\eta_m$$
+
+| Factor | Definición | Fuente |
+|---|---|---|
+| $\eta_h$ | $H/H_{th}$ | — |
+| $\eta_v$ | $Q/(Q + Q_{sp})$, con la fuga a la altura del punto | ec. T3.5.9 |
+| $\eta_{RR}$ | $1 - \sum P_{RR}/P_i$, el rozamiento de disco | propia |
+| $\eta_m$ | $1 - P_m/P$ | ec. T3.5.6 |
+| $\eta_i$ | $\eta/\eta_m$, el rendimiento interno, con $P_i = P - P_m$ | ecs. T3.5.4 y T3.5.5 |
+
+Gülich no define un rendimiento del rozamiento de disco. El nuestro es la parte de la
+potencia interna que llega al fluido en los canales. Sale del balance de la ec. T3.5.1,
+$\rho g H_{th}(Q + Q_{sp}) = \eta_{RR}\,P_i$, así que el producto es exacto. Otros
+programas definen ese factor de otra forma, así que conviene comparar $\eta_v$ y $\eta_m$,
+que son las de Gülich. Las fugas entre etapas y del dispositivo de equilibrado de la
+ec. T3.5.1 no se modelan.
+
+Con las estadísticas (`losses=statistics`) no hay desglose. $\eta_m = \eta/(\eta_h\eta_v)$
+de las dimensiones principales incluye entonces el rozamiento de disco.
+
+En la bomba de referencia:
+
+$$0{,}856 = 0{,}909 \cdot 0{,}982 \cdot 0{,}975 \cdot 0{,}984, \qquad \eta_i = 0{,}870$$
+
 **Claves:** `--set losses=`, `seal_clearance=`, `seal_length=`, `seal_roughness=` y
 `axial_gap=`.
 
@@ -846,9 +959,10 @@ tabla 13.1.
 ## Limitaciones
 
 - **Curva:**
-  - el deslizamiento es constante con el caudal; la dependencia que muestra la estadística
-    del libro solo está en una figura;
-  - la potencia a válvula cerrada es una extrapolación.
+  - el deslizamiento frente al caudal y la potencia a válvula cerrada salen de ajustes
+    propios a las figs. 4.15 y 4.10, que tienen mucha dispersión;
+  - entre válvula cerrada y el inicio de la recirculación la curva se interpola; no puede
+    reconocer una curva inestable.
 - **NPSH₃:** la garganta de entrada de los álabes es una estimación. Con recirculación a
   la entrada el NPSH₃ real deja de bajar o sube, y eso no está modelado.
 - **Pérdidas hidráulicas:**

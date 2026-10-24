@@ -50,6 +50,8 @@ pub(crate) struct VoluteArgs {
     /// length (along the diffuser centerline) and
     /// outlet (discharge diffuser), incidence (cutwater), wall, type (single or double),
     /// rib_wrap (wrap of the inner volute of a double volute), rib (rib thickness),
+    /// rib_comp (on or off: the first partial volute grows by the rib from rib_comp_start
+    /// to the nose, so the outer channel starts with the area of the rule), rib_comp_start,
     /// rib_nose (length over thickness of the elliptic nose and tail of the rib, 1 for a
     /// semicircle), channel_ratio (outlet area of the outer channel over the first
     /// throat), discharge (radial, the default, with the outlet on the pump centerline,
@@ -691,6 +693,8 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
         "rib" => input.setup.rib_thickness = quantity(Length)?,
         "rib_nose" => input.setup.rib_nose_ratio = quantity(Dimensionless)?,
         "channel_ratio" => input.setup.channel_area_ratio = quantity(Dimensionless)?,
+        "rib_comp" => input.setup.rib_compensation = on_off(value)?,
+        "rib_comp_start" => input.setup.rib_compensation_start = quantity(Angle)?,
         "discharge" => input.diffuser.shape = parse_discharge(value)?,
         "bend" => input.diffuser.bend_radius = quantity(Length)?,
         "rotation" => input.diffuser.rotation = quantity(Angle)?,
@@ -925,6 +929,12 @@ fn print_report(name: &str, id: ComponentId, g: &VoluteGeometry, units: &Display
             s(Area, rib.channel_inlet_area),
             s(Area, rib.channel_outlet_area)
         );
+        if let Some(start) = rib.compensation_start {
+            println!(
+                "           rib compensation from {} to the nose: the base rises by the rib",
+                s(Angle, start)
+            );
+        }
         if let Some(r) = &g.rib {
             println!(
                 "           {} nose and tail (length {}): tip at {}   nearest to the axis {}",

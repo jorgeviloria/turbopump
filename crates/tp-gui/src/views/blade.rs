@@ -1,6 +1,7 @@
 //! Blade plots along the normalized meridional length m̄: blade angle, wrap angle,
 //! thickness and the relative velocity on both faces of every section, two rows of
-//! two under one legend, like the performance curves.
+//! two under one legend, like the performance curves. A second page draws the blade
+//! edges in true shape, to shape them by hand.
 
 use eframe::egui::{self, Ui};
 use egui_plot::{Line, LineStyle, Plot, PlotPoints};
@@ -9,9 +10,29 @@ use tp_design::impeller::loading::blade_velocities;
 use tp_project::ComponentId;
 use tp_units::{DisplayUnits, QuantityKind};
 
+use super::blade_edges::EdgesPage;
 use super::{Mark, Palette, marker, unavailable};
+use crate::app::{EditCtx, Selection};
 use crate::derived::Derived;
 use crate::i18n::{tf, tr};
+use tp_project::DesignStep;
+
+/// The pages of the blade view.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum BladePage {
+    #[default]
+    Plots,
+    Edges,
+}
+
+/// The blade view between frames.
+#[derive(Debug, Default)]
+pub(crate) struct BladeView {
+    pub page: BladePage,
+    pub edges: EdgesPage,
+    /// The step the page last followed.
+    followed: Option<Selection>,
+}
 
 /// Value of a blade section at a station, in display units.
 type Quantity<'a> = &'a dyn Fn(&BladeSection, usize) -> f64;
@@ -27,21 +48,48 @@ fn along(section: &BladeSection, value: impl Fn(usize) -> f64) -> PlotPoints<'st
         .collect()
 }
 
-/// The view, clear of the `cover` px the floating properties panel hides on the
-/// right.
-pub(crate) fn show(
-    ui: &mut Ui,
-    derived: &Derived,
-    id: ComponentId,
-    units: &DisplayUnits,
-    cover: f32,
-) {
-    let area = ui.available_rect_before_wrap();
-    let right = (area.max.x - cover).max(area.min.x + 320.0);
-    let clear = egui::Rect::from_min_max(area.min, egui::pos2(right, area.max.y));
-    ui.scope_builder(egui::UiBuilder::new().max_rect(clear), |ui| {
-        content(ui, derived, id, units);
-    });
+impl BladeView {
+    /// The view, clear of the `cover` px the floating properties panel hides on the
+    /// right. The blade-edge step opens the edges page, the other blade steps the plots.
+    pub(crate) fn show(
+        &mut self,
+        ui: &mut Ui,
+        cx: &mut EditCtx<'_>,
+        id: ComponentId,
+        units: &DisplayUnits,
+        cover: f32,
+    ) {
+        let selection = *cx.selection;
+        if self.followed != Some(selection) {
+            self.followed = Some(selection);
+            if let Selection::Step(_, step) = selection {
+                self.page = if step == DesignStep::BladeEdges {
+                    BladePage::Edges
+                } else {
+                    BladePage::Plots
+                };
+            }
+        }
+        let area = ui.available_rect_before_wrap();
+        let right = (area.max.x - cover).max(area.min.x + 320.0);
+        let clear = egui::Rect::from_min_max(area.min, egui::pos2(right, area.max.y));
+        ui.scope_builder(egui::UiBuilder::new().max_rect(clear), |ui| {
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut self.page, BladePage::Plots, tr("Blade plots"));
+                ui.selectable_value(&mut self.page, BladePage::Edges, tr("Edges"));
+            });
+            match self.page {
+                BladePage::Plots => content(ui, cx.derived, id, units),
+                BladePage::Edges => {
+                    if cx.derived.geometry(id).is_some() {
+                        self.edges.show(ui, cx, id, units);
+                    } else {
+                        content(ui, cx.derived, id, units);
+                    }
+                }
+            }
+        });
+    }
 }
 
 fn content(ui: &mut Ui, derived: &Derived, id: ComponentId, units: &DisplayUnits) {

@@ -201,6 +201,13 @@ pub struct VoluteSetupInput {
     /// Outlet area of the outer channel of a double volute over the throat area of the
     /// first partial volute.
     pub channel_area_ratio: Param<f64>,
+    /// Compensation of the rib of a double volute: from
+    /// [`Self::rib_compensation_start`] to the rib nose the first partial volute is
+    /// sized above a base that rises from r'_z to r'_z + e_rib (our construction).
+    pub rib_compensation: bool,
+    /// Wrap angle from the cutwater where the rib compensation starts, rad; automatic:
+    /// halfway to the rib nose.
+    pub rib_compensation_start: Param<f64>,
     /// Q_Le/Q_opt: allowance for leakage that flows through the volute (eq. T7.7.1).
     pub flow_factor: Param<f64>,
     /// Cutwater (base circle) diameter d_z, m.
@@ -555,6 +562,9 @@ pub struct Rib {
     /// less the rib) and at the discharge, m².
     pub channel_inlet_area: f64,
     pub channel_outlet_area: f64,
+    /// Wrap angle from the cutwater where the rib compensation starts, rad; `None`
+    /// without compensation.
+    pub compensation_start: Option<f64>,
 }
 
 impl Rib {
@@ -818,15 +828,23 @@ impl Shape {
 
 /// Height of the section of a partial volute of a double volute that collects the flow
 /// of the wrap `angle`, before the cutwater correction: by angular momentum, Pfleiderer's
-/// swirl or Stepanoff's velocity.
-fn partial_height(rule: &SpiralDevelopment, shape: &Shape, angle: f64) -> Result<f64, DesignError> {
+/// swirl or Stepanoff's velocity. The flow passes above the base `lift` over r'_z (the
+/// rib compensation), so the measure of the band below it is added to the target.
+fn partial_height(
+    rule: &SpiralDevelopment,
+    shape: &Shape,
+    angle: f64,
+    lift: f64,
+) -> Result<f64, DesignError> {
     let target = rule.reference_flow * angle / TAU / rule.reference_velocity;
+    let swirl = |exponent: f64| {
+        let below = shape.swirl_area(lift, rule.reference_radius, exponent);
+        shape.height_for_swirl(target + below, rule.reference_radius, exponent)
+    };
     match rule.law {
-        AreaLaw::Stepanoff => Ok(shape.height_for_area(target)),
-        AreaLaw::AngularMomentum => {
-            shape.height_for_swirl(target, rule.reference_radius, rule.exponent)
-        }
-        _ => shape.height_for_swirl(target, rule.reference_radius, 1.0),
+        AreaLaw::Stepanoff => Ok(shape.height_for_area(target + shape.area(lift))),
+        AreaLaw::AngularMomentum => swirl(rule.exponent),
+        _ => swirl(1.0),
     }
 }
 
@@ -1098,14 +1116,21 @@ impl VoluteDesign {
         };
         let rule = development.clone();
         let partial_throat =
-            |wrap: f64, blockage: f64| -> Result<(SectionSize, f64), DesignError> {
-                let a = partial_height(&rule, &section, wrap)?;
+            |wrap: f64, blockage: f64, lift: f64| -> Result<(SectionSize, f64), DesignError> {
+                // With constant velocity the sections grow in area (eq. 7.27); the band of the
+                // compensation adds its own area, as in the sections before the throat.
+                let a = if law == AreaLaw::ConstantVelocity {
+                    let plain = partial_height(&rule, &section, wrap, 0.0)?;
+                    section.height_for_area(section.area(plain) + section.area(lift))
+                } else {
+                    partial_height(&rule, &section, wrap, lift)?
+                };
                 let correction = correction_for(blockage, a);
                 Ok((section.size(a + correction), correction))
             };
         let inner_wrap = rib_wrap.unwrap_or(TAU);
         let (throat, throat_correction, throat_aspect) = if rib_wrap.is_some() {
-            let (throat, correction) = partial_throat(inner_wrap, cutwater_thickness)?;
+            let (throat, correction) = partial_throat(inner_wrap, cutwater_thickness, 0.0)?;
             let aspect = (inlet_width + 2.0 * section.slope() * throat.height) / throat.height;
             (throat, correction, aspect)
         } else {
@@ -1218,7 +1243,25 @@ impl VoluteDesign {
                 require(thickness > 0.0, || {
                     "the rib thickness must be positive".into()
                 })?;
-                let (outer_throat, _) = partial_throat(start, thickness)?;
+                // The compensation makes room for the rib instead of eq. 7.28.
+                let compensation_start = if setup.rib_compensation {
+                    let at = setup.rib_compensation_start.resolve(|| start / 2.0);
+                    require(at >= 0.0 && at < start - 1f64.to_radians(), || {
+                        format!(
+                            "the rib compensation must start between the cutwater and the rib \
+                             nose at {:.0}°, got {:.1}°",
+                            start.to_degrees(),
+                            at.to_degrees()
+                        )
+                    })?;
+                    Some(at)
+                } else {
+                    None
+                };
+                let (outer_throat, _) = match compensation_start {
+                    Some(_) => partial_throat(start, 0.0, thickness)?,
+                    None => partial_throat(start, thickness, 0.0)?,
+                };
                 require(outer_throat.height > 1.5 * thickness, || {
                     format!(
                         "the rib ({:.1} mm) is too thick for the {:.1} mm high throat of the \
@@ -1246,6 +1289,7 @@ impl VoluteDesign {
                     outer_throat,
                     channel_inlet_area: outer_throat.area - section.area(thickness),
                     channel_outlet_area: outer_throat.area * ratio,
+                    compensation_start,
                 })
             }
         };
@@ -1487,9 +1531,16 @@ impl VoluteDesign {
     pub fn section(&self, angle: f64) -> Result<SectionSize, DesignError> {
         let e3 = self.cutwater_thickness;
         match &self.rib {
-            Some(rib) if angle > rib.start => self.partial_section(angle - rib.start, rib.wrap, e3),
+            Some(rib) if angle > rib.start => {
+                self.partial_section(angle - rib.start, rib.wrap, e3, None)
+            }
             // The first partial volute ends at the rib nose.
-            Some(rib) => self.partial_section(angle, rib.start, rib.thickness),
+            Some(rib) => self.partial_section(
+                angle,
+                rib.start,
+                rib.thickness,
+                rib.compensation_start.map(|at| (at, rib.thickness)),
+            ),
             None => self.spiral_section(angle),
         }
     }
@@ -1513,6 +1564,33 @@ impl VoluteDesign {
             .lifted_outline(angle, size.height, size.lift)
     }
 
+    /// J_sp = Σ ∬ dA/r over the throats the flow enters the collector through, m: the
+    /// throat of a single volute; with a double volute, the throat of the inner volute
+    /// plus the outer channel at the rib nose, beyond the rib (Gülich 2nd ed., Table 4.1
+    /// and eq. 4.13, which gives it for rectangular throats).
+    pub fn throat_integral(&self) -> Result<f64, DesignError> {
+        match &self.rib {
+            Some(rib) => {
+                let shape = self.shape();
+                let channel = shape.momentum_integral(rib.outer_throat.height)
+                    - shape.momentum_integral(rib.thickness);
+                Ok(shape.momentum_integral(self.throat.height) + channel)
+            }
+            None => {
+                let r = self.stagnation_radius;
+                let swirl = Measure::Swirl {
+                    exponent: 1.0,
+                    reference_radius: r,
+                };
+                let lift = self.throat.lift;
+                Ok(self
+                    .cross_sections
+                    .measure(TAU, self.throat.height, lift, swirl)?
+                    / r)
+            }
+        }
+    }
+
     /// Properties of the end section of a single volute, at the throat.
     pub fn end_section(&self) -> Result<SectionProperties, DesignError> {
         self.cross_sections
@@ -1521,16 +1599,22 @@ impl VoluteDesign {
 
     /// Section at `angle` of a partial volute of wrap `wrap`, whose throat is sized by
     /// angular momentum for the flow of its wrap (Gülich Chap. 7.8.1, item 8) and
-    /// enlarged for a nose of thickness `blockage` at its end (eq. 7.28).
+    /// enlarged for a nose of thickness `blockage` at its end (eq. 7.28). With a
+    /// compensation `(start, rise)` the base under the flow rises linearly from r'_z at
+    /// `start` to r'_z + rise at the end instead, and eq. 7.28 is left out.
     fn partial_section(
         &self,
         angle: f64,
         wrap: f64,
         blockage: f64,
+        compensation: Option<(f64, f64)>,
     ) -> Result<SectionSize, DesignError> {
         let shape = self.shape();
-        let end = partial_height(&self.development, &shape, wrap)?;
-        let correction = if self.throat_corrected {
+        let lift = compensation.map_or(0.0, |(start, rise)| {
+            rise * ((angle - start) / (wrap - start)).clamp(0.0, 1.0)
+        });
+        let end = partial_height(&self.development, &shape, wrap, 0.0)?;
+        let correction = if self.throat_corrected && compensation.is_none() {
             0.2 * blockage * blockage / end
         } else {
             0.0
@@ -1538,8 +1622,10 @@ impl VoluteDesign {
         let fraction = (angle / wrap).clamp(0.0, 1.0);
         let height = match self.law {
             // Eq. 7.27 on the uncorrected throat, then the correction ramps up.
-            AreaLaw::ConstantVelocity => shape.height_for_area(shape.area(end) * fraction),
-            _ => partial_height(&self.development, &shape, angle.clamp(0.0, wrap))?,
+            AreaLaw::ConstantVelocity => {
+                shape.height_for_area(shape.area(end) * fraction + shape.area(lift))
+            }
+            _ => partial_height(&self.development, &shape, angle.clamp(0.0, wrap), lift)?,
         };
         Ok(shape.size(height + correction * fraction))
     }
@@ -2209,6 +2295,86 @@ mod tests {
             rib.outer_throat.height,
             max_relative = 1e-12
         );
+    }
+
+    #[test]
+    fn the_rib_compensation_gives_the_outer_channel_the_area_of_the_rule() {
+        let setup = |v: &mut VoluteInput| {
+            v.cross_section = CrossSectionInput::single(SectionShape::rectangular());
+            v.spiral.law = AreaLaw::AngularMomentum;
+            v.spiral.cutwater_correction = false;
+        };
+        let plain = double_with(setup).unwrap();
+        let d = double_with(|v| {
+            setup(v);
+            v.setup.rib_compensation = true;
+        })
+        .unwrap();
+        let (p, rib) = (plain.rib.unwrap(), d.rib.unwrap());
+        let start = rib.compensation_start.unwrap();
+        assert_relative_eq!(start, rib.start / 2.0);
+        // Without it the rib takes its band out of the outer channel at the nose; with
+        // it the channel above the rib carries the flow of the rule. Further out, the
+        // same ∫b/r dr needs a little more area than the plain throat.
+        assert_relative_eq!(
+            p.channel_inlet_area,
+            p.outer_throat.area - d.inlet_width * p.thickness,
+            max_relative = 1e-12
+        );
+        assert!(rib.channel_inlet_area > p.outer_throat.area);
+        assert!(rib.channel_inlet_area < 1.1 * p.outer_throat.area);
+        let above = d.momentum_integral(rib.start, rib.outer_throat.height)
+            - d.momentum_integral(rib.start, rib.thickness);
+        assert_relative_eq!(
+            above,
+            d.momentum_integral(rib.start, p.outer_throat.height),
+            max_relative = 1e-9
+        );
+        // Before the start nothing changes; past it the sections grow smoothly to the
+        // compensated throat at the nose.
+        let at = |v: &VoluteDesign, angle: f64| v.section(angle).unwrap().area;
+        assert_relative_eq!(
+            at(&d, 0.9 * start),
+            at(&plain, 0.9 * start),
+            max_relative = 1e-12
+        );
+        assert!(at(&d, 0.5 * (start + rib.start)) > at(&plain, 0.5 * (start + rib.start)));
+        assert_relative_eq!(
+            d.section(rib.start).unwrap().height,
+            rib.outer_throat.height,
+            max_relative = 1e-9
+        );
+        // The inner volute is not touched.
+        assert_relative_eq!(d.throat.area, plain.throat.area, max_relative = 1e-12);
+        // A start past the nose is refused.
+        assert!(
+            double_with(|v| {
+                setup(v);
+                v.setup.rib_compensation = true;
+                v.setup.rib_compensation_start = Param::Manual(1.1 * PI);
+            })
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn the_throat_integral_is_the_flow_over_the_swirl() {
+        // Sized by angular momentum without correction, the throat integral J_sp is
+        // Q_Le/(c_u·r) for a single volute (eq. 7.24), and the same for the two partial
+        // throats of a double volute with its rib compensated.
+        let single = design_with(SectionShape::rectangular(), AreaLaw::AngularMomentum);
+        let k = single.flow / (reference_basis().cu * 0.086);
+        let j = single.throat_integral().unwrap();
+        // The single volute keeps its cutwater correction of eq. 7.28: a little more.
+        assert!(j > k && j < 1.05 * k, "{j} vs {k}");
+        let d = double_with(|v| {
+            v.cross_section = CrossSectionInput::single(SectionShape::rectangular());
+            v.spiral.law = AreaLaw::AngularMomentum;
+            v.spiral.cutwater_correction = false;
+            v.setup.rib_compensation = true;
+        })
+        .unwrap();
+        assert_relative_eq!(d.throat_integral().unwrap(), k, max_relative = 1e-6);
     }
 
     #[test]

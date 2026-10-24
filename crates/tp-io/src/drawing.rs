@@ -214,20 +214,16 @@ const TEXT_FRACTION: f64 = 0.018;
 pub fn meridional(g: &ImpellerGeometry) -> Drawing {
     let r2 = g.basis.outlet_diameter / 2.0;
     let length = g.contour.axial_length;
+    // From a tenth of the length ahead of the inlet to a tenth past the outlet.
+    let (z0, z1) = (
+        g.contour.hub.start().x - 0.1 * length,
+        g.contour.hub.end().x + 0.1 * length,
+    );
     let mut d = Drawing::new(
         "Turbopump impeller: meridional section",
-        (
-            DVec2::new(-0.1 * length, 0.0),
-            DVec2::new(1.1 * length, 1.05 * r2),
-        ),
+        (DVec2::new(z0, 0.0), DVec2::new(z1, 1.05 * r2)),
     );
-    d.add(
-        AXIS,
-        Shape::Line(
-            DVec2::new(-0.1 * length, 0.0),
-            DVec2::new(1.1 * length, 0.0),
-        ),
-    );
+    d.add(AXIS, Shape::Line(DVec2::new(z0, 0.0), DVec2::new(z1, 0.0)));
     for q in g.channel.quasi_orthogonals.iter().step_by(4) {
         d.add(CONSTRUCTION, Shape::Line(q.hub, q.shroud));
     }
@@ -235,7 +231,7 @@ pub fn meridional(g: &ImpellerGeometry) -> Drawing {
         d.polyline(STREAMLINES, span.points.clone(), false);
     }
     for wall in [&g.contour.hub, &g.contour.shroud] {
-        for segment in wall.segments() {
+        for segment in wall.pieces() {
             d.add(
                 CONTOUR,
                 if segment.degree() == 1 {
@@ -372,8 +368,8 @@ mod tests {
         assert_eq!(
             curves,
             [
-                &g.contour.hub.segments()[0],
-                &g.contour.shroud.segments()[0]
+                &g.contour.hub.segments()[0].pieces()[0],
+                &g.contour.shroud.segments()[0].pieces()[0]
             ]
         );
         assert_eq!(

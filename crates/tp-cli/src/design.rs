@@ -337,6 +337,15 @@ fn print_report(
     if !input.outlet_blade_angle.is_auto() {
         println!("         β2B is manual: the head sets d2 (or b2 when d2 is manual)");
     }
+    let (q1, q2) = (d.at_pump_flow(&d.inlet_mean.triangle), d.at_pump_flow(t));
+    println!(
+        "With Q   cm1 {}   β1 {} (mean)   cm2 {}   w2 {}   β2 {}   (pump flow Q = η_v·Q_La)",
+        s(Velocity, q1.cm),
+        s(Angle, q1.beta()),
+        s(Velocity, q2.cm),
+        s(Velocity, q2.w()),
+        s(Angle, q2.beta())
+    );
     println!(
         "Checks   δ2 = β2B − β2 {} (≤ {}°)   w2/w1 {:.2} (≥ {})",
         s(Angle, d.deviation_angle),
@@ -359,6 +368,20 @@ fn print_report(
         tag(&input.suction_specific_speed),
         s(Head, d.npsh_available)
     );
+    let band = &d.npsh_band;
+    println!(
+        "            NPSH3 band {} to {} by the published methods (estimates; NPSH3 is a test result)",
+        s(Head, band.low),
+        s(Head, band.high)
+    );
+    for e in &band.estimates {
+        let value = if (e.high - e.low).abs() < 1e-9 {
+            s(Head, e.low)
+        } else {
+            format!("{} to {}", s(Head, e.low), s(Head, e.high))
+        };
+        println!("              {:<28} {value}", e.method.name());
+    }
 
     if !d.warnings.is_empty() {
         println!();

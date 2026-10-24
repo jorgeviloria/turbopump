@@ -196,6 +196,32 @@ fn setup(
                 &units,
                 0.8..=3.0,
             );
+            label(
+                ui,
+                tr("Compensate the rib"),
+                tr(
+                    "From φ_C to the rib nose the first partial volute grows by the rib, so the \
+                    outer channel starts with the flow area of the rule instead of accelerating \
+                    past the rib. Our construction, in place of eq. 7.28 for the rib",
+                ),
+            );
+            ui.checkbox(&mut input.setup.rib_compensation, "");
+            ui.end_row();
+            if input.setup.rib_compensation {
+                param_f64(
+                    ui,
+                    tr("Rib compensation start φ_C"),
+                    tr(
+                        "Wrap angle from the cutwater where the base starts to rise; \
+                        automatic: halfway to the rib nose",
+                    ),
+                    &mut input.setup.rib_compensation_start,
+                    Angle,
+                    rib.and_then(|r| r.compensation_start),
+                    &units,
+                    0.0..=359f64.to_radians(),
+                );
+            }
         }
     });
     if let Some(g) = g {
