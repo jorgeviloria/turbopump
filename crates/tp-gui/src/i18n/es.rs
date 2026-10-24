@@ -3403,12 +3403,12 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("the seal exit", "la salida del anillo"),
     ("the neck tip", "la punta del cuello"),
     ("edit inlet duct", "editar la tubería de entrada"),
-    ("Length L", "Longitud L"),
+    ("Duct length L_t", "Longitud de la tubería L_t"),
     (
         "Upstream of the eye; automatic: the eye diameter d₁ (our choice)",
         "Aguas arriba de la boca; automático: el diámetro de la boca d₁ (elección nuestra)",
     ),
-    ("Duct diameter", "Diámetro de la tubería"),
+    ("Duct diameter d_t", "Diámetro de la tubería d_t"),
     (
         "Automatic: the shroud diameter at the inlet, so the wall carries straight on",
         "Automático: el diámetro de la tapa en la entrada, para que la pared siga recta",

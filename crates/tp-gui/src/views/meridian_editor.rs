@@ -42,12 +42,14 @@ impl MeridionalView {
             }
         };
         let units = cx.units();
-        // On opening, and in a new scope, frame the drawing with its dimensions, which
-        // the plot leaves out of its own bounds.
-        if !self.framed || self.shown_scope != Some(self.scope) {
+        // On opening, in a new scope, and when an inlet duct comes or goes, frame the
+        // drawing with its dimensions, which the plot leaves out of its own bounds.
+        let duct = cx.derived.duct_before(id).is_some();
+        if !self.framed || self.shown_scope != Some(self.scope) || self.framed_duct != duct {
             self.fit = Some(self.scope.fit());
             self.framed = true;
             self.shown_scope = Some(self.scope);
+            self.framed_duct = duct;
         }
         let current = cx
             .doc

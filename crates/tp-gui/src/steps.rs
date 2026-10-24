@@ -3146,7 +3146,7 @@ fn duct_dimensions(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Com
         props(ui, "inlet_duct", |ui| {
             changed |= param_f64(
                 ui,
-                tr("Length L"),
+                tr("Duct length L_t"),
                 tr("Upstream of the eye; automatic: the eye diameter d₁ (our choice)"),
                 &mut input.length,
                 Length,
@@ -3156,7 +3156,7 @@ fn duct_dimensions(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Com
             );
             changed |= param_f64(
                 ui,
-                tr("Duct diameter"),
+                tr("Duct diameter d_t"),
                 tr("Automatic: the shroud diameter at the inlet, so the wall carries straight on"),
                 &mut input.diameter,
                 Length,

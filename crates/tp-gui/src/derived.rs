@@ -126,6 +126,14 @@ impl Derived {
         self.duct_result(id).and_then(|r| r.as_ref().ok())
     }
 
+    /// The inlet duct component ahead of impeller `impeller`, if there is one.
+    pub fn duct_id_before(&self, impeller: ComponentId) -> Option<ComponentId> {
+        self.ducts
+            .iter()
+            .find(|(_, (after, _))| *after == impeller)
+            .map(|(id, _)| *id)
+    }
+
     /// The inlet duct ahead of impeller `impeller`, when it was built.
     pub fn duct_before(&self, impeller: ComponentId) -> Option<&InletDuct> {
         self.ducts

@@ -2527,6 +2527,7 @@ mod tests {
                 geometry: &geometry,
                 main: main.as_ref(),
                 semi_axial: false,
+                duct: None,
             },
         )
     }
@@ -2751,6 +2752,85 @@ mod tests {
         harness.get_by_label_contains("Accept step").click();
         harness.run();
         assert!(harness.state().doc.project().components()[0].is_complete());
+    }
+
+    #[test]
+    fn the_inlet_duct_is_dimensioned_and_typed_in_the_meridian() {
+        use crate::views::meridional::{Dimension, duct_lines};
+        let mut harness = editor();
+        let id = harness.state().active_impeller().unwrap();
+        harness
+            .get_all_by_label("Add component")
+            .next()
+            .unwrap()
+            .click();
+        harness.run();
+        harness.get_by_label_contains("Inlet duct").click();
+        harness.run();
+        harness.run();
+        let duct_id = harness.state().doc.project().components()[0].id();
+        let middle = |harness: &Harness<'_, TurbopumpApp>, dimension: Dimension| {
+            let app = harness.state();
+            let g = app.derived.geometry(id).unwrap();
+            let line = duct_lines(app.derived.duct(duct_id).unwrap(), &g.basis)
+                .into_iter()
+                .find(|l| l.dimension == dimension)
+                .unwrap();
+            let p = line.from.lerp(line.to, 0.5);
+            let scale = app
+                .doc
+                .project()
+                .display_units
+                .to_display(QuantityKind::Length, 1.0);
+            app.meridional
+                .transform()
+                .unwrap()
+                .position_from_point(&PlotPoint::new(p.x * scale, p.y * scale))
+        };
+        // Framed again with the duct, its dimensions in sight.
+        let frame = *harness.state().meridional.transform().unwrap().frame();
+        for dimension in [Dimension::DuctLength, Dimension::DuctDiameter] {
+            let at = middle(&harness, dimension);
+            assert!(
+                frame.contains(at),
+                "{dimension:?} at {at:?}, out of {frame:?}"
+            );
+        }
+        // The value of the length under the pointer shades its row.
+        let at = middle(&harness, Dimension::DuctLength);
+        harness.hover_at(at);
+        harness.run();
+        harness.run();
+        assert!(crate::widgets::drawing_hovers(
+            &harness.ctx,
+            "Duct length L_t"
+        ));
+        // Typed on the dimension, it sets the duct by hand.
+        click_with(&mut harness, at, egui::PointerButton::Primary);
+        harness
+            .input_mut()
+            .events
+            .push(egui::Event::Text("120".into()));
+        harness.run();
+        harness.key_press(egui::Key::Enter);
+        harness.run();
+        let input = harness.state().doc.project().duct_input(duct_id).unwrap();
+        assert!(
+            input
+                .length
+                .manual_value()
+                .is_some_and(|l| (l - 0.12).abs() < 1e-12),
+            "{input:?}"
+        );
+        // The diameter is there too, and its row points at it.
+        let at = middle(&harness, Dimension::DuctDiameter);
+        harness.hover_at(at);
+        harness.run();
+        harness.run();
+        assert!(crate::widgets::drawing_hovers(
+            &harness.ctx,
+            "Duct diameter d_t"
+        ));
     }
 
     #[test]

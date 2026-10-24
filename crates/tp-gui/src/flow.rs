@@ -785,7 +785,7 @@ pub(crate) fn key_value(
         (ComponentKind::InletDuct, DuctDimensions) => {
             let d = cx.derived.duct(id)?;
             Some(format!(
-                "L {} · d {} {length}",
+                "L_t {} · d_t {} {length}",
                 short(units, QuantityKind::Length, d.values.length),
                 short(units, QuantityKind::Length, d.values.diameter)
             ))

@@ -10,6 +10,7 @@ use egui_plot::{
     Corner, Legend, Line, LineStyle, MarkerShape, Plot, PlotBounds, PlotPoint, PlotPoints,
     PlotTransform, Points, Polygon, Text,
 };
+use tp_design::impeller::duct::{DuctInput, InletDuct};
 use tp_design::impeller::meridian::{
     AxialReference, DesignMode, EdgeExtent, InletTilt, LeadingEdgeShape, MeridionalContour,
     MeridionalInput, chord_coordinates,
@@ -469,6 +470,8 @@ pub(crate) enum Change {
     Main(CentrifugalPumpInput),
     /// Both at once, as the hub end of a semi-axial outlet: L and d₂i.
     Both(Box<(ImpellerGeometryInput, CentrifugalPumpInput)>),
+    /// The inlet duct ahead of the impeller, a component of its own.
+    Duct(ComponentId, DuctInput),
 }
 
 impl Change {
@@ -484,6 +487,7 @@ impl Change {
                 p.set_main_dimensions(id, MainDimensionsInput::CentrifugalPump(main))?;
                 p.set_impeller_geometry(id, geometry)
             }),
+            Change::Duct(duct, input) => cx.edit(label, |p| p.set_duct(duct, input)),
         };
     }
 }
@@ -496,6 +500,8 @@ pub(crate) struct Inputs<'a> {
     pub main: Option<&'a CentrifugalPumpInput>,
     /// Whether the outlet is semi-axial: its hub end has a diameter d₂i of its own.
     pub semi_axial: bool,
+    /// The inlet duct ahead of the impeller, if there is one, and its inputs.
+    pub duct: Option<(ComponentId, DuctInput)>,
 }
 
 impl Inputs<'_> {
@@ -525,6 +531,14 @@ impl Inputs<'_> {
         let mut input = current.clone();
         edit(&mut input);
         (input != *current).then_some(Change::Main(input))
+    }
+
+    /// The inputs of the inlet duct changed by `edit`, if that changes them.
+    fn duct(&self, edit: impl FnOnce(&mut DuctInput)) -> Option<Change> {
+        let (id, current) = self.duct?;
+        let mut input = current;
+        edit(&mut input);
+        (input != current).then_some(Change::Duct(id, input))
     }
 }
 
@@ -833,6 +847,9 @@ pub(crate) enum Dimension {
     OutletDiameter,
     /// Radius of the rounded corner of an arc segment of a wall.
     ArcRadius(Side, usize),
+    /// Length and diameter of the inlet duct ahead of the impeller.
+    DuctLength,
+    DuctDiameter,
     /// Axial position of a handle, from the inlet plane.
     Z(Handle),
     /// Radius of a handle, from the axis.
@@ -848,6 +865,8 @@ impl Dimension {
             Dimension::InletDiameter => tr("Eye diameter d₁").to_owned(),
             Dimension::OutletDiameter => tr("Outlet diameter d₂").to_owned(),
             Dimension::ArcRadius(..) => tr("Corner radius R").to_owned(),
+            Dimension::DuctLength => tr("Duct length L_t").to_owned(),
+            Dimension::DuctDiameter => tr("Duct diameter d_t").to_owned(),
             Dimension::Z(h) => tf("z of the {}", &[&h.label()]),
             Dimension::R(h) => tf("r of the {}", &[&h.label()]),
         }
@@ -862,6 +881,8 @@ impl Dimension {
             Dimension::InletDiameter => Some("d₁"),
             Dimension::OutletDiameter => Some("d₂"),
             Dimension::ArcRadius(..) => Some("R"),
+            Dimension::DuctLength => Some("L_t"),
+            Dimension::DuctDiameter => Some("d_t"),
             Dimension::Z(_) | Dimension::R(_) => None,
         }
     }
@@ -1027,6 +1048,38 @@ pub(crate) fn dimension_lines(
     lines
 }
 
+/// The dimensions of the inlet `duct` ahead of the impeller: its length under the
+/// axis, where the axial dimensions of the impeller go, and its diameter left of its
+/// inlet (our own layout, as for the impeller).
+pub(crate) fn duct_lines(duct: &InletDuct, basis: &ImpellerBasis) -> Vec<DimensionLine> {
+    let Some(upstream) = duct.inlet_z() else {
+        return Vec::new();
+    };
+    let gap = 0.07 * basis.outlet_diameter / 2.0;
+    let v = duct.values;
+    let (end, r) = (upstream + v.length, v.diameter / 2.0);
+    let (y, x) = (-gap, upstream - gap);
+    vec![
+        DimensionLine {
+            dimension: Dimension::DuctLength,
+            from: DVec2::new(upstream, y),
+            to: DVec2::new(end, y),
+            extensions: vec![
+                [DVec2::new(upstream, 0.0), DVec2::new(upstream, y)],
+                [DVec2::new(end, 0.0), DVec2::new(end, y)],
+            ],
+            value: v.length,
+        },
+        DimensionLine {
+            dimension: Dimension::DuctDiameter,
+            from: DVec2::new(x, 0.0),
+            to: DVec2::new(x, r),
+            extensions: vec![[DVec2::new(upstream, r), DVec2::new(x, r)]],
+            value: v.diameter,
+        },
+    ]
+}
+
 /// The change that sets dimension `dimension` to `value` (m), if it changes anything.
 fn set_dimension(
     dimension: Dimension,
@@ -1054,6 +1107,12 @@ fn set_dimension(
         }
         Dimension::OutletDiameter => {
             return inputs.main(|m| m.outlet_diameter = Param::Manual(length));
+        }
+        Dimension::DuctLength => {
+            return inputs.duct(|d| d.length = Param::Manual(length));
+        }
+        Dimension::DuctDiameter => {
+            return inputs.duct(|d| d.diameter = Param::Manual(length));
         }
         Dimension::ArcRadius(side, segment) => {
             return inputs.geometry(|input| {
@@ -1650,6 +1709,9 @@ pub(crate) struct MeridionalView {
     pub(crate) pointer: Option<DVec2>,
     /// Whether the view has framed its drawing since it was last opened.
     pub(crate) framed: bool,
+    /// Whether an inlet duct was drawn when it last framed: one coming or going frames
+    /// the drawing again.
+    pub(crate) framed_duct: bool,
     /// The distance being measured with Alt and a drag, from and to (z, r) in m.
     measure: Option<(DVec2, DVec2)>,
     /// Guide lines of the snap acting on the dragged point, (z, r) in m.
@@ -1675,6 +1737,7 @@ impl Default for MeridionalView {
             dimension_edit: None,
             pointer: None,
             framed: false,
+            framed_duct: false,
             measure: None,
             guides: Vec::new(),
             references: Vec::new(),
@@ -1826,10 +1889,15 @@ impl MeridionalView {
         // The inlet duct ahead of the impeller, a component of its own.
         let inlet_duct = cx.derived.duct_before(id).cloned();
         let main = cx.doc.project().pump_impeller_input(id).ok();
+        let duct_input = cx.derived.duct_id_before(id).and_then(|duct| {
+            let input = cx.doc.project().duct_input(duct).ok()?;
+            Some((duct, input))
+        });
         let inputs = Inputs {
             geometry: current,
             main: main.as_ref(),
             semi_axial: g.basis.outlet_inclination > 0.0,
+            duct: duct_input,
         };
 
         let center_mode = current.meridional.design_mode == DesignMode::CenterLine;
@@ -1864,10 +1932,19 @@ impl MeridionalView {
         // point under the pointer.
         let permanent = display.dimensions && display.page == Page::FlowPath;
         let mut dimensions = dimension_lines(&g.contour, &g.basis, permanent, active);
+        // The inlet duct is drawn on every page: its dimensions too.
+        let duct_dimensions = inlet_duct
+            .as_ref()
+            .map(|d| duct_lines(d, &g.basis))
+            .unwrap_or_default();
+        if display.dimensions {
+            dimensions.extend(duct_dimensions.iter().cloned());
+        }
         // The property row under the pointer shows its dimension, drawn or not.
         let row_dimension = crate::widgets::hovered_row(ui.ctx()).and_then(|row| {
             dimension_lines(&g.contour, &g.basis, true, None)
                 .into_iter()
+                .chain(duct_dimensions.iter().cloned())
                 .find(|d| d.dimension.label() == row)
         });
         if let Some(line) = &row_dimension
@@ -1928,6 +2005,10 @@ impl MeridionalView {
                 .iter()
                 .flat_map(|d| [d.from, d.to]),
         );
+        if let Some(duct) = &inlet_duct {
+            outline.extend(&duct.outline);
+            outline.extend(duct_dimensions.iter().flat_map(|d| [d.from, d.to]));
+        }
         let meridian_bounds = extent(&outline);
 
         let sections = &g.blade.sections;
@@ -3414,6 +3495,7 @@ mod tests {
             geometry: &input,
             main: Some(&main),
             semi_axial: false,
+            duct: None,
         };
         let drawn = tp_design::impeller::build(&g.basis, &input).unwrap();
         let joint = Handle::Point(Side::Hub, WallPoint::Joint { segment: 0 });
@@ -3458,6 +3540,7 @@ mod tests {
             geometry: &input,
             main: None,
             semi_axial: false,
+            duct: None,
         };
         assert_eq!(
             set_dimension(Dimension::OutletDiameter, 0.2, &drawn, geometry_only),
@@ -3474,6 +3557,7 @@ mod tests {
             geometry: &input,
             main: Some(&main),
             semi_axial: false,
+            duct: None,
         };
         // Dragged 5 mm outwards, the trailing edge sets d₂ 10 mm larger, by hand.
         let edge = handle_position(Handle::TrailingEdge, &g.contour);
@@ -3492,6 +3576,7 @@ mod tests {
             geometry: &input,
             main: Some(&dragged),
             semi_axial: false,
+            duct: None,
         };
         assert!(is_manual(Handle::TrailingEdge, after));
         assert_eq!(
@@ -3509,6 +3594,7 @@ mod tests {
             geometry: &moved,
             main: Some(&main),
             semi_axial: false,
+            duct: None,
         };
         assert!(is_manual(Handle::ShroudInlet, moved_inputs));
         assert_eq!(
