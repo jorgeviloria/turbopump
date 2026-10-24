@@ -84,29 +84,42 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
   - *Curves*: los ajustes de la predicción y el resto de resultados.
 
   A la izquierda de las pestañas están el menú *File* (abre, guarda, exporta y da los
-  ajustes) y el acceso rápido al árbol, guardar, deshacer y rehacer; a la derecha, los
+  ajustes) y el acceso rápido al flujo de diseño, guardar, deshacer y rehacer; a la derecha, los
   ajustes, la ayuda y el botón que pliega las herramientas (las pestañas siguen
   eligiendo la vista).
 - **Franja de objetivo** (bajo la barra): el punto de diseño pedido (Q, H, n, fluido y
   nq) frente a lo previsto para el rodete (altura con su desviación y tolerancia,
   rendimiento, potencia, NPSH₃ frente al NPSH disponible y caudal óptimo), siempre a la
   vista. La tolerancia de altura sale de la clase de calidad G1–G3 de ISO 9906 según
-  Gülich, tabla 15.2, y se cambia en *Global setup › Acceptance* sin desactualizar
+  Gülich, tabla 15.2, y se cambia en *Design point and fluid › Acceptance* sin desactualizar
   ningún paso. Un clic en el objetivo abre el punto de diseño; en lo previsto, las
   curvas.
-- **Columna de componentes** (izquierda): la configuración global y un pictograma por
-  componente, con un punto verde si está terminado o naranja si quedó desactualizado.
-  El botón + añade un rodete, un difusor con o sin álabes o una voluta, simple o doble
-  (con nervio de nariz redonda o elíptica, que reduce el empuje radial). La voluta
-  admite descarga radial (por defecto, central sobre la línea del eje de la bomba) o
-  tangencial, abierta a ambos lados o con una pared recta. Por defecto gira para que
-  la descarga quede vertical. El corte de agua puede ser tangente, afilado o redondeado con su
-  radio.
-- **Panel izquierdo**, que se pliega con un botón para dejar más sitio a la vista, con
-  dos pestañas:
-  - *Design*: los pasos de cada componente, con su estado (pendiente, hecho o
-    desactualizado porque cambió un dato anterior) y sus avisos;
+- **Flujo de diseño** (izquierda), con dos pestañas:
+  - *Design*: el recorrido del diseño de arriba abajo:
+    - el punto de diseño y el fluido, con su resumen;
+    - los componentes en el orden en que los atraviesa el fluido, de la entrada a la
+      salida, unidos por una línea del color de cada uno. Cada componente muestra sus
+      pasos agrupados en fases, el estado de cada paso (pendiente, hecho o
+      desactualizado porque cambió un dato anterior), una cifra clave de los pasos
+      hechos (d₂ y b₂, L, z y β₂B, b₃, el área de la garganta o d_z), la marca del
+      siguiente paso, y en la cabecera su avance, los avisos y los pasos por revisar;
+    - los resultados: curvas, informe, sólidos CAD (con candado mientras falten
+      pasos) y dibujos y mallas.
+
+    Funciona como un acordeón: solo queda abierto el componente activo, salvo los que
+    se fijan con la chincheta, que se recuerdan por proyecto. Pasando el ratón entre
+    dos componentes aparece «Insertar aquí», que ofrece solo lo que admiten las reglas
+    de composición. Alt+↑ y Alt+↓ recorren los pasos de todos los componentes.
   - *3D model*: muestra u oculta cada pieza de la vista 3D o la vuelve translúcida.
+
+  Plegado, el flujo deja un riel con el punto de diseño, un icono por componente con un
+  anillo de avance (naranja si hay pasos por revisar) y sus pasos al pasar el ratón,
+  las curvas y el botón para añadir. Se añade un rodete, un difusor con o sin álabes o
+  una voluta, simple o doble (con nervio de nariz redonda o elíptica, que reduce el
+  empuje radial). La voluta admite descarga radial (por defecto, central sobre la línea
+  del eje de la bomba) o tangencial, abierta a ambos lados o con una pared recta. Por
+  defecto gira para que la descarga quede vertical. El corte de agua puede ser tangente,
+  afilado o redondeado con su radio.
 - **Vista principal**, una a la vez y a pantalla completa, elegida en las pestañas:
   - sección meridional (ver [La vista Meridian](#la-vista-meridian)): la etapa
     completa con el difusor y la voluta, o el rodete solo para dibujar su canal, sus
@@ -138,7 +151,7 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
 
   Al abrir un paso, la vista cambia a la que mejor lo muestra, y en *Meridian* también
   el ámbito (se puede desactivar en los ajustes, *Behavior*).
-- **Panel de propiedades** (derecha): al elegir un paso o la configuración global se
+- **Panel de propiedades** (derecha): al elegir un paso o el punto de diseño se
   abre con sus datos. Cada valor es automático (propuesto por una correlación) o
   manual. *Accept step* marca el paso como hecho y pasa al siguiente, y los errores y
   avisos salen en tarjetas. El panel flota sobre la vista sin reducirla: se pliega a una
