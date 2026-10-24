@@ -202,8 +202,10 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
     pasos que le faltan al componente con los valores sugeridos.
 
   El panel flota sobre la vista sin reducirla: se pliega a una franja estrecha (con su
-  flecha o con Esc), se ensancha arrastrando su borde izquierdo y no bloquea las
-  vistas, así que con él abierto se siguen arrastrando los puntos del contorno. La
+  flecha o con Esc) y tiene el mismo ancho en todas las vistas y pasos; solo cambia
+  arrastrando su borde izquierdo, y ese ancho se recuerda entre sesiones. Todas sus
+  filas comparten columnas: etiquetas, campos, listas y unidades quedan alineados de
+  arriba abajo. No bloquea las vistas, así que con él abierto se siguen arrastrando los puntos del contorno. La
   vista 3D centra la pieza en la parte que queda libre.
 - **Barra de estado** (abajo): el último mensaje, las unidades y el contador de errores
   y avisos, que abre el panel de mensajes de todo el proyecto.
