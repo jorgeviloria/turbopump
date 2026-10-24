@@ -88,9 +88,9 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
   - *Front* y *Section*: sus dibujos y exportaciones, y cómo se edita una sección;
   - *3D*: cámara (encuadrar, vista inicial, el menú *Views* con las vistas desde la
     entrada, desde atrás y de lado y las que se guardan, que se recuerdan entre
-    sesiones, y proyección ortográfica), estilo
-    (sombreado, con aristas o alambre), inspección (corte meridional y medir), y
-    sólidos CAD, mallas y una imagen PNG de la vista;
+    sesiones, proyección ortográfica y el enfoque en el corte de agua), estilo
+    (sombreado, con aristas, alambre o cebra), inspección (corte meridional, corte
+    transversal y medir), y sólidos CAD, mallas y una imagen PNG de la vista;
   - *Curves*: los ajustes de la predicción (en el panel de propiedades) y el resto de
     resultados.
 
@@ -153,9 +153,14 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
     selecciona (también en la Escena) y el botón derecho la oculta, la aísla o cambia
     su opacidad. El corte meridional quita la mitad del modelo que mira a la cámara
     (o la otra); se desplaza paralelo a sí mismo con su posición, en porcentaje del
-    radio, y su plano se puede dibujar sobre el modelo. Donde corta una pieza opaca
-    cerrada (los álabes, cada canal de la voluta, la tubería de entrada), la cara
-    cortada sale maciza y rayada, como en un plano de taller. Medir da la distancia
+    radio, y su plano se puede dibujar sobre el modelo. El corte transversal corta a
+    través del eje por un plano z = cte y quita el lado desde el que mira la cámara.
+    Donde corta una pieza opaca cerrada (los álabes, cada canal de la voluta, la
+    tubería de entrada, el corte de agua), la cara cortada sale maciza y rayada, como
+    en un plano de taller. El corte de agua redondeado es una pieza propia de la
+    Escena, y la carcasa se dibuja sin los trozos de pared que él sustituye; *Cutwater*
+    encuadra la cámara en él. La cebra refleja franjas en las superficies: donde se
+    rompen hay una arista y donde se quiebran salta la curvatura. Medir da la distancia
     entre dos puntos del modelo y sus partes radial y axial, Δr y Δz; cerca de un
     vértice de la malla el punto se ajusta a él;
 
@@ -346,8 +351,14 @@ efectivo, holgura de la tabla 10.2, cuerpo más fino, $e/d_z$, incidencia en el 
 cuña a lo ancho y corrección de la garganta de la ec. 7.28), el cuerpo en 3D, que se
 gira arrastrando, y la incidencia sobre el corte de agua en todo el rango de caudal.
 Mientras se arrastra solo se recalcula la voluta; el resto se pone al día al soltar.
+*View in 3D* abre la vista 3D encuadrada en el corte de agua y cortada a través del
+eje por el plano que se estaba mirando.
 
 ![Corte de agua](docs/img/corte-de-agua.jpg)
+
+| El corte de agua en 3D, cortado por el plano medio | En cebra |
+|---|---|
+| ![Corte de agua en la vista 3D](docs/img/corte-de-agua-3d.jpg) | ![Corte de agua en cebra](docs/img/corte-de-agua-cebra.jpg) |
 
 Las pruebas de la interfaz usan [kittest](https://github.com/rerun-io/kittest) y no
 necesitan GPU. Las capturas con wgpu se generan a mano en `target/screenshots/`:
