@@ -254,22 +254,26 @@ pub(crate) fn show(
     // their rows in the properties: the row under the pointer stands out here, and the
     // value under the pointer here shades its row. Angles in the plot, degrees.
     let b = &g.basis;
+    // The values of the diameters inside the impeller go out past its rim, clear of
+    // the blades.
+    let rim = b.outlet_diameter / 2.0 * 1.04;
     let mut diameters = vec![
-        ("Outlet diameter d₂", "d₂", b.outlet_diameter, 125f64),
-        ("Eye diameter d₁", "d₁", b.inlet_diameter, 40.0),
-        ("Hub diameter d_n", "d_n", b.hub_diameter, -35.0),
+        ("Outlet diameter d₂", "d₂", b.outlet_diameter, 0.0, 125f64),
+        ("Eye diameter d₁", "d₁", b.inlet_diameter, rim, 40.0),
+        ("Hub diameter d_n", "d_n", b.hub_diameter, rim, -35.0),
     ];
     if let Some(v) = volute {
         diameters.push((
             "Cutwater diameter d_z",
             "d_z",
             v.design.cutwater_diameter,
+            0.0,
             160.0,
         ));
     }
     let row = crate::widgets::hovered_row(ui.ctx());
     let mut under = None;
-    for (label, symbol, diameter, degrees) in diameters {
+    for (label, symbol, diameter, reach, degrees) in diameters {
         let label = tr(label);
         let text = format!("{symbol} {}", units.show(QuantityKind::Length, diameter));
         let angle = degrees.to_radians();
@@ -279,6 +283,7 @@ pub(crate) fn show(
             &response.transform,
             [0.0, 0.0],
             diameter / 2.0 * scale,
+            reach * scale,
             angle,
             &text,
             hot,

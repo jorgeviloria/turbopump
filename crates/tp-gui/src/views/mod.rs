@@ -68,14 +68,17 @@ impl Palette {
 
 /// A diameter dimension over a plot: a line across the circle of `radius` (plot units)
 /// round `center`, at `angle` from the x axis, with an arrow at each end; past the end
-/// at `angle` a short leader carries `text` on a background, outside the circle. Drawn
-/// in the accent of an active dimension when `hot`. Returns the hover response of the
-/// text, which screen readers read.
+/// at `angle` a leader carries `text` on a background, outside the circle and at least
+/// `reach` from the center, so that a small diameter puts its value clear of what lies
+/// round it. Drawn in the accent of an active dimension when `hot`. Returns the hover
+/// response of the text, which screen readers read.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn paint_diameter(
     ui: &Ui,
     transform: &PlotTransform,
     center: [f64; 2],
     radius: f64,
+    reach: f64,
     angle: f64,
     text: &str,
     hot: bool,
@@ -100,7 +103,7 @@ pub(crate) fn paint_diameter(
     let stroke = Stroke::new(if hot { 1.8 } else { 1.0 }, color);
     let along = (b - a).normalized();
     let across = along.rot90();
-    let end = b + along * LEADER;
+    let end = at(reach.max(radius) / radius.max(f64::EPSILON)) + along * LEADER;
     painter.line_segment([a, end], stroke);
     for (tip, back) in [(a, along), (b, -along)] {
         let base = tip + back * 7.0;
@@ -370,4 +373,35 @@ fn marker_piece(ui: &mut Ui, mark: Mark, color: Color32, text: &str) {
         }
     }
     ui.add(egui::Label::new(text).extend());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Where the value of a diameter of 20 lands, led out to `reach`: its distance from
+    /// the centre on screen, 2 px to the unit.
+    fn value_distance(reach: f64) -> f32 {
+        let ctx = egui::Context::default();
+        let mut distance = 0.0;
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let frame = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(400.0, 400.0));
+            let bounds = egui_plot::PlotBounds::from_min_max([-100.0, -100.0], [100.0, 100.0]);
+            let transform = PlotTransform::new(frame, bounds, false);
+            let angle = (-35f64).to_radians();
+            let text = paint_diameter(ui, &transform, [0.0, 0.0], 10.0, reach, angle, "d_n", false);
+            let center = frame.center();
+            distance = text.rect.distance_to_pos(center);
+        });
+        output.textures_delta.clear();
+        distance
+    }
+
+    #[test]
+    fn a_small_diameter_leads_its_value_out_past_the_reach() {
+        // Just past its own circle, or out beyond the radius it is led to.
+        let near = value_distance(0.0);
+        assert!(near > 20.0 && near < 60.0, "{near}");
+        assert!(value_distance(90.0) > 180.0, "{}", value_distance(90.0));
+    }
 }
