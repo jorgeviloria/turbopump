@@ -8,7 +8,9 @@ use glam::Vec3;
 use tp_design::diffuser::DiffuserDesign;
 use tp_design::impeller::ImpellerGeometry;
 use tp_design::volute::VoluteGeometry;
-use tp_io::mesh::{Triangle, diffuser_parts, impeller_parts, volute_triangles};
+use tp_io::mesh::{
+    Triangle, blade_solids, diffuser_parts, impeller_parts, volute_solids, volute_triangles,
+};
 use tp_math::{DVec2, DVec3};
 
 /// How much of a part the eye sees through.
@@ -166,6 +168,15 @@ pub(crate) struct Shaded {
     pub opacity: Opacity,
 }
 
+/// A closed volume of an opaque part, capped where the cut runs through it.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Cap {
+    /// Its triangles among the closures.
+    pub range: Range<u32>,
+    /// Linear RGB of the cap.
+    pub color: [f32; 4],
+}
+
 /// Triangles split by how they are drawn, plus wireframe lines.
 #[derive(Debug, Default)]
 pub(crate) struct MeshData {
@@ -176,6 +187,10 @@ pub(crate) struct MeshData {
     pub parts: Vec<Shaded>,
     /// Pairs of vertices.
     pub lines: Vec<Vertex>,
+    /// Closed volumes, never drawn: the cut counts their faces to find where the
+    /// plane lies inside them. Overlapping volumes are separate caps.
+    pub closures: Vec<Vertex>,
+    pub caps: Vec<Cap>,
     pub center: Vec3,
     pub radius: f32,
 }
@@ -194,6 +209,11 @@ const DUCT: [u8; 3] = [120, 150, 170];
 const REVOLVE_STEPS: usize = 72;
 /// Lines are drawn in the part's color times this.
 const LINE_SHADE: f32 = 0.35;
+/// Caps are drawn in the part's color times this, so the cut face reads apart from
+/// the surfaces.
+const CAP_SHADE: f32 = 0.8;
+/// Caps the shader takes at most.
+pub(crate) const MAX_CAPS: usize = 8;
 /// One volute section of this many is drawn as a line.
 const SECTION_STRIDE: usize = 3;
 /// Faces meeting at more than this angle keep a sharp edge.
@@ -316,6 +336,25 @@ pub(crate) fn feature_edges(triangles: &[Triangle]) -> Vec<[DVec3; 2]> {
     edges
 }
 
+/// Whether `triangles` close a volume: every edge is shared by an even number of
+/// them, so that a ray crosses the surface an odd number of times from inside.
+pub(crate) fn is_closed(triangles: &[Triangle]) -> bool {
+    type Key = (i64, i64, i64);
+    let mut count: HashMap<(Key, Key), u32> = HashMap::new();
+    for t in triangles {
+        for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
+            let (ka, kb) = (edge_key(a), edge_key(b));
+            if ka == kb {
+                continue;
+            }
+            *count
+                .entry(if ka < kb { (ka, kb) } else { (kb, ka) })
+                .or_default() += 1;
+        }
+    }
+    !triangles.is_empty() && count.values().all(|n| n % 2 == 0)
+}
+
 fn rgba(rgb: [f32; 3], alpha: f32) -> [f32; 4] {
     [rgb[0], rgb[1], rgb[2], alpha]
 }
@@ -417,6 +456,33 @@ pub(crate) fn build(
                 range: start..mesh.vertices.len() as u32,
                 opacity: part.opacity,
             });
+        }
+        // The closed volumes of the opaque parts, for the caps of a cut.
+        for (_, id, part) in visible.clone().filter(|(_, _, part)| opaque(part)) {
+            let volumes: Vec<Vec<Triangle>> = match id {
+                PartId::Blades => {
+                    let solids = blade_solids(g);
+                    let count = if options.all_blades { solids.len() } else { 1 };
+                    // Apart from each other: one volume.
+                    vec![solids.into_iter().take(count).flatten().collect()]
+                }
+                PartId::Volute => volute.map(volute_solids).unwrap_or_default(),
+                PartId::Duct => vec![duct.clone()],
+                _ => Vec::new(),
+            };
+            let color = rgba(linear(part.color).map(|c| c * CAP_SHADE), 1.0);
+            for volume in volumes.iter().filter(|v| is_closed(v)) {
+                if mesh.caps.len() == MAX_CAPS {
+                    break;
+                }
+                let start = mesh.closures.len() as u32;
+                mesh.closures
+                    .extend(volume.iter().flatten().map(|p| line_vertex(*p, color)));
+                mesh.caps.push(Cap {
+                    range: start..mesh.closures.len() as u32,
+                    color,
+                });
+            }
         }
         if options.edges {
             for (triangles, _, part) in visible.clone() {
@@ -617,6 +683,39 @@ mod tests {
         assert_eq!(mesh.parts[1].range.end, mesh.opaque);
         assert_eq!(mesh.parts[2].range.end as usize, mesh.vertices.len());
         assert!(mesh.parts.iter().all(|p| p.range.len().is_multiple_of(3)));
+    }
+
+    #[test]
+    fn opaque_closed_volumes_are_capped() {
+        let project = default_project();
+        let mut derived = Derived::default();
+        derived.update(&project);
+        let g = geometry();
+        let v = project
+            .components()
+            .iter()
+            .find_map(|c| derived.volute(c.id()))
+            .unwrap();
+        // The casing is glass by default: only the blades are capped.
+        let glass = build(&g, None, Some(v), &ViewOptions::default());
+        assert_eq!(glass.caps.len(), 1);
+        let mut options = ViewOptions::default();
+        options.volute.opacity = Opacity::Opaque;
+        let opaque = build(&g, None, Some(v), &options);
+        // One cap for each channel: they overlap where the spiral meets the diffuser.
+        assert_eq!(opaque.caps.len(), 1 + v.channels().len());
+        for cap in &opaque.caps {
+            let triangles: Vec<Triangle> = opaque.closures
+                [cap.range.start as usize..cap.range.end as usize]
+                .as_chunks::<3>()
+                .0
+                .iter()
+                .map(|t| t.map(|v| Vec3::from(v.position).as_dvec3()))
+                .collect();
+            assert!(is_closed(&triangles));
+        }
+        options.wireframe = true;
+        assert!(build(&g, None, Some(v), &options).caps.is_empty());
     }
 
     #[test]

@@ -92,6 +92,30 @@ pub fn blade_triangles(g: &ImpellerGeometry) -> Vec<Triangle> {
     out
 }
 
+/// Every blade as a closed solid: its faces and edges, closed also at the hub and at
+/// the shroud, where it stands on the walls. For viewers that need closed volumes, such
+/// as the caps of a cut; the ends lie on the walls and are not drawn.
+pub fn blade_solids(g: &ImpellerGeometry) -> Vec<Vec<Triangle>> {
+    let sign = g.blade.rotation_sign;
+    let mut one = blade_triangles(g);
+    for s in [g.blade.sections.first(), g.blade.sections.last()]
+        .into_iter()
+        .flatten()
+    {
+        let (ps, ss) = (s.pressure_side(sign), s.suction_side(sign));
+        for k in 0..ps.len().min(ss.len()).saturating_sub(1) {
+            quad(&mut one, ps[k], ps[k + 1], ss[k + 1], ss[k]);
+        }
+    }
+    let z = g.blade.count;
+    (0..z)
+        .map(|i| {
+            let angle = 2.0 * PI * f64::from(i) / f64::from(z);
+            one.iter().map(|t| t.map(|p| rotate_z(p, angle))).collect()
+        })
+        .collect()
+}
+
 /// The impeller mesh split by part, for viewers that color or hide each one.
 #[derive(Debug, Clone, Default)]
 pub struct ImpellerMesh {
@@ -194,6 +218,24 @@ pub fn volute_triangles(g: &VoluteGeometry) -> Vec<Triangle> {
     out
 }
 
+/// Each channel of the volute as a closed solid, capped at both ends. The channels
+/// overlap where the spiral runs on into the discharge diffuser, so each one closes a
+/// volume of its own; the walls of the bend of an internal volute are left out.
+pub fn volute_solids(g: &VoluteGeometry) -> Vec<Vec<Triangle>> {
+    g.channels()
+        .into_iter()
+        .filter(|rings| rings.len() > 1)
+        .map(|rings| {
+            let mut out = Vec::new();
+            loft_rings(&mut out, &rings);
+            for ring in [&rings[0], &rings[rings.len() - 1]] {
+                cap(&mut out, ring);
+            }
+            out
+        })
+        .collect()
+}
+
 /// A radial diffuser split by part: the two side walls and the vanes.
 #[derive(Debug, Clone, Default)]
 pub struct DiffuserMesh {
@@ -280,6 +322,62 @@ pub(crate) mod tests {
         let one = blade_triangles(&g).len();
         let all = impeller_triangles(&g).len();
         assert!(all >= one * g.blade.count as usize);
+    }
+
+    /// Whether every edge of `triangles` is shared by an even number of them.
+    fn closed(triangles: &[Triangle]) -> bool {
+        let key = |p: DVec3| [p.x, p.y, p.z].map(|v| (v * 1e7).round() as i64);
+        let mut count = std::collections::HashMap::new();
+        for t in triangles {
+            for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
+                let (ka, kb) = (key(a), key(b));
+                if ka != kb {
+                    *count
+                        .entry(ka.min(kb))
+                        .or_insert_with(std::collections::HashMap::new)
+                        .entry(ka.max(kb))
+                        .or_insert(0u32) += 1;
+                }
+            }
+        }
+        count.values().flat_map(|m| m.values()).all(|n| n % 2 == 0)
+    }
+
+    #[test]
+    fn blade_and_volute_solids_are_closed() {
+        use tp_design::outlet::ImpellerOutlet;
+        use tp_design::volute::{CrossSectionInput, InternalRound, SectionShape, VoluteInput};
+        let g = reference();
+        let blades = blade_solids(&g);
+        assert_eq!(blades.len(), g.blade.count as usize);
+        assert!(!closed(&blade_triangles(&g)), "open at the walls");
+        assert!(blades.iter().all(|b| closed(b)));
+        let basis = ImpellerOutlet {
+            flow: 100.0 / 3600.0,
+            impeller_diameter: 0.172,
+            impeller_width: 0.0174,
+            cu: 13.27,
+            cm: 3.03,
+            nq: 35.9,
+            stage_head: 32.0,
+            density: 998.2,
+            midplane: 0.0378,
+            rotation_sign: 1.0,
+            impeller_blades: 7,
+            sides: None,
+        };
+        let internal = VoluteInput {
+            cross_section: CrossSectionInput::single(SectionShape::RoundInternal(
+                InternalRound::default(),
+            )),
+            ..VoluteInput::default()
+        };
+        for input in [VoluteInput::default(), internal] {
+            let v = VoluteGeometry::build(&basis, &input).unwrap();
+            let solids = volute_solids(&v);
+            assert_eq!(solids.len(), v.channels().len());
+            assert!(solids.iter().all(|s| closed(s)));
+        }
     }
 
     #[test]

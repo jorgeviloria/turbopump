@@ -903,6 +903,8 @@ fn uniforms(
             f32::from(b) / 255.0,
             1.0,
         ],
+        cap: [0.0; 4],
+        cap_colors: [[0.0; 4]; mesh::MAX_CAPS],
     }
 }
 

@@ -234,6 +234,30 @@ fn front_dimensions() {
     save_hovering(&mut harness, "front-dimension-and-row");
 }
 
+/// The meridional cut with an opaque casing: the cut faces of the volute, the blades
+/// and the inlet duct are capped, as seen and facing the camera.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn cut_caps() {
+    let mut harness = stage_in_3d();
+    harness.get_by_label("Opacity of Casing").click();
+    harness.run();
+    harness.get_by_label("Meridional cut").click();
+    harness.run();
+    harness.remove_cursor();
+    harness.run();
+    save(&mut harness, "cut-caps");
+    // From the side, the cut turned to face the camera: the meridional section.
+    harness.get_by_label("Views").click();
+    harness.run();
+    harness.get_by_label("From the side").click();
+    harness.run_steps(40);
+    harness.get_by_label_contains("Face the camera").click();
+    harness.remove_cursor();
+    harness.run_steps(4);
+    save(&mut harness, "cut-caps-facing");
+}
+
 /// The Views menu of the 3D tab, a view saved from the side and brought back.
 #[test]
 #[ignore = "needs a GPU; run with --ignored"]
