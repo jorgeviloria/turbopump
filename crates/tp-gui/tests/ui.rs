@@ -125,7 +125,7 @@ fn changing_the_global_setup_makes_done_steps_outdated() {
 #[test]
 fn manual_values_can_be_reset_to_automatic() {
     let mut harness = harness();
-    // Clear the "auto" box of the first parameter (hydraulic efficiency).
+    // The dot of the first parameter (hydraulic efficiency) sets it by hand.
     harness.get_all_by_label("auto").next().unwrap().click();
     harness.run();
     let manual = |harness: &Harness<'_, TurbopumpApp>| {
@@ -138,6 +138,9 @@ fn manual_values_can_be_reset_to_automatic() {
             .manual_value()
     };
     assert!(manual(&harness).is_some());
+    // The menu of the panel puts the whole step back to automatic.
+    harness.get_by_label("More actions of the step").click();
+    harness.run();
     harness.get_by_label_contains("Reset to automatic").click();
     harness.run();
     assert!(manual(&harness).is_none());
@@ -172,7 +175,7 @@ fn every_view_draws_without_a_gpu() {
 fn the_properties_panel_opens_with_a_step_and_folds() {
     let mut harness = harness();
     assert!(harness.state().sidebar_open());
-    harness.get_by_label_contains("Impeller 1 · Main dimensions");
+    harness.get_by_label("Impeller 1 › Sizing");
     harness.key_press(Key::Escape);
     harness.run();
     // Escape folds the panel to a strip, which opens it again.
@@ -193,7 +196,7 @@ fn the_properties_panel_opens_with_a_step_and_folds() {
         .click();
     harness.run();
     assert!(harness.state().sidebar_open());
-    harness.get_by_label_contains("Impeller 1 · Blade properties");
+    harness.get_by_label("Impeller 1 › Blading");
     assert_eq!(harness.state().view(), View::Blade);
 }
 
@@ -619,7 +622,13 @@ fn the_acceptance_settings_leave_the_steps_as_they_are() {
     harness.get_by_label_contains("TARGET").click();
     harness.run();
     assert_eq!(harness.state().selection(), Selection::Setup);
-    // The quality class is the first automatic parameter of the page.
+    // The sections above fold out of the way; the quality class is then the first
+    // automatic parameter in sight.
+    for section in ["Project", "Design point", "Fluid and inlet conditions"] {
+        // The heading of the section, after the path at the top of the panel.
+        harness.get_all_by_label(section).last().unwrap().click();
+        harness.run();
+    }
     harness.get_all_by_label("auto").next().unwrap().click();
     harness.run();
     assert_eq!(
@@ -632,27 +641,38 @@ fn the_acceptance_settings_leave_the_steps_as_they_are() {
     );
 }
 
+/// The row of a step in the design flow (the heading of the panel may show its name).
+fn row<'a>(
+    harness: &'a Harness<'_, TurbopumpApp>,
+    step: &'a str,
+) -> Option<egui_kittest::Node<'a>> {
+    use egui_kittest::kittest::NodeT;
+    harness
+        .query_all_by_label(step)
+        .find(|n| n.accesskit_node().role() == egui::accesskit::Role::Button)
+}
+
 #[test]
 fn the_design_flow_keeps_the_active_component_open() {
     let mut harness = harness();
     // The impeller is active: its steps show, the volute's do not.
-    harness.get_by_label("Blade properties");
-    assert!(harness.query_by_label("Cross section").is_none());
+    row(&harness, "Blade properties").unwrap();
+    assert!(row(&harness, "Cross section").is_none());
     // Its caret folds it, and opening the volute keeps it folded.
     harness.get_by_label("Fold Impeller 1").click();
     harness.run();
-    assert!(harness.query_by_label("Blade properties").is_none());
+    assert!(row(&harness, "Blade properties").is_none());
     harness.get_by_label("Volute 1").click();
     harness.run();
-    harness.get_by_label("Cross section");
-    assert!(harness.query_by_label("Blade properties").is_none());
+    row(&harness, "Cross section").unwrap();
+    assert!(row(&harness, "Blade properties").is_none());
     // The caret folds the active volute until another step opens.
     harness.get_by_label("Fold Volute 1").click();
     harness.run();
-    assert!(harness.query_by_label("Cross section").is_none());
+    assert!(row(&harness, "Cross section").is_none());
     harness.key_press_modifiers(Modifiers::ALT, Key::ArrowDown);
     harness.run();
-    harness.get_by_label("Cross section");
+    row(&harness, "Cross section").unwrap();
     assert!(matches!(
         harness.state().selection(),
         Selection::Step(_, DesignStep::CrossSection)
@@ -660,8 +680,8 @@ fn the_design_flow_keeps_the_active_component_open() {
     // Pinned, the impeller stays open while the volute is active.
     harness.get_all_by_label("Pin open").next().unwrap().click();
     harness.run();
-    harness.get_by_label("Blade properties");
-    harness.get_by_label("Cross section");
+    row(&harness, "Blade properties").unwrap();
+    row(&harness, "Cross section").unwrap();
 }
 
 #[test]
@@ -727,4 +747,39 @@ fn the_scene_shows_hides_and_isolates_the_parts() {
     harness.get_by_label("Show the scene").click();
     harness.run();
     eye(&harness, "Casing");
+}
+
+#[test]
+fn folded_sections_still_save_the_step() {
+    let mut harness = harness();
+    // The last section of the main dimensions folds; an edit above it still counts.
+    harness.get_by_label("Inlet and cavitation").click();
+    harness.run();
+    harness.get_all_by_label("auto").next().unwrap().click();
+    harness.run();
+    let project = harness.state().document().project();
+    let id = project.components()[0].id();
+    assert!(
+        project
+            .pump_impeller_input(id)
+            .unwrap()
+            .hydraulic_efficiency
+            .manual_value()
+            .is_some()
+    );
+}
+
+#[test]
+fn command_enter_accepts_the_step_and_goes_on() {
+    let mut harness = harness();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Enter);
+    harness.run();
+    assert_eq!(
+        status(&harness, DesignStep::MainDimensions),
+        StepStatus::Done
+    );
+    assert!(matches!(
+        harness.state().selection(),
+        Selection::Step(_, DesignStep::MeridionalContour)
+    ));
 }

@@ -3,9 +3,11 @@
 //!
 //! Values are stored in SI and shown in the project's display units. Every group of
 //! properties is a [`props`] grid of two columns: the label, with an ⓘ that tells
-//! where the value comes from and, at its right end, just before the input, the check
-//! box for "automatic" of the parameters that have one; and the input or the computed
-//! value. All grids of the panel share the column widths, so the values line up.
+//! where the value comes from and, at its right end, just before the input, the mark
+//! of the parameters that can be automatic: a hollow dot while the program proposes
+//! the value, a filled one once it is set by hand, as the points of the meridian
+//! editor; and the input or the computed value. All grids of the panel share the
+//! column widths, so the values line up.
 
 use std::hash::Hash;
 use std::ops::RangeInclusive;
@@ -16,7 +18,7 @@ use eframe::egui::{self, Align, DragValue, Layout, RichText, Sense, Ui, vec2};
 use tp_design::Param;
 use tp_units::{DisplayUnits, QuantityKind, decimals_for};
 
-/// Room for the "automatic" check box at the right end of the label cell.
+/// Room for the automatic/manual dot at the right end of the label cell.
 const AUTO_WIDTH: f32 = 20.0;
 /// Space between the columns.
 const GAP: f32 = 8.0;
@@ -101,8 +103,31 @@ pub fn label(ui: &mut Ui, text: &str, hint: &str) {
     label_cell(ui, text, hint, None);
 }
 
-/// The label cell; with `auto`, the "automatic" check box at its right end, just
-/// before the input. Returns the check box's response.
+/// The automatic/manual mark of a parameter: a hollow dot while automatic, a filled
+/// one when set by hand. A click switches it. Screen readers see the check box
+/// "auto", ticked while automatic.
+pub(crate) fn auto_dot(ui: &mut Ui, auto: &mut bool) -> egui::Response {
+    let p = Palette::of(ui);
+    let (rect, mut response) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::click());
+    if response.clicked() {
+        *auto = !*auto;
+        response.mark_changed();
+    }
+    let center = rect.center();
+    let painter = ui.painter();
+    if response.hovered() {
+        painter.circle_filled(center, 8.0, p.hover);
+    }
+    if *auto {
+        painter.circle_stroke(center, 4.0, egui::Stroke::new(1.6, p.weak));
+    } else {
+        painter.circle_filled(center, 4.5, p.accent);
+    }
+    response
+}
+
+/// The label cell; with `auto`, the automatic/manual dot at its right end, just
+/// before the input. Returns the dot's response.
 fn label_cell(
     ui: &mut Ui,
     text: &str,
@@ -126,8 +151,7 @@ fn label_cell(
             }
             auto.map(|auto| {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.spacing_mut().interact_size.x = 0.0;
-                    ui.add(egui::Checkbox::without_text(auto))
+                    auto_dot(ui, auto)
                 })
                 .inner
             })
@@ -219,14 +243,56 @@ pub fn quantity(
     units: &DisplayUnits,
     range: RangeInclusive<f64>,
 ) -> bool {
+    quantity_response(ui, si, kind, units, range).changed()
+}
+
+/// [`quantity`], returning the response of its field.
+fn quantity_response(
+    ui: &mut Ui,
+    si: &mut f64,
+    kind: QuantityKind,
+    units: &DisplayUnits,
+    range: RangeInclusive<f64>,
+) -> egui::Response {
     let mut shown = units.to_display(kind, *si);
     let response = ui.add(drag(&mut shown, kind, units).range(display_range(&range, kind, units)));
     if response.changed() {
         *si = units.from_display(kind, shown);
-        true
-    } else {
-        false
     }
+    response
+}
+
+/// The value of an automatic parameter: its field, in grey, still editable; typing or
+/// dragging sets it by hand. Returns the response and the value it shows.
+fn automatic<T>(
+    ui: &mut Ui,
+    add: impl FnOnce(&mut Ui) -> (egui::Response, T),
+) -> (egui::Response, T) {
+    let weak = Palette::of(ui).weak;
+    ui.scope(|ui| {
+        ui.visuals_mut().override_text_color = Some(weak);
+        add(ui)
+    })
+    .inner
+}
+
+/// The menu of a manual value: back to automatic. Returns whether it was chosen.
+fn back_to_automatic(response: &egui::Response) -> bool {
+    let mut chosen = false;
+    response.context_menu(|ui| {
+        if ui
+            .button(format!(
+                "{}  {}",
+                icon::ARROW_COUNTER_CLOCKWISE,
+                tr("Back to automatic")
+            ))
+            .clicked()
+        {
+            chosen = true;
+            ui.close();
+        }
+    });
+    chosen
 }
 
 /// One grid row for a real-valued parameter: label, value and "auto" toggle.
@@ -252,13 +318,25 @@ pub fn param_f64(
     match param {
         Param::Auto => match effective {
             Some(value) => {
-                let mut shown = units.to_display(kind, value);
-                ui.add_enabled(false, drag(&mut shown, kind, units));
+                let (response, edited) = automatic(ui, |ui| {
+                    let mut v = value;
+                    let r = quantity_response(ui, &mut v, kind, units, range.clone());
+                    (r, v)
+                });
+                if response.changed() {
+                    *param = Param::Manual(edited);
+                    changed = true;
+                }
             }
-            None => value(ui, "—"),
+            None => self::value(ui, "—"),
         },
         Param::Manual(value) => {
-            changed |= quantity(ui, value, kind, units, range.clone());
+            let response = quantity_response(ui, value, kind, units, range.clone());
+            changed |= response.changed();
+            if back_to_automatic(&response) {
+                *param = Param::Auto;
+                changed = true;
+            }
         }
     }
     ui.end_row();
@@ -281,15 +359,26 @@ pub fn param_u32(
     });
     match param {
         Param::Auto => match effective {
-            Some(mut value) => {
-                ui.add_enabled(false, DragValue::new(&mut value));
+            Some(value) => {
+                let (response, edited) = automatic(ui, |ui| {
+                    let mut v = value;
+                    let r = ui.add(DragValue::new(&mut v).speed(0.05).range(range.clone()));
+                    (r, v)
+                });
+                if response.changed() {
+                    *param = Param::Manual(edited);
+                    changed = true;
+                }
             }
-            None => value(ui, "—"),
+            None => self::value(ui, "—"),
         },
         Param::Manual(value) => {
-            changed |= ui
-                .add(DragValue::new(value).speed(0.05).range(range.clone()))
-                .changed();
+            let response = ui.add(DragValue::new(value).speed(0.05).range(range.clone()));
+            changed |= response.changed();
+            if back_to_automatic(&response) {
+                *param = Param::Auto;
+                changed = true;
+            }
         }
     }
     ui.end_row();
@@ -320,20 +409,31 @@ pub fn param_percent(
             .unwrap_or(*range.start())
             .clamp(*range.start(), *range.end())
     });
+    let percent_range = range.start() * 100.0..=range.end() * 100.0;
     match param {
         Param::Auto => match effective {
             Some(value) => {
-                let mut shown = value * 100.0;
-                ui.add_enabled(false, percent(&mut shown));
+                let (response, edited) = automatic(ui, |ui| {
+                    let mut shown = value * 100.0;
+                    let r = ui.add(percent(&mut shown).range(percent_range.clone()));
+                    (r, shown / 100.0)
+                });
+                if response.changed() {
+                    *param = Param::Manual(edited);
+                    changed = true;
+                }
             }
             None => self::value(ui, "—"),
         },
         Param::Manual(value) => {
             let mut shown = *value * 100.0;
-            let response =
-                ui.add(percent(&mut shown).range(range.start() * 100.0..=range.end() * 100.0));
+            let response = ui.add(percent(&mut shown).range(percent_range));
             if response.changed() {
                 *value = shown / 100.0;
+                changed = true;
+            }
+            if back_to_automatic(&response) {
+                *param = Param::Auto;
                 changed = true;
             }
         }
@@ -360,11 +460,21 @@ pub fn param_choice<T: Copy + PartialEq>(
     match param {
         Param::Auto => match effective {
             Some(value) => {
-                ui.add_enabled_ui(false, |ui| {
-                    egui::ComboBox::from_id_salt(("param_choice", label))
-                        .selected_text(name(value))
-                        .show_ui(ui, |_| {});
-                });
+                let weak = Palette::of(ui).weak;
+                let mut chosen = None;
+                egui::ComboBox::from_id_salt(("param_choice", label))
+                    .selected_text(egui::RichText::new(name(value)).color(weak))
+                    .show_ui(ui, |ui| {
+                        for &option in options {
+                            if ui.selectable_label(option == value, name(option)).clicked() {
+                                chosen = Some(option);
+                            }
+                        }
+                    });
+                if let Some(option) = chosen {
+                    *param = Param::Manual(option);
+                    changed = true;
+                }
             }
             None => self::value(ui, "—"),
         },
@@ -398,10 +508,11 @@ fn auto_toggle<T: Copy>(
     response.widget_info(|| {
         egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, auto, tr("auto"))
     });
-    let response = response.on_hover_text(tr(
-        "Automatic: the program proposes the value from a correlation and updates it when \
-         earlier inputs change. Clear it to fix your own value.",
-    ));
+    let response = response.on_hover_text(if auto {
+        tr("Automatic: the program proposes the value and updates it when earlier inputs change. Type a value, or click the dot, to set it by hand.")
+    } else {
+        tr("Set by hand. Click the dot, or right-click the value, to make it automatic again.")
+    });
     if response.changed() {
         *param = if auto {
             Param::Auto

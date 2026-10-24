@@ -389,7 +389,9 @@ fn radial_discharge() {
         .click();
     harness.run();
     harness.get_by_label("radial").click();
-    harness.run();
+    // The panel reopens with the discharge rows changed: its grids take a few frames
+    // to settle.
+    harness.run_steps(8);
     front(&mut harness, "radial-discharge-front");
     harness.state_mut().focus_view(View::View3d);
     harness.run();

@@ -164,14 +164,27 @@ fn can_accept(kind: ComponentKind, step: DesignStep) -> bool {
 }
 
 /// Title of the dialog for `selection`: icon, component and step.
-pub(crate) fn title(project: &Project, selection: Selection) -> (&'static str, String) {
+/// Icon, path (component › phase) and title of the selected step, for the heading of
+/// the panel.
+pub(crate) fn heading(project: &Project, selection: Selection) -> (&'static str, String, String) {
     match selection {
-        Selection::Setup => (icon::TARGET, tr("Design point and fluid").to_owned()),
+        Selection::Setup => (
+            icon::TARGET,
+            tr("Project").to_owned(),
+            tr("Design point and fluid").to_owned(),
+        ),
         Selection::Step(id, step) => {
-            let name = project.component(id).map_or("", |c| c.name.as_str());
+            let component = project.component(id);
+            let name = component.map_or("", |c| c.name.as_str());
+            let phase = component.map_or("", |c| crate::flow::phase(c.kind(), step));
             (
                 icons::step(step),
-                format!("{} · {}", component_name(name), step_title(step)),
+                format!(
+                    "{} › {}",
+                    component_name(name),
+                    crate::flow::phase_name(phase)
+                ),
+                step_title(step),
             )
         }
     }
@@ -185,106 +198,268 @@ pub(crate) fn show(ui: &mut Ui, cx: &mut EditCtx<'_>) {
     }
 }
 
-/// The buttons under the step: back and next.
-pub(crate) fn footer(ui: &mut Ui, cx: &mut EditCtx<'_>) {
-    let p = Palette::of(ui);
+/// Every place of the design in order: the design point, then the steps of each
+/// component that can be worked on.
+pub(crate) fn order(project: &Project) -> Vec<Selection> {
+    let mut order = vec![Selection::Setup];
+    for c in project.components() {
+        for &step in c.kind().steps() {
+            if is_available(c.kind(), step) {
+                order.push(Selection::Step(c.id(), step));
+            }
+        }
+    }
+    order
+}
+
+/// The place `by` steps after `selection` (before, if negative), across components.
+pub(crate) fn step_from(project: &Project, selection: Selection, by: i32) -> Option<Selection> {
+    let order = order(project);
+    let at = order.iter().position(|&s| s == selection)? as i32 + by;
+    usize::try_from(at).ok().and_then(|i| order.get(i).copied())
+}
+
+/// What the main button under the step does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Primary {
+    /// Accept the step and go on to the next one.
+    Accept,
+    /// Only go on: nothing to accept, or done already.
+    Next,
+    /// Accepting waits for this.
+    Blocked(&'static str),
+}
+
+/// The main action of the selected step.
+pub(crate) fn primary(cx: &EditCtx<'_>) -> Primary {
     let Selection::Step(id, step) = *cx.selection else {
-        ui.label(
-            RichText::new(tr(
-                "Shared by every component. Changing the design point or the fluid makes every step outdated; the acceptance does not.",
-            ))
-            .color(p.weak),
-        );
-        return;
+        return Primary::Next;
     };
-    let project = cx.doc.project().clone();
-    let Some(kind) = project.component(id).map(|c| c.kind()) else {
-        return;
-    };
-    let (back, next) = neighbours(kind, step);
-    let target = ui.horizontal(|ui| navigation(ui, back, next)).inner;
-    if let Some(target) = target {
-        *cx.selection = Selection::Step(id, target);
+    match accept_state(cx.doc.project(), cx.derived, id, step) {
+        AcceptState::Ready => Primary::Accept,
+        AcceptState::NotApplicable | AcceptState::Blocked("This step is done.") => Primary::Next,
+        AcceptState::Blocked(reason) => Primary::Blocked(reason),
     }
 }
 
-fn next_text() -> String {
-    format!("{} {}", tr("Next"), icon::CARET_RIGHT)
-}
-
-fn back_text() -> String {
-    format!("{} {}", icon::CARET_LEFT, tr("Back"))
-}
-
-fn accept_text() -> String {
-    format!("{}  {}", icon::CHECK, tr("Accept step"))
-}
-
-fn reset_text() -> String {
-    format!(
-        "{}  {}",
-        icon::ARROW_COUNTER_CLOCKWISE,
-        tr("Reset to automatic")
-    )
-}
-
-/// Width the accept and reset buttons take.
-fn buttons_width(ui: &Ui) -> f32 {
-    let text_width = |text: String| {
-        egui::WidgetText::from(text)
-            .into_galley(
-                ui,
-                Some(egui::TextWrapMode::Extend),
-                f32::INFINITY,
-                egui::TextStyle::Button,
-            )
-            .size()
-            .x
-    };
-    let spacing = ui.spacing();
-    text_width(accept_text())
-        + text_width(reset_text())
-        + 4.0 * spacing.button_padding.x
-        + 2.0 * spacing.item_spacing.x
-}
-
-/// The back and next buttons, right-aligned. Returns the step clicked.
-fn navigation(
-    ui: &mut Ui,
-    back: Option<DesignStep>,
-    next: Option<DesignStep>,
-) -> Option<DesignStep> {
-    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        let next_clicked = ui
-            .add_enabled(next.is_some(), egui::Button::new(next_text()))
-            .clicked();
-        let back_clicked = ui
-            .add_enabled(back.is_some(), egui::Button::new(back_text()))
-            .clicked();
-        if next_clicked {
-            next
-        } else if back_clicked {
-            back
-        } else {
-            None
+/// Accepts the selected step when it can be accepted, and opens the next place of the
+/// design, in the next component when this one has no more steps.
+pub(crate) fn accept_and_continue(cx: &mut EditCtx<'_>) {
+    let before = *cx.selection;
+    let next = step_from(cx.doc.project(), before, 1);
+    match primary(cx) {
+        Primary::Accept => {
+            let Selection::Step(id, step) = before else {
+                return;
+            };
+            accept(cx, id, step);
+            // Accepting the last step of a component stays on it: go on to the next one.
+            if *cx.selection == before
+                && cx.doc.project().component(id).map(|c| c.status(step)) == Some(StepStatus::Done)
+                && let Some(next) = next
+            {
+                *cx.selection = next;
+            }
         }
-    })
-    .inner
+        Primary::Next => {
+            if let Some(next) = next {
+                *cx.selection = next;
+            }
+        }
+        Primary::Blocked(_) => {}
+    }
 }
 
-/// Heading of a group of inputs, with a rule after it.
-pub(crate) fn section(ui: &mut Ui, title: &str) {
-    section_info(ui, title, "");
-}
-
-/// Heading of a group of inputs with an ⓘ for `hint`, and a rule after it.
-pub(crate) fn section_info(ui: &mut Ui, title: &str, hint: &str) {
+/// Under the step: the key value it gives, back, and the main button, which accepts the
+/// step and goes on (Ctrl+Enter).
+pub(crate) fn footer(ui: &mut Ui, cx: &mut EditCtx<'_>) {
     let p = Palette::of(ui);
-    ui.add_space(10.0);
+    let project = cx.doc.project().clone();
+    match *cx.selection {
+        Selection::Setup => {
+            ui.label(
+                RichText::new(tr(
+                    "Shared by every component. Changing the design point or the fluid makes every step outdated; the acceptance does not.",
+                ))
+                .color(p.weak),
+            );
+        }
+        Selection::Step(id, step) => {
+            let units = cx.units();
+            let value = project
+                .component(id)
+                .and_then(|c| crate::flow::key_value(cx, id, c.kind(), step, &units));
+            if let Some(value) = value {
+                ui.label(RichText::new(value).size(12.0).color(p.weak));
+            }
+        }
+    }
+    let back = step_from(&project, *cx.selection, -1);
+    let next = step_from(&project, *cx.selection, 1);
+    let primary = primary(cx);
+    let shortcut = if cfg!(target_os = "macos") {
+        "⌘↩"
+    } else {
+        "Ctrl+Enter"
+    };
     ui.horizontal(|ui| {
-        ui.label(bold(title).size(13.0));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let (text, enabled, tip) = match primary {
+                Primary::Accept => (
+                    format!(
+                        "{}  {}  {}",
+                        icon::CHECK,
+                        tr("Accept step and continue"),
+                        icon::CARET_RIGHT
+                    ),
+                    true,
+                    tr("Mark this step as done with the current values and open the next one"),
+                ),
+                Primary::Next => (
+                    format!("{}  {}", tr("Next"), icon::CARET_RIGHT),
+                    next.is_some(),
+                    "",
+                ),
+                Primary::Blocked(reason) => (
+                    format!(
+                        "{}  {}  {}",
+                        icon::CHECK,
+                        tr("Accept step and continue"),
+                        icon::CARET_RIGHT
+                    ),
+                    false,
+                    tr(reason),
+                ),
+            };
+            let mut button = egui::Button::new(if primary == Primary::Accept {
+                RichText::new(text).color(p.on_accent)
+            } else {
+                RichText::new(text)
+            })
+            .shortcut_text(if enabled { shortcut } else { "" });
+            if primary == Primary::Accept {
+                button = button.fill(p.accent);
+            }
+            let response = ui.add_enabled(enabled, button);
+            let response = if tip.is_empty() {
+                response
+            } else {
+                response.on_hover_text(tip).on_disabled_hover_text(tip)
+            };
+            if response.clicked() {
+                accept_and_continue(cx);
+            }
+            if ui
+                .add_enabled(
+                    back.is_some(),
+                    egui::Button::new(format!("{} {}", icon::CARET_LEFT, tr("Back"))),
+                )
+                .clicked()
+                && let Some(back) = back
+            {
+                *cx.selection = back;
+            }
+        });
+    });
+}
+
+/// What a section of the panel holds; its heading says so.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Kind {
+    Inputs,
+    /// Computed values, read only.
+    Results,
+    /// Values compared with their recommendations.
+    Checks,
+}
+
+/// Heading of a group of inputs, with a rule after it, that folds the group. Returns
+/// whether the group is open.
+pub(crate) fn section(ui: &mut Ui, title: &str) -> bool {
+    section_kind(ui, title, "", Kind::Inputs)
+}
+
+/// [`section`] with an ⓘ that shows `hint`.
+pub(crate) fn section_info(ui: &mut Ui, title: &str, hint: &str) -> bool {
+    section_kind(ui, title, hint, Kind::Inputs)
+}
+
+/// Where the sections of the shown step keep whether they are open.
+fn sections_id(ui: &Ui) -> egui::Id {
+    ui.data(|d| d.get_temp::<egui::Id>(egui::Id::new("properties_step")))
+        .unwrap_or(egui::Id::NULL)
+}
+
+/// Folds or opens every section of the shown step.
+pub(crate) fn fold_sections(ctx: &egui::Context, fold: bool) {
+    let step = ctx
+        .data(|d| d.get_temp::<egui::Id>(egui::Id::new("properties_step")))
+        .unwrap_or(egui::Id::NULL);
+    ctx.data_mut(|d| {
+        let generation = d.get_temp::<u32>(step.with("generation")).unwrap_or(0);
+        d.insert_temp(step.with("generation"), generation + 1);
+        d.insert_temp(step.with("folded"), fold);
+    });
+}
+
+/// Whether every section of the shown step was folded from the menu.
+pub(crate) fn sections_folded(ctx: &egui::Context) -> bool {
+    let step = ctx
+        .data(|d| d.get_temp::<egui::Id>(egui::Id::new("properties_step")))
+        .unwrap_or(egui::Id::NULL);
+    ctx.data(|d| d.get_temp::<bool>(step.with("folded")))
+        .unwrap_or(false)
+}
+
+/// A section heading of any [`Kind`]. Returns whether its group is open.
+pub(crate) fn section_kind(ui: &mut Ui, title: &str, hint: &str, kind: Kind) -> bool {
+    let p = Palette::of(ui);
+    let step = sections_id(ui);
+    let folded = ui
+        .data(|d| d.get_temp::<bool>(step.with("folded")))
+        .unwrap_or(false);
+    let generation = ui
+        .data(|d| d.get_temp::<u32>(step.with("generation")))
+        .unwrap_or(0);
+    let key = step.with(("section", title));
+    let mut open = ui
+        .data(|d| d.get_temp::<(u32, bool)>(key))
+        .filter(|(g, _)| *g == generation)
+        .map_or(!folded, |(_, open)| open);
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        let caret = if open {
+            icon::CARET_DOWN
+        } else {
+            icon::CARET_RIGHT
+        };
+        let mut clicked = ui
+            .add(
+                egui::Label::new(RichText::new(caret).size(11.0).color(p.weak))
+                    .sense(egui::Sense::click()),
+            )
+            .clicked();
+        let heading = ui.add(egui::Button::new(bold(title).size(13.0)).frame(false));
+        heading.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::CollapsingHeader, true, title)
+        });
+        clicked |= heading.clicked();
         if !hint.is_empty() {
             widgets::info(ui, hint);
+        }
+        let tag = match kind {
+            Kind::Inputs => None,
+            Kind::Results => Some(tr("results")),
+            Kind::Checks => Some(tr("checks")),
+        };
+        if let Some(tag) = tag {
+            egui::Frame::new()
+                .fill(p.strip)
+                .corner_radius(4)
+                .inner_margin(egui::Margin::symmetric(5, 0))
+                .show(ui, |ui| {
+                    ui.label(RichText::new(tag).size(10.5).color(p.weak));
+                });
         }
         let rect = ui.available_rect_before_wrap();
         ui.painter().hline(
@@ -292,8 +467,13 @@ pub(crate) fn section_info(ui: &mut Ui, title: &str, hint: &str) {
             rect.center().y,
             egui::Stroke::new(1.0, p.border),
         );
+        if clicked {
+            open = !open;
+            ui.data_mut(|d| d.insert_temp(key, (generation, open)));
+        }
     });
     ui.add_space(2.0);
+    open
 }
 
 /// Whether a step can be accepted now.
@@ -402,222 +582,234 @@ pub(crate) const COMMON_FLUIDS: &[&str] = &[
 ];
 
 fn setup(ui: &mut Ui, cx: &mut EditCtx<'_>) {
+    ui.data_mut(|d| {
+        d.insert_temp(
+            egui::Id::new("properties_step"),
+            egui::Id::new(("properties", Selection::Setup)),
+        );
+    });
     let project = cx.doc.project().clone();
     let units = cx.units();
     egui::ScrollArea::vertical()
         .auto_shrink(false)
         .show(ui, |ui| {
-            section(ui, tr("Project"));
-            let mut info = project.info.clone();
-            let mut renamed = false;
-            props(ui, "project_info", |ui| {
-                label(ui, tr("Name"), "");
-                renamed |= widgets::text_field(ui, &mut info.name).changed();
-                ui.end_row();
-                label(ui, tr("Author"), "");
-                renamed |= widgets::text_field(ui, &mut info.author).changed();
-                ui.end_row();
-                value_row(ui, tr("Machine"), project.machine().to_string());
-            });
-            if renamed {
-                cx.edit("edit project information", |p| {
-                    p.info = info;
-                    Ok(())
+            if section(ui, tr("Project")) {
+                let mut info = project.info.clone();
+                let mut renamed = false;
+                props(ui, "project_info", |ui| {
+                    label(ui, tr("Name"), "");
+                    renamed |= widgets::text_field(ui, &mut info.name).changed();
+                    ui.end_row();
+                    label(ui, tr("Author"), "");
+                    renamed |= widgets::text_field(ui, &mut info.author).changed();
+                    ui.end_row();
+                    value_row(ui, tr("Machine"), project.machine().to_string());
                 });
+                if renamed {
+                    cx.edit("edit project information", |p| {
+                        p.info = info;
+                        Ok(())
+                    });
+                }
             }
-
             let mut setup = project.setup().clone();
             let mut changed = false;
-            section(ui, tr("Design point"));
-            props(ui, "design_point", |ui| {
-                label(ui, tr("Flow rate"), "");
-                ui.horizontal(|ui| {
-                    widgets::halves(ui);
-                    let (mut value, mass) = match setup.design_point.flow {
-                        FlowRate::Volume(v) => (v, false),
-                        FlowRate::Mass(m) => (m, true),
-                    };
-                    let kind = if mass {
-                        QuantityKind::MassFlow
-                    } else {
-                        QuantityKind::VolumeFlow
-                    };
-                    changed |= widgets::quantity(ui, &mut value, kind, &units, 1e-6..=1e5);
-                    let mut is_mass = mass;
-                    ComboBox::from_id_salt("flow_kind")
-                        .selected_text(tr(if mass { "mass" } else { "volume" }))
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut is_mass, false, tr("volume"));
-                            ui.selectable_value(&mut is_mass, true, tr("mass"));
-                        });
-                    let density = cx
-                        .derived
-                        .liquid
-                        .as_ref()
-                        .and_then(|l| l.as_ref().ok())
-                        .map(|l| l.density);
-                    if is_mass != mass {
-                        // Keep the same flow when switching how it is given.
-                        let rho = density.unwrap_or(1000.0);
-                        value = if is_mass { value * rho } else { value / rho };
-                        changed = true;
-                    }
-                    setup.design_point.flow = if is_mass {
-                        FlowRate::Mass(value)
-                    } else {
-                        FlowRate::Volume(value)
-                    };
-                });
-                ui.end_row();
 
-                label(ui, tr("Energy"), "");
-                ui.horizontal(|ui| {
-                    widgets::halves(ui);
-                    let (mut value, pressure) = match setup.design_point.energy {
-                        EnergyTransfer::TotalPressureDifference(p) => (p, true),
-                        other => (other.value(), false),
-                    };
-                    let kind = if pressure {
-                        QuantityKind::Pressure
-                    } else {
-                        QuantityKind::Head
-                    };
-                    changed |= widgets::quantity(ui, &mut value, kind, &units, 1e-3..=1e9);
-                    let mut is_pressure = pressure;
-                    ComboBox::from_id_salt("energy_kind")
-                        .selected_text(tr(if pressure { "pressure rise" } else { "head" }))
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut is_pressure, false, tr("head"));
-                            ui.selectable_value(&mut is_pressure, true, tr("pressure rise"));
-                        });
-                    if is_pressure != pressure {
-                        let rho_g = cx
+            if section(ui, tr("Design point")) {
+                props(ui, "design_point", |ui| {
+                    label(ui, tr("Flow rate"), "");
+                    ui.horizontal(|ui| {
+                        widgets::halves(ui);
+                        let (mut value, mass) = match setup.design_point.flow {
+                            FlowRate::Volume(v) => (v, false),
+                            FlowRate::Mass(m) => (m, true),
+                        };
+                        let kind = if mass {
+                            QuantityKind::MassFlow
+                        } else {
+                            QuantityKind::VolumeFlow
+                        };
+                        changed |= widgets::quantity(ui, &mut value, kind, &units, 1e-6..=1e5);
+                        let mut is_mass = mass;
+                        ComboBox::from_id_salt("flow_kind")
+                            .selected_text(tr(if mass { "mass" } else { "volume" }))
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut is_mass, false, tr("volume"));
+                                ui.selectable_value(&mut is_mass, true, tr("mass"));
+                            });
+                        let density = cx
                             .derived
                             .liquid
                             .as_ref()
                             .and_then(|l| l.as_ref().ok())
-                            .map_or(1000.0, |l| l.density)
-                            * tp_units::STANDARD_GRAVITY;
-                        value = if is_pressure {
-                            value * rho_g
-                        } else {
-                            value / rho_g
-                        };
-                        changed = true;
-                    }
-                    setup.design_point.energy = if is_pressure {
-                        EnergyTransfer::TotalPressureDifference(value)
-                    } else {
-                        EnergyTransfer::Head(value)
-                    };
-                });
-                ui.end_row();
-
-                label(ui, tr("Rotational speed"), "");
-                changed |= widgets::quantity(
-                    ui,
-                    &mut setup.design_point.speed,
-                    QuantityKind::RotationalSpeed,
-                    &units,
-                    0.1..=1e5,
-                );
-                ui.end_row();
-
-                label(
-                    ui,
-                    tr("Rotation"),
-                    tr("Seen from the inlet, looking downstream"),
-                );
-                let text = |r: Rotation| {
-                    tr(match r {
-                        Rotation::Clockwise => "clockwise",
-                        Rotation::CounterClockwise => "counter-clockwise",
-                    })
-                };
-                ComboBox::from_id_salt("rotation")
-                    .selected_text(text(setup.rotation))
-                    .show_ui(ui, |ui| {
-                        for r in [Rotation::Clockwise, Rotation::CounterClockwise] {
-                            changed |= ui
-                                .selectable_value(&mut setup.rotation, r, text(r))
-                                .changed();
+                            .map(|l| l.density);
+                        if is_mass != mass {
+                            // Keep the same flow when switching how it is given.
+                            let rho = density.unwrap_or(1000.0);
+                            value = if is_mass { value * rho } else { value / rho };
+                            changed = true;
                         }
+                        setup.design_point.flow = if is_mass {
+                            FlowRate::Mass(value)
+                        } else {
+                            FlowRate::Volume(value)
+                        };
                     });
-                ui.end_row();
-            });
+                    ui.end_row();
 
-            section(ui, tr("Fluid and inlet conditions"));
-            props(ui, "fluid", |ui| {
-                label(ui, tr("Fluid"), "");
-                ui.horizontal(|ui| {
-                    widgets::halves(ui);
-                    changed |= widgets::text_field(ui, &mut setup.fluid).changed();
-                    ComboBox::from_id_salt("common_fluids")
-                        .selected_text(tr("common…"))
+                    label(ui, tr("Energy"), "");
+                    ui.horizontal(|ui| {
+                        widgets::halves(ui);
+                        let (mut value, pressure) = match setup.design_point.energy {
+                            EnergyTransfer::TotalPressureDifference(p) => (p, true),
+                            other => (other.value(), false),
+                        };
+                        let kind = if pressure {
+                            QuantityKind::Pressure
+                        } else {
+                            QuantityKind::Head
+                        };
+                        changed |= widgets::quantity(ui, &mut value, kind, &units, 1e-3..=1e9);
+                        let mut is_pressure = pressure;
+                        ComboBox::from_id_salt("energy_kind")
+                            .selected_text(tr(if pressure { "pressure rise" } else { "head" }))
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut is_pressure, false, tr("head"));
+                                ui.selectable_value(&mut is_pressure, true, tr("pressure rise"));
+                            });
+                        if is_pressure != pressure {
+                            let rho_g = cx
+                                .derived
+                                .liquid
+                                .as_ref()
+                                .and_then(|l| l.as_ref().ok())
+                                .map_or(1000.0, |l| l.density)
+                                * tp_units::STANDARD_GRAVITY;
+                            value = if is_pressure {
+                                value * rho_g
+                            } else {
+                                value / rho_g
+                            };
+                            changed = true;
+                        }
+                        setup.design_point.energy = if is_pressure {
+                            EnergyTransfer::TotalPressureDifference(value)
+                        } else {
+                            EnergyTransfer::Head(value)
+                        };
+                    });
+                    ui.end_row();
+
+                    label(ui, tr("Rotational speed"), "");
+                    changed |= widgets::quantity(
+                        ui,
+                        &mut setup.design_point.speed,
+                        QuantityKind::RotationalSpeed,
+                        &units,
+                        0.1..=1e5,
+                    );
+                    ui.end_row();
+
+                    label(
+                        ui,
+                        tr("Rotation"),
+                        tr("Seen from the inlet, looking downstream"),
+                    );
+                    let text = |r: Rotation| {
+                        tr(match r {
+                            Rotation::Clockwise => "clockwise",
+                            Rotation::CounterClockwise => "counter-clockwise",
+                        })
+                    };
+                    ComboBox::from_id_salt("rotation")
+                        .selected_text(text(setup.rotation))
                         .show_ui(ui, |ui| {
-                            for name in COMMON_FLUIDS {
-                                if ui.selectable_label(setup.fluid == *name, *name).clicked() {
-                                    setup.fluid = (*name).to_owned();
-                                    changed = true;
-                                }
+                            for r in [Rotation::Clockwise, Rotation::CounterClockwise] {
+                                changed |= ui
+                                    .selectable_value(&mut setup.rotation, r, text(r))
+                                    .changed();
                             }
                         });
+                    ui.end_row();
                 });
-                ui.end_row();
-                label(ui, tr("Inlet total pressure"), "");
-                changed |= widgets::quantity(
-                    ui,
-                    &mut setup.inlet.total_pressure,
-                    QuantityKind::Pressure,
-                    &units,
-                    1.0..=1e9,
-                );
-                ui.end_row();
-                label(ui, tr("Inlet total temperature"), "");
-                changed |= widgets::quantity(
-                    ui,
-                    &mut setup.inlet.total_temperature,
-                    QuantityKind::Temperature,
-                    &units,
-                    1.0..=2000.0,
-                );
-                ui.end_row();
-            });
-            if changed {
-                cx.edit("edit global setup", |p| p.set_setup(setup));
             }
 
-            match &cx.derived.liquid {
-                Some(Ok(l)) => {
-                    props(ui, "liquid", |ui| {
-                        value_row(
-                            ui,
-                            tr("Density ρ"),
-                            units.show(QuantityKind::Density, l.density),
-                        );
-                        value_row(
-                            ui,
-                            tr("Kinematic viscosity ν"),
-                            units.show(QuantityKind::KinematicViscosity, l.kinematic_viscosity()),
-                        );
-                        value_row(
-                            ui,
-                            tr("Vapour pressure p_v"),
-                            units.show(QuantityKind::Pressure, l.vapor_pressure),
-                        );
-                        let source = match l.source {
-                            tp_fluids::PropertySource::CoolProp => "CoolProp",
-                            tp_fluids::PropertySource::BuiltinWater => {
-                                tr("built-in water model (IAPWS)")
-                            }
-                        };
-                        value_row(ui, tr("Source"), source);
+            if section(ui, tr("Fluid and inlet conditions")) {
+                props(ui, "fluid", |ui| {
+                    label(ui, tr("Fluid"), "");
+                    ui.horizontal(|ui| {
+                        widgets::halves(ui);
+                        changed |= widgets::text_field(ui, &mut setup.fluid).changed();
+                        ComboBox::from_id_salt("common_fluids")
+                            .selected_text(tr("common…"))
+                            .show_ui(ui, |ui| {
+                                for name in COMMON_FLUIDS {
+                                    if ui.selectable_label(setup.fluid == *name, *name).clicked() {
+                                        setup.fluid = (*name).to_owned();
+                                        changed = true;
+                                    }
+                                }
+                            });
                     });
+                    ui.end_row();
+                    label(ui, tr("Inlet total pressure"), "");
+                    changed |= widgets::quantity(
+                        ui,
+                        &mut setup.inlet.total_pressure,
+                        QuantityKind::Pressure,
+                        &units,
+                        1.0..=1e9,
+                    );
+                    ui.end_row();
+                    label(ui, tr("Inlet total temperature"), "");
+                    changed |= widgets::quantity(
+                        ui,
+                        &mut setup.inlet.total_temperature,
+                        QuantityKind::Temperature,
+                        &units,
+                        1.0..=2000.0,
+                    );
+                    ui.end_row();
+                });
+
+                match &cx.derived.liquid {
+                    Some(Ok(l)) => {
+                        props(ui, "liquid", |ui| {
+                            value_row(
+                                ui,
+                                tr("Density ρ"),
+                                units.show(QuantityKind::Density, l.density),
+                            );
+                            value_row(
+                                ui,
+                                tr("Kinematic viscosity ν"),
+                                units.show(
+                                    QuantityKind::KinematicViscosity,
+                                    l.kinematic_viscosity(),
+                                ),
+                            );
+                            value_row(
+                                ui,
+                                tr("Vapour pressure p_v"),
+                                units.show(QuantityKind::Pressure, l.vapor_pressure),
+                            );
+                            let source = match l.source {
+                                tp_fluids::PropertySource::CoolProp => "CoolProp",
+                                tp_fluids::PropertySource::BuiltinWater => {
+                                    tr("built-in water model (IAPWS)")
+                                }
+                            };
+                            value_row(ui, tr("Source"), source);
+                        });
+                    }
+                    Some(Err(e)) => {
+                        ui.colored_label(ui.visuals().error_fg_color, e);
+                    }
+                    None => {}
                 }
-                Some(Err(e)) => {
-                    ui.colored_label(ui.visuals().error_fg_color, e);
-                }
-                None => {}
+            }
+            if changed {
+                cx.edit("edit global setup", |p| p.set_setup(setup));
             }
 
             acceptance(ui, cx, &project);
@@ -628,80 +820,81 @@ fn setup(ui: &mut Ui, cx: &mut EditCtx<'_>) {
 /// edited apart from the global setup and makes no step stale.
 fn acceptance(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project) {
     let units = cx.units();
-    section_info(
+    if section_info(
         ui,
         tr("Acceptance"),
         tr(
             "How the objective strip judges the predicted head against the design point. It is not a design input: changing it leaves every step as it is.",
         ),
-    );
-    let criteria = project
-        .components()
-        .iter()
-        .find(|c| c.kind() == ComponentKind::Impeller)
-        .and_then(|c| cx.derived.impeller(c.id()))
-        .and_then(|r| {
-            let main = r.main.as_ref().ok()?;
-            Some(ClassCriteria::of(main, r.performance.as_ref().ok()))
-        });
-    let mut input = project.acceptance;
-    let resolved = input.resolve(criteria.as_ref());
-    let mut changed = false;
-    props(ui, "acceptance", |ui| {
-        changed |= widgets::param_choice(
-            ui,
-            tr("Quality class"),
-            tr(
-                "Gülich, Centrifugal Pumps, Table 15.2, after ISO 9906. Automatic: the most stringent of the outlet and inlet tip speeds, the head per stage at the best efficiency point and the power decides.",
-            ),
-            &mut input.class,
-            resolved.map(|a| a.class),
-            &QualityClass::ALL,
-            |c| c.name().to_owned(),
-        );
-        changed |= widgets::param_percent(
-            ui,
-            tr("Head tolerance t_H"),
-            tr(
-                "G1 ±3 %, G2 ±5 %, G3 ±7 %. ISO 9906 sets them for acceptance tests, a measured pump against its guarantee; the objective strip uses them by analogy for the predicted head.",
-            ),
-            &mut input.head_tolerance,
-            resolved.map(|a| a.head_tolerance),
-            0.001..=0.5,
-        );
-        if let Some(c) = criteria {
-            let [u2, u1, head, power] = c.classes().map(QualityClass::name);
-            let hint = tf(
-                "u₂ {} ({}), u₁ {} ({}), head per stage {} ({}), power {} ({}). Table 15.2: u₂ above 90 m/s G1, 40 to 90 G2; u₁ above 50 m/s G1, 15 to 50 G2; head above 400 m G1, 80 to 400 G2; power above 3000 kW G1, 300 to 3000 G2.",
-                &[
-                    &units.show(QuantityKind::Velocity, c.outlet_tip_speed),
-                    &u2,
-                    &units.show(QuantityKind::Velocity, c.inlet_tip_speed),
-                    &u1,
-                    &units.show(QuantityKind::Head, c.head_per_stage),
-                    &head,
-                    &units.show(QuantityKind::Power, c.power),
-                    &power,
-                ],
-            );
-            value_info(
+    ) {
+        let criteria = project
+            .components()
+            .iter()
+            .find(|c| c.kind() == ComponentKind::Impeller)
+            .and_then(|c| cx.derived.impeller(c.id()))
+            .and_then(|r| {
+                let main = r.main.as_ref().ok()?;
+                Some(ClassCriteria::of(main, r.performance.as_ref().ok()))
+            });
+        let mut input = project.acceptance;
+        let resolved = input.resolve(criteria.as_ref());
+        let mut changed = false;
+        props(ui, "acceptance", |ui| {
+            changed |= widgets::param_choice(
                 ui,
-                tr("Criteria"),
-                &hint,
-                format!(
-                    "u₂ {} · H {} → {}",
-                    units.show(QuantityKind::Velocity, c.outlet_tip_speed),
-                    units.show(QuantityKind::Head, c.head_per_stage),
-                    c.class().name()
+                tr("Quality class"),
+                tr(
+                    "Gülich, Centrifugal Pumps, Table 15.2, after ISO 9906. Automatic: the most stringent of the outlet and inlet tip speeds, the head per stage at the best efficiency point and the power decides.",
                 ),
+                &mut input.class,
+                resolved.map(|a| a.class),
+                &QualityClass::ALL,
+                |c| c.name().to_owned(),
             );
-        }
-    });
-    if changed {
-        cx.edit("edit acceptance", |p| {
-            p.acceptance = input;
-            Ok(())
+            changed |= widgets::param_percent(
+                ui,
+                tr("Head tolerance t_H"),
+                tr(
+                    "G1 ±3 %, G2 ±5 %, G3 ±7 %. ISO 9906 sets them for acceptance tests, a measured pump against its guarantee; the objective strip uses them by analogy for the predicted head.",
+                ),
+                &mut input.head_tolerance,
+                resolved.map(|a| a.head_tolerance),
+                0.001..=0.5,
+            );
+            if let Some(c) = criteria {
+                let [u2, u1, head, power] = c.classes().map(QualityClass::name);
+                let hint = tf(
+                    "u₂ {} ({}), u₁ {} ({}), head per stage {} ({}), power {} ({}). Table 15.2: u₂ above 90 m/s G1, 40 to 90 G2; u₁ above 50 m/s G1, 15 to 50 G2; head above 400 m G1, 80 to 400 G2; power above 3000 kW G1, 300 to 3000 G2.",
+                    &[
+                        &units.show(QuantityKind::Velocity, c.outlet_tip_speed),
+                        &u2,
+                        &units.show(QuantityKind::Velocity, c.inlet_tip_speed),
+                        &u1,
+                        &units.show(QuantityKind::Head, c.head_per_stage),
+                        &head,
+                        &units.show(QuantityKind::Power, c.power),
+                        &power,
+                    ],
+                );
+                value_info(
+                    ui,
+                    tr("Criteria"),
+                    &hint,
+                    format!(
+                        "u₂ {} · H {} → {}",
+                        units.show(QuantityKind::Velocity, c.outlet_tip_speed),
+                        units.show(QuantityKind::Head, c.head_per_stage),
+                        c.class().name()
+                    ),
+                );
+            }
         });
+        if changed {
+            cx.edit("edit acceptance", |p| {
+                p.acceptance = input;
+                Ok(())
+            });
+        }
     }
 }
 
@@ -716,9 +909,14 @@ fn step_panel(ui: &mut Ui, cx: &mut EditCtx<'_>, id: ComponentId, step: DesignSt
     let p = Palette::of(ui);
     let status = component.status(step);
     let (glyph, color) = status_icon(&p, status);
-    // Accept and reset sit on the right of the status when they fit, else just below.
-    let actions = accept_state(&project, cx.derived, id, step) != AcceptState::NotApplicable;
-    let placed = ui.horizontal(|ui| {
+    ui.data_mut(|d| {
+        d.insert_temp(
+            egui::Id::new("properties_step"),
+            egui::Id::new(("properties", *cx.selection)),
+        );
+    });
+    // Status, the place of the step among those of its component, and what it does.
+    ui.horizontal(|ui| {
         egui::Frame::new()
             .fill(color.gamma_multiply(0.14))
             .corner_radius(10)
@@ -730,20 +928,25 @@ fn step_panel(ui: &mut Ui, cx: &mut EditCtx<'_>, id: ComponentId, step: DesignSt
                         .color(color),
                 );
             });
-        if let Some(text) = intro(component.kind(), step) {
+        let kind = component.kind();
+        let counted: Vec<DesignStep> = kind
+            .steps()
+            .iter()
+            .copied()
+            .filter(|&s| is_available(kind, s) && s != DesignStep::ModelSettings)
+            .collect();
+        if let Some(n) = counted.iter().position(|&s| s == step) {
+            ui.label(
+                RichText::new(tf("step {} of {}", &[&(n + 1), &counted.len()]))
+                    .size(11.5)
+                    .color(p.weak),
+            );
+        }
+        if let Some(text) = intro(kind, step) {
             widgets::info(ui, text);
         }
-        let fits = actions && ui.available_width() >= buttons_width(ui) + 8.0;
-        if fits {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                buttons(ui, cx, &project, id, step);
-            });
-        }
-        fits
     });
-    if actions && !placed.inner {
-        ui.horizontal(|ui| buttons(ui, cx, &project, id, step));
-    }
+    problems(ui, cx, id, step);
 
     if !is_available(component.kind(), step) {
         ui.separator();
@@ -758,12 +961,10 @@ fn step_panel(ui: &mut Ui, cx: &mut EditCtx<'_>, id: ComponentId, step: DesignSt
                 match component.kind() {
                     ComponentKind::Volute => {
                         crate::volute_steps::show(ui, cx, &project, id, step);
-                        problems(ui, cx, id, step);
                         return;
                     }
                     ComponentKind::Stator { .. } => {
                         crate::diffuser_steps::show(ui, cx, &project, id, step);
-                        problems(ui, cx, id, step);
                         return;
                     }
                     ComponentKind::Impeller => {}
@@ -779,51 +980,7 @@ fn step_panel(ui: &mut Ui, cx: &mut EditCtx<'_>, id: ComponentId, step: DesignSt
                 DesignStep::ModelSettings => model(ui, cx, &project, id),
                 _ => {}
             }
-            problems(ui, cx, id, step);
         });
-}
-
-/// Accept and reset, for the steps that can be accepted.
-fn buttons(
-    ui: &mut Ui,
-    cx: &mut EditCtx<'_>,
-    project: &Project,
-    id: ComponentId,
-    step: DesignStep,
-) {
-    let p = Palette::of(ui);
-    let state = accept_state(project, cx.derived, id, step);
-    if state == AcceptState::NotApplicable {
-        return;
-    }
-    let ready = state == AcceptState::Ready;
-    let text = accept_text();
-    let button = if ready {
-        egui::Button::new(RichText::new(text).color(p.on_accent)).fill(p.accent)
-    } else {
-        egui::Button::new(text)
-    };
-    let reason = match state {
-        AcceptState::Blocked(reason) => reason,
-        _ => "",
-    };
-    if ui
-        .add_enabled(ready, button)
-        .on_hover_text(tr("Mark this step as done with the current values"))
-        .on_disabled_hover_text(tr(reason))
-        .clicked()
-    {
-        accept(cx, id, step);
-    }
-    if ui
-        .button(reset_text())
-        .on_hover_text(tr(
-            "Return every value of this step to its automatic proposal",
-        ))
-        .clicked()
-    {
-        reset(cx, project, id, step);
-    }
 }
 
 pub(crate) fn reset(cx: &mut EditCtx<'_>, project: &Project, id: ComponentId, step: DesignStep) {
@@ -907,18 +1064,52 @@ fn problems(ui: &mut Ui, cx: &EditCtx<'_>, id: ComponentId, step: DesignStep) {
     show_problems(ui, error, &warnings);
 }
 
+/// The error and warnings of the step, in a strip under its heading: the error always
+/// shows; the warnings fold into one line with the first of them.
 fn show_problems(ui: &mut Ui, error: Option<&String>, warnings: &[String]) {
     if error.is_none() && warnings.is_empty() {
         return;
     }
-    ui.add_space(10.0);
+    ui.add_space(6.0);
     if let Some(e) = error {
         messages::card(ui, Severity::Error, e);
         ui.add_space(3.0);
     }
-    for w in warnings {
-        messages::card(ui, Severity::Warning, w);
-        ui.add_space(3.0);
+    if warnings.is_empty() {
+        return;
+    }
+    let id = egui::Id::new("properties_warnings");
+    let mut open = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
+    let first = crate::i18n::message(&warnings[0]);
+    let text = if warnings.len() == 1 {
+        tf("1 warning: {}", &[&first])
+    } else {
+        tf("{} warnings: {}", &[&warnings.len(), &first])
+    };
+    let caret = if open {
+        icon::CARET_UP
+    } else {
+        icon::CARET_DOWN
+    };
+    let warn = ui.visuals().warn_fg_color;
+    let head = ui.add(
+        egui::Button::new(RichText::new(format!("{}  {text}  {caret}", icon::WARNING)).color(warn))
+            .fill(Palette::of(ui).warning_bg)
+            .truncate(),
+    );
+    head.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &text));
+    if head
+        .on_hover_text(tr("Show or fold the warnings"))
+        .clicked()
+    {
+        open = !open;
+        ui.data_mut(|d| d.insert_temp(id, open));
+    }
+    if open {
+        for w in warnings {
+            messages::card(ui, Severity::Warning, w);
+            ui.add_space(3.0);
+        }
     }
 }
 
@@ -930,306 +1121,310 @@ fn main_dimensions(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Com
     let d = design.as_ref();
     let mut changed = false;
 
-    section(ui, tr("Impeller type"));
-    props(ui, "impeller_type", |ui| {
-        label(
-            ui,
-            tr("Outlet"),
-            tr(
-                "Automatic: semi-axial above nq = 60, where it beats a radial outlet (Gülich Chap. 7.5)",
-            ),
-        );
-        let semi = d.is_some_and(|d| d.semi_axial);
-        ComboBox::from_id_salt("impeller_kind")
-            .selected_text(match input.impeller_type {
-                ImpellerType::Auto if semi => tr("automatic: semi-axial"),
-                ImpellerType::Auto => tr("automatic: radial"),
-                ImpellerType::Radial => tr("radial"),
-                ImpellerType::SemiAxial => tr("semi-axial (mixed flow)"),
-            })
-            .show_ui(ui, |ui| {
-                for (kind, text) in [
-                    (ImpellerType::Auto, tr("automatic")),
-                    (ImpellerType::Radial, tr("radial")),
-                    (ImpellerType::SemiAxial, tr("semi-axial (mixed flow)")),
-                ] {
+    if section(ui, tr("Impeller type")) {
+        props(ui, "impeller_type", |ui| {
+            label(
+                ui,
+                tr("Outlet"),
+                tr(
+                    "Automatic: semi-axial above nq = 60, where it beats a radial outlet (Gülich Chap. 7.5)",
+                ),
+            );
+            let semi = d.is_some_and(|d| d.semi_axial);
+            ComboBox::from_id_salt("impeller_kind")
+                .selected_text(match input.impeller_type {
+                    ImpellerType::Auto if semi => tr("automatic: semi-axial"),
+                    ImpellerType::Auto => tr("automatic: radial"),
+                    ImpellerType::Radial => tr("radial"),
+                    ImpellerType::SemiAxial => tr("semi-axial (mixed flow)"),
+                })
+                .show_ui(ui, |ui| {
+                    for (kind, text) in [
+                        (ImpellerType::Auto, tr("automatic")),
+                        (ImpellerType::Radial, tr("radial")),
+                        (ImpellerType::SemiAxial, tr("semi-axial (mixed flow)")),
+                    ] {
+                        changed |= ui
+                            .selectable_value(&mut input.impeller_type, kind, text)
+                            .changed();
+                    }
+                });
+            ui.end_row();
+            label(ui, tr("Suction"), "");
+            ComboBox::from_id_salt("suction")
+                .selected_text(tr(match input.suction {
+                    Suction::Single => "single entry",
+                    Suction::Double => "double entry",
+                }))
+                .show_ui(ui, |ui| {
                     changed |= ui
-                        .selectable_value(&mut input.impeller_type, kind, text)
+                        .selectable_value(&mut input.suction, Suction::Single, tr("single entry"))
                         .changed();
-                }
-            });
-        ui.end_row();
-        label(ui, tr("Suction"), "");
-        ComboBox::from_id_salt("suction")
-            .selected_text(tr(match input.suction {
-                Suction::Single => "single entry",
-                Suction::Double => "double entry",
-            }))
-            .show_ui(ui, |ui| {
-                changed |= ui
-                    .selectable_value(&mut input.suction, Suction::Single, tr("single entry"))
-                    .changed();
-                changed |= ui
-                    .selectable_value(&mut input.suction, Suction::Double, tr("double entry"))
-                    .changed();
-            });
-        ui.end_row();
-        label(ui, tr("Inlet design"), "");
-        ComboBox::from_id_salt("inlet_design")
-            .selected_text(tr(match input.inlet_design {
-                InletDesign::Normal => "normal impeller",
-                InletDesign::Suction => "suction impeller (low NPSH)",
-            }))
-            .show_ui(ui, |ui| {
-                changed |= ui
-                    .selectable_value(
-                        &mut input.inlet_design,
-                        InletDesign::Normal,
-                        tr("normal impeller"),
-                    )
-                    .changed();
-                changed |= ui
-                    .selectable_value(
-                        &mut input.inlet_design,
-                        InletDesign::Suction,
-                        tr("suction impeller (low NPSH)"),
-                    )
-                    .changed();
-            });
-        ui.end_row();
-    });
+                    changed |= ui
+                        .selectable_value(&mut input.suction, Suction::Double, tr("double entry"))
+                        .changed();
+                });
+            ui.end_row();
+            label(ui, tr("Inlet design"), "");
+            ComboBox::from_id_salt("inlet_design")
+                .selected_text(tr(match input.inlet_design {
+                    InletDesign::Normal => "normal impeller",
+                    InletDesign::Suction => "suction impeller (low NPSH)",
+                }))
+                .show_ui(ui, |ui| {
+                    changed |= ui
+                        .selectable_value(
+                            &mut input.inlet_design,
+                            InletDesign::Normal,
+                            tr("normal impeller"),
+                        )
+                        .changed();
+                    changed |= ui
+                        .selectable_value(
+                            &mut input.inlet_design,
+                            InletDesign::Suction,
+                            tr("suction impeller (low NPSH)"),
+                        )
+                        .changed();
+                });
+            ui.end_row();
+        });
+    }
 
-    section(ui, tr("Efficiencies"));
-    props(ui, "efficiencies", |ui| {
-        changed |= param_f64(
-            ui,
-            tr("Hydraulic η_h"),
-            tr("Gülich Table 3.9 (m = 0.08)"),
-            &mut input.hydraulic_efficiency,
-            Dimensionless,
-            d.map(|d| d.efficiencies.hydraulic),
-            &units,
-            0.3..=0.99,
-        );
-        changed |= param_f64(
-            ui,
-            tr("Volumetric η_v"),
-            tr("Leakage through the seals"),
-            &mut input.volumetric_efficiency,
-            Dimensionless,
-            d.map(|d| d.efficiencies.volumetric),
-            &units,
-            0.5..=1.0,
-        );
-        changed |= param_f64(
-            ui,
-            tr("Overall η"),
-            tr("Gülich Table 3.9 (m = 0.1)"),
-            &mut input.overall_efficiency,
-            Dimensionless,
-            d.map(|d| d.efficiencies.overall),
-            &units,
-            0.2..=0.95,
-        );
-    });
-
-    section(ui, tr("Dimensions"));
-    props(ui, "dimensions", |ui| {
-        changed |= param_f64(
-            ui,
-            tr("Pressure coefficient ψ"),
-            tr("ψ = 2gH/u₂², Gülich eq. 3.26; ignored when d₂ is manual"),
-            &mut input.pressure_coefficient,
-            Dimensionless,
-            d.map(|d| d.pressure_coefficient),
-            &units,
-            0.3..=1.5,
-        );
-        changed |= param_f64(
-            ui,
-            tr("Outlet diameter d₂"),
-            tr("From ψ and the head"),
-            &mut input.outlet_diameter,
-            Length,
-            d.map(|d| d.outlet_diameter),
-            &units,
-            0.01..=5.0,
-        );
-        changed |= param_f64(
-            ui,
-            tr("Outlet width b₂"),
-            tr("Gülich eq. 7.1"),
-            &mut input.outlet_width,
-            Length,
-            d.map(|d| d.outlet_width),
-            &units,
-            0.0005..=1.0,
-        );
-        changed |= param_f64(
-            ui,
-            tr("Outlet hub diameter d₂i"),
-            tr(
-                "Hub end of the outlet edge; d₂ is the shroud end d₂a. Automatic: Gülich eqs. 7.13–7.14 on a semi-axial impeller, d₂ on a radial one; set by hand on a radial one it slants the edge and the design takes the mean diameter",
-            ),
-            &mut input.outlet_hub_diameter,
-            Length,
-            d.map(|d| d.outlet_hub_diameter),
-            &units,
-            0.005..=5.0,
-        );
-        if d.is_some_and(|d| d.semi_axial) {
+    if section(ui, tr("Efficiencies")) {
+        props(ui, "efficiencies", |ui| {
             changed |= param_f64(
                 ui,
-                tr("Outlet inclination ε_s"),
-                tr(
-                    "Angle of the outer streamline at the outlet to a normal to the axis: 0° radial, 90° axial (Gülich eq. 7.12, ±5° in executed pumps)",
-                ),
-                &mut input.outlet_inclination,
-                Angle,
-                d.map(|d| d.outlet_inclination),
+                tr("Hydraulic η_h"),
+                tr("Gülich Table 3.9 (m = 0.08)"),
+                &mut input.hydraulic_efficiency,
+                Dimensionless,
+                d.map(|d| d.efficiencies.hydraulic),
                 &units,
-                1f64.to_radians()..=80f64.to_radians(),
+                0.3..=0.99,
             );
-        }
-        let factor = match input.inlet_diameter_factor {
-            Param::Manual(v) => Some(v),
-            Param::Auto => d.map(|d| corr::inlet_diameter_factor(input.inlet_design, d.nq)),
-        };
-        changed |= param_f64(
-            ui,
-            tr("Eye factor f_d1"),
-            tr("d₁ over the eye diameter of minimum w₁ (Gülich Table 7.1)"),
-            &mut input.inlet_diameter_factor,
-            Dimensionless,
-            factor,
-            &units,
-            0.8..=1.6,
-        );
-        changed |= param_f64(
-            ui,
-            tr("Eye diameter d₁"),
-            tr("Overrides the eye factor when manual"),
-            &mut input.inlet_diameter,
-            Length,
-            d.map(|d| d.inlet_diameter),
-            &units,
-            0.005..=3.0,
-        );
-        changed |= param_f64(
-            ui,
-            tr("Hub diameter d_n"),
-            tr("Hub diameter at the eye"),
-            &mut input.hub_diameter,
-            Length,
-            d.map(|d| d.hub_diameter),
-            &units,
-            0.0..=2.0,
-        );
-        changed |= param_f64(
-            ui,
-            tr("Shaft diameter"),
-            tr("From the torque and the allowable shear stress"),
-            &mut input.shaft_diameter,
-            Length,
-            d.map(|d| d.shaft_diameter),
-            &units,
-            0.002..=1.0,
-        );
-        let tau = input
-            .shaft_shear_stress
-            .resolve(|| corr::SHAFT_SHEAR_STRESS);
-        changed |= param_f64(
-            ui,
-            tr("Shaft shear stress"),
-            tr("Allowable torsional stress"),
-            &mut input.shaft_shear_stress,
-            Pressure,
-            Some(tau),
-            &units,
-            1e6..=300e6,
-        );
-        changed |= param_u32(
-            ui,
-            tr("Blades z"),
-            tr(
-                "Pfleiderer: 5 to 7 for nq 10–120 (Gülich), 3 to 12 otherwise; the head rise picks 3 to 8 (Lobanoff & Ross Fig. 3-2)",
-            ),
-            &mut input.blade_count,
-            d.map(|d| d.blade_count),
-            3..=24,
-        );
-        changed |= param_f64(
-            ui,
-            tr("Head rise to shut-off"),
-            tr(
-                "(H₀ − H)/H. Manual: sets the blades and β₂B (Lobanoff & Ross Figs. 3-2 and 3-13); fewer blades give a steeper curve",
-            ),
-            &mut input.head_rise,
-            Dimensionless,
-            d.map(|d| d.head_rise),
-            &units,
-            0.02..=1.0,
-        );
-        changed |= param_f64(
-            ui,
-            tr("Outlet blade angle β₂B"),
-            tr(
-                "Manual: d₂ follows from the head, or b₂ when d₂ is manual; 90° gives radial blades",
-            ),
-            &mut input.outlet_blade_angle,
-            Angle,
-            d.map(|d| d.outlet.blade_angle),
-            &units,
-            5f64.to_radians()..=90f64.to_radians(),
-        );
-        changed |= param_f64(
-            ui,
-            tr("Blade thickness e"),
-            tr("Normal thickness at inlet and outlet"),
-            &mut input.blade_thickness,
-            Length,
-            d.map(|d| d.blade_thickness),
-            &units,
-            0.0003..=0.1,
-        );
-    });
+            changed |= param_f64(
+                ui,
+                tr("Volumetric η_v"),
+                tr("Leakage through the seals"),
+                &mut input.volumetric_efficiency,
+                Dimensionless,
+                d.map(|d| d.efficiencies.volumetric),
+                &units,
+                0.5..=1.0,
+            );
+            changed |= param_f64(
+                ui,
+                tr("Overall η"),
+                tr("Gülich Table 3.9 (m = 0.1)"),
+                &mut input.overall_efficiency,
+                Dimensionless,
+                d.map(|d| d.efficiencies.overall),
+                &units,
+                0.2..=0.95,
+            );
+        });
+    }
 
-    section(ui, tr("Inlet and cavitation"));
-    props(ui, "inlet", |ui| {
-        let incidence = input.incidence.resolve(|| 0.0);
-        changed |= param_f64(
-            ui,
-            tr("Incidence i"),
-            tr("Between blade and inflow at the leading edge (0°–4°)"),
-            &mut input.incidence,
-            Angle,
-            Some(incidence),
-            &units,
-            -5f64.to_radians()..=10f64.to_radians(),
-        );
-        let nss = input
-            .suction_specific_speed
-            .resolve(|| corr::SUCTION_SPECIFIC_SPEED);
-        changed |= param_f64(
-            ui,
-            tr("Suction specific speed nss"),
-            tr("rpm, m³/s, m; sets NPSH3"),
-            &mut input.suction_specific_speed,
-            Dimensionless,
-            Some(nss),
-            &units,
-            100.0..=400.0,
-        );
-    });
+    if section(ui, tr("Dimensions")) {
+        props(ui, "dimensions", |ui| {
+            changed |= param_f64(
+                ui,
+                tr("Pressure coefficient ψ"),
+                tr("ψ = 2gH/u₂², Gülich eq. 3.26; ignored when d₂ is manual"),
+                &mut input.pressure_coefficient,
+                Dimensionless,
+                d.map(|d| d.pressure_coefficient),
+                &units,
+                0.3..=1.5,
+            );
+            changed |= param_f64(
+                ui,
+                tr("Outlet diameter d₂"),
+                tr("From ψ and the head"),
+                &mut input.outlet_diameter,
+                Length,
+                d.map(|d| d.outlet_diameter),
+                &units,
+                0.01..=5.0,
+            );
+            changed |= param_f64(
+                ui,
+                tr("Outlet width b₂"),
+                tr("Gülich eq. 7.1"),
+                &mut input.outlet_width,
+                Length,
+                d.map(|d| d.outlet_width),
+                &units,
+                0.0005..=1.0,
+            );
+            changed |= param_f64(
+                ui,
+                tr("Outlet hub diameter d₂i"),
+                tr(
+                    "Hub end of the outlet edge; d₂ is the shroud end d₂a. Automatic: Gülich eqs. 7.13–7.14 on a semi-axial impeller, d₂ on a radial one; set by hand on a radial one it slants the edge and the design takes the mean diameter",
+                ),
+                &mut input.outlet_hub_diameter,
+                Length,
+                d.map(|d| d.outlet_hub_diameter),
+                &units,
+                0.005..=5.0,
+            );
+            if d.is_some_and(|d| d.semi_axial) {
+                changed |= param_f64(
+                    ui,
+                    tr("Outlet inclination ε_s"),
+                    tr(
+                        "Angle of the outer streamline at the outlet to a normal to the axis: 0° radial, 90° axial (Gülich eq. 7.12, ±5° in executed pumps)",
+                    ),
+                    &mut input.outlet_inclination,
+                    Angle,
+                    d.map(|d| d.outlet_inclination),
+                    &units,
+                    1f64.to_radians()..=80f64.to_radians(),
+                );
+            }
+            let factor = match input.inlet_diameter_factor {
+                Param::Manual(v) => Some(v),
+                Param::Auto => d.map(|d| corr::inlet_diameter_factor(input.inlet_design, d.nq)),
+            };
+            changed |= param_f64(
+                ui,
+                tr("Eye factor f_d1"),
+                tr("d₁ over the eye diameter of minimum w₁ (Gülich Table 7.1)"),
+                &mut input.inlet_diameter_factor,
+                Dimensionless,
+                factor,
+                &units,
+                0.8..=1.6,
+            );
+            changed |= param_f64(
+                ui,
+                tr("Eye diameter d₁"),
+                tr("Overrides the eye factor when manual"),
+                &mut input.inlet_diameter,
+                Length,
+                d.map(|d| d.inlet_diameter),
+                &units,
+                0.005..=3.0,
+            );
+            changed |= param_f64(
+                ui,
+                tr("Hub diameter d_n"),
+                tr("Hub diameter at the eye"),
+                &mut input.hub_diameter,
+                Length,
+                d.map(|d| d.hub_diameter),
+                &units,
+                0.0..=2.0,
+            );
+            changed |= param_f64(
+                ui,
+                tr("Shaft diameter"),
+                tr("From the torque and the allowable shear stress"),
+                &mut input.shaft_diameter,
+                Length,
+                d.map(|d| d.shaft_diameter),
+                &units,
+                0.002..=1.0,
+            );
+            let tau = input
+                .shaft_shear_stress
+                .resolve(|| corr::SHAFT_SHEAR_STRESS);
+            changed |= param_f64(
+                ui,
+                tr("Shaft shear stress"),
+                tr("Allowable torsional stress"),
+                &mut input.shaft_shear_stress,
+                Pressure,
+                Some(tau),
+                &units,
+                1e6..=300e6,
+            );
+            changed |= param_u32(
+                ui,
+                tr("Blades z"),
+                tr(
+                    "Pfleiderer: 5 to 7 for nq 10–120 (Gülich), 3 to 12 otherwise; the head rise picks 3 to 8 (Lobanoff & Ross Fig. 3-2)",
+                ),
+                &mut input.blade_count,
+                d.map(|d| d.blade_count),
+                3..=24,
+            );
+            changed |= param_f64(
+                ui,
+                tr("Head rise to shut-off"),
+                tr(
+                    "(H₀ − H)/H. Manual: sets the blades and β₂B (Lobanoff & Ross Figs. 3-2 and 3-13); fewer blades give a steeper curve",
+                ),
+                &mut input.head_rise,
+                Dimensionless,
+                d.map(|d| d.head_rise),
+                &units,
+                0.02..=1.0,
+            );
+            changed |= param_f64(
+                ui,
+                tr("Outlet blade angle β₂B"),
+                tr(
+                    "Manual: d₂ follows from the head, or b₂ when d₂ is manual; 90° gives radial blades",
+                ),
+                &mut input.outlet_blade_angle,
+                Angle,
+                d.map(|d| d.outlet.blade_angle),
+                &units,
+                5f64.to_radians()..=90f64.to_radians(),
+            );
+            changed |= param_f64(
+                ui,
+                tr("Blade thickness e"),
+                tr("Normal thickness at inlet and outlet"),
+                &mut input.blade_thickness,
+                Length,
+                d.map(|d| d.blade_thickness),
+                &units,
+                0.0003..=0.1,
+            );
+        });
+    }
 
+    if section(ui, tr("Inlet and cavitation")) {
+        props(ui, "inlet", |ui| {
+            let incidence = input.incidence.resolve(|| 0.0);
+            changed |= param_f64(
+                ui,
+                tr("Incidence i"),
+                tr("Between blade and inflow at the leading edge (0°–4°)"),
+                &mut input.incidence,
+                Angle,
+                Some(incidence),
+                &units,
+                -5f64.to_radians()..=10f64.to_radians(),
+            );
+            let nss = input
+                .suction_specific_speed
+                .resolve(|| corr::SUCTION_SPECIFIC_SPEED);
+            changed |= param_f64(
+                ui,
+                tr("Suction specific speed nss"),
+                tr("rpm, m³/s, m; sets NPSH3"),
+                &mut input.suction_specific_speed,
+                Dimensionless,
+                Some(nss),
+                &units,
+                100.0..=400.0,
+            );
+        });
+    }
     if changed {
         cx.edit("edit main dimensions", |p| {
             p.set_main_dimensions(id, MainDimensionsInput::CentrifugalPump(input))
         });
     }
 
-    if let Some(d) = d {
-        section(ui, tr("Results"));
+    if let Some(d) = d
+        && section_kind(ui, tr("Results"), "", Kind::Results)
+    {
         props(ui, "main_results", |ui| {
             value_row(ui, tr("Specific speed nq"), format!("{:.2}", d.nq));
             value_row(ui, tr("Shaft power"), units.show(Power, d.stage_power));
@@ -1272,177 +1467,416 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
     let m: &mut MeridionalInput = &mut input.meridional;
     let mut changed = false;
     use tp_design::impeller::meridian::DesignMode;
-    section(ui, tr("Contour"));
-    props(ui, "contour", |ui| {
-        label(
-            ui,
-            tr("Design mode"),
-            tr(
-                "Hub and shroud drawn directly, or a center line and a cross-section \
-                 distribution the walls follow (suited to mixed-flow impellers)",
-            ),
-        );
-        let mode = m.design_mode;
-        let mode_name = |mode: DesignMode| {
-            tr(match mode {
-                DesignMode::Walls => "hub and shroud",
-                DesignMode::CenterLine => "center line and area",
-            })
-        };
-        ComboBox::from_id_salt("design_mode")
-            .selected_text(mode_name(mode))
-            .show_ui(ui, |ui| {
-                for option in [DesignMode::Walls, DesignMode::CenterLine] {
-                    ui.selectable_value(&mut m.design_mode, option, mode_name(option));
-                }
-            });
-        ui.end_row();
-        changed |= m.design_mode != mode;
-        changed |= param_f64(
-            ui,
-            tr("Axial length L"),
-            tr("From the inlet plane to the hub at the outlet; default b₂ + (d₁ − d_n)/2"),
-            &mut m.axial_length,
-            Length,
-            g.map(|g| g.contour.axial_length),
-            &units,
-            0.001..=5.0,
-        );
-        if let Some(g) = g {
-            use tp_design::impeller::meridian::{AxialReference, InletTilt};
-            let contour = &g.contour;
+    if section(ui, tr("Contour")) {
+        props(ui, "contour", |ui| {
             label(
                 ui,
-                tr("Axial reference"),
+                tr("Design mode"),
                 tr(
-                    "The point whose axial position is given: the middle of the inlet line or \
-                     of the outlet line; the other end follows from L",
+                    "Hub and shroud drawn directly, or a center line and a cross-section \
+                     distribution the walls follow (suited to mixed-flow impellers)",
                 ),
             );
-            let before = (m.axial_reference, m.axial_position);
-            let name = |r: AxialReference| {
-                tr(match r {
-                    AxialReference::Inlet => "middle of the inlet",
-                    AxialReference::Outlet => "middle of the outlet",
+            let mode = m.design_mode;
+            let mode_name = |mode: DesignMode| {
+                tr(match mode {
+                    DesignMode::Walls => "hub and shroud",
+                    DesignMode::CenterLine => "center line and area",
                 })
             };
-            ComboBox::from_id_salt("axial_reference")
-                .selected_text(name(m.axial_reference))
+            ComboBox::from_id_salt("design_mode")
+                .selected_text(mode_name(mode))
                 .show_ui(ui, |ui| {
-                    for (reference, point) in [
-                        (
-                            AxialReference::Inlet,
-                            contour.hub.start().lerp(contour.shroud.start(), 0.5),
-                        ),
-                        (
-                            AxialReference::Outlet,
-                            contour.hub.end().lerp(contour.shroud.end(), 0.5),
-                        ),
-                    ] {
-                        // The meridian stays where it is: the position follows.
-                        if ui
-                            .selectable_label(m.axial_reference == reference, name(reference))
-                            .clicked()
-                        {
-                            m.axial_reference = reference;
-                            m.axial_position = point.x;
-                        }
+                    for option in [DesignMode::Walls, DesignMode::CenterLine] {
+                        ui.selectable_value(&mut m.design_mode, option, mode_name(option));
                     }
                 });
             ui.end_row();
-            label(
+            changed |= m.design_mode != mode;
+            changed |= param_f64(
                 ui,
-                tr("Axial position z"),
-                tr(
-                    "Of the reference point; changing it moves the whole meridian, drawn points included",
-                ),
+                tr("Axial length L"),
+                tr("From the inlet plane to the hub at the outlet; default b₂ + (d₁ − d_n)/2"),
+                &mut m.axial_length,
+                Length,
+                g.map(|g| g.contour.axial_length),
+                &units,
+                0.001..=5.0,
             );
-            let mut position = m.axial_position;
-            if widgets::quantity(ui, &mut position, Length, &units, -10.0..=10.0) {
-                m.shift(position - m.axial_position);
-                m.axial_position = position;
+            if let Some(g) = g {
+                use tp_design::impeller::meridian::{AxialReference, InletTilt};
+                let contour = &g.contour;
+                label(
+                    ui,
+                    tr("Axial reference"),
+                    tr(
+                        "The point whose axial position is given: the middle of the inlet line or \
+                         of the outlet line; the other end follows from L",
+                    ),
+                );
+                let before = (m.axial_reference, m.axial_position);
+                let name = |r: AxialReference| {
+                    tr(match r {
+                        AxialReference::Inlet => "middle of the inlet",
+                        AxialReference::Outlet => "middle of the outlet",
+                    })
+                };
+                ComboBox::from_id_salt("axial_reference")
+                    .selected_text(name(m.axial_reference))
+                    .show_ui(ui, |ui| {
+                        for (reference, point) in [
+                            (
+                                AxialReference::Inlet,
+                                contour.hub.start().lerp(contour.shroud.start(), 0.5),
+                            ),
+                            (
+                                AxialReference::Outlet,
+                                contour.hub.end().lerp(contour.shroud.end(), 0.5),
+                            ),
+                        ] {
+                            // The meridian stays where it is: the position follows.
+                            if ui
+                                .selectable_label(m.axial_reference == reference, name(reference))
+                                .clicked()
+                            {
+                                m.axial_reference = reference;
+                                m.axial_position = point.x;
+                            }
+                        }
+                    });
+                ui.end_row();
+                label(
+                    ui,
+                    tr("Axial position z"),
+                    tr(
+                        "Of the reference point; changing it moves the whole meridian, drawn points included",
+                    ),
+                );
+                let mut position = m.axial_position;
+                if widgets::quantity(ui, &mut position, Length, &units, -10.0..=10.0) {
+                    m.shift(position - m.axial_position);
+                    m.axial_position = position;
+                }
+                ui.end_row();
+                changed |= (m.axial_reference, m.axial_position) != before;
+                label(
+                    ui,
+                    tr("Inlet line"),
+                    tr(
+                        "Normal to the axis, or leaning: the shroud point an axial distance \
+                         downstream of the hub point, or the line at an angle from the normal",
+                    ),
+                );
+                let height = (contour.shroud.start().y - contour.hub.start().y).max(1e-9);
+                let offset = m.inlet_tilt.offset(height);
+                let tilt = m.inlet_tilt;
+                let tilt_name = |t: &InletTilt| {
+                    tr(match t {
+                        InletTilt::Normal => "normal to the axis",
+                        InletTilt::Axial(_) => "axial distance",
+                        InletTilt::Angle(_) => "angle",
+                    })
+                };
+                ComboBox::from_id_salt("inlet_tilt")
+                    .selected_text(tilt_name(&tilt))
+                    .show_ui(ui, |ui| {
+                        for option in [
+                            InletTilt::Normal,
+                            InletTilt::Axial(offset),
+                            InletTilt::Angle((offset / height).atan()),
+                        ] {
+                            let same =
+                                std::mem::discriminant(&option) == std::mem::discriminant(&tilt);
+                            if ui.selectable_label(same, tilt_name(&option)).clicked() && !same {
+                                m.inlet_tilt = option;
+                            }
+                        }
+                    });
+                ui.end_row();
+                match &mut m.inlet_tilt {
+                    InletTilt::Normal => {}
+                    InletTilt::Axial(dz) => {
+                        label(ui, tr("Shroud point Δz"), tr("Downstream of the hub point"));
+                        changed |= widgets::quantity(ui, dz, Length, &units, -1.0..=1.0);
+                        ui.end_row();
+                    }
+                    InletTilt::Angle(angle) => {
+                        label(
+                            ui,
+                            tr("Inlet angle"),
+                            tr(
+                                "From the normal to the axis; positive with the shroud point downstream",
+                            ),
+                        );
+                        changed |= widgets::quantity(ui, angle, Angle, &units, -1.0..=1.0);
+                        ui.end_row();
+                    }
+                }
+                changed |= m.inlet_tilt != tilt;
             }
-            ui.end_row();
-            changed |= (m.axial_reference, m.axial_position) != before;
-            label(
-                ui,
-                tr("Inlet line"),
-                tr(
-                    "Normal to the axis, or leaning: the shroud point an axial distance \
-                     downstream of the hub point, or the line at an angle from the normal",
+            let walls = [
+                (
+                    "Hub drawn by segments",
+                    &mut m.hub_segments,
+                    [
+                        ("Hub inlet tangent", &mut m.hub_inlet_tangent),
+                        ("Hub outlet tangent", &mut m.hub_outlet_tangent),
+                    ],
                 ),
-            );
-            let height = (contour.shroud.start().y - contour.hub.start().y).max(1e-9);
-            let offset = m.inlet_tilt.offset(height);
-            let tilt = m.inlet_tilt;
-            let tilt_name = |t: &InletTilt| {
-                tr(match t {
-                    InletTilt::Normal => "normal to the axis",
-                    InletTilt::Axial(_) => "axial distance",
-                    InletTilt::Angle(_) => "angle",
-                })
-            };
-            ComboBox::from_id_salt("inlet_tilt")
-                .selected_text(tilt_name(&tilt))
-                .show_ui(ui, |ui| {
-                    for option in [
-                        InletTilt::Normal,
-                        InletTilt::Axial(offset),
-                        InletTilt::Angle((offset / height).atan()),
-                    ] {
-                        let same = std::mem::discriminant(&option) == std::mem::discriminant(&tilt);
-                        if ui.selectable_label(same, tilt_name(&option)).clicked() && !same {
-                            m.inlet_tilt = option;
-                        }
-                    }
-                });
-            ui.end_row();
-            match &mut m.inlet_tilt {
-                InletTilt::Normal => {}
-                InletTilt::Axial(dz) => {
-                    label(ui, tr("Shroud point Δz"), tr("Downstream of the hub point"));
-                    changed |= widgets::quantity(ui, dz, Length, &units, -1.0..=1.0);
-                    ui.end_row();
-                }
-                InletTilt::Angle(angle) => {
+                (
+                    "Shroud drawn by segments",
+                    &mut m.shroud_segments,
+                    [
+                        ("Shroud inlet tangent", &mut m.shroud_inlet_tangent),
+                        ("Shroud outlet tangent", &mut m.shroud_outlet_tangent),
+                    ],
+                ),
+            ];
+            if m.design_mode == DesignMode::CenterLine {
+                if let Some(list) = &m.center_line {
+                    let count = list.len();
                     label(
                         ui,
-                        tr("Inlet angle"),
+                        tr("Center line drawn by segments"),
+                        tr("Drawn in the editor; hub and shroud follow it"),
+                    );
+                    let automatic = ui
+                        .horizontal(|ui| {
+                            ui.label(tf("{} segments", &[&count]));
+                            ui.button(tr("Automatic")).clicked()
+                        })
+                        .inner;
+                    ui.end_row();
+                    if automatic {
+                        m.center_line = None;
+                        changed = true;
+                    }
+                }
+                label(
+                    ui,
+                    tr("Cross section"),
+                    tr(
+                        "A_rel along the center line, 0 at the inlet section and 1 at the outlet one",
+                    ),
+                );
+                ui.label(if m.area_progression.is_empty() {
+                    tr("linear").to_owned()
+                } else {
+                    tf("{} points", &[&m.area_progression.len()])
+                });
+                ui.end_row();
+            }
+            // Walls that follow the center line have no inputs of their own.
+            let walls = if m.design_mode == DesignMode::CenterLine {
+                Vec::new()
+            } else {
+                walls.into_iter().collect()
+            };
+            for (drawn, segments, tangents) in walls {
+                if let Some(list) = segments {
+                    let count = list.len();
+                    widgets::label(
+                        ui,
+                        tr(drawn),
                         tr(
-                            "From the normal to the axis; positive with the shroud point downstream",
+                            "Drawn segment by segment in the meridional view; its tangent lengths \
+                            do not apply",
                         ),
                     );
-                    changed |= widgets::quantity(ui, angle, Angle, &units, -1.0..=1.0);
+                    let automatic = ui
+                        .horizontal(|ui| {
+                            ui.label(tf("{} segments", &[&count]));
+                            ui.button(tr("Automatic")).clicked()
+                        })
+                        .inner;
                     ui.end_row();
+                    if automatic {
+                        *segments = None;
+                        changed = true;
+                    }
+                    continue;
+                }
+                for (label, param) in tangents {
+                    changed |= param_f64(
+                        ui,
+                        tr(label),
+                        tr(
+                            "Length of the Bézier tangent as a fraction of the distance to the corner",
+                        ),
+                        param,
+                        Dimensionless,
+                        Some(DEFAULT_TANGENT),
+                        &units,
+                        0.05..=0.95,
+                    );
                 }
             }
-            changed |= m.inlet_tilt != tilt;
-        }
-        let walls = [
-            (
-                "Hub drawn by segments",
-                &mut m.hub_segments,
-                [
-                    ("Hub inlet tangent", &mut m.hub_inlet_tangent),
-                    ("Hub outlet tangent", &mut m.hub_outlet_tangent),
-                ],
-            ),
-            (
-                "Shroud drawn by segments",
-                &mut m.shroud_segments,
-                [
-                    ("Shroud inlet tangent", &mut m.shroud_inlet_tangent),
-                    ("Shroud outlet tangent", &mut m.shroud_outlet_tangent),
-                ],
-            ),
-        ];
+        });
         if m.design_mode == DesignMode::CenterLine {
-            if let Some(list) = &m.center_line {
+            changed |= area_progression(ui, id, &mut m.area_progression);
+        }
+    }
+    if section(ui, tr("Leading edge")) {
+        props(ui, "leading_edge", |ui| {
+            use tp_design::impeller::meridian::LeadingEdgeShape;
+            let name = |shape: &LeadingEdgeShape| {
+                tr(match shape {
+                    LeadingEdgeShape::Channel => "Along the channel",
+                    LeadingEdgeShape::Line => "Straight line",
+                    LeadingEdgeShape::Bezier { .. } => "Bézier",
+                })
+            };
+            label(
+                ui,
+                tr("Shape"),
+                tr(
+                    "Between its hub and shroud points: following the channel, straight, or a \
+                    Bézier whose control points are dragged in the meridional view",
+                ),
+            );
+            let before = std::mem::discriminant(&m.leading_edge_shape);
+            ComboBox::from_id_salt("leading_edge_shape")
+                .selected_text(name(&m.leading_edge_shape))
+                .show_ui(ui, |ui| {
+                    for shape in [LeadingEdgeShape::Channel, LeadingEdgeShape::Line] {
+                        let text = name(&shape);
+                        ui.selectable_value(&mut m.leading_edge_shape, shape, text);
+                    }
+                    let bezier = matches!(m.leading_edge_shape, LeadingEdgeShape::Bezier { .. });
+                    if ui.selectable_label(bezier, tr("Bézier")).clicked() && !bezier {
+                        m.leading_edge_shape = g.map_or(LeadingEdgeShape::Line, |g| {
+                            crate::views::meridional::bezier_along_edge(g)
+                        });
+                    }
+                });
+            ui.end_row();
+            changed |= std::mem::discriminant(&m.leading_edge_shape) != before;
+            changed |= param_f64(
+                ui,
+                tr("On the hub"),
+                tr("Fraction of the hub length"),
+                &mut m.leading_edge_hub,
+                Dimensionless,
+                Some(g.map_or(DEFAULT_LEADING_EDGE_HUB, |g| g.contour.leading_edge.0)),
+                &units,
+                0.0..=0.9,
+            );
+            changed |= param_f64(
+                ui,
+                tr("On the shroud"),
+                tr("Fraction of the shroud length"),
+                &mut m.leading_edge_shroud,
+                Dimensionless,
+                Some(g.map_or(DEFAULT_LEADING_EDGE_SHROUD, |g| g.contour.leading_edge.1)),
+                &units,
+                0.0..=0.9,
+            );
+            use crate::views::meridional::{extent_like, extent_name};
+            use tp_design::impeller::meridian::EdgeExtent;
+            label(
+                ui,
+                tr("Hub point"),
+                tr(
+                    "Independent of the shroud point, or following it at a constant axial or \
+                     radial distance: 0 puts the edge normal to the axis or parallel to it",
+                ),
+            );
+            let before = m.leading_edge_extent;
+            ComboBox::from_id_salt("leading_edge_extent")
+                .selected_text(extent_name(before))
+                .show_ui(ui, |ui| {
+                    for kind in [
+                        EdgeExtent::Independent,
+                        EdgeExtent::Axial(0.0),
+                        EdgeExtent::Radial(0.0),
+                    ] {
+                        let same = std::mem::discriminant(&kind) == std::mem::discriminant(&before);
+                        if ui.selectable_label(same, extent_name(kind)).clicked() && !same {
+                            m.leading_edge_extent = g.map_or(kind, |g| extent_like(kind, g));
+                        }
+                    }
+                });
+            ui.end_row();
+            changed |= m.leading_edge_extent != before;
+            let offset = match &mut m.leading_edge_extent {
+                EdgeExtent::Independent => None,
+                EdgeExtent::Axial(dz) => Some((tr("Axial offset Δz"), dz)),
+                EdgeExtent::Radial(dr) => Some((tr("Radial offset Δr"), dr)),
+            };
+            if let Some((name, value)) = offset {
+                label(ui, name, tr("From the shroud point to the hub point"));
+                changed |= widgets::quantity(ui, value, Length, &units, -1.0..=1.0);
+                ui.end_row();
+            }
+        });
+    }
+    if section_info(
+        ui,
+        tr("Material"),
+        tr(
+            "The closed contours of the hub disk and the shroud cover, for the CAD model: \
+             automatic from these values, or drawn on the Materials page of the editor",
+        ),
+    ) {
+        props(ui, "material", |ui| {
+            let used = g.map(|g| g.contour.material);
+            let settings = &mut m.material;
+            changed |= param_f64(
+                ui,
+                tr("Wall thickness"),
+                tr("Hub disk and shroud; automatic: max(3 mm, 0.02·d₂)"),
+                &mut settings.wall_thickness,
+                Length,
+                used.map(|u| u.wall_thickness),
+                &units,
+                0.0005..=0.2,
+            );
+            changed |= param_f64(
+                ui,
+                tr("Bore diameter"),
+                tr("Automatic: the hub diameter at the eye"),
+                &mut settings.bore_diameter,
+                Length,
+                used.map(|u| u.bore_diameter),
+                &units,
+                0.0..=1.0,
+            );
+            changed |= param_f64(
+                ui,
+                tr("Boss diameter"),
+                tr(
+                    "Around the bore; automatic: the bore plus a wall of a quarter of it, no thinner than the wall",
+                ),
+                &mut settings.boss_diameter,
+                Length,
+                used.map(|u| u.boss_diameter),
+                &units,
+                0.0..=1.0,
+            );
+            changed |= param_f64(
+                ui,
+                tr("Neck length"),
+                tr(
+                    "Of the shroud upstream of the inlet, where the annular seal runs; automatic: 0.12·d_sp (Gülich Chap. 3.6.2); 0 for none",
+                ),
+                &mut settings.neck_length,
+                Length,
+                used.map(|u| u.neck_length),
+                &units,
+                0.0..=0.5,
+            );
+            for (name, wire) in [
+                (tr("Hub disk drawn by segments"), &mut m.hub_material),
+                (tr("Shroud cover drawn by segments"), &mut m.shroud_material),
+            ] {
+                let Some(list) = wire else {
+                    continue;
+                };
                 let count = list.len();
                 label(
                     ui,
-                    tr("Center line drawn by segments"),
-                    tr("Drawn in the editor; hub and shroud follow it"),
+                    name,
+                    tr("Drawn on the Materials page of the editor; the values above do not apply"),
                 );
                 let automatic = ui
                     .horizontal(|ui| {
@@ -1452,37 +1886,100 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                     .inner;
                 ui.end_row();
                 if automatic {
-                    m.center_line = None;
+                    *wire = None;
                     changed = true;
                 }
             }
+        });
+    }
+    if section_info(
+        ui,
+        tr("Side chambers"),
+        tr(
+            "Between the impeller and the casing: the front one down to the annular seal on \
+             the neck, the rear one down to the shaft seal. Once designed, the axial thrust \
+             and the loss analysis take these seals and gaps wherever theirs are automatic",
+        ),
+    ) {
+        props(ui, "chambers", |ui| {
+            let built = g.map(|g| g.contour.chambers.values);
+            let chambers = &mut m.chambers;
             label(
                 ui,
-                tr("Cross section"),
-                tr("A_rel along the center line, 0 at the inlet section and 1 at the outlet one"),
+                tr("Design the side chambers"),
+                tr(
+                    "Export their fluid with the CAD model, alone and, with a volute after them, joined to the impeller and the volute in one flow domain for CFD; shape them in the Side chambers scope of the Meridian view",
+                ),
             );
-            ui.label(if m.area_progression.is_empty() {
-                tr("linear").to_owned()
-            } else {
-                tf("{} points", &[&m.area_progression.len()])
+            let enabled = chambers.enabled;
+            let response = ui.checkbox(&mut chambers.enabled, "");
+            response.widget_info(|| {
+                egui::WidgetInfo::selected(
+                    egui::WidgetType::Checkbox,
+                    true,
+                    enabled,
+                    tr("Design the side chambers"),
+                )
             });
+            changed |= response.changed();
             ui.end_row();
-        }
-        // Walls that follow the center line have no inputs of their own.
-        let walls = if m.design_mode == DesignMode::CenterLine {
-            Vec::new()
-        } else {
-            walls.into_iter().collect()
-        };
-        for (drawn, segments, tangents) in walls {
-            if let Some(list) = segments {
-                let count = list.len();
-                widgets::label(
+            changed |= param_f64(
+                ui,
+                tr("Axial gap s_ax"),
+                tr(
+                    "Between the impeller and the casing walls; automatic: 0.05·r₂ (our choice; Gülich finds its effect small, Chap. 3.6.1)",
+                ),
+                &mut chambers.axial_gap,
+                Length,
+                built.map(|v| v.axial_gap),
+                &units,
+                0.0001..=0.2,
+            );
+            changed |= param_f64(
+                ui,
+                tr("Seal clearance s"),
+                tr("Radial, of the annular seal on the neck; automatic: Gülich eq. 3.12"),
+                &mut chambers.seal_clearance,
+                Length,
+                built.map(|v| v.seal_clearance),
+                &units,
+                0.00001..=0.01,
+            );
+            changed |= param_f64(
+                ui,
+                tr("Shaft seal diameter d_D"),
+                tr("Where the rear chamber ends; automatic: the hub diameter"),
+                &mut chambers.shaft_seal_diameter,
+                Length,
+                built.map(|v| v.shaft_seal_diameter),
+                &units,
+                0.001..=2.0,
+            );
+            if let Some(v) = built {
+                value_row(
                     ui,
-                    tr(drawn),
+                    tr("Seal diameter d_sp"),
+                    units.show(Length, v.seal_diameter),
+                );
+                value_row(
+                    ui,
+                    tr("Seal length L_sp"),
+                    units.show(Length, v.seal_length),
+                );
+            }
+            for (name, wire) in [
+                (tr("Front casing drawn by segments"), &mut chambers.front),
+                (tr("Rear casing drawn by segments"), &mut chambers.rear),
+            ] {
+                let Some(list) = wire else {
+                    continue;
+                };
+                let count = list.len();
+                label(
+                    ui,
+                    name,
                     tr(
-                        "Drawn segment by segment in the meridional view; its tangent lengths \
-                        do not apply",
+                        "Drawn on the Side chambers page of the editor; the gap above does not apply",
                     ),
                 );
                 let automatic = ui
@@ -1493,344 +1990,56 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                     .inner;
                 ui.end_row();
                 if automatic {
-                    *segments = None;
+                    *wire = None;
                     changed = true;
                 }
-                continue;
             }
-            for (label, param) in tangents {
-                changed |= param_f64(
-                    ui,
-                    tr(label),
-                    tr("Length of the Bézier tangent as a fraction of the distance to the corner"),
-                    param,
-                    Dimensionless,
-                    Some(DEFAULT_TANGENT),
-                    &units,
-                    0.05..=0.95,
-                );
-            }
-        }
-    });
-    if m.design_mode == DesignMode::CenterLine {
-        changed |= area_progression(ui, id, &mut m.area_progression);
-    }
-    section(ui, tr("Leading edge"));
-    props(ui, "leading_edge", |ui| {
-        use tp_design::impeller::meridian::LeadingEdgeShape;
-        let name = |shape: &LeadingEdgeShape| {
-            tr(match shape {
-                LeadingEdgeShape::Channel => "Along the channel",
-                LeadingEdgeShape::Line => "Straight line",
-                LeadingEdgeShape::Bezier { .. } => "Bézier",
-            })
-        };
-        label(
-            ui,
-            tr("Shape"),
-            tr(
-                "Between its hub and shroud points: following the channel, straight, or a \
-                Bézier whose control points are dragged in the meridional view",
-            ),
-        );
-        let before = std::mem::discriminant(&m.leading_edge_shape);
-        ComboBox::from_id_salt("leading_edge_shape")
-            .selected_text(name(&m.leading_edge_shape))
-            .show_ui(ui, |ui| {
-                for shape in [LeadingEdgeShape::Channel, LeadingEdgeShape::Line] {
-                    let text = name(&shape);
-                    ui.selectable_value(&mut m.leading_edge_shape, shape, text);
-                }
-                let bezier = matches!(m.leading_edge_shape, LeadingEdgeShape::Bezier { .. });
-                if ui.selectable_label(bezier, tr("Bézier")).clicked() && !bezier {
-                    m.leading_edge_shape = g.map_or(LeadingEdgeShape::Line, |g| {
-                        crate::views::meridional::bezier_along_edge(g)
-                    });
-                }
-            });
-        ui.end_row();
-        changed |= std::mem::discriminant(&m.leading_edge_shape) != before;
-        changed |= param_f64(
-            ui,
-            tr("On the hub"),
-            tr("Fraction of the hub length"),
-            &mut m.leading_edge_hub,
-            Dimensionless,
-            Some(g.map_or(DEFAULT_LEADING_EDGE_HUB, |g| g.contour.leading_edge.0)),
-            &units,
-            0.0..=0.9,
-        );
-        changed |= param_f64(
-            ui,
-            tr("On the shroud"),
-            tr("Fraction of the shroud length"),
-            &mut m.leading_edge_shroud,
-            Dimensionless,
-            Some(g.map_or(DEFAULT_LEADING_EDGE_SHROUD, |g| g.contour.leading_edge.1)),
-            &units,
-            0.0..=0.9,
-        );
-        use crate::views::meridional::{extent_like, extent_name};
-        use tp_design::impeller::meridian::EdgeExtent;
-        label(
-            ui,
-            tr("Hub point"),
-            tr(
-                "Independent of the shroud point, or following it at a constant axial or \
-                 radial distance: 0 puts the edge normal to the axis or parallel to it",
-            ),
-        );
-        let before = m.leading_edge_extent;
-        ComboBox::from_id_salt("leading_edge_extent")
-            .selected_text(extent_name(before))
-            .show_ui(ui, |ui| {
-                for kind in [
-                    EdgeExtent::Independent,
-                    EdgeExtent::Axial(0.0),
-                    EdgeExtent::Radial(0.0),
-                ] {
-                    let same = std::mem::discriminant(&kind) == std::mem::discriminant(&before);
-                    if ui.selectable_label(same, extent_name(kind)).clicked() && !same {
-                        m.leading_edge_extent = g.map_or(kind, |g| extent_like(kind, g));
-                    }
-                }
-            });
-        ui.end_row();
-        changed |= m.leading_edge_extent != before;
-        let offset = match &mut m.leading_edge_extent {
-            EdgeExtent::Independent => None,
-            EdgeExtent::Axial(dz) => Some((tr("Axial offset Δz"), dz)),
-            EdgeExtent::Radial(dr) => Some((tr("Radial offset Δr"), dr)),
-        };
-        if let Some((name, value)) = offset {
-            label(ui, name, tr("From the shroud point to the hub point"));
-            changed |= widgets::quantity(ui, value, Length, &units, -1.0..=1.0);
-            ui.end_row();
-        }
-    });
-    section_info(
-        ui,
-        tr("Material"),
-        tr(
-            "The closed contours of the hub disk and the shroud cover, for the CAD model: \
-             automatic from these values, or drawn on the Materials page of the editor",
-        ),
-    );
-    props(ui, "material", |ui| {
-        let used = g.map(|g| g.contour.material);
-        let settings = &mut m.material;
-        changed |= param_f64(
-            ui,
-            tr("Wall thickness"),
-            tr("Hub disk and shroud; automatic: max(3 mm, 0.02·d₂)"),
-            &mut settings.wall_thickness,
-            Length,
-            used.map(|u| u.wall_thickness),
-            &units,
-            0.0005..=0.2,
-        );
-        changed |= param_f64(
-            ui,
-            tr("Bore diameter"),
-            tr("Automatic: the hub diameter at the eye"),
-            &mut settings.bore_diameter,
-            Length,
-            used.map(|u| u.bore_diameter),
-            &units,
-            0.0..=1.0,
-        );
-        changed |= param_f64(
-            ui,
-            tr("Boss diameter"),
-            tr(
-                "Around the bore; automatic: the bore plus a wall of a quarter of it, no thinner than the wall",
-            ),
-            &mut settings.boss_diameter,
-            Length,
-            used.map(|u| u.boss_diameter),
-            &units,
-            0.0..=1.0,
-        );
-        changed |= param_f64(
-            ui,
-            tr("Neck length"),
-            tr(
-                "Of the shroud upstream of the inlet, where the annular seal runs; automatic: 0.12·d_sp (Gülich Chap. 3.6.2); 0 for none",
-            ),
-            &mut settings.neck_length,
-            Length,
-            used.map(|u| u.neck_length),
-            &units,
-            0.0..=0.5,
-        );
-        for (name, wire) in [
-            (tr("Hub disk drawn by segments"), &mut m.hub_material),
-            (tr("Shroud cover drawn by segments"), &mut m.shroud_material),
-        ] {
-            let Some(list) = wire else {
-                continue;
-            };
-            let count = list.len();
-            label(
-                ui,
-                name,
-                tr("Drawn on the Materials page of the editor; the values above do not apply"),
-            );
-            let automatic = ui
-                .horizontal(|ui| {
-                    ui.label(tf("{} segments", &[&count]));
-                    ui.button(tr("Automatic")).clicked()
-                })
-                .inner;
-            ui.end_row();
-            if automatic {
-                *wire = None;
-                changed = true;
-            }
-        }
-    });
-    section_info(
-        ui,
-        tr("Side chambers"),
-        tr(
-            "Between the impeller and the casing: the front one down to the annular seal on \
-             the neck, the rear one down to the shaft seal. Once designed, the axial thrust \
-             and the loss analysis take these seals and gaps wherever theirs are automatic",
-        ),
-    );
-    props(ui, "chambers", |ui| {
-        let built = g.map(|g| g.contour.chambers.values);
-        let chambers = &mut m.chambers;
-        label(
-            ui,
-            tr("Design the side chambers"),
-            tr(
-                "Export their fluid with the CAD model, alone and, with a volute after them, joined to the impeller and the volute in one flow domain for CFD; shape them in the Side chambers scope of the Meridian view",
-            ),
-        );
-        let enabled = chambers.enabled;
-        let response = ui.checkbox(&mut chambers.enabled, "");
-        response.widget_info(|| {
-            egui::WidgetInfo::selected(
-                egui::WidgetType::Checkbox,
-                true,
-                enabled,
-                tr("Design the side chambers"),
-            )
         });
-        changed |= response.changed();
-        ui.end_row();
-        changed |= param_f64(
-            ui,
-            tr("Axial gap s_ax"),
-            tr(
-                "Between the impeller and the casing walls; automatic: 0.05·r₂ (our choice; Gülich finds its effect small, Chap. 3.6.1)",
-            ),
-            &mut chambers.axial_gap,
-            Length,
-            built.map(|v| v.axial_gap),
-            &units,
-            0.0001..=0.2,
-        );
-        changed |= param_f64(
-            ui,
-            tr("Seal clearance s"),
-            tr("Radial, of the annular seal on the neck; automatic: Gülich eq. 3.12"),
-            &mut chambers.seal_clearance,
-            Length,
-            built.map(|v| v.seal_clearance),
-            &units,
-            0.00001..=0.01,
-        );
-        changed |= param_f64(
-            ui,
-            tr("Shaft seal diameter d_D"),
-            tr("Where the rear chamber ends; automatic: the hub diameter"),
-            &mut chambers.shaft_seal_diameter,
-            Length,
-            built.map(|v| v.shaft_seal_diameter),
-            &units,
-            0.001..=2.0,
-        );
-        if let Some(v) = built {
-            value_row(
-                ui,
-                tr("Seal diameter d_sp"),
-                units.show(Length, v.seal_diameter),
-            );
-            value_row(
-                ui,
-                tr("Seal length L_sp"),
-                units.show(Length, v.seal_length),
-            );
-        }
-        for (name, wire) in [
-            (tr("Front casing drawn by segments"), &mut chambers.front),
-            (tr("Rear casing drawn by segments"), &mut chambers.rear),
-        ] {
-            let Some(list) = wire else {
-                continue;
-            };
-            let count = list.len();
-            label(
-                ui,
-                name,
-                tr("Drawn on the Side chambers page of the editor; the gap above does not apply"),
-            );
-            let automatic = ui
-                .horizontal(|ui| {
-                    ui.label(tf("{} segments", &[&count]));
-                    ui.button(tr("Automatic")).clicked()
-                })
-                .inner;
-            ui.end_row();
-            if automatic {
-                *wire = None;
-                changed = true;
-            }
-        }
-    });
+    }
     if changed {
         edit_geometry(cx, id, "edit meridional contour", input);
     }
     if let Some(g) = g {
         let qos = &g.channel.quasi_orthogonals;
-        section(ui, tr("Meridional flow"));
-        props(ui, "meridional_results", |ui| {
-            value_row(
-                ui,
-                tr("Hub length"),
-                units.show(Length, g.contour.hub_length()),
-            );
-            value_row(
-                ui,
-                tr("Shroud length"),
-                units.show(Length, g.contour.shroud_length()),
-            );
-            value_row(
-                ui,
-                tr("c_m inlet / outlet"),
-                format!(
-                    "{} / {}",
-                    units.show(Velocity, qos[0].cm),
-                    units.show(Velocity, qos[qos.len() - 1].cm)
-                ),
-            );
-            value_row(
-                ui,
-                tr("Largest local rise of c_m"),
-                format!("{:.1} %", g.channel.max_cm_rise() * 100.0),
-            );
-        });
-        section_info(
+        if section_kind(ui, tr("Meridional flow"), "", Kind::Results) {
+            props(ui, "meridional_results", |ui| {
+                value_row(
+                    ui,
+                    tr("Hub length"),
+                    units.show(Length, g.contour.hub_length()),
+                );
+                value_row(
+                    ui,
+                    tr("Shroud length"),
+                    units.show(Length, g.contour.shroud_length()),
+                );
+                value_row(
+                    ui,
+                    tr("c_m inlet / outlet"),
+                    format!(
+                        "{} / {}",
+                        units.show(Velocity, qos[0].cm),
+                        units.show(Velocity, qos[qos.len() - 1].cm)
+                    ),
+                );
+                value_row(
+                    ui,
+                    tr("Largest local rise of c_m"),
+                    format!("{:.1} %", g.channel.max_cm_rise() * 100.0),
+                );
+            });
+        }
+        if section_kind(
             ui,
             tr("Check against Gülich"),
             tr(
                 "Recommendations for the meridional section of radial impellers: Gülich, \
                  Centrifugal Pumps, chap. 7.2.2.1 and eq. 7.2",
             ),
-        );
-        crate::views::meridian_editor::guide_table(ui, g, &units);
+            Kind::Checks,
+        ) {
+            crate::views::meridian_editor::guide_table(ui, g, &units);
+        }
     }
 }
 
@@ -1889,94 +2098,101 @@ fn blade_properties(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Co
     let mut input = project.impeller_geometry_input(id).unwrap_or_default();
     let g = cx.derived.geometry(id);
     let mut changed = false;
-    section(ui, tr("Sections"));
-    props(ui, "properties", |ui| {
-        changed |= param_u32(
-            ui,
-            tr("Spans"),
-            tr("Blade sections from hub to shroud"),
-            &mut input.properties.spans,
-            Some(g.map_or(DEFAULT_SPANS, |g| g.blade.sections.len() as u32)),
-            2..=21,
-        );
-        label(
-            ui,
-            tr("Meridional flow"),
-            tr(
-                "Stream surfaces and c_m the sections are built on. The potential flow is faster on the shroud and slower at the hub in the bend, which sets the inlet angle of each section; the quasi-1D flow keeps c_m uniform across the channel",
-            ),
-        );
-        ComboBox::from_id_salt("meridional_flow")
-            .selected_text(match input.properties.meridional_flow {
-                MeridionalFlow::Potential => tr("potential (2D)"),
-                MeridionalFlow::QuasiOneDimensional => tr("quasi-1D"),
-            })
-            .show_ui(ui, |ui| {
-                for (flow, text) in [
-                    (MeridionalFlow::Potential, tr("potential (2D)")),
-                    (MeridionalFlow::QuasiOneDimensional, tr("quasi-1D")),
-                ] {
-                    changed |= ui
-                        .selectable_value(&mut input.properties.meridional_flow, flow, text)
-                        .changed();
-                }
-            });
-        ui.end_row();
-        label(
-            ui,
-            tr("Inlet velocity"),
-            tr(
-                "The c_m the leading-edge angles are designed with. Local: each section's own, from the meridional flow. Uniform: the eye value c1m = Q_La/A1 at every section, as Gülich designs the inlet angles (eq. T7.1.7)",
-            ),
-        );
-        ComboBox::from_id_salt("inlet_velocity")
-            .selected_text(match input.properties.inlet_velocity {
-                InletVelocity::Local => tr("local"),
-                InletVelocity::Uniform => tr("uniform c1m"),
-            })
-            .show_ui(ui, |ui| {
-                for (velocity, text) in [
-                    (InletVelocity::Local, tr("local")),
-                    (InletVelocity::Uniform, tr("uniform c1m")),
-                ] {
-                    changed |= ui
-                        .selectable_value(&mut input.properties.inlet_velocity, velocity, text)
-                        .changed();
-                }
-            });
-        ui.end_row();
-        label(
-            ui,
-            tr("Blade shape"),
-            tr(
-                "Cylindrical (2D) blades share one plan view swept along the axis: no lean, a one-piece core, the leading edge parallel to the axis. They suit nq below about 20 (Lobanoff & Ross ch. 3; Gülich Chap. 7.3)",
-            ),
-        );
-        ComboBox::from_id_salt("blade_shape")
-            .selected_text(blade_shape_name(input.properties.shape))
-            .show_ui(ui, |ui| {
-                for shape in [
-                    BladeShape::FreeForm,
-                    BladeShape::Cylindrical,
-                    BladeShape::CircularArc,
-                    BladeShape::Straight,
-                ] {
-                    changed |= ui
-                        .selectable_value(
-                            &mut input.properties.shape,
-                            shape,
-                            blade_shape_name(shape),
-                        )
-                        .changed();
-                }
-            });
-        ui.end_row();
-    });
+    if section(ui, tr("Sections")) {
+        props(ui, "properties", |ui| {
+            changed |= param_u32(
+                ui,
+                tr("Spans"),
+                tr("Blade sections from hub to shroud"),
+                &mut input.properties.spans,
+                Some(g.map_or(DEFAULT_SPANS, |g| g.blade.sections.len() as u32)),
+                2..=21,
+            );
+            label(
+                ui,
+                tr("Meridional flow"),
+                tr(
+                    "Stream surfaces and c_m the sections are built on. The potential flow is faster on the shroud and slower at the hub in the bend, which sets the inlet angle of each section; the quasi-1D flow keeps c_m uniform across the channel",
+                ),
+            );
+            ComboBox::from_id_salt("meridional_flow")
+                .selected_text(match input.properties.meridional_flow {
+                    MeridionalFlow::Potential => tr("potential (2D)"),
+                    MeridionalFlow::QuasiOneDimensional => tr("quasi-1D"),
+                })
+                .show_ui(ui, |ui| {
+                    for (flow, text) in [
+                        (MeridionalFlow::Potential, tr("potential (2D)")),
+                        (MeridionalFlow::QuasiOneDimensional, tr("quasi-1D")),
+                    ] {
+                        changed |= ui
+                            .selectable_value(&mut input.properties.meridional_flow, flow, text)
+                            .changed();
+                    }
+                });
+            ui.end_row();
+            label(
+                ui,
+                tr("Inlet velocity"),
+                tr(
+                    "The c_m the leading-edge angles are designed with. Local: each section's own, from the meridional flow. Uniform: the eye value c1m = Q_La/A1 at every section, as Gülich designs the inlet angles (eq. T7.1.7)",
+                ),
+            );
+            ComboBox::from_id_salt("inlet_velocity")
+                .selected_text(match input.properties.inlet_velocity {
+                    InletVelocity::Local => tr("local"),
+                    InletVelocity::Uniform => tr("uniform c1m"),
+                })
+                .show_ui(ui, |ui| {
+                    for (velocity, text) in [
+                        (InletVelocity::Local, tr("local")),
+                        (InletVelocity::Uniform, tr("uniform c1m")),
+                    ] {
+                        changed |= ui
+                            .selectable_value(&mut input.properties.inlet_velocity, velocity, text)
+                            .changed();
+                    }
+                });
+            ui.end_row();
+            label(
+                ui,
+                tr("Blade shape"),
+                tr(
+                    "Cylindrical (2D) blades share one plan view swept along the axis: no lean, a one-piece core, the leading edge parallel to the axis. They suit nq below about 20 (Lobanoff & Ross ch. 3; Gülich Chap. 7.3)",
+                ),
+            );
+            ComboBox::from_id_salt("blade_shape")
+                .selected_text(blade_shape_name(input.properties.shape))
+                .show_ui(ui, |ui| {
+                    for shape in [
+                        BladeShape::FreeForm,
+                        BladeShape::Cylindrical,
+                        BladeShape::CircularArc,
+                        BladeShape::Straight,
+                    ] {
+                        changed |= ui
+                            .selectable_value(
+                                &mut input.properties.shape,
+                                shape,
+                                blade_shape_name(shape),
+                            )
+                            .changed();
+                    }
+                });
+            ui.end_row();
+        });
+    }
     if changed {
         edit_geometry(cx, id, "edit blade properties", input);
     }
-    if let Some(g) = g {
-        section_info(ui, tr("Blade loading"), tr("Gülich eqs. 7.1.10–11"));
+    if let Some(g) = g
+        && section_kind(
+            ui,
+            tr("Blade loading"),
+            tr("Gülich eqs. 7.1.10–11"),
+            Kind::Checks,
+        )
+    {
         let l = &g.blade_loading;
         props(ui, "loading", |ui| {
             value_row(ui, tr("Blades z"), g.blade.count.to_string());
@@ -2012,141 +2228,143 @@ fn mean_lines(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
     let mut input = project.impeller_geometry_input(id).unwrap_or_default();
     let g = cx.derived.geometry(id);
     let mut changed = false;
-    section(ui, tr("Blade angle distribution"));
-    props(ui, "beta", |ui| {
-        let shape = input.properties.shape;
-        if matches!(shape, BladeShape::CircularArc | BladeShape::Straight) {
-            value_info(
-                ui,
-                tr("Blade shape"),
-                tr(
-                    "The circular-arc and straight shapes fix β from the leading to the trailing edge; the distribution below does not apply",
-                ),
-                blade_shape_name(shape),
-            );
-        }
-        label(ui, tr("Distribution"), "");
-        let smooth = matches!(input.mean_lines.beta, BetaDistribution::Smooth { .. });
-        ComboBox::from_id_salt("beta_kind")
-            .selected_text(tr(if smooth { "smooth (Bézier)" } else { "linear" }))
-            .show_ui(ui, |ui| {
-                if ui.selectable_label(!smooth, tr("linear")).clicked() && smooth {
-                    input.mean_lines.beta = BetaDistribution::Linear;
-                    changed = true;
-                }
-                if ui.selectable_label(smooth, tr("smooth (Bézier)")).clicked() && !smooth {
-                    input.mean_lines.beta = BetaDistribution::Smooth {
-                        inlet: 0.3,
-                        outlet: 0.3,
-                    };
-                    changed = true;
-                }
-            });
-        ui.end_row();
-        if let BetaDistribution::Smooth { inlet, outlet } = &mut input.mean_lines.beta {
-            label(
-                ui,
-                tr("Inlet hold"),
-                tr("How long β stays near its inlet value"),
-            );
-            changed |= ui
-                .add(DragValue::new(inlet).range(0.0..=1.0).speed(0.005))
-                .changed();
-            ui.end_row();
-            label(
-                ui,
-                tr("Outlet hold"),
-                tr("How long β stays near its outlet value"),
-            );
-            changed |= ui
-                .add(DragValue::new(outlet).range(0.0..=1.0).speed(0.005))
-                .changed();
-            ui.end_row();
-        }
-    });
-    if input.properties.shape == BladeShape::FreeForm {
-        section(ui, tr("Wrap angle"));
-        props(ui, "wrap", |ui| {
-            label(
-                ui,
-                tr("Sections"),
-                tr(
-                    "Common: every section wraps the same angle, so the leading edge has no tangential sweep; each keeps its edge angles and a bump in its β distribution takes it there. Linear: from the hub wrap to the shroud wrap with the flow fraction. Free: each wraps what its β distribution gives",
-                ),
-            );
-            ComboBox::from_id_salt("wrap_mode")
-                .selected_text(match input.mean_lines.wrap {
-                    WrapMode::Common => tr("common wrap"),
-                    WrapMode::Linear => tr("linear hub to shroud"),
-                    WrapMode::Free => tr("each its own"),
-                })
+    if section(ui, tr("Blade angle distribution")) {
+        props(ui, "beta", |ui| {
+            let shape = input.properties.shape;
+            if matches!(shape, BladeShape::CircularArc | BladeShape::Straight) {
+                value_info(
+                    ui,
+                    tr("Blade shape"),
+                    tr(
+                        "The circular-arc and straight shapes fix β from the leading to the trailing edge; the distribution below does not apply",
+                    ),
+                    blade_shape_name(shape),
+                );
+            }
+            label(ui, tr("Distribution"), "");
+            let smooth = matches!(input.mean_lines.beta, BetaDistribution::Smooth { .. });
+            ComboBox::from_id_salt("beta_kind")
+                .selected_text(tr(if smooth { "smooth (Bézier)" } else { "linear" }))
                 .show_ui(ui, |ui| {
-                    for (mode, text) in [
-                        (WrapMode::Common, tr("common wrap")),
-                        (WrapMode::Linear, tr("linear hub to shroud")),
-                        (WrapMode::Free, tr("each its own")),
-                    ] {
-                        changed |= ui
-                            .selectable_value(&mut input.mean_lines.wrap, mode, text)
-                            .changed();
+                    if ui.selectable_label(!smooth, tr("linear")).clicked() && smooth {
+                        input.mean_lines.beta = BetaDistribution::Linear;
+                        changed = true;
+                    }
+                    if ui.selectable_label(smooth, tr("smooth (Bézier)")).clicked() && !smooth {
+                        input.mean_lines.beta = BetaDistribution::Smooth {
+                            inlet: 0.3,
+                            outlet: 0.3,
+                        };
+                        changed = true;
                     }
                 });
             ui.end_row();
-            if input.mean_lines.wrap == WrapMode::Common {
-                changed |= param_f64(
+            if let BetaDistribution::Smooth { inlet, outlet } = &mut input.mean_lines.beta {
+                label(
                     ui,
-                    tr("Wrap angle φ"),
-                    tr(
-                        "Shared by every section; automatic: the mean of the wraps their own β distributions give",
-                    ),
-                    &mut input.mean_lines.wrap_angle,
-                    QuantityKind::Angle,
-                    g.map(|g| g.blade.sections[0].wrap_angle()),
-                    &units,
-                    20f64.to_radians()..=360f64.to_radians(),
+                    tr("Inlet hold"),
+                    tr("How long β stays near its inlet value"),
                 );
-            }
-            if input.mean_lines.wrap == WrapMode::Linear {
-                changed |= param_f64(
+                changed |= ui
+                    .add(DragValue::new(inlet).range(0.0..=1.0).speed(0.005))
+                    .changed();
+                ui.end_row();
+                label(
                     ui,
-                    tr("Hub wrap φ_hub"),
-                    tr("Automatic: what the hub section's own β distribution gives"),
-                    &mut input.mean_lines.wrap_angle,
-                    QuantityKind::Angle,
-                    g.map(|g| g.blade.sections[0].wrap_angle()),
-                    &units,
-                    20f64.to_radians()..=360f64.to_radians(),
+                    tr("Outlet hold"),
+                    tr("How long β stays near its outlet value"),
                 );
-                changed |= param_f64(
-                    ui,
-                    tr("Shroud wrap φ_shroud"),
-                    tr("Automatic: what the shroud section's own β distribution gives"),
-                    &mut input.mean_lines.wrap_angle_shroud,
-                    QuantityKind::Angle,
-                    g.and_then(|g| g.blade.sections.last())
-                        .map(|s| s.wrap_angle()),
-                    &units,
-                    20f64.to_radians()..=360f64.to_radians(),
-                );
+                changed |= ui
+                    .add(DragValue::new(outlet).range(0.0..=1.0).speed(0.005))
+                    .changed();
+                ui.end_row();
             }
         });
+        if input.properties.shape == BladeShape::FreeForm && section(ui, tr("Wrap angle")) {
+            props(ui, "wrap", |ui| {
+                label(
+                    ui,
+                    tr("Sections"),
+                    tr(
+                        "Common: every section wraps the same angle, so the leading edge has no tangential sweep; each keeps its edge angles and a bump in its β distribution takes it there. Linear: from the hub wrap to the shroud wrap with the flow fraction. Free: each wraps what its β distribution gives",
+                    ),
+                );
+                ComboBox::from_id_salt("wrap_mode")
+                    .selected_text(match input.mean_lines.wrap {
+                        WrapMode::Common => tr("common wrap"),
+                        WrapMode::Linear => tr("linear hub to shroud"),
+                        WrapMode::Free => tr("each its own"),
+                    })
+                    .show_ui(ui, |ui| {
+                        for (mode, text) in [
+                            (WrapMode::Common, tr("common wrap")),
+                            (WrapMode::Linear, tr("linear hub to shroud")),
+                            (WrapMode::Free, tr("each its own")),
+                        ] {
+                            changed |= ui
+                                .selectable_value(&mut input.mean_lines.wrap, mode, text)
+                                .changed();
+                        }
+                    });
+                ui.end_row();
+                if input.mean_lines.wrap == WrapMode::Common {
+                    changed |= param_f64(
+                        ui,
+                        tr("Wrap angle φ"),
+                        tr(
+                            "Shared by every section; automatic: the mean of the wraps their own β distributions give",
+                        ),
+                        &mut input.mean_lines.wrap_angle,
+                        QuantityKind::Angle,
+                        g.map(|g| g.blade.sections[0].wrap_angle()),
+                        &units,
+                        20f64.to_radians()..=360f64.to_radians(),
+                    );
+                }
+                if input.mean_lines.wrap == WrapMode::Linear {
+                    changed |= param_f64(
+                        ui,
+                        tr("Hub wrap φ_hub"),
+                        tr("Automatic: what the hub section's own β distribution gives"),
+                        &mut input.mean_lines.wrap_angle,
+                        QuantityKind::Angle,
+                        g.map(|g| g.blade.sections[0].wrap_angle()),
+                        &units,
+                        20f64.to_radians()..=360f64.to_radians(),
+                    );
+                    changed |= param_f64(
+                        ui,
+                        tr("Shroud wrap φ_shroud"),
+                        tr("Automatic: what the shroud section's own β distribution gives"),
+                        &mut input.mean_lines.wrap_angle_shroud,
+                        QuantityKind::Angle,
+                        g.and_then(|g| g.blade.sections.last())
+                            .map(|s| s.wrap_angle()),
+                        &units,
+                        20f64.to_radians()..=360f64.to_radians(),
+                    );
+                }
+            });
+        }
     }
-    section(ui, tr("Resolution"));
-    props(ui, "points", |ui| {
-        changed |= param_u32(
-            ui,
-            tr("Points per section"),
-            tr("From leading to trailing edge"),
-            &mut input.mean_lines.points,
-            Some(g.map_or(DEFAULT_POINTS, |g| g.blade.sections[0].m.len() as u32)),
-            11..=201,
-        );
-    });
+    if section(ui, tr("Resolution")) {
+        props(ui, "points", |ui| {
+            changed |= param_u32(
+                ui,
+                tr("Points per section"),
+                tr("From leading to trailing edge"),
+                &mut input.mean_lines.points,
+                Some(g.map_or(DEFAULT_POINTS, |g| g.blade.sections[0].m.len() as u32)),
+                11..=201,
+            );
+        });
+    }
     if changed {
         edit_geometry(cx, id, "edit blade mean lines", input);
     }
-    if let Some(g) = g {
-        section(ui, tr("Sections"));
+    if let Some(g) = g
+        && section(ui, tr("Sections"))
+    {
         Grid::new("sections")
             .num_columns(4)
             .striped(true)
@@ -2171,31 +2389,32 @@ fn profiles(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: ComponentI
     let mut input = project.impeller_geometry_input(id).unwrap_or_default();
     let base = cx.derived.geometry(id).map(|g| g.basis.blade_thickness);
     let mut changed = false;
-    section(ui, tr("Thickness"));
-    props(ui, "profiles", |ui| {
-        let leading = input.profiles.thickness_leading.manual_value().or(base);
-        changed |= param_f64(
-            ui,
-            tr("At the leading edge"),
-            tr("Default: the blade thickness of the main dimensions"),
-            &mut input.profiles.thickness_leading,
-            QuantityKind::Length,
-            leading,
-            &units,
-            0.0002..=0.1,
-        );
-        let trailing = input.profiles.thickness_trailing.manual_value().or(base);
-        changed |= param_f64(
-            ui,
-            tr("At the trailing edge"),
-            tr("Default: the blade thickness of the main dimensions"),
-            &mut input.profiles.thickness_trailing,
-            QuantityKind::Length,
-            trailing,
-            &units,
-            0.0002..=0.1,
-        );
-    });
+    if section(ui, tr("Thickness")) {
+        props(ui, "profiles", |ui| {
+            let leading = input.profiles.thickness_leading.manual_value().or(base);
+            changed |= param_f64(
+                ui,
+                tr("At the leading edge"),
+                tr("Default: the blade thickness of the main dimensions"),
+                &mut input.profiles.thickness_leading,
+                QuantityKind::Length,
+                leading,
+                &units,
+                0.0002..=0.1,
+            );
+            let trailing = input.profiles.thickness_trailing.manual_value().or(base);
+            changed |= param_f64(
+                ui,
+                tr("At the trailing edge"),
+                tr("Default: the blade thickness of the main dimensions"),
+                &mut input.profiles.thickness_trailing,
+                QuantityKind::Length,
+                trailing,
+                &units,
+                0.0002..=0.1,
+            );
+        });
+    }
     if changed {
         edit_geometry(cx, id, "edit blade profiles", input);
     }
@@ -2439,51 +2658,54 @@ fn edges(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: ComponentId) 
     let mut input = project.impeller_geometry_input(id).unwrap_or_default();
     let mut changed = false;
     let e = &mut input.edges;
-    section(ui, tr("Leading edge"));
-    props(ui, "leading_edge_shape_rows", |ui| {
-        changed |= edge_rows(
-            ui,
-            "leading_edge_shape",
-            &mut e.leading,
-            &mut e.leading_shroud,
-        );
-    });
-    section(ui, tr("Trailing edge"));
-    props(ui, "trailing_edge_shape_rows", |ui| {
-        changed |= edge_rows(
-            ui,
-            "trailing_edge_shape",
-            &mut e.trailing,
-            &mut e.trailing_shroud,
-        );
-    });
-    section(ui, tr("Results"));
-    props(ui, "edges_results", |ui| {
-        let spans = [
-            (tr("c_p,min of the leading edge"), Some(e.leading)),
-            (tr("c_p,min at the shroud"), e.leading_shroud),
-        ];
-        for (name, shape) in spans {
-            let Some(shape) = shape else { continue };
-            match shape.min_pressure_coefficient() {
-                Some(cp) => value_info(
-                    ui,
-                    name,
-                    tr(
-                        "At shockless entry (Gülich eq. 7.1a, for elliptic noses; an \
-                         estimate with the nose length for the other shapes)",
+    if section(ui, tr("Leading edge")) {
+        props(ui, "leading_edge_shape_rows", |ui| {
+            changed |= edge_rows(
+                ui,
+                "leading_edge_shape",
+                &mut e.leading,
+                &mut e.leading_shroud,
+            );
+        });
+    }
+    if section(ui, tr("Trailing edge")) {
+        props(ui, "trailing_edge_shape_rows", |ui| {
+            changed |= edge_rows(
+                ui,
+                "trailing_edge_shape",
+                &mut e.trailing,
+                &mut e.trailing_shroud,
+            );
+        });
+    }
+    if section_kind(ui, tr("Results"), "", Kind::Results) {
+        props(ui, "edges_results", |ui| {
+            let spans = [
+                (tr("c_p,min of the leading edge"), Some(e.leading)),
+                (tr("c_p,min at the shroud"), e.leading_shroud),
+            ];
+            for (name, shape) in spans {
+                let Some(shape) = shape else { continue };
+                match shape.min_pressure_coefficient() {
+                    Some(cp) => value_info(
+                        ui,
+                        name,
+                        tr(
+                            "At shockless entry (Gülich eq. 7.1a, for elliptic noses; an \
+                             estimate with the nose length for the other shapes)",
+                        ),
+                        format!("{cp:.2}"),
                     ),
-                    format!("{cp:.2}"),
-                ),
-                None => value_info(
-                    ui,
-                    name,
-                    tr("A blunt leading edge causes a strong local pressure drop."),
-                    "—",
-                ),
+                    None => value_info(
+                        ui,
+                        name,
+                        tr("A blunt leading edge causes a strong local pressure drop."),
+                        "—",
+                    ),
+                }
             }
-        }
-    });
+        });
+    }
     if changed {
         edit_geometry(cx, id, "edit blade edges", input);
     }

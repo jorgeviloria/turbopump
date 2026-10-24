@@ -47,30 +47,31 @@ fn collector_name(c: Collector) -> &'static str {
     })
 }
 
-/// An automatic or manual setting on one line: label, value and "auto".
+/// An automatic or manual setting on one line: label, the automatic/manual dot and the
+/// value, which typing sets by hand.
 fn setting(ui: &mut Ui, label: &str, hint: &str, param: &mut Param<f64>, auto_value: f64) {
     ui.label(label).on_hover_text(hint);
-    match param {
-        Param::Auto => {
-            let mut shown = auto_value;
-            ui.add_enabled(false, DragValue::new(&mut shown).max_decimals(3));
-        }
-        Param::Manual(value) => {
-            ui.add(
-                DragValue::new(value)
-                    .speed(0.005)
-                    .range(0.05..=3.0)
-                    .max_decimals(3),
-            );
-        }
-    }
     let mut auto = param.is_auto();
-    if ui.checkbox(&mut auto, tr("auto")).changed() {
+    if crate::widgets::auto_dot(ui, &mut auto).changed() {
         *param = if auto {
             Param::Auto
         } else {
             Param::Manual(auto_value)
         };
+    }
+    let mut value = param.resolve(|| auto_value);
+    let field = DragValue::new(&mut value)
+        .speed(0.005)
+        .range(0.05..=3.0)
+        .max_decimals(3);
+    let response = ui.scope(|ui| {
+        if param.is_auto() {
+            ui.visuals_mut().override_text_color = Some(ui.visuals().weak_text_color());
+        }
+        ui.add(field)
+    });
+    if response.inner.changed() {
+        *param = Param::Manual(value);
     }
     ui.add_space(10.0);
 }

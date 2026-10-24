@@ -32,7 +32,7 @@ use crate::views::{blade, front, report};
 use crate::{default_project, steps, tree};
 
 /// What the step panel shows.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Selection {
     /// Design point, fluid and units, shared by every component.
     Setup,
@@ -826,7 +826,19 @@ impl TurbopumpApp {
                         .inner_margin(Margin::symmetric(12, 8))
                         .show(ui, |ui| {
                             ui.set_min_size(ui.available_size());
-                            let (glyph, title) = steps::title(self.doc.project(), self.selection);
+                            let (glyph, crumb, title) =
+                                steps::heading(self.doc.project(), self.selection);
+                            ui.label(RichText::new(crumb).size(11.5).color(p.weak));
+                            let mut reset = false;
+                            let mut fold_sections = None;
+                            let resettable = match self.selection {
+                                Selection::Step(id, step) => {
+                                    steps::accept_state(self.doc.project(), &self.derived, id, step)
+                                        != steps::AcceptState::NotApplicable
+                                }
+                                Selection::Setup => false,
+                            };
+                            let folded = steps::sections_folded(ui.ctx());
                             floating::header(ui, glyph, &title, false, |ui| {
                                 if ui
                                     .add(Button::new(icon::CARET_RIGHT).frame(false))
@@ -835,7 +847,49 @@ impl TurbopumpApp {
                                 {
                                     toggle = true;
                                 }
+                                let more = ui.add(Button::new(icon::DOTS_THREE).frame(false));
+                                more.widget_info(|| {
+                                    egui::WidgetInfo::labeled(
+                                        egui::WidgetType::Button,
+                                        true,
+                                        tr("More actions of the step"),
+                                    )
+                                });
+                                egui::Popup::menu(&more).show(|ui| {
+                                    ui.set_min_width(240.0);
+                                    if ui
+                                        .add_enabled(
+                                            resettable,
+                                            Button::new(format!(
+                                                "{}  {}",
+                                                icon::ARROW_COUNTER_CLOCKWISE,
+                                                tr("Reset to automatic")
+                                            )),
+                                        )
+                                        .on_hover_text(tr(
+                                            "Return every value of this step to its automatic proposal",
+                                        ))
+                                        .clicked()
+                                    {
+                                        reset = true;
+                                    }
+                                    let (glyph, text) = if folded {
+                                        (icon::ARROWS_OUT_LINE_VERTICAL, tr("Open every section"))
+                                    } else {
+                                        (icon::ARROWS_IN_LINE_VERTICAL, tr("Fold every section"))
+                                    };
+                                    if ui.button(format!("{glyph}  {text}")).clicked() {
+                                        fold_sections = Some(!folded);
+                                    }
+                                });
                             });
+                            if let Some(fold) = fold_sections {
+                                steps::fold_sections(ui.ctx(), fold);
+                            }
+                            if reset && let Selection::Step(id, step) = self.selection {
+                                let project = self.doc.project().clone();
+                                steps::reset(&mut self.edit_ctx(), &project, id, step);
+                            }
                             let mut cx = self.edit_ctx();
                             Panel::bottom("properties_footer")
                                 .frame(Frame::new().inner_margin(Margin::symmetric(0, 6)))
@@ -1077,6 +1131,7 @@ impl TurbopumpApp {
         // Text fields handle their own undo while the user types in them.
         let editing = ctx.text_edit_focused();
         let mut step = 0;
+        let mut accept = false;
         ctx.input_mut(|i| {
             if i.consume_shortcut(&shortcut(command_shift, Key::S)) {
                 self.save_as();
@@ -1091,6 +1146,9 @@ impl TurbopumpApp {
             }
             if i.consume_shortcut(&shortcut(Modifiers::COMMAND, Key::Comma)) {
                 self.dialog = Some(Dialog::Settings(Section::default()));
+            }
+            if i.consume_shortcut(&shortcut(Modifiers::COMMAND, Key::Enter)) {
+                accept = true;
             }
             if !editing {
                 if i.consume_shortcut(&shortcut(Modifiers::ALT, Key::ArrowDown)) {
@@ -1110,25 +1168,17 @@ impl TurbopumpApp {
         if step != 0 {
             self.step_by(step);
         }
+        if accept {
+            steps::accept_and_continue(&mut self.edit_ctx());
+        }
     }
 
     /// Opens the step `by` places after the selected one (before, if negative), across
     /// components; the design point comes first.
     fn step_by(&mut self, by: i32) {
-        let project = self.doc.project();
-        let mut order = vec![Selection::Setup];
-        for c in project.components() {
-            for &step in c.kind().steps() {
-                if steps::is_available(c.kind(), step) {
-                    order.push(Selection::Step(c.id(), step));
-                }
-            }
+        if let Some(to) = steps::step_from(self.doc.project(), self.selection, by) {
+            self.edit_ctx().open(to);
         }
-        let Some(at) = order.iter().position(|&s| s == self.selection) else {
-            return;
-        };
-        let to = (at as i32 + by).clamp(0, order.len() as i32 - 1) as usize;
-        self.edit_ctx().open(order[to]);
     }
 
     fn handle_close_request(&mut self, ctx: &egui::Context) {

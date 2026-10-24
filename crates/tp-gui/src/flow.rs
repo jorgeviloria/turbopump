@@ -591,7 +591,7 @@ impl Progress {
 }
 
 /// The caption of the phase a step belongs to.
-fn phase(kind: ComponentKind, step: DesignStep) -> &'static str {
+pub(crate) fn phase(kind: ComponentKind, step: DesignStep) -> &'static str {
     use DesignStep::*;
     match (kind, step) {
         (ComponentKind::Volute, VoluteSetup) => "SETUP",
@@ -604,6 +604,19 @@ fn phase(kind: ComponentKind, step: DesignStep) -> &'static str {
         (_, BladeProperties | BladeMeanLines | BladeProfiles | BladeEdges) => "BLADING",
         _ => "MODEL",
     }
+}
+
+/// A phase caption as a name: "Meridian" for "MERIDIAN".
+pub(crate) fn phase_name(caption: &str) -> &'static str {
+    tr(match caption {
+        "SIZING" => "Sizing",
+        "MERIDIAN" => "Meridian",
+        "BLADING" => "Blading",
+        "SETUP" => "Setup",
+        "GEOMETRY" => "Geometry",
+        "WALL" => "Wall",
+        _ => "Model",
+    })
 }
 
 /// `text` on one line, cut with "…" to `width`.
@@ -703,7 +716,7 @@ fn short(units: &DisplayUnits, kind: QuantityKind, si: f64) -> String {
 }
 
 /// The value that sums up a done step, if it has one.
-fn key_value(
+pub(crate) fn key_value(
     cx: &EditCtx<'_>,
     id: ComponentId,
     kind: ComponentKind,

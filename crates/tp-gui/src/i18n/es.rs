@@ -3264,6 +3264,29 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Hub (disk)", "Cubo (disco)"),
     ("Shroud (cover)", "Carcasa (tapa)"),
     ("All parts of {}", "Todas las piezas de {}"),
+    ("Fold every section", "Plegar todas las secciones"),
+    ("Open every section", "Abrir todas las secciones"),
+    ("More actions of the step", "Más acciones del paso"),
+    ("1 warning: {}", "1 aviso: {}"),
+    ("{} warnings: {}", "{} avisos: {}"),
+    ("Accept step and continue", "Aceptar paso y seguir"),
+    (
+        "Mark this step as done with the current values and open the next one",
+        "Marca el paso como hecho con los valores actuales y abre el siguiente",
+    ),
+    ("Show or fold the warnings", "Mostrar o plegar los avisos"),
+    ("checks", "comprobación"),
+    ("results", "resultados"),
+    ("step {} of {}", "paso {} de {}"),
+    (
+        "Automatic: the program proposes the value and updates it when earlier inputs change. Type a value, or click the dot, to set it by hand.",
+        "Automático: el programa propone el valor y lo actualiza cuando cambian las entradas anteriores. Escribe un valor, o haz clic en el punto, para fijarlo a mano.",
+    ),
+    (
+        "Set by hand. Click the dot, or right-click the value, to make it automatic again.",
+        "Fijado a mano. Haz clic en el punto, o clic derecho en el valor, para volver a automático.",
+    ),
+    ("Sizing", "Dimensionado"),
 ];
 
 /// Messages of the design code, most specific first.
