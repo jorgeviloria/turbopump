@@ -3230,6 +3230,40 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("SETUP", "CONFIGURACIÓN"),
     ("GEOMETRY", "GEOMETRÍA"),
     ("WALL", "PARED"),
+    (
+        "Dock in a corner (or drag the header)",
+        "Acoplar en una esquina (o arrastrar la cabecera)",
+    ),
+    ("Fold the scene", "Plegar la escena"),
+    ("Hide all", "Ocultar todo"),
+    ("Isolate {}", "Aislar {}"),
+    ("Reset the scene", "Restablecer la escena"),
+    ("Scene menu", "Menú de la escena"),
+    ("Scene", "Escena"),
+    ("See-through {}", "Transparente: {}"),
+    ("Show all", "Mostrar todo"),
+    ("Show only this part", "Mostrar solo esta pieza"),
+    (
+        "Show or hide the whole component",
+        "Mostrar u ocultar todo el componente",
+    ),
+    (
+        "Show or hide; Alt+click isolates it",
+        "Mostrar u ocultar; Alt+clic la aísla",
+    ),
+    (
+        "Show the other parts again",
+        "Volver a mostrar las demás piezas",
+    ),
+    ("Show the scene", "Mostrar la escena"),
+    ("{}/{} shown", "{}/{} visibles"),
+    ("Top left", "Arriba a la izquierda"),
+    ("Top right", "Arriba a la derecha"),
+    ("Bottom left", "Abajo a la izquierda"),
+    ("Bottom right", "Abajo a la derecha"),
+    ("Hub (disk)", "Cubo (disco)"),
+    ("Shroud (cover)", "Carcasa (tapa)"),
+    ("All parts of {}", "Todas las piezas de {}"),
 ];
 
 /// Messages of the design code, most specific first.

@@ -295,12 +295,12 @@ fn the_panel_accepts_steps_and_the_column_adds_components() {
             ComponentKind::Volute
         ]
     );
-    // The new component is selected, and the left panel can show the 3D model tree.
+    // The new component is selected, and the scene of the 3D view lists its parts.
     assert!(matches!(
         harness.state().selection(),
         Selection::Step(id, _) if id == harness.state().document().project().components()[1].id()
     ));
-    harness.get_by_label_contains("3D model").click();
+    harness.state_mut().focus_view(View::View3d);
     harness.run();
     harness.get_by_label("Side walls");
     harness.get_by_label("Casing");
@@ -680,4 +680,51 @@ fn the_design_flow_folds_to_a_rail() {
     harness.get_by_label("Show the design flow").click();
     harness.run();
     harness.get_by_label("Cross section");
+}
+
+#[test]
+fn the_scene_shows_hides_and_isolates_the_parts() {
+    let mut harness = harness();
+    harness.get_by_label("3D tab").click();
+    harness.run();
+    use egui_kittest::kittest::NodeT;
+    // The eye of a part: the check box with its name (a toolbar group may share it).
+    fn eye<'a>(h: &'a Harness<'_, TurbopumpApp>, part: &'a str) -> egui_kittest::Node<'a> {
+        h.get_all_by_label(part)
+            .find(|n| n.accesskit_node().role() == egui::accesskit::Role::CheckBox)
+            .unwrap_or_else(|| panic!("no eye for {part}"))
+    }
+    let shown = |h: &Harness<'_, TurbopumpApp>, part: &str| {
+        eye(h, part).accesskit_node().toggled() == Some(egui::accesskit::Toggled::True)
+    };
+    assert!(shown(&harness, "Casing"));
+    // The eye hides a part.
+    eye(&harness, "Casing").click();
+    harness.run();
+    assert!(!shown(&harness, "Casing"));
+    // Isolating the blades hides every other part; again, everything comes back.
+    harness.get_by_label("Isolate Blades").click();
+    harness.run();
+    assert!(shown(&harness, "Blades"));
+    assert!(!shown(&harness, "Hub (disk)"));
+    harness.get_by_label("Isolate Blades").click();
+    harness.run();
+    assert!(shown(&harness, "Hub (disk)"));
+    assert!(!shown(&harness, "Casing"), "as it was before");
+    // One blade or all of them.
+    harness.get_by_label("All blades").click();
+    harness.run();
+    assert!(harness.query_by_label("All blades").is_some());
+    // The menu shows everything; the panel folds to a pill and opens again.
+    harness.get_by_label("Scene menu").click();
+    harness.run();
+    harness.get_by_label("Show all").click();
+    harness.run();
+    assert!(shown(&harness, "Casing"));
+    harness.get_by_label("Fold the scene").click();
+    harness.run();
+    assert!(harness.query_by_label("Casing").is_none());
+    harness.get_by_label("Show the scene").click();
+    harness.run();
+    eye(&harness, "Casing");
 }

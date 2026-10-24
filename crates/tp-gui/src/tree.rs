@@ -1,17 +1,12 @@
-//! What the left side of the window shares: the step names and statuses, adding and
-//! removing components, and the tree of what the 3D view shows.
+//! What the design flow and the panels share: the step names and statuses, and adding
+//! and removing components.
 
-use eframe::egui::{
-    self, Align2, Color32, FontId, Id, Rect, Response, RichText, Sense, Ui, Vec2, WidgetInfo,
-    WidgetType, pos2, vec2,
-};
+use eframe::egui::{self, Color32, Ui};
 use tp_project::{ComponentId, ComponentKind, DesignStep, StepStatus};
 
 use crate::app::{EditCtx, Selection};
 use crate::i18n::{component_name, tf, tr};
-use crate::icons;
-use crate::theme::{Palette, bold_family, component_color, icon};
-use crate::viewer::{Part, ViewOptions};
+use crate::theme::{Palette, icon};
 
 /// Step name with a capital first letter.
 pub(crate) fn step_title(step: DesignStep) -> String {
@@ -171,168 +166,6 @@ pub(crate) fn remove_component(cx: &mut EditCtx<'_>, id: ComponentId) {
 pub(crate) fn entry_step(cx: &EditCtx<'_>, id: ComponentId) -> Option<DesignStep> {
     let c = cx.doc.project().component(id)?;
     Some(c.next_step().unwrap_or(c.kind().steps()[0]))
-}
-
-// ---------------------------------------------------------------------------------------
-// Trees
-
-const ROW: f32 = 22.0;
-
-/// Caption above a tree.
-fn caption(ui: &mut Ui, text: &str) {
-    let p = Palette::of(ui);
-    ui.add_space(6.0);
-    ui.label(RichText::new(text).size(11.0).color(p.weak).strong());
-    ui.add_space(2.0);
-}
-
-/// Header of a component in a tree, which folds its rows. Returns whether it is open.
-fn component_header(
-    ui: &mut Ui,
-    id: Id,
-    kind: ComponentKind,
-    name: &str,
-    badge: Option<(usize, usize)>,
-) -> (bool, Response) {
-    let p = Palette::of(ui);
-    let mut open = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(true);
-    let (rect, response) =
-        ui.allocate_exact_size(vec2(ui.available_width(), ROW + 2.0), Sense::click());
-    response.widget_info(|| WidgetInfo::labeled(WidgetType::CollapsingHeader, true, name));
-    if response.hovered() {
-        ui.painter().rect_filled(rect, 4, p.hover);
-    }
-    if response.clicked() {
-        open = !open;
-        ui.data_mut(|d| d.insert_temp(id, open));
-    }
-    let y = rect.center().y;
-    let caret = if open {
-        icon::CARET_DOWN
-    } else {
-        icon::CARET_RIGHT
-    };
-    ui.painter().text(
-        pos2(rect.left() + 7.0, y),
-        Align2::CENTER_CENTER,
-        caret,
-        FontId::proportional(12.0),
-        p.weak,
-    );
-    icons::component(
-        ui.painter(),
-        Rect::from_center_size(pos2(rect.left() + 24.0, y), Vec2::splat(16.0)),
-        kind,
-        component_color(kind),
-    );
-    let galley =
-        ui.painter()
-            .layout_no_wrap(name.to_owned(), FontId::new(13.0, bold_family()), p.text);
-    ui.painter().galley(
-        pos2(rect.left() + 38.0, y - galley.size().y / 2.0),
-        galley,
-        p.text,
-    );
-    if let Some((errors, warnings)) = badge {
-        let mut x = rect.right() - 6.0;
-        for (n, glyph, color) in [
-            (warnings, icon::WARNING, ui.visuals().warn_fg_color),
-            (errors, icon::X_CIRCLE, ui.visuals().error_fg_color),
-        ] {
-            if n > 0 {
-                let text = format!("{glyph} {n}");
-                let r = ui.painter().text(
-                    pos2(x, y),
-                    Align2::RIGHT_CENTER,
-                    text,
-                    FontId::proportional(12.0),
-                    color,
-                );
-                x = r.left() - 6.0;
-            }
-        }
-    }
-    (open, response)
-}
-
-/// Which parts the active stage has, for the model tree.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct StageParts {
-    /// `Some(vaned)` when a stator follows the impeller.
-    pub stator: Option<bool>,
-    pub volute: bool,
-}
-
-/// One part: an eye that shows or hides it and, if allowed, a see-through toggle.
-fn part_row(ui: &mut Ui, label: &str, part: &mut Part, glass: bool) {
-    let p = Palette::of(ui);
-    ui.horizontal(|ui| {
-        ui.add_space(14.0);
-        let (glyph, color) = if part.shown {
-            (icon::EYE, p.text)
-        } else {
-            (icon::EYE_SLASH, p.weak)
-        };
-        if ui
-            .add(egui::Button::new(RichText::new(glyph).color(color)).frame(false))
-            .on_hover_text(if part.shown { tr("Hide") } else { tr("Show") })
-            .clicked()
-        {
-            part.shown = !part.shown;
-        }
-        let text = RichText::new(label).color(if part.shown { p.text } else { p.weak });
-        ui.label(text);
-        if glass {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let button = egui::Button::selectable(part.glass, icon::CUBE_TRANSPARENT);
-                if ui
-                    .add_enabled(part.shown, button)
-                    .on_hover_text(tr("See-through"))
-                    .clicked()
-                {
-                    part.glass = !part.glass;
-                }
-            });
-        }
-    });
-}
-
-fn switch_row(ui: &mut Ui, label: &str, value: &mut bool) {
-    let mut part = Part {
-        shown: *value,
-        glass: false,
-    };
-    part_row(ui, label, &mut part, false);
-    *value = part.shown;
-}
-
-/// The tree of what the 3D view shows.
-pub(crate) fn model_tree(ui: &mut Ui, options: &mut ViewOptions, stage: StageParts) {
-    caption(ui, tr("3D MODEL"));
-    let header = |ui: &mut Ui, kind: ComponentKind, name: &str| {
-        component_header(ui, Id::new(("model_open", name)), kind, name, None).0
-    };
-    if header(ui, ComponentKind::Impeller, tr("Impeller")) {
-        part_row(ui, tr("Blades"), &mut options.blades, true);
-        part_row(ui, tr("Hub"), &mut options.hub, true);
-        part_row(ui, tr("Shroud"), &mut options.shroud, true);
-    }
-    if let Some(vaned) = stage.stator
-        && header(ui, ComponentKind::Stator { vaned }, tr("Diffuser"))
-    {
-        if vaned {
-            part_row(ui, tr("Vanes"), &mut options.vanes, true);
-        }
-        part_row(ui, tr("Side walls"), &mut options.walls, true);
-    }
-    if stage.volute && header(ui, ComponentKind::Volute, tr("Volute")) {
-        part_row(ui, tr("Casing"), &mut options.volute, true);
-        switch_row(ui, tr("Section curves"), &mut options.sections);
-    }
-    caption(ui, tr("DISPLAY"));
-    switch_row(ui, tr("Feature edges"), &mut options.edges);
-    switch_row(ui, tr("All blades"), &mut options.all_blades);
-    switch_row(ui, tr("Wireframe"), &mut options.wireframe);
 }
 
 #[cfg(test)]

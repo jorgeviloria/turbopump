@@ -13,16 +13,17 @@ use tp_units::DisplayUnits;
 use crate::derived::Derived;
 use crate::dialogs::{self, Choice};
 use crate::export::{self, Exports};
+use crate::floating;
 use crate::flow::FlowPanel;
 use crate::i18n::{self, Language, message, project_name, tf, tr};
 use crate::messages::{self, Message};
 use crate::new_project::{NewProjectForm, Outcome};
 use crate::objective;
 use crate::ribbon::{Command, Ribbon, RibbonCx};
+use crate::scene::{self, ScenePanel};
 use crate::settings::{self, Section, SettingsCx};
 use crate::theme::{self, Palette, icon};
 use crate::tools::{self, ToolsCx};
-use crate::tree::StageParts;
 use crate::viewer::Viewer;
 use crate::views::cross_section::CrossSectionView;
 use crate::views::meridional::{MeridionalView, Scope};
@@ -170,6 +171,9 @@ const ZOOM_KEY: &str = "zoom";
 const FOLLOW_STEP_KEY: &str = "follow_step";
 /// Key of the components pinned open in the design flow, by project file.
 const PINS_KEY: &str = "pinned_components";
+/// Keys of the corner of the scene panel and whether it is folded.
+const SCENE_CORNER_KEY: &str = "scene_corner";
+const SCENE_FOLDED_KEY: &str = "scene_folded";
 
 /// Code of a theme in the stored preferences.
 fn theme_code(theme: ThemePreference) -> &'static str {
@@ -274,13 +278,6 @@ fn view_for(kind: ComponentKind, step: DesignStep) -> Option<(View, Option<Scope
     }
 }
 
-/// The trees of the left panel.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LeftTab {
-    Design,
-    Model,
-}
-
 /// An action that would discard unsaved changes, waiting for the user's answer.
 #[derive(Debug)]
 enum Pending {
@@ -332,8 +329,8 @@ pub struct TurbopumpApp {
     ribbon: Ribbon,
     /// The design flow on the left, or its rail.
     flow: FlowPanel,
-    /// Which tree the left panel shows.
-    left: LeftTab,
+    /// The parts of the 3D view, floating over it.
+    scene: ScenePanel,
     /// Whether the messages panel is open.
     show_messages: bool,
     /// Fonts and styles are installed on the first frame.
@@ -381,6 +378,18 @@ impl TurbopumpApp {
             if let Some(pins) = storage.get_string(PINS_KEY) {
                 app.flow.load_pins(&pins);
             }
+            if let Some(corner) = storage
+                .get_string(SCENE_CORNER_KEY)
+                .and_then(|c| scene::Corner::from_code(&c))
+            {
+                app.scene.corner = corner;
+            }
+            if let Some(folded) = storage
+                .get_string(SCENE_FOLDED_KEY)
+                .and_then(|f| f.parse().ok())
+            {
+                app.scene.folded = folded;
+            }
         }
         i18n::set(app.language);
         if let Some(path) = path {
@@ -415,7 +424,7 @@ impl TurbopumpApp {
             dialog: None,
             ribbon: Ribbon::default(),
             flow: FlowPanel::default(),
-            left: LeftTab::Design,
+            scene: ScenePanel::default(),
             show_messages: false,
             styled: false,
             allow_close: false,
@@ -578,13 +587,7 @@ impl TurbopumpApp {
                     }
                 });
         }
-        let stage = StageParts {
-            stator: self
-                .active_stator()
-                .and_then(|id| self.doc.project().component(id))
-                .map(|c| matches!(c.kind(), ComponentKind::Stator { vaned: true })),
-            volute: self.active_volute().is_some(),
-        };
+        let stage = self.scene_stage();
         self.flow.follow(self.selection);
         let file = self
             .doc
@@ -607,58 +610,15 @@ impl TurbopumpApp {
                         .inner_margin(Margin::symmetric(8, 6)),
                 )
                 .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        let tabs = [
-                            (LeftTab::Design, icon::TREE_STRUCTURE, tr("Design")),
-                            (LeftTab::Model, icon::CUBE, tr("3D model")),
-                        ];
-                        for (tab, glyph, label) in tabs {
-                            if ui
-                                .add(Button::selectable(
-                                    self.left == tab,
-                                    format!("{glyph}  {label}"),
-                                ))
-                                .clicked()
-                            {
-                                self.left = tab;
-                            }
-                        }
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let tip = tr("Fold the design flow");
-                            let fold = ui.add(Button::new(icon::CARET_DOUBLE_LEFT).frame(false));
-                            fold.widget_info(|| {
-                                egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tip)
-                            });
-                            if fold.on_hover_text(tip).clicked() {
-                                flow_command = Some(Command::ToggleTree);
-                            }
-                        });
-                    });
-                    ui.separator();
-                    match self.left {
-                        LeftTab::Design => {
-                            let mut cx = EditCtx {
-                                doc: &mut self.doc,
-                                derived: &self.derived,
-                                selection: &mut self.selection,
-                                status: &mut self.status,
-                                exports: &mut self.exports,
-                                properties: &mut self.sidebar_open,
-                            };
-                            flow_command = flow_command.or(self.flow.show(
-                                ui,
-                                &mut cx,
-                                &file,
-                                has_geometry,
-                                has_volute,
-                            ));
-                        }
-                        LeftTab::Model => {
-                            egui::ScrollArea::vertical().show(ui, |ui| {
-                                tree::model_tree(ui, &mut self.viewer.options, stage);
-                            });
-                        }
-                    }
+                    let mut cx = EditCtx {
+                        doc: &mut self.doc,
+                        derived: &self.derived,
+                        selection: &mut self.selection,
+                        status: &mut self.status,
+                        exports: &mut self.exports,
+                        properties: &mut self.sidebar_open,
+                    };
+                    flow_command = self.flow.show(ui, &mut cx, &file, has_geometry, has_volute);
                 });
         } else {
             Panel::left("design_rail")
@@ -679,6 +639,7 @@ impl TurbopumpApp {
         }
         command = command.or(flow_command);
         let mut main_area = ui.available_rect_before_wrap();
+        let mut scene_area = None;
         CentralPanel::no_frame().show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             main_area = ui.available_rect_before_wrap();
@@ -736,16 +697,19 @@ impl TurbopumpApp {
                     View::FrontView => {
                         front::show(ui, cx.derived, id, stator, volute, &units);
                     }
-                    View::View3d => self.viewer.show(
-                        ui,
-                        render_state,
-                        cx.derived,
-                        id,
-                        stator,
-                        volute,
-                        &units,
-                        cover,
-                    ),
+                    View::View3d => {
+                        scene_area = Some(target);
+                        self.viewer.show(
+                            ui,
+                            render_state,
+                            cx.derived,
+                            id,
+                            stator,
+                            volute,
+                            &units,
+                            (self.scene.left_cover(), cover),
+                        );
+                    }
                     View::Performance => {
                         self.performance
                             .show(ui, cx.doc.project(), cx.derived, id, &units, cover);
@@ -756,6 +720,11 @@ impl TurbopumpApp {
                 }
             });
         });
+        if let Some(area) = scene_area {
+            let cover = self.sidebar_extent(&ctx, main_area) + SIDEBAR_MARGIN;
+            self.scene
+                .show(&ctx, area, cover, &mut self.viewer.options, &stage);
+        }
         self.properties_panel(&ctx, main_area);
 
         if let Some(command) = command {
@@ -826,18 +795,12 @@ impl TurbopumpApp {
         );
         let style = ctx.style_of(ctx.theme());
         let p = Palette::for_dark(style.visuals.dark_mode);
-        let shadow = style.visuals.popup_shadow;
         let mut toggle = false;
         egui::Area::new(egui::Id::new("properties_panel"))
             .order(egui::Order::Middle)
             .fixed_pos(rect.min)
             .show(ctx, |ui| {
-                let frame = Frame::new()
-                    .fill(ui.visuals().window_fill)
-                    .stroke(egui::Stroke::new(1.0, p.border))
-                    .corner_radius(8)
-                    .shadow(shadow);
-                frame.show(ui, |ui| {
+                floating::frame(&style).show(ui, |ui| {
                     ui.set_min_size(rect.size());
                     ui.set_max_size(rect.size());
                     if width < SIDEBAR_STRIP + 40.0 {
@@ -863,23 +826,16 @@ impl TurbopumpApp {
                         .inner_margin(Margin::symmetric(12, 8))
                         .show(ui, |ui| {
                             ui.set_min_size(ui.available_size());
-                            ui.horizontal(|ui| {
-                                let title = steps::title(self.doc.project(), self.selection);
-                                ui.add(egui::Label::new(theme::bold(title).size(15.0)).truncate());
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        if ui
-                                            .add(Button::new(icon::CARET_RIGHT).frame(false))
-                                            .on_hover_text(tr("Fold the properties"))
-                                            .clicked()
-                                        {
-                                            toggle = true;
-                                        }
-                                    },
-                                );
+                            let (glyph, title) = steps::title(self.doc.project(), self.selection);
+                            floating::header(ui, glyph, &title, false, |ui| {
+                                if ui
+                                    .add(Button::new(icon::CARET_RIGHT).frame(false))
+                                    .on_hover_text(tr("Fold the properties"))
+                                    .clicked()
+                                {
+                                    toggle = true;
+                                }
                             });
-                            ui.separator();
                             let mut cx = self.edit_ctx();
                             Panel::bottom("properties_footer")
                                 .frame(Frame::new().inner_margin(Margin::symmetric(0, 6)))
@@ -1022,6 +978,30 @@ impl TurbopumpApp {
             .iter()
             .find(|c| c.kind() == ComponentKind::Impeller)
             .map(|c| c.id())
+    }
+
+    /// The components of the active stage, as the scene lists them.
+    fn scene_stage(&self) -> scene::Stage {
+        let project = self.doc.project();
+        let name = |id: Option<ComponentId>| {
+            id.and_then(|id| project.component(id))
+                .map(|c| i18n::component_name(&c.name))
+        };
+        let impeller = self.active_impeller();
+        scene::Stage {
+            impeller: name(impeller).unwrap_or_default(),
+            blades: impeller
+                .and_then(|id| self.derived.geometry(id))
+                .map(|g| g.blade.count),
+            stator: self.active_stator().and_then(|id| {
+                let c = project.component(id)?;
+                Some((
+                    i18n::component_name(&c.name),
+                    matches!(c.kind(), ComponentKind::Stator { vaned: true }),
+                ))
+            }),
+            volute: name(self.active_volute()),
+        }
     }
 
     /// The stator right after the active impeller, if any.
@@ -1423,6 +1403,8 @@ impl eframe::App for TurbopumpApp {
         storage.set_string(ZOOM_KEY, self.zoom.to_string());
         storage.set_string(FOLLOW_STEP_KEY, self.follow_step.to_string());
         storage.set_string(PINS_KEY, self.flow.pins_text());
+        storage.set_string(SCENE_CORNER_KEY, self.scene.corner.code().to_owned());
+        storage.set_string(SCENE_FOLDED_KEY, self.scene.folded.to_string());
     }
 }
 

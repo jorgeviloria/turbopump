@@ -144,7 +144,7 @@ impl Viewer {
         stator: Option<ComponentId>,
         volute: Option<ComponentId>,
         units: &DisplayUnits,
-        cover: f32,
+        (left, right): (f32, f32),
     ) {
         let stator = stator.and_then(|s| derived.diffuser(s).map(|d| (s, d)));
         let volute = volute.and_then(|v| derived.volute(v).map(|g| (v, g)));
@@ -165,8 +165,12 @@ impl Viewer {
         };
 
         let (rect, response) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
-        // A dialog over the right of the view: center the model in the free part.
-        let free = Rect::from_min_max(rect.min, pos2(rect.right() - cover, rect.bottom()));
+        // Panels float over the left and right of the view: center the model in the
+        // free part between them.
+        let free = Rect::from_min_max(
+            pos2(rect.left() + left, rect.top()),
+            pos2(rect.right() - right, rect.bottom()),
+        );
         self.free_aspect = free.width() / free.height().max(1.0);
         let gpu = self.gpu.get_or_insert_with(|| Gpu::new(&state.device));
         let key = (

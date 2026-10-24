@@ -152,11 +152,14 @@ impl FlowPanel {
                 });
             });
 
+        // The project and its progress stay at the top; the flow scrolls under them.
+        if header(ui, &project, &p) {
+            command = Some(Command::ToggleTree);
+        }
+        ui.add_space(6.0);
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                header(ui, &project, &p);
-                ui.add_space(6.0);
                 setup_node(ui, cx, &project, &units, &p);
                 ui.add_space(4.0);
                 end_marker(ui, tr("INLET"), &p);
@@ -759,14 +762,28 @@ fn key_value(
     }
 }
 
-/// Name of the project, its machine and how far its design is.
-fn header(ui: &mut Ui, project: &Project, p: &Palette) {
+/// Name of the project, its machine and how far its design is, with the button that
+/// folds the panel. Returns whether it was clicked.
+fn header(ui: &mut Ui, project: &Project, p: &Palette) -> bool {
     let (done, total) = project
         .components()
         .iter()
         .map(Progress::of)
         .fold((0, 0), |(d, t), x| (d + x.done, t + x.total));
-    ui.add(egui::Label::new(bold(project_name(&project.info.name)).size(15.0)).truncate());
+    let mut fold = false;
+    ui.horizontal(|ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let tip = tr("Fold the design flow");
+            let button = ui.add(egui::Button::new(icon::CARET_DOUBLE_LEFT).frame(false));
+            button.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, tip));
+            fold = button.on_hover_text(tip).clicked();
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.add(
+                    egui::Label::new(bold(project_name(&project.info.name)).size(15.0)).truncate(),
+                );
+            });
+        });
+    });
     ui.label(
         RichText::new(tf(
             "{} project · {}/{} steps",
@@ -787,6 +804,7 @@ fn header(ui: &mut Ui, project: &Project, p: &Palette) {
         ui.painter()
             .rect_filled(Rect::from_min_size(bar.min, vec2(width, 3.0)), 2, p.accent);
     }
+    fold
 }
 
 /// The design point and fluid, with the target in a line under it.

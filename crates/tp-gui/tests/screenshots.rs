@@ -56,8 +56,7 @@ fn main_window() {
             let name = view.title().to_lowercase().replace(' ', "-");
             save(&mut harness, &format!("{name}-{suffix}"));
         }
-        // The 3D tab of the toolbar and the tree of the 3D model.
-        harness.get_by_label_contains("3D model").click();
+        // The 3D tab of the toolbar and the scene floating over the view.
         harness.state_mut().focus_view(View::View3d);
         harness.run();
         save(&mut harness, &format!("home-{suffix}"));

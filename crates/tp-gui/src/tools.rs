@@ -387,7 +387,8 @@ pub(crate) fn section(ui: &mut Ui, cx: ToolsCx) -> Option<Command> {
     command
 }
 
-/// The 3D tab: camera, style, blades and the exports of the model.
+/// The 3D tab: camera, style and the exports of the model. What is shown, and how
+/// many blades, is in the scene over the view.
 pub(crate) fn view3d(ui: &mut Ui, options: &mut ViewOptions, cx: ToolsCx) -> Option<Command> {
     let mut command = None;
     group(ui, tr("Camera"), |ui| {
@@ -432,21 +433,6 @@ pub(crate) fn view3d(ui: &mut Ui, options: &mut ViewOptions, cx: ToolsCx) -> Opt
                 options.edges = edges;
                 options.wireframe = wireframe;
             }
-        }
-    });
-    group(ui, tr("Blades"), |ui| {
-        if big_button(
-            ui,
-            Icon::Glyph(icon::FAN),
-            tr("All blades"),
-            true,
-            options.all_blades,
-            None,
-        )
-        .on_hover_text(tr("All blades, or only one"))
-        .clicked()
-        {
-            options.all_blades = !options.all_blades;
         }
     });
     group(ui, tr("Export"), |ui| {

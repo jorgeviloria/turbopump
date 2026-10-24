@@ -164,16 +164,14 @@ fn can_accept(kind: ComponentKind, step: DesignStep) -> bool {
 }
 
 /// Title of the dialog for `selection`: icon, component and step.
-pub(crate) fn title(project: &Project, selection: Selection) -> String {
+pub(crate) fn title(project: &Project, selection: Selection) -> (&'static str, String) {
     match selection {
-        Selection::Setup => format!("{}  {}", icon::TARGET, tr("Design point and fluid")),
+        Selection::Setup => (icon::TARGET, tr("Design point and fluid").to_owned()),
         Selection::Step(id, step) => {
             let name = project.component(id).map_or("", |c| c.name.as_str());
-            format!(
-                "{}  {} · {}",
+            (
                 icons::step(step),
-                component_name(name),
-                step_title(step)
+                format!("{} · {}", component_name(name), step_title(step)),
             )
         }
     }
