@@ -891,7 +891,7 @@ fn the_3d_tab_cuts_and_measures() {
     harness.get_by_label("Meridional cut").click();
     harness.run();
     assert!(!is_on(&harness.get_by_label("Meridional cut")));
-    assert!(disabled(&harness, "Face the camera"));
+    assert!(disabled(&harness, "Open toward the view"));
     harness.get_by_label("Measure").click();
     harness.run();
     assert!(is_on(&harness.get_by_label("Measure")));

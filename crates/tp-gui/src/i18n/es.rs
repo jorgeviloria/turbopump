@@ -3463,10 +3463,10 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Cut the model through its axis and remove the half toward the camera",
         "Corta el modelo por su eje y quita la mitad que mira a la cámara",
     ),
-    ("Face the camera", "Hacia la cámara"),
+    ("Open toward the view", "Abrir hacia la vista"),
     (
-        "Turn the cut to the side the camera looks from",
-        "Gira el corte hacia el lado desde el que mira la cámara",
+        "Turn the cutting plane so that the half facing the camera is the one removed: the section opens toward you. The camera does not move.",
+        "Gira el plano de corte para quitar la mitad que da a la cámara: la sección queda de frente. La cámara no se mueve.",
     ),
     ("Other half", "Otra mitad"),
     ("Remove the other half instead", "Quita la otra mitad"),

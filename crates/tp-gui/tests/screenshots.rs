@@ -252,7 +252,9 @@ fn cut_caps() {
     harness.run();
     harness.get_by_label("From the side").click();
     harness.run_steps(40);
-    harness.get_by_label_contains("Face the camera").click();
+    harness
+        .get_by_label_contains("Open toward the view")
+        .click();
     harness.remove_cursor();
     harness.run_steps(4);
     save(&mut harness, "cut-caps-facing");

@@ -526,8 +526,10 @@ pub(crate) fn view3d(ui: &mut Ui, viewer: &mut Viewer, cx: ToolsCx) -> Option<Co
             viewer.set_cut(!cut);
         }
         stack(ui, |ui| {
-            if small_button(ui, icon::CROSSHAIR, tr("Face the camera"), cut, false)
-                .on_hover_text(tr("Turn the cut to the side the camera looks from"))
+            if small_button(ui, icon::EYE, tr("Open toward the view"), cut, false)
+                .on_hover_text(tr(
+                    "Turn the cutting plane so that the half facing the camera is the one removed: the section opens toward you. The camera does not move.",
+                ))
                 .clicked()
             {
                 viewer.aim_cut();
