@@ -811,7 +811,10 @@ fn setup(ui: &mut Ui, cx: &mut EditCtx<'_>) {
                         let mut is_mass = mass;
                         widgets::list(ui, |ui| {
                             ComboBox::from_id_salt("flow_kind")
-                                .selected_text(tr(if mass { "mass" } else { "volume" }))
+                                .selected_text(crate::widgets::noted(
+                                    ui,
+                                    tr(if mass { "mass" } else { "volume" }),
+                                ))
                                 .show_ui(ui, |ui| {
                                     ui.selectable_value(&mut is_mass, false, tr("volume"));
                                     ui.selectable_value(&mut is_mass, true, tr("mass"));
@@ -853,7 +856,10 @@ fn setup(ui: &mut Ui, cx: &mut EditCtx<'_>) {
                         let mut is_pressure = pressure;
                         widgets::list(ui, |ui| {
                             ComboBox::from_id_salt("energy_kind")
-                                .selected_text(tr(if pressure { "pressure rise" } else { "head" }))
+                                .selected_text(crate::widgets::noted(
+                                    ui,
+                                    tr(if pressure { "pressure rise" } else { "head" }),
+                                ))
                                 .show_ui(ui, |ui| {
                                     ui.selectable_value(&mut is_pressure, false, tr("head"));
                                     ui.selectable_value(
@@ -909,7 +915,7 @@ fn setup(ui: &mut Ui, cx: &mut EditCtx<'_>) {
                     };
                     widgets::list(ui, |ui| {
                         ComboBox::from_id_salt("rotation")
-                            .selected_text(text(setup.rotation))
+                            .selected_text(crate::widgets::noted(ui, text(setup.rotation)))
                             .show_ui(ui, |ui| {
                                 for r in [Rotation::Clockwise, Rotation::CounterClockwise] {
                                     changed |= ui
@@ -930,7 +936,7 @@ fn setup(ui: &mut Ui, cx: &mut EditCtx<'_>) {
                         changed |= widgets::text_field(ui, &mut setup.fluid).changed();
                         widgets::list(ui, |ui| {
                             ComboBox::from_id_salt("common_fluids")
-                                .selected_text(tr("common…"))
+                                .selected_text(crate::widgets::noted(ui, tr("common…")))
                                 .show_ui(ui, |ui| {
                                     for name in COMMON_FLUIDS {
                                         if ui
@@ -1344,12 +1350,15 @@ fn main_dimensions(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Com
             let semi = d.is_some_and(|d| d.semi_axial);
             widgets::list(ui, |ui| {
                 ComboBox::from_id_salt("impeller_kind")
-                    .selected_text(match input.impeller_type {
-                        ImpellerType::Auto if semi => tr("automatic: semi-axial"),
-                        ImpellerType::Auto => tr("automatic: radial"),
-                        ImpellerType::Radial => tr("radial"),
-                        ImpellerType::SemiAxial => tr("semi-axial (mixed flow)"),
-                    })
+                    .selected_text(crate::widgets::noted(
+                        ui,
+                        match input.impeller_type {
+                            ImpellerType::Auto if semi => tr("automatic: semi-axial"),
+                            ImpellerType::Auto => tr("automatic: radial"),
+                            ImpellerType::Radial => tr("radial"),
+                            ImpellerType::SemiAxial => tr("semi-axial (mixed flow)"),
+                        },
+                    ))
                     .show_ui(ui, |ui| {
                         for (kind, text) in [
                             (ImpellerType::Auto, tr("automatic")),
@@ -1366,10 +1375,13 @@ fn main_dimensions(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Com
             label(ui, tr("Suction"), "");
             widgets::list(ui, |ui| {
                 ComboBox::from_id_salt("suction")
-                    .selected_text(tr(match input.suction {
-                        Suction::Single => "single entry",
-                        Suction::Double => "double entry",
-                    }))
+                    .selected_text(crate::widgets::noted(
+                        ui,
+                        tr(match input.suction {
+                            Suction::Single => "single entry",
+                            Suction::Double => "double entry",
+                        }),
+                    ))
                     .show_ui(ui, |ui| {
                         changed |= ui
                             .selectable_value(
@@ -1391,10 +1403,13 @@ fn main_dimensions(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Com
             label(ui, tr("Inlet design"), "");
             widgets::list(ui, |ui| {
                 ComboBox::from_id_salt("inlet_design")
-                    .selected_text(tr(match input.inlet_design {
-                        InletDesign::Normal => "normal impeller",
-                        InletDesign::Suction => "suction impeller (low NPSH)",
-                    }))
+                    .selected_text(crate::widgets::noted(
+                        ui,
+                        tr(match input.inlet_design {
+                            InletDesign::Normal => "normal impeller",
+                            InletDesign::Suction => "suction impeller (low NPSH)",
+                        }),
+                    ))
                     .show_ui(ui, |ui| {
                         changed |= ui
                             .selectable_value(
@@ -1711,7 +1726,7 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
             };
             widgets::list(ui, |ui| {
                 ComboBox::from_id_salt("design_mode")
-                    .selected_text(mode_name(mode))
+                    .selected_text(crate::widgets::noted(ui, mode_name(mode)))
                     .show_ui(ui, |ui| {
                         for option in [DesignMode::Walls, DesignMode::CenterLine] {
                             ui.selectable_value(&mut m.design_mode, option, mode_name(option));
@@ -1750,7 +1765,7 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                 };
                 widgets::list(ui, |ui| {
                     ComboBox::from_id_salt("axial_reference")
-                        .selected_text(name(m.axial_reference))
+                        .selected_text(crate::widgets::noted(ui, name(m.axial_reference)))
                         .show_ui(ui, |ui| {
                             for (reference, point) in [
                                 (
@@ -1811,7 +1826,7 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                 };
                 widgets::list(ui, |ui| {
                     ComboBox::from_id_salt("inlet_tilt")
-                        .selected_text(tilt_name(&tilt))
+                        .selected_text(crate::widgets::noted(ui, tilt_name(&tilt)))
                         .show_ui(ui, |ui| {
                             for option in [
                                 InletTilt::Normal,
@@ -1875,12 +1890,7 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                         tr("Center line drawn by segments"),
                         tr("Drawn in the editor; hub and shroud follow it"),
                     );
-                    let automatic = ui
-                        .horizontal(|ui| {
-                            ui.label(segments_count(count));
-                            ui.button(tr("Automatic")).clicked()
-                        })
-                        .inner;
+                    let automatic = widgets::drawn_wire(ui, &segments_count(count));
                     ui.end_row();
                     if automatic {
                         m.center_line = None;
@@ -1918,12 +1928,7 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                             do not apply",
                         ),
                     );
-                    let automatic = ui
-                        .horizontal(|ui| {
-                            ui.label(segments_count(count));
-                            ui.button(tr("Automatic")).clicked()
-                        })
-                        .inner;
+                    let automatic = widgets::drawn_wire(ui, &segments_count(count));
                     ui.end_row();
                     if automatic {
                         *segments = None;
@@ -1972,7 +1977,7 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
             let before = std::mem::discriminant(&m.leading_edge_shape);
             widgets::list(ui, |ui| {
                 ComboBox::from_id_salt("leading_edge_shape")
-                    .selected_text(name(&m.leading_edge_shape))
+                    .selected_text(crate::widgets::noted(ui, name(&m.leading_edge_shape)))
                     .show_ui(ui, |ui| {
                         for shape in [LeadingEdgeShape::Channel, LeadingEdgeShape::Line] {
                             let text = name(&shape);
@@ -2022,7 +2027,7 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
             let before = m.leading_edge_extent;
             widgets::list(ui, |ui| {
                 ComboBox::from_id_salt("leading_edge_extent")
-                    .selected_text(extent_name(before))
+                    .selected_text(crate::widgets::noted(ui, extent_name(before)))
                     .show_ui(ui, |ui| {
                         for kind in [
                             EdgeExtent::Independent,
@@ -2119,12 +2124,7 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                     name,
                     tr("Drawn on the Materials page of the editor; the values above do not apply"),
                 );
-                let automatic = ui
-                    .horizontal(|ui| {
-                        ui.label(segments_count(count));
-                        ui.button(tr("Automatic")).clicked()
-                    })
-                    .inner;
+                let automatic = widgets::drawn_wire(ui, &segments_count(count));
                 ui.end_row();
                 if automatic {
                     *wire = None;
@@ -2223,12 +2223,7 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                         "Drawn on the Side chambers page of the editor; the gap above does not apply",
                     ),
                 );
-                let automatic = ui
-                    .horizontal(|ui| {
-                        ui.label(segments_count(count));
-                        ui.button(tr("Automatic")).clicked()
-                    })
-                    .inner;
+                let automatic = widgets::drawn_wire(ui, &segments_count(count));
                 ui.end_row();
                 if automatic {
                     *wire = None;
@@ -2428,10 +2423,13 @@ fn blade_properties(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Co
             );
             widgets::list(ui, |ui| {
                 ComboBox::from_id_salt("meridional_flow")
-                    .selected_text(match input.properties.meridional_flow {
-                        MeridionalFlow::Potential => tr("potential (2D)"),
-                        MeridionalFlow::QuasiOneDimensional => tr("quasi-1D"),
-                    })
+                    .selected_text(crate::widgets::noted(
+                        ui,
+                        match input.properties.meridional_flow {
+                            MeridionalFlow::Potential => tr("potential (2D)"),
+                            MeridionalFlow::QuasiOneDimensional => tr("quasi-1D"),
+                        },
+                    ))
                     .show_ui(ui, |ui| {
                         for (flow, text) in [
                             (MeridionalFlow::Potential, tr("potential (2D)")),
@@ -2453,10 +2451,13 @@ fn blade_properties(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Co
             );
             widgets::list(ui, |ui| {
                 ComboBox::from_id_salt("inlet_velocity")
-                    .selected_text(match input.properties.inlet_velocity {
-                        InletVelocity::Local => tr("local"),
-                        InletVelocity::Uniform => tr("uniform c1m"),
-                    })
+                    .selected_text(crate::widgets::noted(
+                        ui,
+                        match input.properties.inlet_velocity {
+                            InletVelocity::Local => tr("local"),
+                            InletVelocity::Uniform => tr("uniform c1m"),
+                        },
+                    ))
                     .show_ui(ui, |ui| {
                         for (velocity, text) in [
                             (InletVelocity::Local, tr("local")),
@@ -2482,7 +2483,10 @@ fn blade_properties(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Co
             );
             widgets::list(ui, |ui| {
                 ComboBox::from_id_salt("blade_shape")
-                    .selected_text(blade_shape_name(input.properties.shape))
+                    .selected_text(crate::widgets::noted(
+                        ui,
+                        blade_shape_name(input.properties.shape),
+                    ))
                     .show_ui(ui, |ui| {
                         for shape in [
                             BladeShape::FreeForm,
@@ -2566,7 +2570,10 @@ fn mean_lines(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
             let smooth = matches!(input.mean_lines.beta, BetaDistribution::Smooth { .. });
             widgets::list(ui, |ui| {
                 ComboBox::from_id_salt("beta_kind")
-                    .selected_text(tr(if smooth { "smooth (Bézier)" } else { "linear" }))
+                    .selected_text(crate::widgets::noted(
+                        ui,
+                        tr(if smooth { "smooth (Bézier)" } else { "linear" }),
+                    ))
                     .show_ui(ui, |ui| {
                         if ui.selectable_label(!smooth, tr("linear")).clicked() && smooth {
                             input.mean_lines.beta = BetaDistribution::Linear;
@@ -2615,11 +2622,14 @@ fn mean_lines(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                 );
                 widgets::list(ui, |ui| {
                     ComboBox::from_id_salt("wrap_mode")
-                        .selected_text(match input.mean_lines.wrap {
-                            WrapMode::Common => tr("common wrap"),
-                            WrapMode::Linear => tr("linear hub to shroud"),
-                            WrapMode::Free => tr("each its own"),
-                        })
+                        .selected_text(crate::widgets::noted(
+                            ui,
+                            match input.mean_lines.wrap {
+                                WrapMode::Common => tr("common wrap"),
+                                WrapMode::Linear => tr("linear hub to shroud"),
+                                WrapMode::Free => tr("each its own"),
+                            },
+                        ))
                         .show_ui(ui, |ui| {
                             for (mode, text) in [
                                 (WrapMode::Common, tr("common wrap")),
@@ -2783,7 +2793,7 @@ fn edge_shape(ui: &mut Ui, salt: &str, shape: &mut EdgeShape) -> bool {
     let mut changed = false;
     widgets::list(ui, |ui| {
         ComboBox::from_id_salt(salt)
-            .selected_text(edge_shape_name(shape))
+            .selected_text(crate::widgets::noted(ui, edge_shape_name(shape)))
             .show_ui(ui, |ui| {
                 for option in [
                     EdgeShape::Ellipse { ratio: 4.0 },
@@ -2953,7 +2963,10 @@ fn edge_rows(ui: &mut Ui, salt: &str, hub: &mut EdgeShape, shroud: &mut Option<E
     let mut linear = shroud.is_some();
     widgets::list(ui, |ui| {
         ComboBox::from_id_salt((salt, "mode"))
-            .selected_text(tr(if linear { "linear" } else { "uniform" }))
+            .selected_text(crate::widgets::noted(
+                ui,
+                tr(if linear { "linear" } else { "uniform" }),
+            ))
             .show_ui(ui, |ui| {
                 changed |= ui
                     .selectable_value(&mut linear, false, tr("uniform"))

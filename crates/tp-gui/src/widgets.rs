@@ -370,13 +370,8 @@ pub fn then_unit(
 /// Keeps a list to the width of its column however long its text, which a combo box
 /// would otherwise stretch to the edge of the panel.
 pub fn list<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
-    list_with_tip(ui, "", add)
-}
-
-/// [`list`], with the whole of `tip` on hover: the text of the choice, which a
-/// narrow list cuts.
-pub fn list_with_tip<R>(ui: &mut Ui, tip: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
     let width = ui.spacing().combo_width;
+    ui.data_mut(|d| d.remove::<String>(list_text_id()));
     let inner = ui.allocate_ui_with_layout(
         vec2(width, ROW_HEIGHT - 2.0),
         Layout::left_to_right(Align::Center),
@@ -385,10 +380,61 @@ pub fn list_with_tip<R>(ui: &mut Ui, tip: &str, add: impl FnOnce(&mut Ui) -> R) 
             add(ui)
         },
     );
-    if !tip.is_empty() {
-        inner.response.on_hover_text(tip);
+    // A choice cut to fit shows whole on hover.
+    if let Some(text) = ui.data_mut(|d| d.remove_temp::<String>(list_text_id())) {
+        let font = egui::TextStyle::Button.resolve(ui.style());
+        let room = width
+            - ui.spacing().icon_width
+            - ui.spacing().icon_spacing
+            - 2.0 * ui.spacing().button_padding.x;
+        let needed = ui
+            .painter()
+            .layout_no_wrap(text.clone(), font, egui::Color32::WHITE)
+            .size()
+            .x;
+        if needed > room {
+            inner.response.on_hover_text(text);
+        }
     }
     inner.inner
+}
+
+/// The value of a wire drawn by hand: how many segments it has and a button back to
+/// the automatic one at the right, both within the width of a field so the row keeps to
+/// the columns of the others. Returns whether the button was clicked.
+pub fn drawn_wire(ui: &mut Ui, count: &str) -> bool {
+    let width = ui.spacing().combo_width;
+    let mut clicked = false;
+    ui.allocate_ui_with_layout(
+        vec2(width + UNIT_WIDTH + 4.0, ROW_HEIGHT - 2.0),
+        Layout::left_to_right(Align::Center),
+        |ui| {
+            ui.allocate_ui_with_layout(
+                vec2(width, ROW_HEIGHT - 2.0),
+                Layout::left_to_right(Align::Center),
+                |ui| {
+                    ui.set_min_width(width);
+                    ui.add(egui::Label::new(count).extend());
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        clicked = ui.button(tr("Automatic")).clicked();
+                    });
+                },
+            );
+        },
+    );
+    clicked
+}
+
+fn list_text_id() -> egui::Id {
+    egui::Id::new("tp_list_text")
+}
+
+/// The text a list shows, noted so that [`list`] can show it whole on hover when it does
+/// not fit.
+pub fn noted(ui: &Ui, text: impl Into<egui::WidgetText>) -> egui::WidgetText {
+    let text = text.into();
+    ui.data_mut(|d| d.insert_temp(list_text_id(), text.text().to_owned()));
+    text
 }
 
 /// The unit of `kind` to show after a field: none for a plain number.
@@ -681,9 +727,9 @@ pub fn param_choice<T: Copy + PartialEq>(
             Some(value) => {
                 let weak = Palette::of(ui).weak;
                 let mut chosen = None;
-                list_with_tip(ui, &name(value), |ui| {
+                list(ui, |ui| {
                     egui::ComboBox::from_id_salt(("param_choice", label))
-                        .selected_text(egui::RichText::new(name(value)).color(weak))
+                        .selected_text(noted(ui, egui::RichText::new(name(value)).color(weak)))
                         .show_ui(ui, |ui| {
                             for &option in options {
                                 if ui.selectable_label(option == value, name(option)).clicked() {
@@ -700,10 +746,9 @@ pub fn param_choice<T: Copy + PartialEq>(
             None => self::value(ui, "—"),
         },
         Param::Manual(value) => {
-            let tip = name(*value);
-            list_with_tip(ui, &tip, |ui| {
+            list(ui, |ui| {
                 egui::ComboBox::from_id_salt(("param_choice", label))
-                    .selected_text(name(*value))
+                    .selected_text(noted(ui, name(*value)))
                     .show_ui(ui, |ui| {
                         for &option in options {
                             changed |= ui.selectable_value(value, option, name(option)).changed();

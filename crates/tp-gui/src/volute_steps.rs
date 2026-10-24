@@ -140,7 +140,7 @@ fn setup(
             };
             crate::widgets::list(ui, |ui| {
                 ComboBox::from_id_salt("volute_kind")
-                    .selected_text(text(input.setup.kind))
+                    .selected_text(crate::widgets::noted(ui, text(input.setup.kind)))
                     .show_ui(ui, |ui| {
                         for kind in [VoluteKind::Single, VoluteKind::Double] {
                             ui.selectable_value(&mut input.setup.kind, kind, text(kind));
@@ -323,9 +323,9 @@ fn spiral(
                 (AreaLaw::Auto, Some(law)) => tf("automatic: {}", &[&law_name(law)]),
                 (law, _) => law_name(law).to_owned(),
             };
-            crate::widgets::list_with_tip(ui, &selected.clone(), |ui| {
+            crate::widgets::list(ui, |ui| {
                 ComboBox::from_id_salt("volute_law")
-                    .selected_text(selected)
+                    .selected_text(crate::widgets::noted(ui, selected))
                     .height(400.0)
                     .show_ui(ui, |ui| {
                         ui.weak(tr("Velocity-based"));
@@ -488,11 +488,14 @@ fn spiral(
                     let bezier = matches!(spiral.progression, Progression::Bezier { .. });
                     crate::widgets::list(ui, |ui| {
                         ComboBox::from_id_salt("volute_progression")
-                            .selected_text(if bezier {
-                                tr("Bézier curve")
-                            } else {
-                                tr("linear")
-                            })
+                            .selected_text(crate::widgets::noted(
+                                ui,
+                                if bezier {
+                                    tr("Bézier curve")
+                                } else {
+                                    tr("linear")
+                                },
+                            ))
                             .show_ui(ui, |ui| {
                                 if ui.selectable_label(!bezier, tr("linear")).clicked() {
                                     spiral.progression = Progression::Linear;
@@ -882,7 +885,7 @@ fn diffuser(
             let current = input.diffuser.shape;
             crate::widgets::list(ui, |ui| {
                 ComboBox::from_id_salt("volute_discharge")
-                    .selected_text(text(&current))
+                    .selected_text(crate::widgets::noted(ui, text(&current)))
                     .show_ui(ui, |ui| {
                         for option in [
                             DischargeShape::Radial { axis_angle: 0.0 },
@@ -1070,7 +1073,7 @@ fn cutwater(
             let current = input.cutwater.shape;
             crate::widgets::list(ui, |ui| {
                 ComboBox::from_id_salt("volute_cutwater_shape")
-                    .selected_text(text(&current))
+                    .selected_text(crate::widgets::noted(ui, text(&current)))
                     .show_ui(ui, |ui| {
                         for option in [
                             CutwaterShape::Tangent,
