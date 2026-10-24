@@ -152,7 +152,8 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
     su opacidad. El corte meridional quita la mitad del modelo que mira a la cámara
     (o la otra); se desplaza paralelo a sí mismo con su posición, en porcentaje del
     radio, y su plano se puede dibujar sobre el modelo. Donde corta una pieza opaca
-    cerrada (los álabes, cada canal de la voluta, la tubería de entrada), la cara
+    cerrada (los álabes del rodete y del difusor, cada canal de la voluta, también en la
+    doble y la interior, y la tubería de entrada), la cara
     cortada sale maciza y rayada, como en un plano de taller. Medir da la distancia
     entre dos puntos del modelo y sus partes radial y axial, Δr y Δz; cerca de un
     vértice de la malla el punto se ajusta a él;
