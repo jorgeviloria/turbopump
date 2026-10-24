@@ -869,6 +869,8 @@ impl VoluteGeometry {
             .map(|s| CutwaterSlice {
                 tip: turn(s.tip),
                 outline: s.outline.into_iter().map(turn).collect(),
+                spiral_wall: s.spiral_wall.into_iter().map(turn).collect(),
+                diffuser_wall: s.diffuser_wall.into_iter().map(turn).collect(),
                 ..s
             })
             .collect();

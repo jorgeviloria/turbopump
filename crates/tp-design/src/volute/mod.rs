@@ -368,6 +368,9 @@ pub struct CutwaterInput {
     /// Incidence i₃ between the cutwater camber line and the approaching flow, rad
     /// (eq. T7.7.6; ±3°).
     pub incidence: Param<f64>,
+    /// Share of the thickness a rounded cutwater lacks past the tip of the wedge that
+    /// its spiral side takes, 0 to 1; the diffuser side takes the rest. Automatic: ½.
+    pub share: Param<f64>,
 }
 
 /// Inputs of the wall-thickness step.
@@ -626,6 +629,8 @@ pub struct VoluteDesign {
     pub cutwater_shape: CutwaterShape,
     /// Rounding radius of the cutwater nose; 0 unless rounded, m.
     pub nose_radius: f64,
+    /// Share of the missing thickness on the spiral side of a rounded cutwater.
+    pub cutwater_share: f64,
     pub diffuser: DischargeDiffuser,
     pub wall_thickness: f64,
     /// The flange at the outlet, if drawn.
@@ -1236,6 +1241,10 @@ impl VoluteDesign {
         require(nose_radius >= 0.0, || {
             "the cutwater radius cannot be negative".into()
         })?;
+        let cutwater_share = input.cutwater.share.resolve(|| 0.5);
+        require((0.0..=1.0).contains(&cutwater_share), || {
+            "the share of the spiral side of the cutwater must lie between 0 and 1".into()
+        })?;
 
         let rib = match rib_wrap {
             None => None,
@@ -1431,6 +1440,7 @@ impl VoluteDesign {
             cutwater_angle,
             cutwater_shape,
             nose_radius,
+            cutwater_share,
             diffuser,
             wall_thickness,
             flange,
@@ -1525,6 +1535,14 @@ impl VoluteDesign {
             b3: self.inlet_width,
             rz: self.stagnation_radius,
         })
+    }
+
+    /// Flow angle α₃′ at the cutwater at another operating point, rad: c₃m grows with
+    /// the flow through the volute and c₃u with the theoretical head of the impeller
+    /// (Euler, no prerotation), from their design values (eqs. T7.7.3 to T7.7.5).
+    /// `flow_ratio` is Q/Q_design and `head_ratio` H_th/H_th,design.
+    pub fn cutwater_flow_angle_at(&self, flow_ratio: f64, head_ratio: f64) -> f64 {
+        (self.cutwater_flow_angle.tan() * flow_ratio).atan2(head_ratio)
     }
 
     /// The cross section at wrap angle `angle` (rad) from the cutwater; 2π is the throat.

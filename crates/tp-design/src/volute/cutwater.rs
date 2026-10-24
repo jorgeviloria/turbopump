@@ -12,8 +12,8 @@
 //! - from the nose to the tip of the wedge the body keeps the nose thickness e = 2ρ
 //!   about a cubic Bézier camber line, tangent to α₃B at the nose and to the middle of
 //!   the walls at the tip;
-//! - past the tip each face is its wall moved into the flow by half of what the wedge
-//!   lacks of e, through a quadratic smooth maximum, so that it runs tangentially into
+//! - past the tip each face is its wall moved into the flow by its share (½ by default)
+//!   of what the wedge lacks of e, through a quadratic smooth maximum, so that it runs tangentially into
 //!   the wall where the wedge has grown to e + k.
 //!
 //! So the cutwater is nowhere thinner than e, and takes no more of the flow than that
@@ -42,9 +42,6 @@ const DIFFUSER_SUBDIVISIONS: usize = 24;
 const FACE_POINTS: usize = 48;
 /// Width of the smooth maximum that runs the faces into the walls, in nose thicknesses.
 const SMOOTHING: f64 = 0.25;
-/// Share of the missing thickness the spiral side of the body takes past the tip; the
-/// diffuser side takes the rest.
-const SPIRAL_SHARE: f64 = 0.5;
 
 /// The cutwater in one plane z = const, in the plane of the design (the cutwater on
 /// the +x axis) until the volute is turned.
@@ -67,6 +64,11 @@ pub struct CutwaterSlice {
     /// Lengths of wall from the tip to where the faces join the spiral wall and the
     /// diffuser wall, m; 0 for a sharp cutwater.
     pub join_length: f64,
+    /// The outer wall of the spiral in this plane, from the start of the spiral
+    /// downstream past the cutwater.
+    pub spiral_wall: Vec<DVec3>,
+    /// The inner wall of the diffuser in this plane, from the throat downstream.
+    pub diffuser_wall: Vec<DVec3>,
 }
 
 /// The cutwater in planes across the inlet width, from −z to +z. `outlines` are the
@@ -204,6 +206,8 @@ impl Walls {
         let td = direction(&self.diffuser, d.segment);
         let wedge = ts.dot(td).clamp(-1.0, 1.0).acos();
         let at = |p: DVec2| DVec3::new(p.x, p.y, z);
+        let spiral_wall: Vec<DVec3> = self.spiral.iter().map(|p| at(*p)).collect();
+        let diffuser_wall: Vec<DVec3> = self.diffuser.iter().map(|p| at(*p)).collect();
         let Some(centre) = centre else {
             return Some(CutwaterSlice {
                 z,
@@ -213,6 +217,8 @@ impl Walls {
                 min_thickness: 0.0,
                 nose_distance: s.point.length(),
                 join_length: 0.0,
+                spiral_wall,
+                diffuser_wall,
             });
         };
         let body = self.body(design, sign, centre)?;
@@ -228,6 +234,8 @@ impl Walls {
             outline: body.outline.into_iter().map(at).collect(),
             min_thickness: body.min_thickness,
             join_length: body.join_length,
+            spiral_wall,
+            diffuser_wall,
         })
     }
 
@@ -272,103 +280,111 @@ impl Walls {
         // Each face is its wall moved into the flow by its share of what the wedge lacks
         // of the thickness e, smoothed (a quadratic smooth maximum with zero, C¹) so
         // that it runs into the wall tangentially where the wedge is e + k thick.
-        let k = SMOOTHING * e;
-        let lack = |l: f64| -> f64 {
-            let g = e - gap(l);
-            if g >= k {
-                g
-            } else if g <= -k {
-                0.0
-            } else {
-                (g + k) * (g + k) / (4.0 * k)
-            }
-        };
-        let join = if gap(longest) < e + k {
-            longest
-        } else {
-            let (mut lo, mut hi) = (0.0, longest);
-            for _ in 0..40 {
-                let mid = 0.5 * (lo + hi);
-                if gap(mid) < e + k {
-                    lo = mid;
+        // The faces for a body `target` thick at the walls: with an uneven share they
+        // lean on the normal they are moved along, so the thinnest part is checked
+        // and the target raised until it is e.
+        let build = |target: f64| {
+            let k = SMOOTHING * e;
+            let lack = |l: f64| -> f64 {
+                let g = target - gap(l);
+                if g >= k {
+                    g
+                } else if g <= -k {
+                    0.0
                 } else {
-                    hi = mid;
+                    (g + k) * (g + k) / (4.0 * k)
                 }
-            }
-            hi
+            };
+            let join = if gap(longest) < target + k {
+                longest
+            } else {
+                let (mut lo, mut hi) = (0.0, longest);
+                for _ in 0..40 {
+                    let mid = 0.5 * (lo + hi);
+                    if gap(mid) < target + k {
+                        lo = mid;
+                    } else {
+                        hi = mid;
+                    }
+                }
+                hi
+            };
+            let share = design.cutwater_share;
+            let stations: Vec<f64> = (0..=FACE_POINTS)
+                .map(|i| join * i as f64 / FACE_POINTS as f64)
+                .collect();
+            let inner_wall: Vec<DVec2> = stations
+                .iter()
+                .map(|&l| spiral.point(l).0 - across(l) * (share * lack(l)))
+                .collect();
+            let outer_wall: Vec<DVec2> = stations
+                .iter()
+                .map(|&l| diffuser.point(l).0 + across(l) * ((1.0 - share) * lack(l)))
+                .collect();
+            // From the nose to the tip, a camber line leaving the nose at α₃B and reaching
+            // the middle of the faces at the tip along them; the faces e/2 to each side.
+            let end = 0.5 * (inner_wall[0] + outer_wall[0]);
+            let end_dir =
+                (inner_wall[1] + outer_wall[1] - inner_wall[0] - outer_wall[0]).normalize();
+            let reach = centre.distance(end) / 3.0;
+            let camber_line = Bezier::new(vec![
+                centre,
+                centre + camber * reach,
+                end - end_dir * reach,
+                end,
+            ])
+            .expect("four points");
+            let slope = camber_line.derivative();
+            let (inner_lead, outer_lead): (Vec<DVec2>, Vec<DVec2>) = (0..=FACE_POINTS)
+                .map(|i| {
+                    let t = i as f64 / FACE_POINTS as f64;
+                    let tangent = slope.eval(t).normalize();
+                    let n = DVec2::new(-tangent.y, tangent.x);
+                    let n = if n.dot(normal) > 0.0 { n } else { -n };
+                    let p = camber_line.eval(t);
+                    (p - n * (0.5 * e), p + n * (0.5 * e))
+                })
+                .unzip();
+            let inner: Vec<DVec2> = inner_lead
+                .iter()
+                .chain(inner_wall.iter().skip(1))
+                .copied()
+                .collect();
+            let outer: Vec<DVec2> = outer_lead
+                .iter()
+                .chain(outer_wall.iter().skip(1))
+                .copied()
+                .collect();
+            // Thickness behind the nose: from each face to the other side, the other face
+            // or the wall past its join.
+            // Only the wall near the join can be the nearest other side.
+            let reach = join + 4.0 * e;
+            let other_outer: Vec<DVec2> = outer
+                .iter()
+                .copied()
+                .chain(diffuser.between(join, reach))
+                .collect();
+            let other_inner: Vec<DVec2> = inner
+                .iter()
+                .copied()
+                .chain(spiral.between(join, reach))
+                .collect();
+            let thinnest = inner
+                .iter()
+                .map(|p| distance_to(&other_outer, *p))
+                .chain(outer.iter().map(|p| distance_to(&other_inner, *p)))
+                .fold(f64::INFINITY, f64::min);
+            (inner, outer, thinnest, join)
         };
-        let share = SPIRAL_SHARE;
-        let stations: Vec<f64> = (0..=FACE_POINTS)
-            .map(|i| join * i as f64 / FACE_POINTS as f64)
-            .collect();
-        let inner_wall: Vec<DVec2> = stations
-            .iter()
-            .map(|&l| spiral.point(l).0 - across(l) * (share * lack(l)))
-            .collect();
-        let outer_wall: Vec<DVec2> = stations
-            .iter()
-            .map(|&l| diffuser.point(l).0 + across(l) * ((1.0 - share) * lack(l)))
-            .collect();
-        // From the nose to the tip, a camber line leaving the nose at α₃B and reaching
-        // the middle of the faces at the tip along them; the faces e/2 to each side,
-        // their shares changing smoothly to those at the tip.
-        let end = 0.5 * (inner_wall[0] + outer_wall[0]);
-        let end_dir = (inner_wall[1] + outer_wall[1] - inner_wall[0] - outer_wall[0]).normalize();
-        let reach = centre.distance(end) / 3.0;
-        let camber_line = Bezier::new(vec![
-            centre,
-            centre + camber * reach,
-            end - end_dir * reach,
-            end,
-        ])
-        .expect("four points");
-        let slope = camber_line.derivative();
-        let (inner_lead, outer_lead): (Vec<DVec2>, Vec<DVec2>) = (0..=FACE_POINTS)
-            .map(|i| {
-                let t = i as f64 / FACE_POINTS as f64;
-                let w = t * t * (3.0 - 2.0 * t);
-                let tangent = slope.eval(t).normalize();
-                let n = DVec2::new(-tangent.y, tangent.x);
-                let n = if n.dot(normal) > 0.0 { n } else { -n };
-                let p = camber_line.eval(t);
-                // At the tip the faces sit share·e and (1 − share)·e off the wall
-                // crossing, the camber line in the middle of them.
-                let inner = e * (0.5 + (share - 0.5) * w);
-                let outer = e * (0.5 + (0.5 - share) * w);
-                (p - n * inner, p + n * outer)
-            })
-            .unzip();
-        let inner: Vec<DVec2> = inner_lead
-            .iter()
-            .chain(inner_wall.iter().skip(1))
-            .copied()
-            .collect();
-        let outer: Vec<DVec2> = outer_lead
-            .iter()
-            .chain(outer_wall.iter().skip(1))
-            .copied()
-            .collect();
-        // Thickness behind the nose: from each face to the other side, the other face
-        // or the wall past its join.
-        // Only the wall near the join can be the nearest other side.
-        let reach = join + 4.0 * e;
-        let other_outer: Vec<DVec2> = outer
-            .iter()
-            .copied()
-            .chain(diffuser.between(join, reach))
-            .collect();
-        let other_inner: Vec<DVec2> = inner
-            .iter()
-            .copied()
-            .chain(spiral.between(join, reach))
-            .collect();
-        let thinnest = inner
-            .iter()
-            .map(|p| distance_to(&other_outer, *p))
-            .chain(outer.iter().map(|p| distance_to(&other_inner, *p)))
-            .fold(f64::INFINITY, f64::min);
-        let faces = (inner, outer);
-        let (inner, outer) = faces;
+        let (mut inner, mut outer, mut thinnest, mut join) = build(e);
+        let mut target = e;
+        for _ in 0..3 {
+            if thinnest >= e * (1.0 - 1e-3) {
+                break;
+            }
+            target *= e / thinnest;
+            (inner, outer, thinnest, join) = build(target);
+        }
         // From the spiral wall back along the inner face, round the nose, and along the
         // outer face to the diffuser wall.
         let mut outline: Vec<DVec2> = inner.iter().rev().copied().collect();
@@ -788,6 +804,65 @@ mod tests {
         let tangent = build(|v| v.cutwater.shape = CutwaterShape::Tangent);
         assert!(tangent.cutwater_slices.is_empty());
         assert!(tangent.cutwater_outline().is_empty());
+    }
+
+    #[test]
+    fn the_share_puts_the_missing_thickness_on_one_side() {
+        // Distance from the spiral wall a little past the tip to the body outline: with
+        // share 0 the spiral side of the body is the wall itself.
+        let off_the_wall = |share: f64| -> (f64, f64) {
+            let g = build(|v| v.cutwater.share = Param::Manual(share));
+            let mid = &g.cutwater_slices[SLICES / 2];
+            let e = 2.0 * g.design.nose_radius;
+            assert!(mid.min_thickness > e * (1.0 - 1e-3), "{share}");
+            let tip = mid.tip;
+            let wall = mid
+                .spiral_wall
+                .iter()
+                .find(|p| {
+                    p.distance(tip) > 0.5 * e && p.truncate().length() > tip.truncate().length()
+                })
+                .copied()
+                .unwrap();
+            let outline: Vec<DVec2> = mid.outline.iter().map(|p| p.truncate()).collect();
+            (distance_to(&outline, wall.truncate()), e)
+        };
+        let (none, e) = off_the_wall(0.0);
+        let (half, _) = off_the_wall(0.5);
+        assert!(none < 0.05 * e, "{}", none / e);
+        assert!(half > 0.2 * e, "{}", half / e);
+        let mut input = VoluteInput::default();
+        input.cutwater.share = Param::Manual(1.5);
+        assert!(VoluteGeometry::build(&reference_basis(), &input).is_err());
+    }
+
+    #[test]
+    fn the_flow_meets_the_cutwater_flatter_at_part_load() {
+        let g = build(|_| {});
+        let d = &g.design;
+        assert!((d.cutwater_flow_angle_at(1.0, 1.0) - d.cutwater_flow_angle).abs() < 1e-12);
+        // Less flow and more theoretical head: a flatter flow, positive incidence on the
+        // cutwater (Gülich Fig. 9.20).
+        let part = d.cutwater_flow_angle_at(0.5, 1.15);
+        assert!(part < d.cutwater_flow_angle && part > 0.0);
+        assert!(d.cutwater_flow_angle_at(1.3, 0.8) > d.cutwater_flow_angle);
+    }
+
+    #[test]
+    fn every_point_of_every_plane_is_finite() {
+        for shape in discharges() {
+            let g = build(|v| v.diffuser.shape = shape);
+            for s in &g.cutwater_slices {
+                for p in s
+                    .outline
+                    .iter()
+                    .chain(&s.spiral_wall)
+                    .chain(&s.diffuser_wall)
+                {
+                    assert!(p.is_finite(), "{shape:?} at z = {}: {p}", s.z);
+                }
+            }
+        }
     }
 
     #[test]
