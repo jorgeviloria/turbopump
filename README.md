@@ -442,7 +442,9 @@ Una bomba completa se crea con sus componentes de la entrada a la salida: rodete
 estator con álabes (`stator`) o sin ellos (`vaneless-stator`) y voluta. Cada uno se
 diseña con su orden, y `cad` construye los sólidos de todos; de la voluta salen el
 dominio fluido (`volute.step`) y la carcasa con su espesor de pared y la brida de
-salida (`volute-casing.step`). Con las cámaras laterales diseñadas salen también su
+salida (`volute-casing.step`). El corte de agua redondeado del sólido es el que dibuja la
+vista 3D: un loft por sus contornos a lo ancho de la entrada, que una prueba compara con
+la malla de la vista. Con las cámaras laterales diseñadas salen también su
 fluido (`side-chambers.step`) y, si a continuación del rodete viene una voluta, un único
 fluido para CFD con rodete, cámaras y voluta (`fluid-joined.step`), unido por un anillo
 en la salida del rodete. Con la tubería de entrada modelada sale su fluido

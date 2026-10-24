@@ -515,6 +515,41 @@ secciones redondas la línea donde se cruzan las paredes se curva: en la bomba d
 referencia la punta pasa de 98,3 mm del eje junto a las paredes laterales a 104,1 mm en
 el plano medio.
 
+**Entre los planos y en el CAD.** Entre dos planos, cada punto del contorno sigue una
+spline de Catmull–Rom a través de los nueve planos, con cuatro contornos por hueco. La
+vista 3D dibuja el cuerpo con esos contornos y recorta con ellos las paredes que el
+cuerpo sustituye. El CAD hace un loft suave por los mismos contornos. Desde los planos
+extremos el cuerpo sigue recto hasta pasar las paredes laterales. Con secciones
+redondas importa: los extremos de las caras se deslizan por las paredes de un plano
+al siguiente (12 mm en la bomba de referencia), y una malla recta entre los nueve
+planos se separaba 0,2 mm del sólido. De cada contorno se toman los puntos necesarios
+para seguirlo a 0,01 mm con tramos rectos, los mismos en todos los planos
+(Douglas–Peucker sobre todos a la vez), a no más de 2 mm uno de otro: por un tramo
+recto largo la spline se balancea al salir de él (casi 1 mm junto a la pared recta
+interior de la descarga tangencial). Una spline por los casi 600 puntos de cada
+contorno daba superficies tan pesadas que una booleana tardaba hasta 90 s.
+
+El cuerpo se recorta del canal y del anillo de entrada por separado, y luego se unen.
+Con secciones redondas exteriores, el anillo solo se une al canal con holgura, y de
+esa unión el cuerpo ya no se recorta limpio. Cada herramienta busca su propia
+holgura. Un corte fallido puede dar un sólido válido, incluso algo más pequeño, sin
+haber quitado el cuerpo: por eso el corte tiene que dejar sobre la superficie el
+centro de cada cara (en el canal) y el punto más interior de la nariz (en el anillo),
+en cada plano, a menos de 0,02 mm.
+
+Una prueba compara el sólido con lo que se ve en las siete familias de sección y en
+las descargas:
+
+- los contornos del cuerpo quedan a menos de 0,1 mm de la superficie del CAD (de 0,02 a
+  0,06 mm);
+- ningún punto del cuerpo queda más cerca del eje que su nariz;
+- a 2 mm del cuerpo, el CAD no se aparta de la vista más que las paredes en el lado
+  opuesto de la espiral, más 0,2 mm.
+
+Las paredes se apartan en toda la voluta hasta 0,5–0,8 mm, según la sección: la vista
+las traza rectas entre los 64 puntos de cada sección, y el CAD pasa superficies suaves
+por ellos.
+
 **Por qué no un simple redondeo tangente a las dos paredes:** la cuña natural es muy
 fina (5,5° en la bomba de referencia con la pared del corte de agua recta), porque la pared
 de la espiral sale con el ángulo del flujo y la de la tobera casi en la misma dirección. Un redondeo de radio $e_3/2$
