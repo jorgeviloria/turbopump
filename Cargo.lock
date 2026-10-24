@@ -4033,6 +4033,7 @@ dependencies = [
  "cxx-build",
  "thiserror 2.0.21",
  "tp-design",
+ "tp-io",
  "tp-math",
  "tp-occt-sys",
 ]

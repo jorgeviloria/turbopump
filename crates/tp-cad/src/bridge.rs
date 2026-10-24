@@ -47,6 +47,10 @@ pub(crate) mod ffi {
         /// `samples` points along each edge, in the order of OCCT's indexed edge map
         /// (indices from 1); NaN for degenerate edges.
         fn edge_samples(shape: &Shape, samples: usize) -> Vec<P3>;
+        /// Triangles of the faces, three points each, facing out, within `deflection`.
+        fn triangles(shape: &Shape, deflection: f64) -> Result<Vec<P3>>;
+        /// Distance from each point to the nearest face; NaN where it cannot be found.
+        fn boundary_distances(shape: &Shape, points: &[P3]) -> Result<Vec<f64>>;
         /// Rounds the edges of the indexed edge map with `radius`.
         fn fillet_edges(shape: &Shape, edges: &[u32], radius: f64) -> Result<UniquePtr<Shape>>;
 

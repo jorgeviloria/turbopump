@@ -45,6 +45,8 @@ std::unique_ptr<Shape> make_compound(const ShapeList &shapes);
 std::unique_ptr<Shape> cylinder(const P3 &base, const P3 &direction, double radius,
                                 double height);
 rust::Vec<P3> edge_samples(const Shape &shape, std::size_t samples);
+rust::Vec<P3> triangles(const Shape &shape, double deflection);
+rust::Vec<double> boundary_distances(const Shape &shape, rust::Slice<const P3> points);
 std::unique_ptr<Shape> fillet_edges(const Shape &shape, rust::Slice<const std::uint32_t> edges,
                                     double radius);
 
