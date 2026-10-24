@@ -240,7 +240,7 @@ mientras se edite el rodete.
 - **Comprobación:** el panel de propiedades compara el contorno con las
   recomendaciones de Gülich.
 
-![Cámaras laterales en la vista Meridian](docs/img/editor-camaras.jpg)
+![Cámaras laterales en la vista Meridiano](docs/img/editor-camaras.jpg)
 
 ### Bordes del álabe
 
