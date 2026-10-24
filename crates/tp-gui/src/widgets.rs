@@ -322,8 +322,9 @@ fn value_box(ui: &mut Ui, text: egui::WidgetText) -> egui::Response {
         .response
 }
 
-/// Width of the unit after a numeric field.
-const UNIT_WIDTH: f32 = 34.0;
+/// Width of the unit after a numeric field: room for the longest symbols, such as
+/// mm²/s, lb/ft³ or Btu/lb.
+const UNIT_WIDTH: f32 = 44.0;
 
 /// A numeric field and, after it and outside it, its `unit` in the weak color, as
 /// engineering programs show them. The field leaves room for a unit even when there is
