@@ -926,9 +926,57 @@ Por defecto se usa la viscosidad del líquido del proyecto. Fuera de 7 < $n_q$ <
 encima de 4000 mm²/s el programa avisa, porque son los límites de los ensayos de la
 tabla 13.1.
 
+## 11. Objetivo y tolerancia de altura
+
+La interfaz compara siempre lo previsto con el punto de diseño, en una franja bajo la
+barra de herramientas. Para decidir si la altura prevista en el caudal de diseño «cumple»
+hace falta una tolerancia, y se toma de las clases de calidad que Gülich cita de ISO 9906
+(*Centrifugal Pumps*, 2.ª ed., tabla 15.2, pág. 902):
+
+| Clase | $t_Q$ | $t_H$ | $t_P$ | $t_\eta$ |
+|---|---|---|---|---|
+| G1 | ±5 % | ±3 % | +4 % | 0 (−3 %) |
+| G2 | ±8 % | ±5 % | +8 % | −5 % |
+| G3 | ±9 % | ±7 % | +9 % | −7 % |
+
+La misma tabla dice qué clase corresponde a una bomba. Decide el criterio **más
+exigente** de los cuatro:
+
+| Criterio | G1 | G2 | G3 |
+|---|---|---|---|
+| $u_2$ | > 90 m/s | 40–90 m/s | < 40 m/s |
+| $u_1$ (línea de corriente exterior) | > 50 m/s | 15–50 m/s | < 15 m/s |
+| Altura por etapa en el punto óptimo | > 400 m | 80–400 m | < 80 m |
+| Potencia | > 3000 kW | 300–3000 kW | < 300 kW |
+
+- **Automático:** la clase sale de esos criterios. La altura por etapa es la prevista en
+  el punto óptimo y la potencia la prevista en el diseño. Sin predicción, se usan la
+  altura y la potencia de las dimensiones principales. $t_H$ es la de la clase.
+- **A mano:** la clase y $t_H$ se fijan por separado en *Punto de diseño › Aceptación*.
+- **No es una entrada del diseño.** Se guarda en el proyecto fuera de la configuración
+  global, así que cambiarla no deja ningún paso desactualizado.
+- **La bomba de ejemplo** (100 m³/h, 32 m, 2900 min⁻¹) tiene $u_2$ = 26,2 m/s,
+  $u_1$ = 11,7 m/s, unos 34 m y 10 kW: G3 en los cuatro criterios, $t_H$ = ±7 %.
+
+**Analogía, no conformidad.** ISO 9906 fija esas tolerancias para el ensayo de recepción
+de una bomba fabricada, entre lo medido y lo garantizado. Aquí se aplican a la altura
+**prevista** frente a la **pedida**, solo para orientar el diseño. No certifican nada,
+como ya advierte la nota de validación.
+
+La franja marca:
+
+- **Altura:** ✓ si $|H_{prev} - H| \le t_H \cdot H$; ⚠ si no.
+- **NPSH:** ✓ si el NPSH disponible supera al NPSH₃ en el caudal de diseño; ✕ si no. El
+  umbral de un margen «escaso» queda pendiente de tomarlo de la bibliografía.
+- **Rendimiento, potencia y caudal óptimo:** se muestran sin juicio. El rendimiento va
+  junto a la estadística de las dimensiones principales y su dispersión.
+
 ## Dónde se usa
 
 - **Interfaz:**
+  - franja de objetivo bajo la barra de herramientas: lo pedido frente a lo previsto
+    (altura con su tolerancia, rendimiento, potencia, NPSH₃ y caudal óptimo); un clic en
+    lo previsto abre *Curves* y en el objetivo abre el punto de diseño;
   - vista *Curves*: las cuatro gráficas (altura, rendimiento, potencia y NPSH₃ con el
     NPSH disponible y la pérdida en la voluta) en una cuadrícula de 2×2 que deja libre el
     panel de propiedades, con una leyenda común para los puntos de diseño, de máximo

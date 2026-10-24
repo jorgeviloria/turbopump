@@ -81,6 +81,13 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
   - *Help*.
 
   El menú *File* abre, guarda y exporta.
+- **Franja de objetivo** (bajo la barra): el punto de diseño pedido (Q, H, n, fluido y
+  nq) frente a lo previsto para el rodete (altura con su desviación y tolerancia,
+  rendimiento, potencia, NPSH₃ frente al NPSH disponible y caudal óptimo), siempre a la
+  vista. La tolerancia de altura sale de la clase de calidad G1–G3 de ISO 9906 según
+  Gülich, tabla 15.2, y se cambia en *Global setup › Acceptance* sin desactualizar
+  ningún paso. Un clic en el objetivo abre el punto de diseño; en lo previsto, las
+  curvas.
 - **Columna de componentes** (izquierda): la configuración global y un pictograma por
   componente, con un punto verde si está terminado o naranja si quedó desactualizado.
   El botón + añade un rodete, un difusor con o sin álabes o una voluta, simple o doble
