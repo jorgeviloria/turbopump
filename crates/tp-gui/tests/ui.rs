@@ -1259,3 +1259,30 @@ fn warnings_appearing_do_not_move_the_form() {
     };
     assert_eq!(contour_top(false), contour_top(true));
 }
+
+#[test]
+fn the_footer_buttons_keep_their_place() {
+    let mut harness = harness();
+    let back = |h: &Harness<'_, TurbopumpApp>| h.get_by_label_contains("Back").rect();
+    // Pending main dimensions: Accept.
+    let pending = back(&harness);
+    accept(&mut harness);
+    // A later step that waits for the earlier ones: Accept, disabled.
+    harness.key_press_modifiers(Modifiers::ALT, Key::ArrowDown);
+    harness.run();
+    harness.run();
+    let blocked = back(&harness);
+    // The accepted step: Next.
+    for _ in 0..2 {
+        harness.key_press_modifiers(Modifiers::ALT, Key::ArrowUp);
+        harness.run();
+    }
+    harness.run();
+    assert_eq!(
+        status(&harness, DesignStep::MainDimensions),
+        StepStatus::Done
+    );
+    let done = back(&harness);
+    assert_eq!(pending, done, "Back moved between Accept and Next");
+    assert_eq!(pending, blocked, "Back moved for a blocked step");
+}

@@ -333,12 +333,24 @@ pub(crate) fn footer(ui: &mut Ui, cx: &mut EditCtx<'_>) {
                     tr(reason),
                 ),
             };
+            // As wide as its longest text with the shortcut, whatever it says now, so that
+            // Back never moves.
+            let font = egui::TextStyle::Button.resolve(ui.style());
+            let longest = format!(
+                "{}  {}  {}      {shortcut}",
+                icon::CHECK,
+                tr("Accept step and continue"),
+                icon::CARET_RIGHT
+            );
+            let width = ui.painter().layout_no_wrap(longest, font, p.text).size().x
+                + 2.0 * ui.spacing().button_padding.x;
             let mut button = egui::Button::new(if primary == Primary::Accept {
                 RichText::new(text).color(p.on_accent)
             } else {
                 RichText::new(text)
             })
-            .shortcut_text(if enabled { shortcut } else { "" });
+            .shortcut_text(if enabled { shortcut } else { "" })
+            .min_size(egui::vec2(width, 0.0));
             if primary == Primary::Accept {
                 button = button.fill(p.accent);
             }
