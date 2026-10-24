@@ -174,6 +174,8 @@ const PINS_KEY: &str = "pinned_components";
 /// Keys of the corner of the scene panel and whether it is folded.
 const SCENE_CORNER_KEY: &str = "scene_corner";
 const SCENE_FOLDED_KEY: &str = "scene_folded";
+/// Key of the parallel projection of the 3D view.
+const ORTHOGRAPHIC_KEY: &str = "orthographic";
 
 /// Code of a theme in the stored preferences.
 fn theme_code(theme: ThemePreference) -> &'static str {
@@ -323,6 +325,8 @@ pub struct TurbopumpApp {
     performance: PerformanceView,
     blade: blade::BladeView,
     viewer: Viewer,
+    /// The renderer of the window, for pictures of the 3D view.
+    render_state: Option<RenderState>,
     exports: Exports,
     status: Option<Status>,
     dialog: Option<Dialog>,
@@ -390,6 +394,12 @@ impl TurbopumpApp {
             {
                 app.scene.folded = folded;
             }
+            if let Some(orthographic) = storage
+                .get_string(ORTHOGRAPHIC_KEY)
+                .and_then(|o| o.parse().ok())
+            {
+                app.viewer.orthographic = orthographic;
+            }
         }
         i18n::set(app.language);
         if let Some(path) = path {
@@ -419,6 +429,7 @@ impl TurbopumpApp {
             performance: PerformanceView::default(),
             blade: blade::BladeView::default(),
             viewer: Viewer::default(),
+            render_state: None,
             exports: Exports::default(),
             status: None,
             dialog: None,
@@ -467,9 +478,20 @@ impl TurbopumpApp {
         self.sidebar_open = open;
     }
 
+    /// A PNG picture of the model as the 3D view shows it, twice as sharp and without
+    /// the view cube, axes or scale. `None` until the 3D view has been drawn.
+    pub fn picture_of_3d_view(&mut self, ctx: &egui::Context) -> Option<Vec<u8>> {
+        let state = self.render_state.as_ref()?;
+        let capture = self
+            .viewer
+            .capture(state, ctx.style_of(ctx.theme()).visuals.dark_mode)?;
+        export::png(&capture).ok()
+    }
+
     /// Draws the whole window. `render_state` enables the 3D view.
     pub fn show(&mut self, ui: &mut Ui, render_state: Option<&RenderState>) {
         let ctx = ui.ctx().clone();
+        self.render_state = render_state.cloned();
         if !self.styled {
             // Fonts load at the start of the next pass: draw nothing until then.
             theme::install(&ctx);
@@ -517,14 +539,14 @@ impl TurbopumpApp {
                 let view = self.view;
                 let meridional = &mut self.meridional;
                 let blade = &mut self.blade;
-                let options = &mut self.viewer.options;
+                let viewer = &mut self.viewer;
                 let performance = &mut self.performance;
                 command = self.ribbon.show(ui, &cx, |ui| match view {
                     View::Meridian => tools::meridian(ui, meridional, &units, tools),
                     View::Blade => tools::blade(ui, blade, tools),
                     View::FrontView => tools::front(ui, tools),
                     View::CrossSection => tools::section(ui, tools),
-                    View::View3d => tools::view3d(ui, options, tools),
+                    View::View3d => tools::view3d(ui, viewer, tools),
                     View::Performance => tools::curves(ui, performance),
                     View::Report => tools::report(ui, tools),
                 });
@@ -972,6 +994,13 @@ impl TurbopumpApp {
                 }
             }
             Command::ExportCad => self.exports.open_cad(),
+            Command::Picture3d => match self.picture_of_3d_view(ctx) {
+                Some(png) => {
+                    let result = export::save_picture(png, &self.doc.project().info.name);
+                    self.report_export(result);
+                }
+                None => self.error(tr("The 3D view could not be captured.").to_owned()),
+            },
             Command::Focus(view) => self.focus_view(view),
             Command::Camera(view) => {
                 self.focus_view(View::View3d);
@@ -1455,6 +1484,7 @@ impl eframe::App for TurbopumpApp {
         storage.set_string(PINS_KEY, self.flow.pins_text());
         storage.set_string(SCENE_CORNER_KEY, self.scene.corner.code().to_owned());
         storage.set_string(SCENE_FOLDED_KEY, self.scene.folded.to_string());
+        storage.set_string(ORTHOGRAPHIC_KEY, self.viewer.orthographic.to_string());
     }
 }
 

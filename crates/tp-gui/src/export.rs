@@ -10,6 +10,7 @@ use tp_project::{ComponentId, Project};
 
 use crate::derived::Derived;
 use crate::i18n::tr;
+use crate::viewer::Capture;
 
 /// Whether this build can make CAD solids (the `cad` feature).
 pub(crate) const CAD_AVAILABLE: bool = cfg!(feature = "cad");
@@ -200,6 +201,26 @@ pub(crate) fn save_volute(
         || Ok(kind.contents(g).into_bytes()),
         project_name,
     )
+}
+
+/// `capture` as a PNG file.
+pub(crate) fn png(capture: &Capture) -> Result<Vec<u8>, String> {
+    let mut bytes = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut bytes, capture.width, capture.height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
+        writer
+            .write_image_data(&capture.rgba)
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(bytes)
+}
+
+/// Asks where to save a PNG picture of the 3D view, and saves it.
+pub(crate) fn save_picture(png: Vec<u8>, project_name: &str) -> Result<Option<PathBuf>, String> {
+    save_file("3d", "png", tr("PNG image"), || Ok(png), project_name)
 }
 
 fn save_file(

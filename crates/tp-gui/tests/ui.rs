@@ -749,6 +749,51 @@ fn the_scene_shows_hides_and_isolates_the_parts() {
     eye(&harness, "Casing");
 }
 
+/// Whether a toggle button is on, however its role reports it.
+fn is_on(node: &egui_kittest::Node<'_>) -> bool {
+    use egui_kittest::kittest::NodeT;
+    let node = node.accesskit_node();
+    node.is_selected() == Some(true) || node.toggled() == Some(egui::accesskit::Toggled::True)
+}
+
+#[test]
+fn the_scene_sets_opacity_and_color_and_the_camera_goes_parallel() {
+    use egui_kittest::kittest::NodeT;
+    let mut harness = harness();
+    harness.get_by_label("3D tab").click();
+    harness.run();
+    // The casing starts as glass; the button steps to opaque, then translucent.
+    assert!(is_on(&harness.get_by_label("Opacity of Casing")));
+    harness.get_by_label("Opacity of Casing").click();
+    harness.run();
+    assert!(!is_on(&harness.get_by_label("Opacity of Casing")));
+    harness.get_by_label("Opacity of Casing").click();
+    harness.run();
+    assert!(is_on(&harness.get_by_label("Opacity of Casing")));
+    // The swatch opens the color and the three opacities; the color is the default one.
+    harness.get_by_label("Color of Blades").click();
+    harness.run();
+    assert!(
+        harness
+            .get_by_label("Default color")
+            .accesskit_node()
+            .is_disabled()
+    );
+    harness.get_by_label("Glass").click();
+    harness.run();
+    assert!(is_on(&harness.get_by_label("Opacity of Blades")));
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    assert!(harness.query_by_label("Default color").is_none());
+    // Parallel projection, on and off.
+    harness.get_by_label("Orthographic").click();
+    harness.run();
+    assert!(is_on(&harness.get_by_label("Orthographic")));
+    harness.get_by_label("Orthographic").click();
+    harness.run();
+    assert!(!is_on(&harness.get_by_label("Orthographic")));
+}
+
 #[test]
 fn folded_sections_still_save_the_step() {
     let mut harness = harness();

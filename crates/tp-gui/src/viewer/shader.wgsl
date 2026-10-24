@@ -6,6 +6,7 @@
 
 struct Uniforms {
     view_projection: mat4x4<f32>,
+    // The eye, or with w = 0 the direction toward it in a parallel view.
     eye: vec4<f32>,
     // Directions toward the key and fill lights, world space.
     key_light: vec4<f32>,
@@ -64,7 +65,7 @@ fn gamma_from_linear(c: vec3<f32>) -> vec3<f32> {
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-    let to_eye = normalize(u.eye.xyz - in.world);
+    let to_eye = select(normalize(u.eye.xyz - in.world), normalize(u.eye.xyz), u.eye.w == 0.0);
     var n = normalize(in.normal);
     // Open surfaces: light both faces.
     if dot(n, to_eye) < 0.0 {

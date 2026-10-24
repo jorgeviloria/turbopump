@@ -1,16 +1,19 @@
 //! The Scene: a panel that floats over the 3D view with the parts of the model, in the
 //! order the flow crosses them. Each part has an eye that shows or hides it (Alt+click
-//! isolates it), a see-through toggle and a button that isolates it. The panel docks in
-//! a corner of the view, moves to another by dragging its header and folds to a pill.
+//! isolates it), a swatch that picks its color and opacity, a button that steps through
+//! the opacities and one that isolates it. The panel docks in a corner of the view,
+//! moves to another by dragging its header and folds to a pill.
 
-use eframe::egui::{self, Id, Pos2, Rect, RichText, Ui, Vec2, WidgetInfo, WidgetType, pos2, vec2};
+use eframe::egui::{
+    self, Color32, Id, Pos2, Rect, RichText, Stroke, Ui, Vec2, WidgetInfo, WidgetType, pos2, vec2,
+};
 use tp_project::ComponentKind;
 
 use crate::floating;
 use crate::i18n::{tf, tr};
 use crate::icons;
 use crate::theme::{Palette, component_color, icon};
-use crate::viewer::{Part, ViewOptions};
+use crate::viewer::{Opacity, Part, ViewOptions};
 
 /// Width of the open panel.
 const WIDTH: f32 = 250.0;
@@ -173,6 +176,26 @@ impl Stage {
         }
         groups
     }
+}
+
+fn opacity_name(opacity: Opacity) -> &'static str {
+    tr(match opacity {
+        Opacity::Opaque => "Opaque",
+        Opacity::Translucent => "Translucent",
+        Opacity::Glass => "Glass",
+    })
+}
+
+/// A small square in `color`, filled as much as `opacity` lets through.
+fn opacity_square(painter: &egui::Painter, center: Pos2, opacity: Opacity, color: Color32) {
+    let rect = Rect::from_center_size(center, Vec2::splat(11.0));
+    let fill = match opacity {
+        Opacity::Opaque => 1.0,
+        Opacity::Translucent => 0.45,
+        Opacity::Glass => 0.12,
+    };
+    painter.rect_filled(rect, 2, color.gamma_multiply(fill));
+    painter.rect_stroke(rect, 2, Stroke::new(1.0, color), egui::StrokeKind::Inside);
 }
 
 fn name(key: Key) -> &'static str {
@@ -366,7 +389,7 @@ impl ScenePanel {
         for (kind, component, parts) in stage.groups() {
             self.component_row(ui, kind, &component, &parts, options, &p);
             for key in parts {
-                self.part_row(ui, kind, key, options, stage, &p);
+                self.part_row(ui, key, options, stage, &p);
             }
         }
     }
@@ -413,7 +436,6 @@ impl ScenePanel {
     fn part_row(
         &mut self,
         ui: &mut Ui,
-        kind: ComponentKind,
         key: Key,
         options: &mut ViewOptions,
         stage: &Stage,
@@ -437,12 +459,20 @@ impl ScenePanel {
                     self.isolated = None;
                 }
             }
-            let (swatch, _) = ui.allocate_exact_size(vec2(10.0, 10.0), egui::Sense::hover());
-            ui.painter().rect_filled(
-                swatch,
-                2,
-                component_color(kind).gamma_multiply(if shown { 1.0 } else { 0.4 }),
-            );
+            match key.part_mut(options) {
+                Some(part) => swatch(ui, part, key, label),
+                // The section curves take the color of the casing.
+                None => {
+                    let (rect, _) = ui.allocate_exact_size(Vec2::splat(12.0), egui::Sense::hover());
+                    let [r, g, b] = options.volute.color;
+                    let color =
+                        Color32::from_rgb(r, g, b).gamma_multiply(if shown { 1.0 } else { 0.4 });
+                    ui.painter().line_segment(
+                        [rect.left_center(), rect.right_center()],
+                        Stroke::new(2.0, color),
+                    );
+                }
+            }
             painted(ui, label, egui::FontFamily::Proportional, color);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 2.0;
@@ -460,16 +490,28 @@ impl ScenePanel {
                     self.isolate(key, options);
                 }
                 if let Some(part) = key.part_mut(options) {
-                    let tip = tf("See-through {}", &[&label]);
-                    let glass = ui.add_enabled(
-                        part.shown,
-                        egui::Button::selectable(part.glass, icon::CUBE_TRANSPARENT),
-                    );
-                    glass.widget_info(|| {
-                        WidgetInfo::selected(WidgetType::Button, part.shown, part.glass, &tip)
+                    let tip = tf("Opacity of {}", &[&label]);
+                    let see_through = part.opacity != Opacity::Opaque;
+                    let button =
+                        ui.add_enabled(part.shown, egui::Button::selectable(see_through, "   "));
+                    // Opaque is the usual state: quiet, like the isolate button beside it.
+                    let ink = if part.shown && see_through {
+                        p.text
+                    } else {
+                        p.weak
+                    };
+                    opacity_square(ui.painter(), button.rect.center(), part.opacity, ink);
+                    button.widget_info(|| {
+                        WidgetInfo::selected(WidgetType::Button, part.shown, see_through, &tip)
                     });
-                    if glass.on_hover_text(tr("See-through")).clicked() {
-                        part.glass = !part.glass;
+                    let hint = format!(
+                        "{}: {}\n{}",
+                        tr("Opacity"),
+                        opacity_name(part.opacity),
+                        tf("Click for {}", &[&opacity_name(part.opacity.next())])
+                    );
+                    if button.on_hover_text(hint).clicked() {
+                        part.opacity = part.opacity.next();
                     }
                 }
                 if key == Key::Blades
@@ -514,6 +556,59 @@ impl ScenePanel {
             }
         }
     }
+}
+
+/// The color of a part as a swatch, drawn at its opacity; a click opens a picker for
+/// the color and the opacity.
+fn swatch(ui: &mut Ui, part: &mut Part, key: Key, label: &str) {
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(12.0), egui::Sense::click());
+    let [r, g, b] = part.color;
+    let color = Color32::from_rgb(r, g, b);
+    let dim = if part.shown { 1.0 } else { 0.4 };
+    opacity_square(
+        ui.painter(),
+        rect.center(),
+        part.opacity,
+        color.gamma_multiply(dim),
+    );
+    let tip = tf("Color of {}", &[&label]);
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::ColorButton, true, &tip));
+    let response = response.on_hover_text(tr("Color and opacity"));
+    let default = key
+        .part(&ViewOptions::default())
+        .map_or(part.color, |d| d.color);
+    egui::Popup::menu(&response)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            ui.label(crate::theme::bold(label));
+            let mut picked = color;
+            if egui::color_picker::color_picker_color32(
+                ui,
+                &mut picked,
+                egui::color_picker::Alpha::Opaque,
+            ) {
+                part.color = [picked.r(), picked.g(), picked.b()];
+            }
+            ui.horizontal(|ui| {
+                for opacity in Opacity::ALL {
+                    if ui
+                        .selectable_label(part.opacity == opacity, opacity_name(opacity))
+                        .clicked()
+                    {
+                        part.opacity = opacity;
+                    }
+                }
+            });
+            if ui
+                .add_enabled(
+                    part.color != default,
+                    egui::Button::new(tr("Default color")),
+                )
+                .clicked()
+            {
+                part.color = default;
+            }
+        });
 }
 
 /// A name drawn without a widget: the eye before it already carries it for screen

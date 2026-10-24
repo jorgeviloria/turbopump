@@ -1686,7 +1686,6 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Remove component", "Quitar componente"),
     ("Hide", "Ocultar"),
     ("Show", "Mostrar"),
-    ("See-through", "Translúcido"),
     ("3D MODEL", "MODELO 3D"),
     ("Blades", "Álabes"),
     ("Hub", "Cubo"),
@@ -3240,7 +3239,6 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Reset the scene", "Restablecer la escena"),
     ("Scene menu", "Menú de la escena"),
     ("Scene", "Escena"),
-    ("See-through {}", "Transparente: {}"),
     ("Show all", "Mostrar todo"),
     ("Show only this part", "Mostrar solo esta pieza"),
     (
@@ -3287,6 +3285,30 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Fijado a mano. Haz clic en el punto, o clic derecho en el valor, para volver a automático.",
     ),
     ("Sizing", "Dimensionado"),
+    (
+        "The 3D view could not be captured.",
+        "No se pudo capturar la vista 3D.",
+    ),
+    ("Orthographic", "Ortográfica"),
+    (
+        "Parallel projection: sizes do not shrink with depth, as on a drawing",
+        "Proyección paralela: los tamaños no disminuyen con la profundidad, como en un plano",
+    ),
+    ("Picture", "Imagen"),
+    (
+        "A PNG of the model as the view shows it, twice as sharp, without the cube, axes or scale",
+        "Un PNG del modelo tal como lo muestra la vista, con el doble de nitidez, sin el cubo, los ejes ni la escala",
+    ),
+    ("PNG image", "Imagen PNG"),
+    ("Opacity", "Opacidad"),
+    ("Opaque", "Opaco"),
+    ("Translucent", "Translúcido"),
+    ("Glass", "Cristal"),
+    ("Color and opacity", "Color y opacidad"),
+    ("Default color", "Color por defecto"),
+    ("Opacity of {}", "Opacidad: {}"),
+    ("Click for {}", "Con un clic: {}"),
+    ("Color of {}", "Color: {}"),
 ];
 
 /// Messages of the design code, most specific first.

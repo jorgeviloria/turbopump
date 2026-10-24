@@ -17,6 +17,8 @@ pub(crate) struct Camera {
     /// Elevation toward the inlet side, rad.
     pub pitch: f32,
     pub distance: f32,
+    /// Parallel projection: sizes do not shrink with depth.
+    pub orthographic: bool,
     /// Radius of the model, for zoom limits and clipping planes.
     radius: f32,
 }
@@ -30,6 +32,7 @@ impl Camera {
             yaw: -0.9,
             pitch: 0.55,
             distance: 1.0,
+            orthographic: false,
             radius: 1.0,
         };
         camera.reframe(center, radius, aspect);
@@ -96,11 +99,25 @@ impl Camera {
         }
     }
 
+    /// The direction from the target toward the eye.
+    pub fn backward(&self) -> Vec3 {
+        (self.eye() - self.target) / self.distance.max(1e-9)
+    }
+
     pub fn projection(&self, aspect: f32) -> Mat4 {
-        let near = (self.distance - 2.0 * self.radius).max(self.distance * 0.01);
+        let fov = Self::vertical_fov(aspect);
         let far = self.distance + 2.0 * self.radius;
         // wgpu clip space: z in [0, 1], y up.
-        directx::perspective(Self::vertical_fov(aspect), aspect.max(1e-3), near, far)
+        if self.orthographic {
+            // As tall as the perspective view at the target, so switching keeps the
+            // model's size there; the near plane may lie behind the eye.
+            let h = self.distance * (fov / 2.0).tan();
+            let w = h * aspect.max(1e-3);
+            directx::orthographic(-w, w, -h, h, self.distance - 2.0 * self.radius, far)
+        } else {
+            let near = (self.distance - 2.0 * self.radius).max(self.distance * 0.01);
+            directx::perspective(fov, aspect.max(1e-3), near, far)
+        }
     }
 
     pub fn view_projection(&self, aspect: f32) -> Mat4 {
@@ -172,6 +189,30 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// In parallel projection a point keeps its place on screen whatever its depth, and
+    /// the scale bar's points-to-length ratio holds across the whole view.
+    #[test]
+    fn orthographic_view_ignores_depth() {
+        let mut camera = Camera::fit(Vec3::ZERO, 0.1, 1.0);
+        camera.orthographic = true;
+        camera.look_from(0.0, 0.0);
+        let vp = camera.view_projection(1.0);
+        let up = Vec3::NEG_Z * camera.units_per_point(500.0, 500.0) * 250.0;
+        for depth in [-0.09, 0.0, 0.09] {
+            let p = up + camera.backward() * depth;
+            let clip = vp * p.extend(1.0);
+            let ndc = clip.truncate() / clip.w;
+            assert!(
+                (ndc.y - 1.0).abs() < 1e-4 && (0.0..1.0).contains(&ndc.z),
+                "{ndc:?}"
+            );
+        }
+        // Zoomed right in, the parts behind the eye still draw.
+        camera.zoom(1e-9);
+        let clip = camera.view_projection(1.0) * (camera.backward() * 0.09).extend(1.0);
+        assert!((0.0..1.0).contains(&(clip.z / clip.w)));
     }
 
     #[test]

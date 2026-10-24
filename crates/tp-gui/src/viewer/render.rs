@@ -18,6 +18,7 @@ const SAMPLES: u32 = 4;
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub(crate) struct Uniforms {
     pub view_projection: [[f32; 4]; 4],
+    /// The eye, or with w = 0 the direction toward it in a parallel view.
     pub eye: [f32; 4],
     /// Directions toward the key and fill lights, world space.
     pub key_light: [f32; 4],
@@ -221,36 +222,7 @@ impl Gpu {
     fn ensure_target(&mut self, state: &RenderState, size: [u32; 2]) -> egui::TextureId {
         let device = &state.device;
         if self.target.as_ref().is_none_or(|t| t.size != size) {
-            let texture = |label, format, samples, usage| {
-                device
-                    .create_texture(&wgpu::TextureDescriptor {
-                        label: Some(label),
-                        size: wgpu::Extent3d {
-                            width: size[0],
-                            height: size[1],
-                            depth_or_array_layers: 1,
-                        },
-                        mip_level_count: 1,
-                        sample_count: samples,
-                        dimension: wgpu::TextureDimension::D2,
-                        format,
-                        usage,
-                        view_formats: &[],
-                    })
-                    .create_view(&wgpu::TextureViewDescriptor::default())
-            };
-            let attachment = wgpu::TextureUsages::RENDER_ATTACHMENT;
-            let target = Target {
-                size,
-                color: texture("3d color", COLOR_FORMAT, SAMPLES, attachment),
-                depth: texture("3d depth", DEPTH_FORMAT, SAMPLES, attachment),
-                resolved: texture(
-                    "3d image",
-                    COLOR_FORMAT,
-                    1,
-                    attachment | wgpu::TextureUsages::TEXTURE_BINDING,
-                ),
-            };
+            let target = Target::new(device, size, wgpu::TextureUsages::TEXTURE_BINDING).1;
             let mut renderer = state.renderer.write();
             match self.texture {
                 Some(id) => renderer.update_egui_texture_from_wgpu_texture(
@@ -282,6 +254,71 @@ impl Gpu {
     ) -> egui::TextureId {
         let texture = self.ensure_target(state, size);
         let target = self.target.as_ref().expect("created above");
+        let encoder = self.draw(state, target, uniforms);
+        state.queue.submit([encoder.finish()]);
+        texture
+    }
+
+    /// Draws the uploaded mesh at `size` pixels into a texture of its own and reads it
+    /// back: RGBA, row by row. `None` when the GPU fails to hand it over.
+    pub fn capture(
+        &mut self,
+        state: &RenderState,
+        size: [u32; 2],
+        uniforms: &Uniforms,
+    ) -> Option<Vec<u8>> {
+        let device = &state.device;
+        let (image, target) = Target::new(device, size, wgpu::TextureUsages::COPY_SRC);
+        let mut encoder = self.draw(state, &target, uniforms);
+        let row = 4 * size[0] as usize;
+        let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize;
+        let padded = row.div_ceil(align) * align;
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("3d capture"),
+            size: (padded * size[1] as usize) as u64,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        encoder.copy_texture_to_buffer(
+            image.as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded as u32),
+                    rows_per_image: None,
+                },
+            },
+            image.size(),
+        );
+        let submitted = state.queue.submit([encoder.finish()]);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        buffer
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |r| drop(sender.send(r)));
+        device
+            .poll(wgpu::PollType::Wait {
+                submission_index: Some(submitted),
+                timeout: Some(std::time::Duration::from_secs(10)),
+            })
+            .ok()?;
+        receiver.recv().ok()?.ok()?;
+        let data = buffer.slice(..).get_mapped_range().ok()?;
+        Some(
+            data.chunks_exact(padded)
+                .flat_map(|r| &r[..row])
+                .copied()
+                .collect(),
+        )
+    }
+
+    /// Records the background and the mesh into `target`.
+    fn draw(
+        &self,
+        state: &RenderState,
+        target: &Target,
+        uniforms: &Uniforms,
+    ) -> wgpu::CommandEncoder {
         state
             .queue
             .write_buffer(&self.uniforms, 0, bytemuck::bytes_of(uniforms));
@@ -346,7 +383,43 @@ impl Gpu {
                 }
             }
         }
-        state.queue.submit([encoder.finish()]);
-        texture
+        encoder
+    }
+}
+
+impl Target {
+    /// Multisampled color and depth of `size` pixels, resolved into an image that can
+    /// also be used as `usage`. Returns that image's texture too.
+    fn new(
+        device: &wgpu::Device,
+        size: [u32; 2],
+        usage: wgpu::TextureUsages,
+    ) -> (wgpu::Texture, Self) {
+        let texture = |label, format, samples, usage| {
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(label),
+                size: wgpu::Extent3d {
+                    width: size[0],
+                    height: size[1],
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: samples,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage,
+                view_formats: &[],
+            })
+        };
+        let attachment = wgpu::TextureUsages::RENDER_ATTACHMENT;
+        let view = |t: wgpu::Texture| t.create_view(&wgpu::TextureViewDescriptor::default());
+        let image = texture("3d image", COLOR_FORMAT, 1, attachment | usage);
+        let target = Target {
+            size,
+            color: view(texture("3d color", COLOR_FORMAT, SAMPLES, attachment)),
+            depth: view(texture("3d depth", DEPTH_FORMAT, SAMPLES, attachment)),
+            resolved: image.create_view(&wgpu::TextureViewDescriptor::default()),
+        };
+        (image, target)
     }
 }

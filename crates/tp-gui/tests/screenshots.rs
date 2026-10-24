@@ -100,6 +100,48 @@ fn documentation() {
     save(&mut harness, "editor");
 }
 
+/// The scene's color picker over a parallel view with a translucent casing, and the
+/// PNG picture the 3D tab saves of that view.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn scene_colors_and_picture() {
+    let mut harness = harness(egui::Theme::Light);
+    for _ in 0..6 {
+        harness.get_by_label_contains("Accept step").click();
+        harness.run();
+    }
+    harness.get_by_label("Volute 1").click();
+    harness.run();
+    for _ in 0..2 {
+        harness.get_by_label_contains("Accept step").click();
+        harness.run();
+    }
+    harness.state_mut().set_sidebar_open(false);
+    harness.get_by_label("3D tab").click();
+    harness.run();
+    harness.get_by_label("Orthographic").click();
+    harness.run();
+    // Glass to opaque to translucent.
+    for _ in 0..2 {
+        harness.get_by_label("Opacity of Casing").click();
+        harness.run();
+    }
+    harness.get_by_label("Color of Blades").click();
+    harness.run_steps(4);
+    save(&mut harness, "scene-colors");
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    let ctx = harness.ctx.clone();
+    let png = harness
+        .state_mut()
+        .picture_of_3d_view(&ctx)
+        .expect("a picture of the 3D view");
+    assert!(png.starts_with(b"\x89PNG"));
+    let path = output("picture-3d");
+    std::fs::write(&path, png).unwrap();
+    println!("wrote {}", path.display());
+}
+
 /// The whole stage: impeller and volute designed, the spiral step selected.
 #[test]
 #[ignore = "needs a GPU; run with --ignored"]

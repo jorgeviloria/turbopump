@@ -10,7 +10,7 @@ use crate::export::{
 use crate::i18n::tr;
 use crate::ribbon::{Command, Icon, big_button, export_items, group, small_button, stack};
 use crate::theme::icon;
-use crate::viewer::{CameraView, ViewOptions};
+use crate::viewer::{CameraView, Viewer};
 use crate::views::blade::{BladePage, BladeView};
 use crate::views::meridian_editor::references_panel;
 use crate::views::meridional::{Fit, MeridionalView, Scope};
@@ -387,9 +387,9 @@ pub(crate) fn section(ui: &mut Ui, cx: ToolsCx) -> Option<Command> {
     command
 }
 
-/// The 3D tab: camera, style and the exports of the model. What is shown, and how
-/// many blades, is in the scene over the view.
-pub(crate) fn view3d(ui: &mut Ui, options: &mut ViewOptions, cx: ToolsCx) -> Option<Command> {
+/// The 3D tab: camera, style and the exports of the model. What is shown, in which
+/// color and how see-through, is in the scene over the view.
+pub(crate) fn view3d(ui: &mut Ui, viewer: &mut Viewer, cx: ToolsCx) -> Option<Command> {
     let mut command = None;
     group(ui, tr("Camera"), |ui| {
         if big_button(
@@ -420,7 +420,23 @@ pub(crate) fn view3d(ui: &mut Ui, options: &mut ViewOptions, cx: ToolsCx) -> Opt
         {
             command = Some(Command::Camera(CameraView::Iso));
         }
+        if big_button(
+            ui,
+            Icon::Glyph(icon::PERSPECTIVE),
+            tr("Orthographic"),
+            true,
+            viewer.orthographic,
+            None,
+        )
+        .on_hover_text(tr(
+            "Parallel projection: sizes do not shrink with depth, as on a drawing",
+        ))
+        .clicked()
+        {
+            viewer.orthographic = !viewer.orthographic;
+        }
     });
+    let options = &mut viewer.options;
     group(ui, tr("Style"), |ui| {
         let styles = [
             (icon::SPHERE, tr("Shaded"), false, false),
@@ -458,6 +474,21 @@ pub(crate) fn view3d(ui: &mut Ui, options: &mut ViewOptions, cx: ToolsCx) -> Opt
                 command = Some(Command::ExportVolute(VoluteExport::Mesh));
             }
         });
+        if big_button(
+            ui,
+            Icon::Glyph(icon::CAMERA),
+            tr("Picture"),
+            cx.has_geometry,
+            false,
+            None,
+        )
+        .on_hover_text(tr(
+            "A PNG of the model as the view shows it, twice as sharp, without the cube, axes or scale",
+        ))
+        .clicked()
+        {
+            command = Some(Command::Picture3d);
+        }
     });
     help(
         ui,

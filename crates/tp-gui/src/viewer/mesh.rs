@@ -10,23 +10,62 @@ use tp_design::volute::VoluteGeometry;
 use tp_io::mesh::{Triangle, diffuser_parts, impeller_parts, volute_triangles};
 use tp_math::DVec3;
 
+/// How much of a part the eye sees through.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub(crate) enum Opacity {
+    #[default]
+    Opaque,
+    Translucent,
+    /// Mostly see-through: only the outline and grazing faces show.
+    Glass,
+}
+
+impl Opacity {
+    pub const ALL: [Opacity; 3] = [Opacity::Opaque, Opacity::Translucent, Opacity::Glass];
+
+    fn alpha(self) -> f32 {
+        match self {
+            Opacity::Opaque => 1.0,
+            Opacity::Translucent => 0.5,
+            Opacity::Glass => 0.2,
+        }
+    }
+
+    /// The next level, back to opaque after glass.
+    pub fn next(self) -> Self {
+        match self {
+            Opacity::Opaque => Opacity::Translucent,
+            Opacity::Translucent => Opacity::Glass,
+            Opacity::Glass => Opacity::Opaque,
+        }
+    }
+}
+
 /// How one part of the model is drawn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct Part {
     pub shown: bool,
-    /// See-through.
-    pub glass: bool,
+    pub opacity: Opacity,
+    /// Gamma-encoded RGB.
+    pub color: [u8; 3],
 }
 
 impl Part {
-    const SOLID: Part = Part {
-        shown: true,
-        glass: false,
-    };
-    const GLASS: Part = Part {
-        shown: true,
-        glass: true,
-    };
+    const fn solid(color: [u8; 3]) -> Part {
+        Part {
+            shown: true,
+            opacity: Opacity::Opaque,
+            color,
+        }
+    }
+
+    const fn glass(color: [u8; 3]) -> Part {
+        Part {
+            shown: true,
+            opacity: Opacity::Glass,
+            color,
+        }
+    }
 }
 
 /// What the 3D view shows.
@@ -52,12 +91,12 @@ pub(crate) struct ViewOptions {
 impl Default for ViewOptions {
     fn default() -> Self {
         Self {
-            blades: Part::SOLID,
-            hub: Part::SOLID,
-            shroud: Part::GLASS,
-            vanes: Part::SOLID,
-            walls: Part::GLASS,
-            volute: Part::GLASS,
+            blades: Part::solid(BLADE),
+            hub: Part::solid(HUB),
+            shroud: Part::glass(SHROUD),
+            vanes: Part::solid(VANES),
+            walls: Part::glass(WALLS),
+            volute: Part::glass(VOLUTE),
             all_blades: true,
             edges: true,
             sections: true,
@@ -87,16 +126,14 @@ pub(crate) struct MeshData {
     pub radius: f32,
 }
 
-/// Materials, in linear RGB: a bronze impeller, a teal diffuser and a blue casing, in
-/// the colors of their components elsewhere in the editor.
-const BLADE: [f32; 3] = [0.50, 0.25, 0.08];
-const HUB: [f32; 3] = [0.34, 0.18, 0.07];
-const SHROUD: [f32; 3] = [0.55, 0.32, 0.14];
-const VANES: [f32; 3] = [0.06, 0.34, 0.28];
-const WALLS: [f32; 3] = [0.10, 0.40, 0.35];
-const VOLUTE: [f32; 3] = [0.09, 0.22, 0.50];
-/// Opacity of see-through parts.
-const GLASS_ALPHA: f32 = 0.2;
+/// Default materials, gamma-encoded: a bronze impeller, a teal diffuser and a blue
+/// casing, in the colors of their components elsewhere in the editor.
+const BLADE: [u8; 3] = [188, 137, 80];
+const HUB: [u8; 3] = [158, 118, 75];
+const SHROUD: [u8; 3] = [196, 153, 105];
+const VANES: [u8; 3] = [69, 158, 144];
+const WALLS: [u8; 3] = [89, 170, 160];
+const VOLUTE: [u8; 3] = [85, 129, 188];
 /// Lines are drawn in the part's color times this.
 const LINE_SHADE: f32 = 0.35;
 /// One volute section of this many is drawn as a line.
@@ -225,6 +262,18 @@ fn rgba(rgb: [f32; 3], alpha: f32) -> [f32; 4] {
     [rgb[0], rgb[1], rgb[2], alpha]
 }
 
+/// Linear RGB of a gamma-encoded color, which the shader lights.
+fn linear(color: [u8; 3]) -> [f32; 3] {
+    color.map(|c| {
+        let c = f32::from(c) / 255.0;
+        if c <= 0.04045 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    })
+}
+
 fn line_color(rgb: [f32; 3]) -> [f32; 4] {
     rgba(rgb.map(|c| c * LINE_SHADE), 1.0)
 }
@@ -244,36 +293,37 @@ pub(crate) fn build(
     };
     let diffuser = stator.map(diffuser_parts).unwrap_or_default();
     let casing = volute.map(volute_triangles).unwrap_or_default();
-    let shown: [(&[Triangle], Part, [f32; 3]); 6] = [
-        (&blades, options.blades, BLADE),
-        (&parts.hub, options.hub, HUB),
-        (&parts.shroud, options.shroud, SHROUD),
-        (&diffuser.vanes, options.vanes, VANES),
-        (&diffuser.walls, options.walls, WALLS),
-        (&casing, options.volute, VOLUTE),
+    let shown: [(&[Triangle], Part); 6] = [
+        (&blades, options.blades),
+        (&parts.hub, options.hub),
+        (&parts.shroud, options.shroud),
+        (&diffuser.vanes, options.vanes),
+        (&diffuser.walls, options.walls),
+        (&casing, options.volute),
     ];
 
     let mut mesh = MeshData::default();
-    let visible = shown
-        .iter()
-        .filter(|(t, part, _)| part.shown && !t.is_empty());
+    let visible = shown.iter().filter(|(t, part)| part.shown && !t.is_empty());
     if options.wireframe {
-        for (triangles, _, rgb) in visible.clone() {
-            push_all_edges(&mut mesh.lines, triangles, rgba(*rgb, 1.0));
+        for (triangles, part) in visible.clone() {
+            push_all_edges(&mut mesh.lines, triangles, rgba(linear(part.color), 1.0));
         }
     } else {
-        for (triangles, _, rgb) in visible.clone().filter(|(_, part, _)| !part.glass) {
-            push_triangles(&mut mesh.vertices, triangles, rgba(*rgb, 1.0));
+        let opaque = |part: &Part| part.opacity == Opacity::Opaque;
+        for (triangles, part) in visible.clone().filter(|(_, part)| opaque(part)) {
+            push_triangles(&mut mesh.vertices, triangles, rgba(linear(part.color), 1.0));
         }
         mesh.opaque = mesh.vertices.len() as u32;
-        for (triangles, _, rgb) in visible.clone().filter(|(_, part, _)| part.glass) {
-            push_triangles(&mut mesh.vertices, triangles, rgba(*rgb, GLASS_ALPHA));
+        for (triangles, part) in visible.clone().filter(|(_, part)| !opaque(part)) {
+            let color = rgba(linear(part.color), part.opacity.alpha());
+            push_triangles(&mut mesh.vertices, triangles, color);
         }
         if options.edges {
-            for (triangles, _, rgb) in visible.clone() {
+            for (triangles, part) in visible.clone() {
+                let color = line_color(linear(part.color));
                 for [a, b] in feature_edges(triangles) {
-                    mesh.lines.push(line_vertex(a, line_color(*rgb)));
-                    mesh.lines.push(line_vertex(b, line_color(*rgb)));
+                    mesh.lines.push(line_vertex(a, color));
+                    mesh.lines.push(line_vertex(b, color));
                 }
             }
         }
@@ -282,7 +332,7 @@ pub(crate) fn build(
         && options.volute.shown
         && let Some(v) = volute
     {
-        let color = rgba(VOLUTE.map(|c| c * 0.7), 1.0);
+        let color = rgba(linear(options.volute.color).map(|c| c * 0.7), 1.0);
         let rings = v.rings();
         let last = rings.len().saturating_sub(1);
         // Every third section, and the last, so the casing still reads as a surface.
@@ -368,11 +418,60 @@ mod tests {
             None,
             None,
             &ViewOptions {
-                shroud: Part::SOLID,
+                shroud: Part::solid(SHROUD),
                 ..ViewOptions::default()
             },
         );
         assert_eq!(solid.opaque as usize, solid.vertices.len());
+    }
+
+    /// Translucent and glass parts blend after the opaque ones, each with its own
+    /// opacity, in the color the scene gave it.
+    #[test]
+    fn opacity_levels_and_colors_reach_the_vertices() {
+        let g = geometry();
+        let options = ViewOptions {
+            blades: Part {
+                opacity: Opacity::Translucent,
+                color: [255, 0, 0],
+                ..Part::solid(BLADE)
+            },
+            ..ViewOptions::default()
+        };
+        let mesh = build(&g, None, None, &options);
+        let blended = &mesh.vertices[mesh.opaque as usize..];
+        let near = |a: [f32; 4], b: [f32; 4]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-6);
+        assert!(blended.iter().any(|v| near(v.color, [1.0, 0.0, 0.0, 0.5])));
+        let alpha = |v: &Vertex, a: f32| (v.color[3] - a).abs() < 1e-6;
+        assert!(
+            blended.iter().any(|v| alpha(v, 0.2)),
+            "the shroud stays glass"
+        );
+        assert!(
+            mesh.vertices[..mesh.opaque as usize]
+                .iter()
+                .all(|v| alpha(v, 1.0))
+        );
+        let cycle: Vec<Opacity> = Opacity::ALL.iter().map(|o| o.next()).collect();
+        assert_eq!(
+            cycle,
+            [Opacity::Translucent, Opacity::Glass, Opacity::Opaque]
+        );
+    }
+
+    #[test]
+    fn default_colors_survive_the_trip_to_linear() {
+        for c in [BLADE, HUB, SHROUD, VANES, WALLS, VOLUTE] {
+            let back = linear(c).map(|l| {
+                let g = if l <= 0.003_130_8 {
+                    12.92 * l
+                } else {
+                    1.055 * l.powf(1.0 / 2.4) - 0.055
+                };
+                (g * 255.0).round() as u8
+            });
+            assert_eq!(back, c);
+        }
     }
 
     #[test]
@@ -413,7 +512,7 @@ mod tests {
         let g = geometry();
         let hidden = Part {
             shown: false,
-            glass: false,
+            ..Part::solid(HUB)
         };
         let mesh = build(
             &g,

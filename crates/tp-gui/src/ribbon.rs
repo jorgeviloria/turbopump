@@ -35,6 +35,8 @@ pub(crate) enum Command {
     ExportDrawing(DrawingExport),
     ExportVolute(VoluteExport),
     ExportCad,
+    /// A PNG picture of the 3D view.
+    Picture3d,
     Focus(View),
     Camera(CameraView),
     ToggleTree,

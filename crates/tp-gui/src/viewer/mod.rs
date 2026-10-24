@@ -21,7 +21,7 @@ use crate::i18n::tr;
 use crate::theme::{Palette, icon};
 use crate::views::unavailable;
 use camera::Camera;
-pub(crate) use mesh::{Part, ViewOptions};
+pub(crate) use mesh::{Opacity, Part, ViewOptions};
 use render::{Gpu, Uniforms};
 
 /// What the uploaded mesh was built from: results revision, impeller, stator, volute
@@ -58,6 +58,8 @@ const TURN_TIME: f32 = 0.35;
 #[derive(Debug, Default)]
 pub(crate) struct Viewer {
     pub options: ViewOptions,
+    /// Parallel projection instead of perspective.
+    pub orthographic: bool,
     camera: Option<Camera>,
     /// The camera turning toward a standard view.
     turn: Option<Turn>,
@@ -74,7 +76,20 @@ pub(crate) struct Viewer {
     framed_aspect: f32,
     /// The user zoomed or panned since the camera was last framed.
     moved: bool,
+    /// The free part of the view and the pixels per point, last frame, for captures.
+    frame: Option<(Rect, f32)>,
 }
+
+/// A picture of the 3D view: `width` by `height` pixels, RGBA row by row.
+#[derive(Debug, Clone)]
+pub(crate) struct Capture {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+}
+
+/// A capture is this many times as sharp as the screen.
+const CAPTURE_SCALE: f32 = 2.0;
 
 /// Labels of the faces of the view cube, by outward normal.
 const FACES: [(Vec3, &str); 6] = [
@@ -196,6 +211,7 @@ impl Viewer {
         let Some(camera) = self.camera.as_mut() else {
             return;
         };
+        camera.orthographic = self.orthographic;
         // Until the user zooms or pans, the framing follows the free part of the view,
         // which changes as the dialog opens, closes or moves.
         if !self.moved
@@ -245,6 +261,7 @@ impl Viewer {
         }
 
         let ppp = ui.ctx().pixels_per_point();
+        self.frame = Some((free, ppp));
         let size = [
             ((rect.width() * ppp).round() as u32).max(1),
             ((rect.height() * ppp).round() as u32).max(1),
@@ -272,6 +289,26 @@ impl Viewer {
             None => {}
         }
     }
+
+    /// Renders the free part of the view, without the cube, axes and scale, sharper
+    /// than on screen. `None` before the view has been drawn.
+    pub(crate) fn capture(&mut self, state: &RenderState, dark: bool) -> Option<Capture> {
+        let (free, ppp) = self.frame?;
+        let camera = self.camera?;
+        let gpu = self.gpu.as_mut()?;
+        let limit = state.device.limits().max_texture_dimension_2d as f32;
+        let scale = (ppp * CAPTURE_SCALE).min(limit / free.width().max(free.height()).max(1.0));
+        let size = [
+            ((free.width() * scale).round() as u32).max(1),
+            ((free.height() * scale).round() as u32).max(1),
+        ];
+        let rgba = gpu.capture(state, size, &uniforms(&camera, free, free, dark))?;
+        Some(Capture {
+            width: size[0],
+            height: size[1],
+            rgba,
+        })
+    }
 }
 
 /// Lights fixed to the camera, and the background of the theme. The model is centered
@@ -292,9 +329,15 @@ fn uniforms(camera: &Camera, rect: Rect, free: Rect, dark: bool) -> Uniforms {
     let shift = (free.center().x - rect.center().x) / (rect.width() / 2.0).max(1.0);
     let projection = glam::Mat4::from_translation(Vec3::new(shift, 0.0, 0.0))
         * camera.view_projection(rect.width() / rect.height().max(1.0));
+    // A parallel view looks along one direction: w = 0 tells the shader so.
+    let eye = if camera.orthographic {
+        camera.backward().extend(0.0)
+    } else {
+        camera.eye().extend(1.0)
+    };
     Uniforms {
         view_projection: projection.to_cols_array_2d(),
-        eye: camera.eye().extend(1.0).to_array(),
+        eye: eye.to_array(),
         key_light: key.extend(0.0).to_array(),
         fill_light: fill.extend(0.0).to_array(),
         up: up.extend(0.0).to_array(),

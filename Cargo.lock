@@ -4095,6 +4095,7 @@ dependencies = [
  "egui_plot",
  "glam",
  "notosans",
+ "png",
  "rfd",
  "tp-cad",
  "tp-design",
