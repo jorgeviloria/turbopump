@@ -218,6 +218,167 @@ pub fn volute_triangles(g: &VoluteGeometry) -> Vec<Triangle> {
     out
 }
 
+/// The body of a rounded cutwater as a closed surface: lofted through its outline in
+/// each plane across the inlet width and closed at the outermost planes. Empty unless
+/// rounded.
+pub fn cutwater_triangles(g: &VoluteGeometry) -> Vec<Triangle> {
+    let rings: Vec<&Vec<DVec3>> = g
+        .cutwater_slices
+        .iter()
+        .map(|s| &s.outline)
+        .filter(|o| o.len() > 2)
+        .collect();
+    let mut out = Vec::new();
+    let Some(&first) = rings.first() else {
+        return out;
+    };
+    let n = first.len();
+    if rings.len() < 2 || rings.iter().any(|r| r.len() != n) {
+        return out;
+    }
+    // Outward normals: the planes run from −z to +z, so the loft faces out when the
+    // outlines run counter-clockwise, and the ends face −z and +z.
+    let counter_clockwise = (0..n)
+        .map(|i| first[i].truncate().perp_dot(first[(i + 1) % n].truncate()))
+        .sum::<f64>()
+        > 0.0;
+    for pair in rings.windows(2) {
+        let (a, b) = (pair[0], pair[1]);
+        for i in 0..n {
+            let j = (i + 1) % n;
+            if counter_clockwise {
+                quad(&mut out, a[i], a[j], b[j], b[i]);
+            } else {
+                quad(&mut out, b[i], b[j], a[j], a[i]);
+            }
+        }
+    }
+    // Each end as a strip between the two faces: the outline runs back along one face
+    // and forward along the other.
+    for (ring, up) in [(first, false), (rings[rings.len() - 1], true)] {
+        let mut end = Vec::new();
+        for i in 0..(n - 1) / 2 {
+            quad(
+                &mut end,
+                ring[i],
+                ring[i + 1],
+                ring[n - 2 - i],
+                ring[n - 1 - i],
+            );
+        }
+        out.extend(end.into_iter().map(|t| {
+            let facing_up = (t[1] - t[0]).cross(t[2] - t[0]).z > 0.0;
+            if facing_up == up {
+                t
+            } else {
+                [t[0], t[2], t[1]]
+            }
+        }));
+    }
+    out
+}
+
+/// The inner surface of the volute for viewing: as [`volute_triangles`], without the
+/// pieces of wall that lie inside another channel or inside the body of the cutwater
+/// near it, so that the cutwater shows as it is built. Not a closed surface.
+pub fn volute_view_triangles(g: &VoluteGeometry) -> Vec<Triangle> {
+    let all = volute_triangles(g);
+    let slices = &g.cutwater_slices;
+    let channels = g.channels();
+    if slices.is_empty() || channels.len() < 2 || g.bend.is_some() {
+        return all;
+    }
+    // Near the cutwater only: within twice the reach of its body from the tip.
+    let reach = slices
+        .iter()
+        .flat_map(|s| s.outline.iter().map(move |p| p.distance(s.tip)))
+        .fold(0.01f64, f64::max);
+    let near = |p: DVec3| slices.iter().any(|s| p.distance(s.tip) < 2.0 * reach);
+    let plane = |z: f64| {
+        slices
+            .iter()
+            .min_by(|a, b| (a.z - z).abs().total_cmp(&(b.z - z).abs()))
+            .expect("some planes")
+    };
+    // The channels again, each with its own triangles, the diffuser last.
+    let mut out = Vec::new();
+    let count = channels.len();
+    for (i, rings) in channels.into_iter().enumerate() {
+        let mut own = Vec::new();
+        loft_rings(&mut own, &rings);
+        if let Some(first) = rings.first() {
+            cap(&mut own, first);
+        }
+        if i + 1 == count
+            && let Some(last) = rings.last()
+        {
+            cap(&mut own, last);
+        }
+        let diffuser = i + 1 == count;
+        out.extend(own.into_iter().filter(|t| {
+            let c = (t[0] + t[1] + t[2]) / 3.0;
+            if !near(c) {
+                return true;
+            }
+            let s = plane(c.z);
+            let p = c.truncate();
+            let body: Vec<DVec2> = s.outline.iter().map(|q| q.truncate()).collect();
+            if body.len() > 2 && inside(&body, p) {
+                return false;
+            }
+            // A spiral wall inside the diffuser, or a diffuser wall inside the spiral.
+            let (other, toward_axis) = if diffuser {
+                (&s.spiral_wall, true)
+            } else {
+                (&s.diffuser_wall, false)
+            };
+            let other: Vec<DVec2> = other.iter().map(|q| q.truncate()).collect();
+            !beside(&other, p, toward_axis)
+        }));
+    }
+    out
+}
+
+/// Whether `p` lies inside the closed polygon `outline`.
+fn inside(outline: &[DVec2], p: DVec2) -> bool {
+    let n = outline.len();
+    let mut odd = false;
+    for i in 0..n {
+        let (a, b) = (outline[i], outline[(i + 1) % n]);
+        if (a.y > p.y) != (b.y > p.y) && p.x < a.x + (p.y - a.y) / (b.y - a.y) * (b.x - a.x) {
+            odd = !odd;
+        }
+    }
+    odd
+}
+
+/// Whether `p` lies beside the wall `wall`, within its length, on the side toward the
+/// pump axis (`toward_axis`) or away from it.
+fn beside(wall: &[DVec2], p: DVec2, toward_axis: bool) -> bool {
+    let Some((k, t, q)) = (0..wall.len().saturating_sub(1))
+        .map(|k| {
+            let (a, b) = (wall[k], wall[k + 1]);
+            let ab = b - a;
+            let t = ((p - a).dot(ab) / ab.length_squared().max(1e-30)).clamp(0.0, 1.0);
+            (k, t, a + ab * t)
+        })
+        .min_by(|x, y| x.2.distance(p).total_cmp(&y.2.distance(p)))
+    else {
+        return false;
+    };
+    // Past either end of the wall there is nothing to be beside.
+    if (k == 0 && t <= 0.0) || (k + 2 == wall.len() && t >= 1.0) {
+        return false;
+    }
+    let along = wall[k + 1] - wall[k];
+    let mut out = DVec2::new(along.y, -along.x);
+    if out.dot(q) < 0.0 {
+        out = -out;
+    }
+    let away = (p - q).dot(out) > 0.0;
+    away != toward_axis
+}
+
 /// Each channel of the volute as a closed solid, capped at both ends. The channels
 /// overlap where the spiral runs on into the discharge diffuser, so each one closes a
 /// volume of its own; the walls of the bend of an internal volute are left out.
@@ -378,6 +539,100 @@ pub(crate) mod tests {
             assert_eq!(solids.len(), v.channels().len());
             assert!(solids.iter().all(|s| closed(s)));
         }
+    }
+
+    fn reference_volute(edit: impl Fn(&mut tp_design::volute::VoluteInput)) -> VoluteGeometry {
+        use tp_design::outlet::ImpellerOutlet;
+        let basis = ImpellerOutlet {
+            flow: 100.0 / 3600.0,
+            impeller_diameter: 0.172,
+            impeller_width: 0.0174,
+            cu: 13.27,
+            cm: 3.03,
+            nq: 35.9,
+            stage_head: 32.0,
+            density: 998.2,
+            midplane: 0.0378,
+            rotation_sign: 1.0,
+            impeller_blades: 7,
+            sides: None,
+        };
+        let mut input = tp_design::volute::VoluteInput::default();
+        edit(&mut input);
+        VoluteGeometry::build(&basis, &input).unwrap()
+    }
+
+    #[test]
+    fn the_cutwater_body_is_a_closed_surface_as_thick_as_its_nose() {
+        use tp_design::volute::{CrossSectionInput, CutwaterShape, SectionShape};
+        for sections in [
+            CrossSectionInput::default(),
+            CrossSectionInput::single(SectionShape::round()),
+        ] {
+            let g = reference_volute(|v| v.cross_section = sections.clone());
+            let body = cutwater_triangles(&g);
+            assert!(!body.is_empty());
+            assert!(closed(&body));
+            // Its volume: about the area of the midplane outline times the width of the
+            // planes.
+            let volume = body
+                .iter()
+                .map(|t| t[0].dot(t[1].cross(t[2])))
+                .sum::<f64>()
+                .abs()
+                / 6.0;
+            let mid = &g.cutwater_slices[g.cutwater_slices.len() / 2];
+            let n = mid.outline.len();
+            let area = 0.5
+                * (0..n)
+                    .map(|i| {
+                        mid.outline[i]
+                            .truncate()
+                            .perp_dot(mid.outline[(i + 1) % n].truncate())
+                    })
+                    .sum::<f64>()
+                    .abs();
+            let first = g.cutwater_slices.first().unwrap().z;
+            let last = g.cutwater_slices.last().unwrap().z;
+            let estimate = area * (last - first);
+            assert!(
+                (volume / estimate - 1.0).abs() < 0.25,
+                "{volume} vs {estimate}"
+            );
+        }
+        let sharp = reference_volute(|v| v.cutwater.shape = CutwaterShape::Sharp);
+        assert!(cutwater_triangles(&sharp).is_empty());
+    }
+
+    #[test]
+    fn the_view_of_the_volute_leaves_out_the_walls_the_cutwater_replaces() {
+        let g = reference_volute(|_| {});
+        let all = volute_triangles(&g);
+        let view = volute_view_triangles(&g);
+        assert!(view.len() < all.len());
+        // Only near the cutwater: most of the volute stays.
+        assert!(
+            view.len() as f64 > 0.9 * all.len() as f64,
+            "{} of {}",
+            view.len(),
+            all.len()
+        );
+        // Nothing of the walls is left inside the body in the midplane.
+        let mid = &g.cutwater_slices[g.cutwater_slices.len() / 2];
+        let body: Vec<DVec2> = mid.outline.iter().map(|p| p.truncate()).collect();
+        for t in &view {
+            let c = (t[0] + t[1] + t[2]) / 3.0;
+            if (c.z - mid.z).abs() < 1e-3 {
+                assert!(!inside(&body, c.truncate()), "{c}");
+            }
+        }
+        // A tangent cutwater is drawn as it is.
+        let tangent =
+            reference_volute(|v| v.cutwater.shape = tp_design::volute::CutwaterShape::Tangent);
+        assert_eq!(
+            volute_view_triangles(&tangent).len(),
+            volute_triangles(&tangent).len()
+        );
     }
 
     #[test]
