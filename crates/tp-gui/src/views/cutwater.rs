@@ -56,6 +56,8 @@ pub(crate) struct CutwaterPage {
     /// Turn of the 3D view about the pump axis and its tilt, rad.
     yaw: f32,
     pitch: f32,
+    /// The plane z to show in the 3D view, asked for with its button.
+    pub open_3d: Option<f64>,
 }
 
 impl Default for CutwaterPage {
@@ -68,6 +70,7 @@ impl Default for CutwaterPage {
             frame: true,
             yaw: -0.6,
             pitch: 0.9,
+            open_3d: None,
         }
     }
 }
@@ -266,6 +269,13 @@ impl CutwaterPage {
                 self.plane = None;
             }
             ui.checkbox(&mut self.all_planes, tr("All planes"));
+            if ui
+                .button(format!("{}  {}", crate::theme::icon::CUBE, tr("View in 3D")))
+                .on_hover_text(tr("The 3D view on the cutwater, cut across the axis at this plane"))
+                .clicked()
+            {
+                self.open_3d = Some(slices[plane].z);
+            }
             if let CutwaterShape::Rounded { .. } = input.cutwater.shape {
                 ui.separator();
                 let mut share = g.design.cutwater_share;

@@ -437,6 +437,30 @@ fn cutwater() {
     }
 }
 
+/// The cutwater in the 3D view: framed and cut across the axis at the midplane from
+/// its page, then in zebra stripes.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn cutwater_3d() {
+    let mut harness = harness(egui::Theme::Dark);
+    for _ in 0..6 {
+        harness.get_by_label_contains("Accept step").click();
+        harness.run();
+    }
+    harness.get_by_label("Volute 1").click();
+    harness.run();
+    for _ in 0..4 {
+        harness.get_by_label_contains("Accept step").click();
+        harness.run();
+    }
+    harness.get_by_label_contains("View in 3D").click();
+    harness.run_steps(6);
+    save(&mut harness, "cutwater-3d");
+    harness.get_by_label("Zebra").click();
+    harness.run_steps(4);
+    save(&mut harness, "cutwater-zebra");
+}
+
 /// The cross-section step: the default trapezoid, then a radius-based section with a
 /// second definition of line segments, its corners ready to drag.
 #[test]

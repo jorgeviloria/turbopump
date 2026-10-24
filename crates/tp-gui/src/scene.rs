@@ -89,10 +89,11 @@ enum Key {
     Volute,
     Sections,
     Duct,
+    Cutwater,
 }
 
 impl Key {
-    const ALL: [Key; 8] = [
+    const ALL: [Key; 9] = [
         Key::Blades,
         Key::Hub,
         Key::Shroud,
@@ -101,6 +102,7 @@ impl Key {
         Key::Volute,
         Key::Sections,
         Key::Duct,
+        Key::Cutwater,
     ];
 
     fn shown(self, o: &ViewOptions) -> bool {
@@ -128,6 +130,7 @@ impl Key {
             Key::Volute => Some(PartId::Volute),
             Key::Sections => None,
             Key::Duct => Some(PartId::Duct),
+            Key::Cutwater => Some(PartId::Cutwater),
         }
     }
 
@@ -158,6 +161,8 @@ pub(crate) struct Stage {
     /// The stator after the impeller: its name and whether it has vanes.
     pub stator: Option<(String, bool)>,
     pub volute: Option<String>,
+    /// Whether the volute has the body of a rounded cutwater.
+    pub cutwater: bool,
 }
 
 impl Stage {
@@ -177,11 +182,11 @@ impl Stage {
             groups.push((ComponentKind::Stator { vaned: *vaned }, name.clone(), keys));
         }
         if let Some(name) = &self.volute {
-            groups.push((
-                ComponentKind::Volute,
-                name.clone(),
-                vec![Key::Volute, Key::Sections],
-            ));
+            let mut keys = vec![Key::Volute, Key::Sections];
+            if self.cutwater {
+                keys.insert(1, Key::Cutwater);
+            }
+            groups.push((ComponentKind::Volute, name.clone(), keys));
         }
         groups
     }

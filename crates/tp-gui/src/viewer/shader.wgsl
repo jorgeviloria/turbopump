@@ -25,6 +25,8 @@ struct Uniforms {
     cap: vec4<f32>,
     // Linear color of each cap, by instance.
     cap_colors: array<vec4<f32>, 8>,
+    // x: zebra stripes instead of shading when 1; y: stripes over a half turn.
+    style: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -98,9 +100,17 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let facing = max(dot(n, to_eye), 0.0);
     let rim = pow(1.0 - facing, 4.0);
     let base = in.color.rgb;
-    let rgb = base * (ambient + diffuse)
+    var rgb = base * (ambient + diffuse)
         + specular * mix(vec3<f32>(1.0), base * 2.0, 0.4)
         + vec3<f32>(rim * 0.08);
+    // Zebra: stripes of a far striped sky seen in the surface as a mirror. Where the
+    // stripes break, the surface turns (G0); where they kink, its curvature jumps (G1).
+    if u.style.x > 0.5 {
+        let mirrored = reflect(-to_eye, n);
+        let height = acos(clamp(dot(mirrored, normalize(u.up.xyz)), -1.0, 1.0));
+        let stripe = step(0.5, fract(height * u.style.y / 3.14159265));
+        rgb = mix(vec3<f32>(0.03), vec3<f32>(0.92), stripe) * (0.75 + 0.25 * facing);
+    }
     // Glass shows more at grazing angles.
     let alpha = select(in.color.a, clamp(in.color.a * (1.0 + 2.0 * rim), 0.0, 0.85), in.color.a < 1.0);
     return vec4<f32>(gamma_from_linear(clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0))), alpha);

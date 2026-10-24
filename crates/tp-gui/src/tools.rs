@@ -530,9 +530,22 @@ pub(crate) fn view3d(ui: &mut Ui, viewer: &mut Viewer, cx: ToolsCx) -> Option<Co
         {
             viewer.orthographic = !viewer.orthographic;
         }
+        if big_button(
+            ui,
+            Icon::Glyph(icon::GPS_FIX),
+            tr("Cutwater"),
+            cx.has_volute,
+            false,
+            None,
+        )
+        .on_hover_text(tr("Frame the camera on the cutwater of the volute"))
+        .clicked()
+        {
+            viewer.focus_cutwater(None);
+        }
     });
-    let options = &mut viewer.options;
     group(ui, tr("Style"), |ui| {
+        let options = &mut viewer.options;
         let styles = [
             (icon::SPHERE, tr("Shaded"), false, false),
             (icon::POLYGON, tr("With edges"), true, false),
@@ -545,23 +558,45 @@ pub(crate) fn view3d(ui: &mut Ui, viewer: &mut Viewer, cx: ToolsCx) -> Option<Co
                 options.wireframe = wireframe;
             }
         }
+        if big_button(ui, Icon::Glyph(icon::BARCODE), tr("Zebra"), true, viewer.zebra, None)
+            .on_hover_text(tr(
+                "Stripes reflected in the surfaces: where they break the surface has a corner, where they kink its curvature jumps",
+            ))
+            .clicked()
+        {
+            viewer.zebra = !viewer.zebra;
+        }
     });
     group(ui, tr("Inspect"), |ui| {
         let cut = viewer.cut.is_some();
-        if big_button(
-            ui,
-            Icon::Glyph(icon::SCISSORS),
-            tr("Meridional cut"),
-            true,
-            cut,
-            None,
-        )
-        .on_hover_text(tr(
-            "Cut the model through its axis and remove the half toward the camera",
-        ))
-        .clicked()
-        {
-            viewer.set_cut(!cut);
+        for (horizontal, glyph, label, hint) in [
+            (
+                false,
+                icon::SCISSORS,
+                tr("Meridional cut"),
+                tr("Cut the model through its axis and remove the half toward the camera"),
+            ),
+            (
+                true,
+                icon::SQUARE_SPLIT_HORIZONTAL,
+                tr("Cut across"),
+                tr(
+                    "Cut the model across its axis, by a plane z = const, and remove the side the camera looks from",
+                ),
+            ),
+        ] {
+            let on = cut && viewer.horizontal == horizontal;
+            if big_button(ui, Icon::Glyph(glyph), label, true, on, None)
+                .on_hover_text(hint)
+                .clicked()
+            {
+                if on {
+                    viewer.set_cut(false);
+                } else {
+                    viewer.set_cut(true);
+                    viewer.horizontal = horizontal;
+                }
+            }
         }
         stack(ui, |ui| {
             if small_button(ui, icon::CROSSHAIR, tr("Face the camera"), cut, false)

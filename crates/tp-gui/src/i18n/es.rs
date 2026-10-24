@@ -3553,6 +3553,25 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "at least {} against pulsations (Gülich Table 10.2); past 10 % it costs about 1 % of efficiency (p. 421)",
         "al menos {} contra las pulsaciones (Gülich tabla 10.2); por encima del 10 % cuesta alrededor de un 1 % de rendimiento (p. 421)",
     ),
+    ("View in 3D", "Ver en 3D"),
+    (
+        "The 3D view on the cutwater, cut across the axis at this plane",
+        "La vista 3D sobre el corte de agua, cortada a través del eje por este plano",
+    ),
+    (
+        "Frame the camera on the cutwater of the volute",
+        "Encuadra la cámara en el corte de agua de la voluta",
+    ),
+    ("Zebra", "Cebra"),
+    (
+        "Stripes reflected in the surfaces: where they break the surface has a corner, where they kink its curvature jumps",
+        "Franjas reflejadas en las superficies: donde se rompen la superficie tiene una arista, donde se quiebran su curvatura salta",
+    ),
+    ("Cut across", "Corte transversal"),
+    (
+        "Cut the model across its axis, by a plane z = const, and remove the side the camera looks from",
+        "Corta el modelo a través de su eje, por un plano z = cte, y quita el lado desde el que mira la cámara",
+    ),
 ];
 
 /// Messages of the design code, most specific first.

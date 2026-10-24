@@ -788,6 +788,11 @@ impl TurbopumpApp {
             }
         }
         self.properties_panel(&ctx, main_area);
+        // The cutwater page asked for the 3D view at one of its planes.
+        if let Some(z) = self.front.cutwater.open_3d.take() {
+            self.focus_view(View::View3d);
+            self.viewer.focus_cutwater(Some(z));
+        }
 
         if let Some(command) = command {
             self.run(command, &ctx);
@@ -1259,6 +1264,10 @@ impl TurbopumpApp {
                 ))
             }),
             volute: name(self.active_volute()),
+            cutwater: self
+                .active_volute()
+                .and_then(|id| self.derived.volute(id))
+                .is_some_and(|g| !g.cutwater_outline().is_empty()),
         }
     }
 
@@ -2237,6 +2246,26 @@ mod tests {
         assert!((r / radius - 1.5).abs() < 0.1, "{r} vs {radius}");
         let after = geometry(harness.state());
         assert!((after.cutwater.nose_distance - after.design.cutwater_diameter / 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn the_cutwater_page_opens_the_3d_view_on_its_plane() {
+        let mut harness = Harness::builder()
+            .with_size([1440.0, 900.0])
+            .build_eframe(|cc| TurbopumpApp::new(cc, None));
+        harness.run();
+        let volute = harness.state().active_volute().unwrap();
+        harness.state_mut().selection = Selection::Step(volute, DesignStep::CutWater);
+        harness.run();
+        harness.run();
+        harness.get_by_label_contains("View in 3D").click();
+        harness.run();
+        let app = harness.state();
+        assert_eq!(app.view, View::View3d);
+        // The midplane, as the page showed it; the view applies it when it draws.
+        let g = app.derived.volute(volute).unwrap();
+        let mid = g.cutwater_slices[g.cutwater_slices.len() / 2].z;
+        assert_eq!(app.viewer.pending_focus(), Some(Some(mid)));
     }
 
     fn editor() -> Harness<'static, TurbopumpApp> {
