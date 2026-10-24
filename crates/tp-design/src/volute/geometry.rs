@@ -179,6 +179,9 @@ pub struct VoluteGeometry {
     pub warnings: Vec<String>,
 }
 
+/// Outlines of the body of the cutwater per gap between two of its planes, for meshes.
+const BODY_STEPS: usize = 4;
+
 /// Turn by which the channels of a double volute reach into the discharge diffuser, so
 /// that the solids overlap where they meet, rad.
 const CHANNEL_OVERLAP: f64 = 1.5 * std::f64::consts::PI / 180.0;
@@ -194,6 +197,12 @@ impl VoluteGeometry {
             .iter()
             .find(|s| (s.z - zm).abs() < 1e-12)
             .map_or(&[], |s| s.outline.as_slice())
+    }
+
+    /// Outlines of the body of a rounded cutwater from −z to +z, between its planes
+    /// too (see [`super::cutwater::fine_outlines`]), for meshes. Empty unless rounded.
+    pub fn cutwater_body(&self) -> Vec<Vec<DVec3>> {
+        super::cutwater::fine_outlines(&self.cutwater_slices, BODY_STEPS)
     }
 
     /// The pieces of the flow channel, each a sequence of outlines in 3D to loft

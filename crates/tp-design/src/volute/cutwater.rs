@@ -463,6 +463,56 @@ impl Path {
     }
 }
 
+/// Outlines of the body between the planes too, from −z to +z: `steps` per gap between
+/// two planes, on a Catmull–Rom spline through the outlines of the planes point by point
+/// (uniform: the planes are evenly spaced). Lofted straight from one to the next they
+/// follow the smooth surface the CAD lofts through the planes, where the ends of the
+/// faces slide along the walls from plane to plane (round sections). Empty unless
+/// rounded.
+pub fn fine_outlines(slices: &[CutwaterSlice], steps: usize) -> Vec<Vec<DVec3>> {
+    let rings: Vec<&[DVec3]> = slices
+        .iter()
+        .map(|s| s.outline.as_slice())
+        .filter(|o| o.len() > 2)
+        .collect();
+    let Some(n) = rings.first().map(|r| r.len()) else {
+        return Vec::new();
+    };
+    if rings.len() < 3 || rings.iter().any(|r| r.len() != n) {
+        return rings.iter().map(|r| r.to_vec()).collect();
+    }
+    let m = rings.len();
+    // The planes beyond the ends carry on the first and last gaps straight.
+    let at = |k: isize, i: usize| -> DVec3 {
+        if k < 0 {
+            rings[0][i] * 2.0 - rings[1][i]
+        } else if k as usize >= m {
+            rings[m - 1][i] * 2.0 - rings[m - 2][i]
+        } else {
+            rings[k as usize][i]
+        }
+    };
+    let mut out = Vec::with_capacity((m - 1) * steps + 1);
+    for k in 0..m as isize - 1 {
+        for j in 0..steps {
+            let t = j as f64 / steps as f64;
+            out.push(
+                (0..n)
+                    .map(|i| {
+                        let (p0, p1, p2, p3) = (at(k - 1, i), at(k, i), at(k + 1, i), at(k + 2, i));
+                        0.5 * (p1 * 2.0
+                            + (p2 - p0) * t
+                            + (p0 * 2.0 - p1 * 5.0 + p2 * 4.0 - p3) * (t * t)
+                            + (p3 - p0 + (p1 - p2) * 3.0) * (t * t * t))
+                    })
+                    .collect(),
+            );
+        }
+    }
+    out.push(rings[m - 1].to_vec());
+    out
+}
+
 /// A centripetal Catmull–Rom spline through `points`, `n` points per span.
 fn catmull_rom(points: &[DVec2], n: usize) -> Vec<DVec2> {
     if points.len() < 3 {
@@ -787,6 +837,34 @@ mod tests {
         for k in 0..SLICES {
             let mirror = SLICES - 1 - k;
             assert!((radius(&round, k) - radius(&round, mirror)).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn the_outlines_between_the_planes_pass_through_theirs_smoothly() {
+        let g = build(|v| v.cross_section = CrossSectionInput::single(SectionShape::round()));
+        let steps = 4;
+        let fine = fine_outlines(&g.cutwater_slices, steps);
+        assert_eq!(fine.len(), (SLICES - 1) * steps + 1);
+        for (k, slice) in g.cutwater_slices.iter().enumerate() {
+            assert_eq!(fine[k * steps], slice.outline);
+        }
+        // Each outline in its own plane, and every point on a smooth curve across them:
+        // the second differences along z stay small next to the first ones.
+        for outline in &fine {
+            assert!(outline.iter().all(|p| (p.z - outline[0].z).abs() < 1e-12));
+        }
+        for i in 0..fine[0].len() {
+            let along: Vec<DVec3> = fine.iter().map(|o| o[i]).collect();
+            let step = along
+                .windows(2)
+                .map(|w| w[0].distance(w[1]))
+                .fold(0.0, f64::max);
+            let bend = along
+                .windows(3)
+                .map(|w| (w[0] + w[2] - w[1] * 2.0).length())
+                .fold(0.0, f64::max);
+            assert!(bend < 0.25 * step, "{i}: {bend} vs {step}");
         }
     }
 
