@@ -208,7 +208,9 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
     automáticos de una vez, y un solo Cmd/Ctrl+Z los recupera. Cuando un paso ya
     aceptado queda por revisar, una barra naranja en el margen marca las filas que
     cambiaron desde que se aceptó (también las automáticas que movió un cambio aguas
-    arriba), y su ayuda dice cuánto valían. Con el ratón sobre una fila que es una
+    arriba), y su ayuda dice cuánto valían. Lo que mostraba cada fila al aceptarse se
+    guarda con el proyecto: las marcas siguen ahí tras cerrar y volver a abrir, y no
+    las cambian otras unidades ni otro idioma. Con el ratón sobre una fila que es una
     cota del dibujo (L, b₂, d_n, d₁ o d₂ en el meridiano; d₂, d₁, d_n o d_z en la
     vista frontal; b₃, o la altura de la garganta, en la de sección), esa cota se
     resalta en el dibujo,
