@@ -156,14 +156,25 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
   esquina; también se acopla arrastrando su cabecera a la esquina más cercana, y se
   pliega a una píldora. El modelo se centra en lo que dejan libre la Escena y el panel
   de propiedades. La esquina y el plegado se recuerdan.
-- **Panel de propiedades** (derecha): al elegir un paso o el punto de diseño se
-  abre con sus datos. Cada valor es automático (propuesto por una correlación) o
-  manual. *Accept step* marca el paso como hecho y pasa al siguiente, y los errores y
-  avisos salen en tarjetas. El panel flota sobre la vista sin reducirla: se pliega a una
-  franja estrecha (con su flecha o con Esc), se ensancha
-  arrastrando su borde izquierdo y no bloquea las vistas, así que con él abierto se
-  siguen arrastrando los puntos del contorno. La vista 3D centra la pieza en la parte
-  que queda libre.
+- **Panel de propiedades** (derecha): al elegir un paso o el punto de diseño se abre
+  con sus datos:
+  - **arriba**, la ruta (componente › fase), el título, el estado, «paso n de m», la ⓘ
+    con lo que hace el paso y un menú ⋯ para devolver el paso a automático o plegar
+    todas sus secciones. El error del paso se ve siempre; los avisos, en una línea
+    con el primero que se despliega;
+  - **en medio**, secciones que se pliegan, marcadas como resultados o comprobación
+    cuando lo son. Cada valor que puede ser automático lleva un punto, como los del
+    editor del meridiano: hueco y en gris si lo propone el programa, relleno si está
+    fijado a mano. Escribir en un valor automático lo fija; un clic en el punto, o
+    clic derecho en el valor, lo vuelve automático;
+  - **abajo**, la cifra clave del paso, *Back* y *Accept step and continue*
+    (Cmd/Ctrl+Intro), que marca el paso como hecho y abre el siguiente, también en
+    el componente siguiente.
+
+  El panel flota sobre la vista sin reducirla: se pliega a una franja estrecha (con su
+  flecha o con Esc), se ensancha arrastrando su borde izquierdo y no bloquea las
+  vistas, así que con él abierto se siguen arrastrando los puntos del contorno. La
+  vista 3D centra la pieza en la parte que queda libre.
 - **Barra de estado** (abajo): el último mensaje, las unidades y el contador de errores
   y avisos, que abre el panel de mensajes de todo el proyecto.
 - **Idioma:** inglés o español, en los ajustes (el engranaje de la barra). La elección se guarda, y la
