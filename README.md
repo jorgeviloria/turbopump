@@ -179,7 +179,10 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
     fijado a mano. Escribir en un valor automático lo fija; un clic en el punto, o
     clic derecho en el valor, lo vuelve automático. La cabecera de cada sección dice
     cuántos valores tiene fijados a mano («● 2 a mano»); un clic ahí los vuelve todos
-    automáticos de una vez, y un solo Cmd/Ctrl+Z los recupera;
+    automáticos de una vez, y un solo Cmd/Ctrl+Z los recupera. Cuando un paso ya
+    aceptado queda por revisar, una barra naranja en el margen marca las filas que
+    cambiaron desde que se aceptó (también las automáticas que movió un cambio aguas
+    arriba), y su ayuda dice cuánto valían;
   - **abajo**, la cifra clave del paso, *Back* y *Accept step and continue*
     (Cmd/Ctrl+Intro), que marca el paso como hecho y abre el siguiente, también en
     el componente siguiente. Con Mayús (o desde el menú ⋯), se completan todos los
