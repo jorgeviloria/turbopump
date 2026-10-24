@@ -180,8 +180,9 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
   con sus datos:
   - **arriba**, la ruta (componente › fase), el título, el estado, «paso n de m», la ⓘ
     con lo que hace el paso y un menú ⋯ para devolver el paso a automático o plegar
-    todas sus secciones. El error del paso se ve siempre; los avisos, en una línea
-    con el primero que se despliega;
+    todas sus secciones. El error del paso, o sus avisos, van al final de la misma
+    fila del estado, recortados al sitio que queda (enteros al pasar el ratón; un clic
+    los lista todos encima del formulario), así que al aparecer no mueven nada;
   - **en medio**, secciones que se pliegan, marcadas como resultados o comprobación
     cuando lo son. Cada valor que puede ser automático lleva un punto, como los del
     editor del meridiano: hueco y en gris si lo propone el programa, relleno si está
