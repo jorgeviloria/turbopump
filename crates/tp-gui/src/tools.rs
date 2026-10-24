@@ -638,19 +638,20 @@ pub(crate) fn view3d(ui: &mut Ui, viewer: &mut Viewer, cx: ToolsCx) -> Option<Co
 
 /// The Curves tab: the settings of the prediction and its other results.
 pub(crate) fn curves(ui: &mut Ui, view: &mut PerformanceView) -> Option<Command> {
+    let mut command = None;
     group(ui, tr("Show"), |ui| {
         if big_button(
             ui,
             Icon::Glyph(icon::SLIDERS_HORIZONTAL),
             tr("Settings"),
             true,
-            view.settings_open,
+            !view.step_in_panel,
             None,
         )
-        .on_hover_text(tr("Recirculation, shut-off, liquid and operation in the system: they shape the curve but are seldom changed"))
+        .on_hover_text(tr("Recirculation, shut-off, liquid and operation in the system in the properties panel, or the step again"))
         .clicked()
         {
-            view.settings_open = !view.settings_open;
+            command = Some(Command::CurveSettings(view.step_in_panel));
         }
         if big_button(
             ui,
@@ -668,7 +669,7 @@ pub(crate) fn curves(ui: &mut Ui, view: &mut PerformanceView) -> Option<Command>
             view.details_open = !view.details_open;
         }
     });
-    None
+    command
 }
 
 /// The Report tab: every export of the project.

@@ -1978,13 +1978,11 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ),
     ("axial length", "longitud axial"),
     ("vaned diffuser", "difusor con álabes"),
-    ("vaneless diffuser", "difusor sin álabes"),
     ("auto", "auto"),
     (
         "The performance prediction needs a pump impeller.",
         "La predicción de prestaciones necesita un rodete de bomba.",
     ),
-    ("Collector: {}", "Colector: {}"),
     (
         "From the component after the impeller; it sets the shut-off head",
         "Del componente tras el rodete; fija la altura a válvula cerrada",
@@ -3169,8 +3167,8 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Meshes", "Mallas"),
     ("Gestures", "Gestos"),
     (
-        "Recirculation, shut-off, liquid and operation in the system: they shape the curve but are seldom changed",
-        "Recirculación, válvula cerrada, líquido y funcionamiento en la instalación: dan forma a la curva pero se cambian poco",
+        "Recirculation, shut-off, liquid and operation in the system in the properties panel, or the step again",
+        "Recirculación, válvula cerrada, líquido y funcionamiento en la instalación en el panel de propiedades, o de nuevo el paso",
     ),
     (
         "Losses, forces and the rest of the results; the report has them too",
@@ -3302,6 +3300,19 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Opacity of {}", "Opacidad: {}"),
     ("Click for {}", "Con un clic: {}"),
     ("Color of {}", "Color: {}"),
+    ("Curve", "Curva"),
+    (
+        "They shape the curve but are seldom changed",
+        "Dan forma a la curva pero se cambian poco",
+    ),
+    ("Collector", "Colector"),
+    ("Losses and forces", "Pérdidas y fuerzas"),
+    ("Curve settings", "Ajustes de curvas"),
+    ("More actions of the curves", "Más acciones de las curvas"),
+    (
+        "Every setting of the curves back to its automatic value",
+        "Todos los ajustes de las curvas vuelven a su valor automático",
+    ),
     ("Show the plane", "Mostrar el plano"),
     (
         "Outline the cutting plane over the model",

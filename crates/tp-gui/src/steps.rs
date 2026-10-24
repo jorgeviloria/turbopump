@@ -196,6 +196,16 @@ pub(crate) fn show(ui: &mut Ui, cx: &mut EditCtx<'_>) {
     });
 }
 
+/// Starts a page of the properties panel other than a step, `id`: its sections keep
+/// their own open state, and no row belongs to a step or a section yet.
+pub(crate) fn page(ui: &mut Ui, id: egui::Id) {
+    ui.data_mut(|d| {
+        d.remove::<egui::Id>(current_section_id());
+        d.remove::<StepStatus>(status_id());
+        d.insert_temp(egui::Id::new("properties_step"), id);
+    });
+}
+
 /// Every place of the design in order: the design point, then the steps of each
 /// component that can be worked on.
 pub(crate) fn order(project: &Project) -> Vec<Selection> {
