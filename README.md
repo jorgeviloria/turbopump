@@ -243,6 +243,13 @@ mientras se edite el rodete.
   anillo de cierre (holgura según Gülich, ec. 3.12), y la trasera hasta el sello del
   eje. Sus sellos pasan al empuje axial y al análisis de pérdidas cuando estos están en
   automático.
+- **Tubería de entrada:** un tramo axial delante de la boca, para la entrada de un
+  dominio de CFD: un anillo entre el cubo prolongado y la pared de la tubería, de
+  longitud L = d₁ y tan ancho como la tapa en la entrada (valores nuestros, editables).
+  Con las cámaras laterales diseñadas, termina a una holgura axial Δz (la misma s_ax)
+  de la punta del cuello: la fuga del anillo de cierre sale a ese hueco y vuelve a la
+  boca dentro del mismo dominio. Se dibuja en el ámbito Cámaras laterales y aparece en
+  la Escena del 3D.
 - **Cruces:** si dos paredes se cruzan, o una se cruza consigo misma, el punto se
   marca en rojo y sale un aviso.
 - **Análisis:** la curvatura de las paredes, los círculos de área, las gráficas de área
@@ -359,7 +366,9 @@ dominio fluido (`volute.step`) y la carcasa con su espesor de pared y la brida d
 salida (`volute-casing.step`). Con las cámaras laterales diseñadas salen también su
 fluido (`side-chambers.step`) y, si a continuación del rodete viene una voluta, un único
 fluido para CFD con rodete, cámaras y voluta (`fluid-joined.step`), unido por un anillo
-en la salida del rodete. Ese fluido necesita un borde de salida paralelo al eje
+en la salida del rodete. Con la tubería de entrada modelada sale su fluido
+(`inlet-duct.step`), y el fluido unido empieza en ella: comparte la cara de entrada del
+rodete y la salida del sello. Ese fluido necesita un borde de salida paralelo al eje
 (d₂i = d₂). La altura de la cara de salida se puede fijar con
 `turbopump volute --set height=…`:
 
