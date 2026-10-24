@@ -190,10 +190,10 @@ pub(crate) fn show(ui: &mut Ui, cx: &mut EditCtx<'_>) {
         d.remove::<egui::Id>(current_section_id());
         d.remove::<StepStatus>(status_id());
     });
-    match *cx.selection {
+    widgets::shared_columns(ui, |ui| match *cx.selection {
         Selection::Setup => setup(ui, cx),
         Selection::Step(id, step) => step_panel(ui, cx, id, step),
-    }
+    });
 }
 
 /// Every place of the design in order: the design point, then the steps of each

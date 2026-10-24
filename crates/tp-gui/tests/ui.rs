@@ -1121,3 +1121,96 @@ fn nothing_moves_when_a_toggle_is_selected() {
         assert!(shifted.is_empty(), "{toggle}:\n{}", shifted.join("\n"));
     }
 }
+
+/// The left edge of what the properties panel shows: its labels start there.
+fn panel_left(h: &Harness<'_, TurbopumpApp>) -> f32 {
+    let crumb = h
+        .get_all_by_label_contains("›")
+        .filter(|n| n.rect().left() > 700.0)
+        .map(|n| n.rect().left())
+        .fold(f32::INFINITY, f32::min);
+    let _ = h.get_by_label("More actions of the step");
+    crumb
+}
+
+#[test]
+fn the_properties_panel_keeps_its_width_in_every_view_and_step() {
+    let mut harness = harness();
+    // Every place of the design, in every view.
+    let mut widths = Vec::new();
+    for tab in [
+        "Meridian tab",
+        "Blade tab",
+        "Front tab",
+        "Section tab",
+        "3D tab",
+        "Curves tab",
+        "Report tab",
+    ] {
+        harness.get_by_label(tab).click();
+        harness.run();
+        for _ in 0..14 {
+            harness.key_press_modifiers(Modifiers::ALT, Key::ArrowDown);
+            harness.run();
+            harness.get_by_label(tab).click();
+            harness.run();
+            widths.push((tab, panel_left(&harness)));
+        }
+    }
+    let first = widths[0].1;
+    let off: Vec<String> = widths
+        .iter()
+        .filter(|(_, x)| x.is_finite() && (x - first).abs() > 0.5)
+        .map(|(tab, x)| format!("{tab}: {x}"))
+        .collect();
+    assert!(
+        off.is_empty(),
+        "panel left at {first}, but\n{}",
+        off.join("\n")
+    );
+}
+
+/// The inputs of the properties panel: numeric fields, lists and text fields.
+fn panel_inputs(h: &Harness<'_, TurbopumpApp>) -> Vec<(String, egui::Rect)> {
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::NodeT;
+    h.query_all_by_role(Role::SpinButton)
+        .chain(h.query_all_by_role(Role::ComboBox))
+        .chain(h.query_all_by_role(Role::TextInput))
+        .filter(|n| {
+            matches!(
+                n.accesskit_node().role(),
+                Role::SpinButton | Role::ComboBox | Role::TextInput
+            ) && n.rect().left() > 1000.0
+        })
+        .map(|n| {
+            let name = n.accesskit_node().label().or(n.accesskit_node().value());
+            (name.unwrap_or_default(), n.rect())
+        })
+        .collect()
+}
+
+#[test]
+fn the_inputs_of_the_properties_line_up() {
+    let mut harness = harness();
+    // The design point, the main dimensions and the meridional contour.
+    let mut checked = 0;
+    for _ in 0..3 {
+        let inputs = panel_inputs(&harness);
+        if let Some((_, first)) = inputs.first() {
+            let off: Vec<String> = inputs
+                .iter()
+                .filter(|(_, r)| {
+                    (r.left() - first.left()).abs() > 1.0 || (r.right() - first.right()).abs() > 1.0
+                })
+                .map(|(name, r)| format!("{name}: {r:?} (first {first:?})"))
+                .collect();
+            assert!(off.is_empty(), "{}", off.join("\n"));
+            checked += inputs.len();
+        }
+        harness.key_press_modifiers(Modifiers::ALT, Key::ArrowDown);
+        harness.run();
+        harness.run();
+    }
+    assert!(checked > 10, "{checked}");
+}

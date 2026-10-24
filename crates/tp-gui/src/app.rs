@@ -188,6 +188,8 @@ const SCENE_CORNER_KEY: &str = "scene_corner";
 const SCENE_FOLDED_KEY: &str = "scene_folded";
 /// Key of the parallel projection of the 3D view.
 const ORTHOGRAPHIC_KEY: &str = "orthographic";
+/// Key of the width the user gave the properties panel.
+const SIDEBAR_WIDTH_KEY: &str = "properties_width";
 /// Key of the saved views of the 3D view, one code each, separated by semicolons.
 const SAVED_VIEWS_KEY: &str = "saved_views";
 
@@ -224,7 +226,7 @@ fn system_language() -> Language {
 }
 
 /// Default width of the properties panel.
-const SIDEBAR_WIDTH: f32 = 420.0;
+const SIDEBAR_WIDTH: f32 = 460.0;
 /// Width of the folded properties panel.
 const SIDEBAR_STRIP: f32 = 30.0;
 /// Gap between the properties panel and the edges of the view.
@@ -413,6 +415,13 @@ impl TurbopumpApp {
                 .and_then(|o| o.parse().ok())
             {
                 app.viewer.orthographic = orthographic;
+            }
+            if let Some(width) = storage
+                .get_string(SIDEBAR_WIDTH_KEY)
+                .and_then(|w| w.parse::<f32>().ok())
+                .filter(|w| w.is_finite())
+            {
+                app.sidebar_width = width;
             }
             if let Some(views) = storage.get_string(SAVED_VIEWS_KEY) {
                 app.viewer.saved = views
@@ -847,6 +856,12 @@ impl TurbopumpApp {
             .order(egui::Order::Middle)
             .fixed_pos(rect.min)
             .show(ctx, |ui| {
+                // The panel takes exactly its rectangle: its width is the user's, never
+                // what a wide row asks for, and nothing drawn spills out of it.
+                let (outer, _) = ui.allocate_exact_size(rect.size(), egui::Sense::hover());
+                let mut ui = ui.new_child(egui::UiBuilder::new().max_rect(outer));
+                ui.set_clip_rect(outer.expand(1.0));
+                let ui = &mut ui;
                 floating::frame(&style).show(ui, |ui| {
                     ui.set_min_size(rect.size());
                     ui.set_max_size(rect.size());
@@ -867,7 +882,8 @@ impl TurbopumpApp {
                         )
                         .on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
                     if resize.dragged() {
-                        self.sidebar_width -= resize.drag_delta().x;
+                        self.sidebar_width =
+                            (self.sidebar_width - resize.drag_delta().x).clamp(300.0, 1200.0);
                     }
                     Frame::new()
                         .inner_margin(Margin::symmetric(12, 8))
@@ -1572,6 +1588,7 @@ impl eframe::App for TurbopumpApp {
         storage.set_string(SCENE_CORNER_KEY, self.scene.corner.code().to_owned());
         storage.set_string(SCENE_FOLDED_KEY, self.scene.folded.to_string());
         storage.set_string(ORTHOGRAPHIC_KEY, self.viewer.orthographic.to_string());
+        storage.set_string(SIDEBAR_WIDTH_KEY, self.sidebar_width.to_string());
         let views: Vec<String> = self.viewer.saved.iter().map(|v| v.code()).collect();
         storage.set_string(SAVED_VIEWS_KEY, views.join(";"));
     }

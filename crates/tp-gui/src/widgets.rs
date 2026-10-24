@@ -38,7 +38,7 @@ impl Columns {
         // A little slack: rows exactly as wide as the panel would nudge its width
         // through rounding, and the columns would take frames to settle.
         let free = (width - GAP - 12.0).max(160.0);
-        let label = (free * 0.56).clamp(100.0, 260.0);
+        let label = (free * 0.52).clamp(100.0, 260.0);
         Self {
             label,
             value: free - label,
@@ -47,6 +47,11 @@ impl Columns {
 
     fn id() -> egui::Id {
         egui::Id::new("tp_property_columns")
+    }
+
+    /// Where a panel keeps the columns all its grids share.
+    fn panel_id() -> egui::Id {
+        egui::Id::new("tp_panel_columns")
     }
 
     /// The columns of the grid being drawn.
@@ -59,7 +64,9 @@ impl Columns {
 /// A grid of property rows. Inputs, combo boxes and text fields in it fill the value
 /// column; build the rows with [`label`], [`param_f64`], [`param_u32`] and [`value_row`].
 pub fn props(ui: &mut Ui, id: impl Hash + std::fmt::Debug, add: impl FnOnce(&mut Ui)) {
-    let columns = Columns::for_width(ui.available_width());
+    let columns = ui
+        .data(|d| d.get_temp::<Columns>(Columns::panel_id()))
+        .unwrap_or_else(|| Columns::for_width(ui.available_width()));
     ui.data_mut(|d| d.insert_temp(Columns::id(), columns));
     egui::Grid::new(id)
         .num_columns(2)
@@ -70,11 +77,25 @@ pub fn props(ui: &mut Ui, id: impl Hash + std::fmt::Debug, add: impl FnOnce(&mut
             ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
             let spacing = ui.spacing_mut();
             spacing.interact_size.x = columns.value;
-            // Lists as wide as a numeric field and its unit together.
-            spacing.combo_width = columns.value;
-            spacing.text_edit_width = columns.value - 2.0 * spacing.button_padding.x;
+            // Lists and text fields as wide as the numeric fields, which leave the
+            // rest of the column to their unit: all line up on both edges.
+            let field = columns.value - UNIT_WIDTH - 4.0;
+            spacing.combo_width = field;
+            spacing.text_edit_width = field - 2.0 * spacing.button_padding.x;
             add(ui);
         });
+}
+
+/// Draws `add` with every grid of rows in it on the same columns, worked out from the
+/// width of `ui`: labels, fields, lists and units line up down the whole panel, whatever
+/// frames or indents a group sits in.
+pub fn shared_columns<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    // Room for the scroll bar the panel may show.
+    let columns = Columns::for_width(ui.available_width() - 8.0);
+    ui.data_mut(|d| d.insert_temp(Columns::panel_id(), columns));
+    let inner = add(ui);
+    ui.data_mut(|d| d.remove::<Columns>(Columns::panel_id()));
+    inner
 }
 
 /// An ⓘ that shows `text` when the pointer rests on it.
