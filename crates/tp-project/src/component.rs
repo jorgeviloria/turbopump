@@ -6,6 +6,7 @@ use tp_design::MainDimensionsInput;
 use tp_design::diffuser::DiffuserInput;
 use tp_design::impeller::ImpellerGeometryInput;
 use tp_design::volute::VoluteInput;
+use tp_units::QuantityKind;
 
 use crate::ProjectError;
 
@@ -130,6 +131,25 @@ pub enum StepStatus {
     Stale,
 }
 
+/// What one row of a step showed when the step was accepted, so that the editor can
+/// mark the rows that changed since. Rows are named by the editor.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AcceptedValue {
+    /// What is compared: the value written without units or language.
+    pub key: String,
+    /// The value as it was shown.
+    pub text: String,
+    /// A quantity, in SI, to show again in other units and compare as shown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quantity: Option<(QuantityKind, f64)>,
+    /// Proposed by the program rather than set by hand.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub automatic: bool,
+}
+
+/// The rows of an accepted step, by name.
+pub type AcceptedRows = BTreeMap<String, AcceptedValue>;
+
 /// How a component's boundary is tied to its neighbour.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -153,6 +173,9 @@ pub struct Component {
     /// Steps not listed are pending.
     #[serde(default)]
     steps: BTreeMap<DesignStep, StepStatus>,
+    /// What the rows of each step showed when it was last accepted.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    accepted: BTreeMap<DesignStep, AcceptedRows>,
     /// Inputs of the main-dimensions step; `None` means every value automatic.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     main_dimensions: Option<MainDimensionsInput>,
@@ -175,6 +198,7 @@ impl Component {
             kind,
             coupling: Coupling::default(),
             steps: BTreeMap::new(),
+            accepted: BTreeMap::new(),
             main_dimensions: None,
             geometry: None,
             volute: None,
@@ -327,6 +351,17 @@ impl Component {
 
     pub fn status(&self, step: DesignStep) -> StepStatus {
         self.steps.get(&step).copied().unwrap_or_default()
+    }
+
+    /// What the rows of `step` showed when it was last accepted, if the editor kept
+    /// them.
+    pub fn accepted(&self, step: DesignStep) -> Option<&AcceptedRows> {
+        self.accepted.get(&step)
+    }
+
+    /// Keeps what the rows of `step` showed as it was accepted.
+    pub fn set_accepted(&mut self, step: DesignStep, rows: AcceptedRows) {
+        self.accepted.insert(step, rows);
     }
 
     /// The first step that is not done, or `None` when the design is complete.

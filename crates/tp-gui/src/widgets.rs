@@ -188,7 +188,7 @@ fn label_cell(
     text: &str,
     hint: &str,
     auto: Option<&mut bool>,
-    shown: Option<&str>,
+    shown: Option<&Shown<'_>>,
 ) -> Option<egui::Response> {
     let columns = Columns::of(ui);
     let width = columns.label;
@@ -534,6 +534,42 @@ fn back_to_automatic(response: &egui::Response) -> bool {
     chosen
 }
 
+/// What a parameter row shows, to compare with what it showed when its step was
+/// accepted.
+pub(crate) struct Shown<'a> {
+    pub value: tp_project::AcceptedValue,
+    /// The units a quantity shows in, to compare and write it as shown.
+    pub units: Option<&'a DisplayUnits>,
+}
+
+impl<'a> Shown<'a> {
+    /// A quantity of `kind`, `si` in SI, shown in `units`.
+    fn quantity(kind: QuantityKind, si: f64, units: &'a DisplayUnits) -> Self {
+        Self {
+            value: tp_project::AcceptedValue {
+                key: format!("{si:e}"),
+                text: units.show(kind, si),
+                quantity: Some((kind, si)),
+                automatic: false,
+            },
+            units: Some(units),
+        }
+    }
+
+    /// Anything else: `text` as shown, compared by `key`.
+    fn text(key: impl Into<String>, text: impl Into<String>) -> Self {
+        Self {
+            value: tp_project::AcceptedValue {
+                key: key.into(),
+                text: text.into(),
+                quantity: None,
+                automatic: false,
+            },
+            units: None,
+        }
+    }
+}
+
 /// One grid row for a real-valued parameter: label, value and "auto" toggle.
 ///
 /// `effective` is the value the design used (the automatic one in automatic mode);
@@ -553,7 +589,7 @@ pub fn param_f64(
         Param::Auto => effective,
         Param::Manual(v) => Some(*v),
     }
-    .map(|v| units.show(kind, v));
+    .map(|v| Shown::quantity(kind, v, units));
     let mut changed = auto_toggle(ui, label, hint, param, shown, || {
         effective
             .unwrap_or(*range.start())
@@ -600,7 +636,7 @@ pub fn param_u32(
         Param::Auto => effective,
         Param::Manual(v) => Some(*v),
     }
-    .map(|v| v.to_string());
+    .map(|v| Shown::text(v.to_string(), v.to_string()));
     let mut changed = auto_toggle(ui, label, hint, param, shown, || {
         effective
             .unwrap_or(*range.start())
@@ -660,7 +696,7 @@ pub fn param_percent(
         Param::Auto => effective,
         Param::Manual(v) => Some(*v),
     }
-    .map(|v| format!("± {:.2} %", v * 100.0));
+    .map(|v| Shown::text(format!("{v:e}"), format!("± {:.2} %", v * 100.0)));
     let mut changed = auto_toggle(ui, label, hint, param, shown, || {
         effective
             .unwrap_or(*range.start())
@@ -717,11 +753,15 @@ pub fn param_choice<T: Copy + PartialEq>(
     let Some(&first) = options.first() else {
         return false;
     };
+    // Compared by the English name, so that another language changes nothing.
     let shown = match param {
         Param::Auto => effective,
         Param::Manual(v) => Some(*v),
     }
-    .map(&name);
+    .map(|v| {
+        let text = name(v);
+        Shown::text(crate::i18n::key_of(&text).to_owned(), text)
+    });
     let mut changed = auto_toggle(ui, label, hint, param, shown, || effective.unwrap_or(first));
     match param {
         Param::Auto => match effective {
@@ -769,19 +809,16 @@ fn auto_toggle<T: Copy>(
     label: &str,
     hint: &str,
     param: &mut Param<T>,
-    shown: Option<String>,
+    shown: Option<Shown<'_>>,
     manual_start: impl FnOnce() -> T,
 ) -> bool {
     let mut auto = param.is_auto();
     // Automatic or by hand is part of what the row shows.
-    let shown = shown.map(|v| {
-        if auto {
-            format!("{v} ({})", tr("automatic"))
-        } else {
-            v
-        }
+    let shown = shown.map(|mut v| {
+        v.value.automatic = auto;
+        v
     });
-    let Some(response) = label_cell(ui, label, hint, Some(&mut auto), shown.as_deref()) else {
+    let Some(response) = label_cell(ui, label, hint, Some(&mut auto), shown.as_ref()) else {
         return false;
     };
     response.widget_info(|| {

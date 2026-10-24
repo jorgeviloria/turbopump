@@ -13,10 +13,10 @@ use tp_design::impeller::{ImpellerGeometryInput, meridian::MeridionalInput};
 use tp_design::pump::correlations as corr;
 use tp_design::pump::{CentrifugalPumpInput, ImpellerType, InletDesign, Suction};
 use tp_project::{
-    ComponentId, ComponentKind, DesignStep, EnergyTransfer, FlowRate, Param, Project, Rotation,
-    StepStatus, VANED_STEPS, VANELESS_STEPS, VOLUTE_STEPS,
+    AcceptedRows, AcceptedValue, ComponentId, ComponentKind, DesignStep, EnergyTransfer, FlowRate,
+    Param, Project, Rotation, StepStatus, VANED_STEPS, VANELESS_STEPS, VOLUTE_STEPS,
 };
-use tp_units::QuantityKind;
+use tp_units::{DisplayUnits, QuantityKind};
 
 use crate::app::{EditCtx, Selection};
 use crate::derived::Derived;
@@ -188,12 +188,37 @@ pub(crate) fn show(ui: &mut Ui, cx: &mut EditCtx<'_>) {
     // Rows above the first section belong to none; the design point has no status.
     ui.data_mut(|d| {
         d.remove::<egui::Id>(current_section_id());
+        d.remove::<String>(section_title_id());
         d.remove::<StepStatus>(status_id());
+        d.insert_temp(showing_id(), AcceptedRows::new());
     });
-    widgets::shared_columns(ui, |ui| match *cx.selection {
+    let selection = *cx.selection;
+    widgets::shared_columns(ui, |ui| match selection {
         Selection::Setup => setup(ui, cx),
         Selection::Step(id, step) => step_panel(ui, cx, id, step),
     });
+    // What the rows showed, for an accept to keep. A step done out of sight, or in an
+    // older file, keeps them the first time it shows, and rows of a section opened
+    // later join them.
+    let rows = ui.data(|d| d.get_temp::<AcceptedRows>(showing_id()));
+    if let (Selection::Step(id, step), Some(rows)) = (selection, &rows)
+        && let Some(c) = cx.doc.project().component(id)
+        && c.status(step) == StepStatus::Done
+        && rows
+            .keys()
+            .any(|k| c.accepted(step).is_none_or(|kept| !kept.contains_key(k)))
+    {
+        cx.doc.annotate(|p| {
+            if let Ok(c) = p.component_mut(id) {
+                let mut kept = c.accepted(step).cloned().unwrap_or_default();
+                for (key, value) in rows {
+                    kept.entry(key.clone()).or_insert_with(|| value.clone());
+                }
+                c.set_accepted(step, kept);
+            }
+        });
+    }
+    *cx.shown = rows.map(|rows| (selection, rows));
 }
 
 /// Starts a page of the properties panel other than a step, `id`: its sections keep
@@ -201,6 +226,7 @@ pub(crate) fn show(ui: &mut Ui, cx: &mut EditCtx<'_>) {
 pub(crate) fn page(ui: &mut Ui, id: egui::Id) {
     ui.data_mut(|d| {
         d.remove::<egui::Id>(current_section_id());
+        d.remove::<String>(section_title_id());
         d.remove::<StepStatus>(status_id());
         d.insert_temp(egui::Id::new("properties_step"), id);
     });
@@ -439,26 +465,77 @@ fn status_id() -> egui::Id {
     egui::Id::new("properties_status")
 }
 
-/// Keeps what a row of the shown step showed when the step was last accepted. While
-/// the step is done, `value` is what was accepted; once outdated, returns what was
-/// accepted when the row shows something else now.
-pub(crate) fn changed_since_accepted(ui: &Ui, label: &str, value: &str) -> Option<String> {
-    let step = sections_id(ui);
-    let status = ui.data(|d| d.get_temp::<StepStatus>(status_id()))?;
-    let row = current_section(ui).unwrap_or(step).with(label);
-    ui.data_mut(|d| {
-        let accepted = d.get_temp_mut_or_default::<std::collections::HashMap<egui::Id, String>>(
-            step.with("accepted"),
-        );
-        match status {
-            StepStatus::Done => {
-                accepted.insert(row, value.to_owned());
-                None
+/// Where the rows of the shown step note what they show, by [`row_key`].
+fn showing_id() -> egui::Id {
+    egui::Id::new("properties_showing")
+}
+
+/// Where the shown step keeps what its rows showed when it was accepted, as the
+/// project has it.
+fn accepted_rows_id() -> egui::Id {
+    egui::Id::new("properties_accepted_rows")
+}
+
+/// Where the open section keeps its title in English.
+fn section_title_id() -> egui::Id {
+    egui::Id::new("current_section_title")
+}
+
+/// The name of a row of the shown step whatever the language: the titles of its
+/// section and of the row, in English.
+fn row_key(ui: &Ui, label: &str) -> String {
+    let section = ui
+        .data(|d| d.get_temp::<String>(section_title_id()))
+        .unwrap_or_default();
+    format!("{section} › {}", crate::i18n::key_of(label))
+}
+
+/// `value` as a row shows it: a quantity in `units`, and whether it is automatic.
+fn shown_text(value: &AcceptedValue, units: Option<&DisplayUnits>) -> String {
+    let text = match (value.quantity, units) {
+        (Some((kind, si)), Some(units)) => units.show(kind, si),
+        _ => value.text.clone(),
+    };
+    if value.automatic {
+        format!("{text} ({})", tr("automatic"))
+    } else {
+        text
+    }
+}
+
+/// Whether a row shows something else than `was`: quantities as `units` write them,
+/// so that rounding, or other units, change nothing.
+fn differs(was: &AcceptedValue, now: &AcceptedValue, units: Option<&DisplayUnits>) -> bool {
+    was.automatic != now.automatic
+        || match (was.quantity, now.quantity, units) {
+            (Some((a, x)), Some((b, y)), Some(units)) if a == b => {
+                units.show(a, x) != units.show(b, y)
             }
-            StepStatus::Stale => accepted.get(&row).filter(|was| *was != value).cloned(),
-            StepStatus::Pending => None,
+            _ => was.key != now.key,
         }
-    })
+}
+
+/// Notes what a row of the shown step shows, and, once the step is outdated, returns
+/// what it showed when the step was accepted if that was something else. The project
+/// keeps what the rows showed as the step was accepted (see [`show`]).
+pub(crate) fn changed_since_accepted(
+    ui: &Ui,
+    label: &str,
+    shown: &widgets::Shown<'_>,
+) -> Option<String> {
+    let key = row_key(ui, label);
+    ui.data_mut(|d| {
+        d.get_temp_mut_or_default::<AcceptedRows>(showing_id())
+            .insert(key.clone(), shown.value.clone());
+    });
+    if ui.data(|d| d.get_temp::<StepStatus>(status_id())) != Some(StepStatus::Stale) {
+        return None;
+    }
+    let was = ui
+        .data(|d| d.get_temp::<Option<AcceptedRows>>(accepted_rows_id()))
+        .flatten()?
+        .remove(&key)?;
+    differs(&was, &shown.value, shown.units).then(|| shown_text(&was, shown.units))
 }
 
 fn current_section_id() -> egui::Id {
@@ -583,9 +660,13 @@ pub(crate) fn section_kind(ui: &mut Ui, title: &str, hint: &str, kind: Kind) -> 
                 d.insert_temp(key.with("manual"), 0usize);
                 d.insert_temp(key.with("to_automatic"), to_automatic);
                 d.insert_temp(current_section_id(), key);
+                d.insert_temp(section_title_id(), crate::i18n::key_of(title).to_owned());
             });
         } else {
-            ui.data_mut(|d| d.remove::<egui::Id>(current_section_id()));
+            ui.data_mut(|d| {
+                d.remove::<egui::Id>(current_section_id());
+                d.remove::<String>(section_title_id());
+            });
         }
     });
     ui.add_space(2.0);
@@ -701,7 +782,19 @@ pub(crate) fn complete_all(cx: &mut EditCtx<'_>, id: ComponentId) {
         return;
     };
     let label = tf("complete every step of {}", &[&name]);
-    match cx.doc.edit(&label, |p| p.design_remaining(id)) {
+    // The step in sight keeps what its rows show, if it is among those done.
+    let shown = cx.shown.clone();
+    let edit = |p: &mut Project| {
+        let designed = p.design_remaining(id)?;
+        if let Some((Selection::Step(at, step), rows)) = shown
+            && at == id
+            && designed.done.contains(&step)
+        {
+            p.component_mut(id)?.set_accepted(step, rows);
+        }
+        Ok(designed)
+    };
+    match cx.doc.edit(&label, edit) {
         Ok(tp_project::Designed { done, failed: None }) => match done.last() {
             Some(&last) => {
                 *cx.selection = Selection::Step(id, last);
@@ -736,10 +829,19 @@ pub(crate) fn accept(cx: &mut EditCtx<'_>, id: ComponentId, step: DesignStep) {
     let Some(kind) = cx.doc.project().component(id).map(|c| c.kind()) else {
         return;
     };
-    match cx
-        .doc
-        .edit(&format!("accept {step}"), |p| p.design_step(id, step))
-    {
+    // What the rows of the step showed as it was accepted, when it was shown.
+    let rows = cx
+        .shown
+        .as_ref()
+        .filter(|(shown, _)| *shown == Selection::Step(id, step))
+        .map(|(_, rows)| rows.clone());
+    match cx.doc.edit(&format!("accept {step}"), |p| {
+        p.design_step(id, step)?;
+        if let Some(rows) = rows {
+            p.component_mut(id)?.set_accepted(step, rows);
+        }
+        Ok(())
+    }) {
         Ok(()) => {
             cx.info(tf("{} accepted", &[&step_title(step)]));
             if let (_, Some(next)) = neighbours(kind, step) {
@@ -1126,10 +1228,7 @@ fn step_panel(ui: &mut Ui, cx: &mut EditCtx<'_>, id: ComponentId, step: DesignSt
     ui.data_mut(|d| {
         d.insert_temp(egui::Id::new("properties_step"), step_id);
         d.insert_temp(status_id(), status);
-        // A step never accepted has nothing to compare with.
-        if status == StepStatus::Pending {
-            d.remove::<std::collections::HashMap<egui::Id, String>>(step_id.with("accepted"));
-        }
+        d.insert_temp(accepted_rows_id(), component.accepted(step).cloned());
     });
     // Status, the place of the step among those of its component, and what it does.
     ui.horizontal(|ui| {

@@ -1023,6 +1023,82 @@ fn rows_changed_since_the_step_was_accepted_are_marked() {
     assert_eq!(marks(&harness), 0);
 }
 
+/// Opens `project` from a file, as after closing the editor and starting it again.
+fn reopened(project: &tp_project::Project, name: &str) -> Harness<'static, TurbopumpApp> {
+    let path = std::env::temp_dir().join(format!("turbopump-{name}.tpj"));
+    project.save(&path).unwrap();
+    let mut harness = Harness::builder()
+        .with_size([1440.0, 900.0])
+        .build_eframe(move |cc| TurbopumpApp::new(cc, Some(&path)));
+    harness.run();
+    harness
+}
+
+#[test]
+fn what_an_accepted_step_showed_is_kept_in_the_project_file() {
+    let mut harness = harness();
+    accept(&mut harness);
+    let mut project = harness.state().document().project().clone();
+    let rows = project.components()[0]
+        .accepted(DesignStep::MainDimensions)
+        .expect("kept as the step was accepted");
+    assert!(rows.keys().any(|k| k.ends_with("Outlet diameter d₂")));
+    // Undoing the accept forgets them with it.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert!(
+        harness.state().document().project().components()[0]
+            .accepted(DesignStep::MainDimensions)
+            .is_none()
+    );
+    // A higher head, out of sight and after a restart, outdates the step: the rows
+    // that moved are marked though the step never showed again while done.
+    let mut setup = project.setup().clone();
+    setup.design_point.energy = tp_project::EnergyTransfer::Head(40.0);
+    project.set_setup(setup).unwrap();
+    let mut harness = reopened(&project, "accepted-rows");
+    harness
+        .get_all_by_label("Main dimensions")
+        .find(|n| n.rect().left() < 400.0)
+        .unwrap()
+        .click();
+    harness.run();
+    harness.run();
+    assert_eq!(
+        status(&harness, DesignStep::MainDimensions),
+        StepStatus::Stale
+    );
+    harness.get_by_label("Outlet diameter d₂ changed since the step was accepted");
+}
+
+#[test]
+fn other_units_or_language_mark_no_row() {
+    let mut harness = harness();
+    accept(&mut harness);
+    harness.key_press_modifiers(Modifiers::ALT, Key::ArrowUp);
+    harness.run();
+    harness.get_by_label("SI units").click();
+    harness.run();
+    harness.get_by_label("US customary").click();
+    harness.run();
+    harness.get_by_label("Close").click();
+    harness.run();
+    choose_language(&mut harness, "Language", "Español", "Cerrar");
+    // One value set by hand outdates the step: only its row is marked.
+    harness.get_all_by_label("auto").next().unwrap().click();
+    harness.run();
+    harness.run();
+    assert_eq!(
+        status(&harness, DesignStep::MainDimensions),
+        StepStatus::Stale
+    );
+    let marks = harness
+        .query_all_by_label_contains("cambió desde que se aceptó el paso")
+        .count();
+    choose_language(&mut harness, "Idioma", "English", "Close");
+    assert_eq!(marks, 1);
+}
+
 #[test]
 fn the_views_menu_names_the_views_of_a_pump() {
     use egui_kittest::kittest::NodeT;

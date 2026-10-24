@@ -63,6 +63,18 @@ pub fn current() -> Language {
 static SPANISH: LazyLock<HashMap<&'static str, &'static str>> =
     LazyLock::new(|| es::TEXTS.iter().copied().collect());
 
+static ENGLISH: LazyLock<HashMap<&'static str, &'static str>> =
+    LazyLock::new(|| es::TEXTS.iter().map(|&(en, es)| (es, en)).collect());
+
+/// The English text that `text`, shown in the current language, translates: the key
+/// that names it whatever the language.
+pub fn key_of(text: &str) -> &str {
+    match current() {
+        Language::English => text,
+        Language::Spanish => ENGLISH.get(text).copied().unwrap_or(text),
+    }
+}
+
 /// `text` in the current language.
 pub fn tr(text: &'static str) -> &'static str {
     match current() {

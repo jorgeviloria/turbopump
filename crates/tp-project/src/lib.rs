@@ -16,7 +16,10 @@ mod project;
 mod setup;
 pub mod validation;
 
-pub use component::{Component, ComponentId, ComponentKind, Coupling, DesignStep, StepStatus};
+pub use component::{
+    AcceptedRows, AcceptedValue, Component, ComponentId, ComponentKind, Coupling, DesignStep,
+    StepStatus,
+};
 pub use design::{Designed, GEOMETRY_STEPS, VANED_STEPS, VANELESS_STEPS, VOLUTE_STEPS, can_design};
 pub use document::Document;
 pub use error::ProjectError;

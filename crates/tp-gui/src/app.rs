@@ -66,6 +66,9 @@ pub(crate) struct EditCtx<'a> {
     pub exports: &'a mut Exports,
     /// Whether the properties panel of the selected step is open.
     pub properties: &'a mut bool,
+    /// What the rows of the panel showed last, and for which place: an accept keeps
+    /// them.
+    pub shown: &'a mut Option<(Selection, tp_project::AcceptedRows)>,
 }
 
 impl EditCtx<'_> {
@@ -325,6 +328,8 @@ pub struct TurbopumpApp {
     followed: Option<Selection>,
     /// The view shown last frame.
     shown: Option<View>,
+    /// What the rows of the properties panel showed last frame, and for which place.
+    shown_rows: Option<(Selection, tp_project::AcceptedRows)>,
     /// The main view changes to suit the step that opens.
     follow_step: bool,
     /// Whether the tree panel is open.
@@ -447,6 +452,7 @@ impl TurbopumpApp {
             sidebar_open: true,
             followed: None,
             shown: None,
+            shown_rows: None,
             follow_step: true,
             tree_open: true,
             language: Language::English,
@@ -668,6 +674,7 @@ impl TurbopumpApp {
                         status: &mut self.status,
                         exports: &mut self.exports,
                         properties: &mut self.sidebar_open,
+                        shown: &mut self.shown_rows,
                     };
                     flow_command = self.flow.show(ui, &mut cx, &file, has_geometry, has_volute);
                 });
@@ -684,6 +691,7 @@ impl TurbopumpApp {
                         status: &mut self.status,
                         exports: &mut self.exports,
                         properties: &mut self.sidebar_open,
+                        shown: &mut self.shown_rows,
                     };
                     flow_command = self.flow.rail(ui, &mut cx);
                 });
@@ -718,6 +726,7 @@ impl TurbopumpApp {
                 status: &mut self.status,
                 exports: &mut self.exports,
                 properties: &mut self.sidebar_open,
+                shown: &mut self.shown_rows,
             };
             let Some(id) = active else {
                 ui.centered_and_justified(|ui| {
@@ -1202,6 +1211,7 @@ impl TurbopumpApp {
             status: &mut self.status,
             exports: &mut self.exports,
             properties: &mut self.sidebar_open,
+            shown: &mut self.shown_rows,
         }
     }
 
