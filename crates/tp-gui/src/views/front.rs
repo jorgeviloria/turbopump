@@ -212,12 +212,12 @@ pub(crate) fn show(
                         .color(palette.volute)
                         .width(2.0),
                 );
-                // The designed cutwater: its rounded nose, or the tip of the wedge.
-                let nose = v.cutwater.nose_outline();
+                // The designed cutwater: its rounded body, which runs into the walls, or
+                // the tip of the wedge.
+                let nose = v.cutwater_outline();
                 if !nose.is_empty() {
-                    let mut points: Vec<[f64; 2]> =
+                    let points: Vec<[f64; 2]> =
                         nose.iter().map(|p| view(p.x, p.y, scale)).collect();
-                    points.push(points[0]);
                     plot.line(
                         Line::new(tr("cutwater"), PlotPoints::from(points))
                             .color(palette.volute)

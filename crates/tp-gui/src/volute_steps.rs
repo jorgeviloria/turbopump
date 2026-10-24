@@ -1056,7 +1056,8 @@ fn cutwater(
                 tr("Shape"),
                 tr(
                     "Tangent: the spiral starts where it clears the diffuser. Sharp: the spiral \
-                 cuts the diffuser wall. Rounded: a nose of radius ρ on the cutwater circle \
+                 cuts the diffuser wall. Rounded: a nose of radius ρ on the cutwater circle, \
+                 its body never thinner than the nose and running smoothly into both walls \
                  (Gülich Fig. 7.41b)",
                 ),
             );
@@ -1159,6 +1160,43 @@ fn cutwater(
                         tr("Effective cutwater diameter"),
                         units.show(Length, 2.0 * c.nose_distance),
                     );
+                    // Across the inlet width.
+                    let slices = &g.cutwater_slices;
+                    let range = |f: &dyn Fn(&tp_design::volute::CutwaterSlice) -> f64| {
+                        slices
+                            .iter()
+                            .map(f)
+                            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), x| {
+                                (lo.min(x), hi.max(x))
+                            })
+                    };
+                    if !slices.is_empty() {
+                        let (lo, hi) = range(&|c| c.tip.truncate().length());
+                        value_row(
+                            ui,
+                            tr("Tip across the width"),
+                            tf(
+                                "{} to {} from the axis",
+                                &[&units.show(Length, lo), &units.show(Length, hi)],
+                            ),
+                        );
+                    }
+                    if !slices.is_empty() && c.radius > 0.0 {
+                        value_row(
+                            ui,
+                            tr("Thinnest body"),
+                            units.show(Length, range(&|c| c.min_thickness).0),
+                        );
+                        let (lo, hi) = range(&|c| c.join_length);
+                        value_row(
+                            ui,
+                            tr("Joins the walls"),
+                            tf(
+                                "{} to {} past the tip",
+                                &[&units.show(Length, lo), &units.show(Length, hi)],
+                            ),
+                        );
+                    }
                 });
             }
         }

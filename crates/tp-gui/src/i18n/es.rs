@@ -2802,8 +2802,8 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Bend turns", "Giro del codo"),
     ("Centerline length", "Longitud de la línea media"),
     (
-        "Tangent: the spiral starts where it clears the diffuser. Sharp: the spiral cuts the diffuser wall. Rounded: a nose of radius ρ on the cutwater circle (Gülich Fig. 7.41b)",
-        "Tangente: la espiral empieza donde deja libre el difusor. Afilado: la espiral corta la pared del difusor. Redondeado: una nariz de radio ρ sobre el círculo del corte de agua (Gülich Fig. 7.41b)",
+        "Tangent: the spiral starts where it clears the diffuser. Sharp: the spiral cuts the diffuser wall. Rounded: a nose of radius ρ on the cutwater circle, its body never thinner than the nose and running smoothly into both walls (Gülich Fig. 7.41b)",
+        "Tangente: la espiral empieza donde deja libre el difusor. Afilado: la espiral corta la pared del difusor. Redondeado: una nariz de radio ρ sobre el círculo del corte de agua, con un cuerpo nunca más fino que la nariz que se une suavemente a las dos paredes (Gülich Fig. 7.41b)",
     ),
     ("Nose radius ρ", "Radio de la nariz ρ"),
     (
@@ -2812,6 +2812,11 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ),
     ("Tip of the wedge", "Punta de la cuña"),
     ("Wedge angle", "Ángulo de la cuña"),
+    ("Tip across the width", "Punta a lo ancho"),
+    ("{} to {} from the axis", "de {} a {} del eje"),
+    ("Thinnest body", "Cuerpo más fino"),
+    ("Joins the walls", "Se une a las paredes"),
+    ("{} to {} past the tip", "de {} a {} pasada la punta"),
     (
         "{} from the cutwater, {} from the axis",
         "{} desde el corte de agua, {} desde el eje",

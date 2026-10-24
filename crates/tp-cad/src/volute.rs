@@ -144,6 +144,29 @@ fn loft_pieces(pieces: &[Vec<Vec<DVec3>>], breaks: &[usize]) -> Result<Vec<Shape
         .collect()
 }
 
+/// Gaps to retry a cut with when the gap of the fusion before it fails: a fusion that
+/// needs a gap to join the ring to some channels (external round sections) may leave a
+/// solid that only another gap cuts cleanly.
+const CUT_GAPS: [f64; 3] = [3e-3, 5e-2, 0.0];
+
+/// `shape` minus `tool` with the gap `fuzzy`, or else with the first of [`CUT_GAPS`]
+/// that leaves one valid solid; the first result when none does.
+fn cut_sound(shape: &Shape, tool: &Shape, fuzzy: f64) -> Result<Shape, CadError> {
+    let sound = |s: &Shape| s.is_valid() && s.solid_count() == 1;
+    let first = shape.cut_fuzzy(tool, fuzzy);
+    if matches!(&first, Ok(s) if sound(s)) {
+        return first;
+    }
+    for gap in CUT_GAPS.into_iter().filter(|g| (g - fuzzy).abs() > 1e-12) {
+        if let Ok(cut) = shape.cut_fuzzy(tool, gap)
+            && sound(&cut)
+        {
+            return Ok(cut);
+        }
+    }
+    first
+}
+
 /// The first attempt over [`FUZZY_GAPS`] whose result is `sound`, or turns sound once
 /// `repair`ed, else the first that built at all. Repairing a nearly valid result by
 /// shape healing costs far less than a boolean operation with the next gap.
@@ -196,14 +219,13 @@ pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
         )
     };
     let mut tools = Vec::new();
-    let nose = g.cutwater.nose_outline();
-    if !nose.is_empty() {
-        let arc: Vec<DVec3> = nose[..nose.len() - 1].iter().map(at).collect();
-        let tip = at(&nose[nose.len() - 1]);
+    // The body of a rounded cutwater: its smooth outline and the chord that closes it
+    // inside the wedge.
+    let nose: Vec<DVec3> = g.cutwater_outline().iter().map(at).collect();
+    if let (Some(&first), Some(&last)) = (nose.first(), nose.last()) {
         tools.push(extrude(&[
-            occ::spline_edge(&arc, false)?,
-            occ::line_edge(arc[arc.len() - 1], tip)?,
-            occ::line_edge(tip, arc[0])?,
+            occ::spline_edge(&nose, false)?,
+            occ::line_edge(last, first)?,
         ])?);
     }
     if let Some(rib) = &g.rib {
@@ -235,8 +257,8 @@ pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
         let mut channel = joined.rotated_z(0.0)?;
         let mut fluid = ring.fuse_fuzzy(&channel, fuzzy)?;
         for tool in &tools {
-            fluid = fluid.cut_fuzzy(tool, fuzzy)?;
-            channel = channel.cut_fuzzy(tool, fuzzy)?;
+            fluid = cut_sound(&fluid, tool, fuzzy)?;
+            channel = cut_sound(&channel, tool, fuzzy)?;
         }
         Ok((channel, fluid))
     };

@@ -836,6 +836,43 @@ fn print_report(name: &str, id: ComponentId, g: &VoluteGeometry, units: &Display
             s(Length, c.nose_distance)
         ),
     }
+    // Across the inlet width: where the walls cross, and the body of a rounded cutwater.
+    let slices = &g.cutwater_slices;
+    if !slices.is_empty() {
+        let range = |f: &dyn Fn(&tp_design::volute::CutwaterSlice) -> f64| {
+            slices
+                .iter()
+                .map(f)
+                .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), x| {
+                    (lo.min(x), hi.max(x))
+                })
+        };
+        let (tip_lo, tip_hi) = range(&|c| c.tip.truncate().length());
+        let (wedge_lo, wedge_hi) = range(&|c| c.wedge);
+        let (near, _) = range(&|c| c.nose_distance);
+        println!(
+            "           across the width ({} planes): tip {} to {} from the axis, wedge {} to {}, \
+             nearest to the axis {}",
+            slices.len(),
+            s(Length, tip_lo),
+            s(Length, tip_hi),
+            s(Angle, wedge_lo),
+            s(Angle, wedge_hi),
+            s(Length, near)
+        );
+        if c.radius > 0.0 {
+            let (thin, _) = range(&|c| c.min_thickness);
+            let (join_lo, join_hi) = range(&|c| c.join_length);
+            println!(
+                "           body: nowhere thinner than {} (the nose {}); it runs into the walls \
+                 {} to {} past the tip",
+                s(Length, thin),
+                s(Length, 2.0 * c.radius),
+                s(Length, join_lo),
+                s(Length, join_hi)
+            );
+        }
+    }
     println!("Sections   {shape}; {law}");
     if let Some(bend) = &g.bend {
         println!(

@@ -22,6 +22,7 @@
 //!
 //! [`loss`] estimates the hydraulic losses of a volute against flow.
 
+pub mod cutwater;
 mod geometry;
 pub mod loss;
 pub mod section;
@@ -38,6 +39,7 @@ use crate::pump::correlations::{CorrelationInfo, Verification};
 use crate::{DesignError, Param};
 use tp_units::STANDARD_GRAVITY;
 
+pub use cutwater::CutwaterSlice;
 pub use geometry::{NozzleSection, VoluteGeometry, VoluteSection};
 pub use section::{
     BendWall, BezierBase, BezierSide, CrossSectionInput, CrossSections, DEFAULT_CONE_ANGLE_DEG,
