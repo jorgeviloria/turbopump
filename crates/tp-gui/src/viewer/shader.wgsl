@@ -16,8 +16,8 @@ struct Uniforms {
     // Background at the top and at the bottom of the view.
     sky: vec4<f32>,
     ground: vec4<f32>,
-    // Normal of the cutting plane through the axis; w = 1 when the model is cut. The
-    // side the normal points to is removed.
+    // The cutting plane, normal · p = w, the side the normal points to removed; a zero
+    // normal when the model is whole.
     clip: vec4<f32>,
     // Gamma-encoded tint of the part under the pointer and of the one selected.
     accent: vec4<f32>,
@@ -62,7 +62,7 @@ fn vs_line(v: VertexIn) -> VertexOut {
 }
 
 fn cut_away(p: vec3<f32>) -> bool {
-    return u.clip.w > 0.5 && dot(u.clip.xyz, p) > 0.0;
+    return dot(u.clip.xyz, u.clip.xyz) > 0.25 && dot(u.clip.xyz, p) > u.clip.w;
 }
 
 fn gamma_from_linear(c: vec3<f32>) -> vec3<f32> {

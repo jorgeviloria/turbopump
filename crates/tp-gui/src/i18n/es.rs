@@ -3302,6 +3302,17 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Opacity of {}", "Opacidad: {}"),
     ("Click for {}", "Con un clic: {}"),
     ("Color of {}", "Color: {}"),
+    ("Show the plane", "Mostrar el plano"),
+    (
+        "Outline the cutting plane over the model",
+        "Dibuja el contorno del plano de corte sobre el modelo",
+    ),
+    ("Position {} %", "Posición {} %"),
+    ("Position of the cut", "Posición del corte"),
+    (
+        "Moves the cut parallel to itself, in percent of the model's radius; 0 through the axis",
+        "Desplaza el corte paralelo a sí mismo, en porcentaje del radio del modelo; 0 por el eje",
+    ),
     ("Error of the step", "Error del paso"),
     ("Warnings of the step", "Avisos del paso"),
     ("Click to list them", "Clic para verlos todos"),

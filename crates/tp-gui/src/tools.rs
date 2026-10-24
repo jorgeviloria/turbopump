@@ -533,6 +533,42 @@ pub(crate) fn view3d(ui: &mut Ui, viewer: &mut Viewer, cx: ToolsCx) -> Option<Co
             {
                 viewer.flip_cut();
             }
+            let shown = viewer.show_cut_plane;
+            if small_button(ui, icon::SQUARE, tr("Show the plane"), cut, shown)
+                .on_hover_text(tr("Outline the cutting plane over the model"))
+                .clicked()
+            {
+                viewer.show_cut_plane = !shown;
+            }
+        });
+        stack(ui, |ui| {
+            let mut percent = viewer.cut_offset * 100.0;
+            ui.add_enabled(
+                cut,
+                egui::Label::new(tf(
+                    "Position {} %",
+                    &[&if percent.abs() < 0.5 {
+                        "0".to_owned()
+                    } else {
+                        format!("{percent:+.0}")
+                    }],
+                )),
+            );
+            let slider = ui.add_enabled(
+                cut,
+                egui::Slider::new(&mut percent, -100.0..=100.0).show_value(false),
+            );
+            slider.widget_info(|| {
+                egui::WidgetInfo::slider(cut, f64::from(percent), tr("Position of the cut"))
+            });
+            if slider
+                .on_hover_text(tr(
+                    "Moves the cut parallel to itself, in percent of the model's radius; 0 through the axis",
+                ))
+                .changed()
+            {
+                viewer.cut_offset = percent / 100.0;
+            }
         });
         let measuring = viewer.measuring();
         if big_button(

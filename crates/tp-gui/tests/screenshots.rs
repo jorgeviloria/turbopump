@@ -318,7 +318,11 @@ fn inspect_3d() {
 
     harness.get_by_label("Meridional cut").click();
     harness.run();
+    harness.get_by_label_contains("Show the plane").click();
+    harness.run();
     save(&mut harness, "cut");
+    harness.get_by_label_contains("Show the plane").click();
+    harness.run();
 
     harness.get_by_label("Measure").click();
     harness.run();
