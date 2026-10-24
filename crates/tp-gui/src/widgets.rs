@@ -174,7 +174,7 @@ pub(crate) fn set_drawing_hover(ctx: &egui::Context, label: Option<String>) {
 }
 
 /// Whether a drawing has the row `label` under the pointer, this frame or the last.
-fn drawing_hovers(ctx: &egui::Context, label: &str) -> bool {
+pub(crate) fn drawing_hovers(ctx: &egui::Context, label: &str) -> bool {
     let now = ctx.cumulative_pass_nr();
     ctx.data(|d| d.get_temp::<(u64, String)>(hover_id("drawing")))
         .is_some_and(|(pass, l)| now <= pass + 1 && l == label)
@@ -322,8 +322,9 @@ fn value_box(ui: &mut Ui, text: egui::WidgetText) -> egui::Response {
         .response
 }
 
-/// Width of the unit after a numeric field.
-const UNIT_WIDTH: f32 = 34.0;
+/// Width of the unit after a numeric field: room for the longest symbols, such as
+/// mm²/s, lb/ft³ or Btu/lb.
+const UNIT_WIDTH: f32 = 44.0;
 
 /// A numeric field and, after it and outside it, its `unit` in the weak color, as
 /// engineering programs show them. The field leaves room for a unit even when there is

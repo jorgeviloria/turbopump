@@ -895,6 +895,13 @@ impl TurbopumpApp {
                         .inner_margin(Margin::symmetric(12, 8))
                         .show(ui, |ui| {
                             ui.set_min_size(ui.available_size());
+                            if self.view == View::Performance {
+                                self.panel_pages(ui);
+                                if !self.performance.step_in_panel {
+                                    self.curve_settings(ui, &p, &mut toggle);
+                                    return;
+                                }
+                            }
                             let (glyph, crumb, title) =
                                 steps::heading(self.doc.project(), self.selection);
                             ui.label(RichText::new(crumb).size(11.5).color(p.weak));
@@ -1006,6 +1013,85 @@ impl TurbopumpApp {
         }
     }
 
+    /// While the curves are shown, the choice of what the properties panel shows: the
+    /// settings of the curves or the step.
+    fn panel_pages(&mut self, ui: &mut Ui) {
+        ui.horizontal(|ui| {
+            let width = (ui.available_width() - ui.spacing().item_spacing.x) / 2.0;
+            for (step, text) in [(false, tr("Curve settings")), (true, tr("Step"))] {
+                let selected = self.performance.step_in_panel == step;
+                if ui
+                    .add_sized([width, 24.0], Button::selectable(selected, text))
+                    .clicked()
+                {
+                    self.performance.step_in_panel = step;
+                }
+            }
+        });
+        ui.add_space(4.0);
+    }
+
+    /// The settings of the curves in the properties panel, under a header like that of
+    /// a step; `toggle` asks to fold the panel.
+    fn curve_settings(&mut self, ui: &mut Ui, p: &Palette, toggle: &mut bool) {
+        let impeller = self.active_impeller();
+        let name = impeller
+            .and_then(|id| self.doc.project().component(id))
+            .map_or("", |c| c.name.as_str());
+        let crumb = format!("{} › {}", crate::i18n::component_name(name), tr("Results"));
+        ui.label(RichText::new(crumb).size(11.5).color(p.weak));
+        let mut reset = false;
+        floating::header(
+            ui,
+            icon::SLIDERS_HORIZONTAL,
+            tr("Curve settings"),
+            false,
+            |ui| {
+                if ui
+                    .add(Button::new(icon::CARET_RIGHT).frame(false))
+                    .on_hover_text(tr("Fold the properties"))
+                    .clicked()
+                {
+                    *toggle = true;
+                }
+                let more = ui.add(Button::new(icon::DOTS_THREE).frame(false));
+                more.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::Button,
+                        true,
+                        tr("More actions of the curves"),
+                    )
+                });
+                egui::Popup::menu(&more).show(|ui| {
+                    ui.set_min_width(240.0);
+                    if ui
+                        .button(format!(
+                            "{}  {}",
+                            icon::ARROW_COUNTER_CLOCKWISE,
+                            tr("Reset to automatic")
+                        ))
+                        .on_hover_text(tr(
+                            "Every setting of the curves back to its automatic value",
+                        ))
+                        .clicked()
+                    {
+                        reset = true;
+                    }
+                });
+            },
+        );
+        if reset {
+            self.performance.reset_settings();
+        }
+        let Some(id) = impeller else {
+            ui.weak(tr("The performance prediction needs a pump impeller."));
+            return;
+        };
+        let units = self.doc.project().display_units.clone();
+        self.performance
+            .settings_panel(ui, self.doc.project(), &self.derived, id, &units);
+    }
+
     /// Carries out a toolbar command.
     fn run(&mut self, command: Command, ctx: &egui::Context) {
         match command {
@@ -1020,6 +1106,12 @@ impl TurbopumpApp {
                 self.save_as();
             }
             Command::Quit => ctx.send_viewport_cmd(ViewportCommand::Close),
+            Command::CurveSettings(show) => {
+                self.performance.step_in_panel = !show;
+                if show {
+                    self.sidebar_open = true;
+                }
+            }
             Command::Undo => self.undo(),
             Command::Redo => self.redo(),
             Command::UsUnits(us) => {
@@ -2327,6 +2419,30 @@ mod tests {
         );
         let g = harness.state().derived.geometry(id).unwrap();
         assert!((g.basis.outlet_diameter - 0.18).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_dimensions_of_the_front_and_section_views_point_at_their_rows() {
+        let mut harness = editor();
+        for (view, symbol, row) in [
+            (View::FrontView, "d₂ ", "Outlet diameter d₂"),
+            (View::FrontView, "d_z ", "Cutwater diameter d_z"),
+            (View::CrossSection, "b₃ ", "Inlet width b₃"),
+        ] {
+            harness.state_mut().focus_view(view);
+            harness.run();
+            let at = harness.get_by_label_contains(symbol).rect().center();
+            harness.hover_at(at);
+            harness.run();
+            assert!(
+                crate::widgets::drawing_hovers(&harness.ctx, row),
+                "{view:?}: {row}"
+            );
+            harness.hover_at(egui::pos2(5.0, 5.0));
+            harness.run();
+            harness.run();
+            assert!(!crate::widgets::drawing_hovers(&harness.ctx, row));
+        }
     }
 
     /// Screen position of `p` ((z, r) in m) in the last frame of the diagram.

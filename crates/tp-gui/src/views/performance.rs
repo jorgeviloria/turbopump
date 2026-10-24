@@ -2,7 +2,7 @@
 //! required NPSH against flow, with the estimated recirculation range dashed and the
 //! losses of the volute after the impeller.
 
-use eframe::egui::{self, Color32, DragValue, Grid, RichText, Ui};
+use eframe::egui::{self, Color32, Ui};
 use egui_plot::{
     Corner, HLine, Legend, Line, LineStyle, MarkerShape, Plot, PlotPoints, Points, VLine,
 };
@@ -17,7 +17,6 @@ use crate::derived::Derived;
 use crate::i18n::{tf, tr};
 use crate::messages::{self, Severity};
 use crate::theme;
-use crate::theme::bold;
 
 /// What the cached curve was computed from.
 type Key = (u64, ComponentId, PerformanceInput);
@@ -33,47 +32,19 @@ pub(crate) struct PerformanceView {
     viscosity: Param<f64>,
     operation: OperationInput,
     cache: Option<(Key, Result<PumpPerformance, String>)>,
-    /// The settings show above the curves; the toolbar switches them.
-    pub(crate) settings_open: bool,
+    /// While the curves are shown, the properties panel shows the step rather than the
+    /// settings of the curves; its page selector and the toolbar switch it.
+    pub(crate) step_in_panel: bool,
     /// The results beyond the key numbers show under them.
     pub(crate) details_open: bool,
 }
 
 fn collector_name(c: Collector) -> &'static str {
     tr(match c {
-        Collector::Volute => "volute",
-        Collector::VanedDiffuser => "vaned diffuser",
-        Collector::VanelessDiffuser => "vaneless diffuser",
+        Collector::Volute => "Volute",
+        Collector::VanedDiffuser => "Vaned diffuser",
+        Collector::VanelessDiffuser => "Vaneless diffuser",
     })
-}
-
-/// An automatic or manual setting on one line: label, the automatic/manual dot and the
-/// value, which typing sets by hand.
-fn setting(ui: &mut Ui, label: &str, hint: &str, param: &mut Param<f64>, auto_value: f64) {
-    ui.label(label).on_hover_text(hint);
-    let mut auto = param.is_auto();
-    if crate::widgets::auto_dot(ui, &mut auto).changed() {
-        *param = if auto {
-            Param::Auto
-        } else {
-            Param::Manual(auto_value)
-        };
-    }
-    let mut value = param.resolve(|| auto_value);
-    let field = DragValue::new(&mut value)
-        .speed(0.005)
-        .range(0.05..=3.0)
-        .max_decimals(3);
-    let response = ui.scope(|ui| {
-        if param.is_auto() {
-            ui.visuals_mut().override_text_color = Some(ui.visuals().weak_text_color());
-        }
-        ui.add(field)
-    });
-    if response.inner.changed() {
-        *param = Param::Manual(value);
-    }
-    ui.add_space(10.0);
 }
 
 impl PerformanceView {
@@ -96,18 +67,15 @@ impl PerformanceView {
         });
     }
 
-    fn content(
+    /// The input of the curve with the settings applied, and the curve, computed
+    /// again only when either changed. `None` without a pump impeller.
+    fn computed(
         &mut self,
-        ui: &mut Ui,
         project: &Project,
         derived: &Derived,
         id: ComponentId,
-        units: &DisplayUnits,
-    ) {
-        let Ok(mut input) = project.performance_input(id) else {
-            unavailable(ui, tr("The performance prediction needs a pump impeller."));
-            return;
-        };
+    ) -> Option<(PerformanceInput, Result<PumpPerformance, String>)> {
+        let mut input = project.performance_input(id).ok()?;
         input.recirculation_onset = self.onset;
         input.shutoff_coefficient = self.shutoff;
         input.max_flow_ratio = self.max_flow;
@@ -122,25 +90,29 @@ impl PerformanceView {
                 .map_err(|e| e.to_string());
             self.cache = Some((key, curve));
         }
-        let Some((_, curve)) = &self.cache else {
+        let (_, curve) = self.cache.as_ref()?;
+        Some((input, curve.clone()))
+    }
+
+    fn content(
+        &mut self,
+        ui: &mut Ui,
+        project: &Project,
+        derived: &Derived,
+        id: ComponentId,
+        units: &DisplayUnits,
+    ) {
+        let Some((_, curve)) = self.computed(project, derived, id) else {
+            unavailable(ui, tr("The performance prediction needs a pump impeller."));
             return;
         };
         let curve = match curve {
-            Ok(c) => c.clone(),
+            Ok(c) => c,
             Err(e) => {
-                unavailable(ui, e);
+                unavailable(ui, &e);
                 return;
             }
         };
-
-        // The settings, when the toolbar shows them: they shape the curve but are
-        // seldom changed.
-        let o = curve.operation.clone();
-        if self.settings_open {
-            ui.label(bold(tr("Settings")));
-            self.settings(ui, &curve, &input, &o, id, units);
-            ui.separator();
-        }
 
         // The key numbers; the rest below when the toolbar shows it, and in the report.
         self.summary(ui, &curve, units);
@@ -156,140 +128,194 @@ impl PerformanceView {
         self.plots(ui, &curve, id, units);
     }
 
-    /// The settings of the curve, the liquid and the system.
-    fn settings(
+    /// Every setting of the curves back to automatic.
+    pub(crate) fn reset_settings(&mut self) {
+        *self = Self {
+            cache: self.cache.take(),
+            step_in_panel: self.step_in_panel,
+            details_open: self.details_open,
+            ..Self::default()
+        };
+    }
+
+    /// The settings of the curves in the properties panel: their range, the losses and
+    /// forces, the liquid and the operation in the system.
+    pub(crate) fn settings_panel(
         &mut self,
         ui: &mut Ui,
-        curve: &PumpPerformance,
-        input: &PerformanceInput,
-        o: &tp_design::operation::Operation,
+        project: &Project,
+        derived: &Derived,
         id: ComponentId,
         units: &DisplayUnits,
     ) {
-        {
-            ui.horizontal_wrapped(|ui| {
-            ui.label(
-                RichText::new(tf("Collector: {}", &[&collector_name(input.collector)]))
-                    .color(Palette::of(ui).guide),
-            )
-            .on_hover_text(tr(
-                "From the component after the impeller; it sets the shut-off head",
-            ));
-            ui.add_space(10.0);
-            let q_opt = curve.design.flow;
-            setting(
-                ui,
-                tr("Recirculation below Q/Q_opt"),
-                tr(
-                    "Flow ratio where recirculation sets in at the impeller inlet; below it \
-                 the curve is an estimate",
-                ),
-                &mut self.onset,
-                curve.recirculation_flow / q_opt,
-            );
-            setting(
-                ui,
-                tr("Shut-off ψ₀"),
-                tr("Pressure coefficient 2gH₀/u₂² against a closed valve. Automatic: the head rise of the blade number and β₂B for nq 4–68 (Lobanoff & Ross Fig. 3-2), Gülich eqs. 3.27–3.28 outside"),
-                &mut self.shutoff,
-                curve.shutoff_coefficient,
-            );
-            setting(
-                ui,
-                tr("Up to Q/Q_opt"),
-                tr("Largest flow of the curve"),
-                &mut self.max_flow,
-                curve.max_flow / q_opt,
-            );
-            ui.checkbox(&mut self.statistics, tr("Efficiencies from statistics"))
-                .on_hover_text(tr(
-                    "Leakage, disk friction and mechanical losses from the statistics of the \
-                     design (Gülich Table 3.9) instead of the loss analysis (Chap. 3.6)",
-                ));
-            ui.checkbox(&mut self.balance_holes, tr("Balance holes"))
-                .on_hover_text(tr(
-                    "Holes in the rear shroud with an annular seal there: most of the axial \
-                     force on the shrouds cancels (Gülich eq. T9.2.14)",
-                ));
-        });
-            ui.collapsing(tr("Liquid"), |ui| {
-                Grid::new(("liquid", id.0)).num_columns(3).show(ui, |ui| {
-                crate::widgets::param_f64(
-                    ui,
-                    tr("Kinematic viscosity ν"),
-                    tr(
-                        "The curve is predicted for cold water and corrected for this viscosity \
-                         (Gülich Chap. 13.1); automatic: the liquid of the project",
-                    ),
-                    &mut self.viscosity,
-                    QuantityKind::KinematicViscosity,
-                    Some(curve.viscous.viscosity),
-                    units,
-                    1e-7..=1e-2,
-                );
-            });
-            });
-            ui.collapsing(tr("Operation in the system"), |ui| {
-            use QuantityKind::{Head, Length, RotationalSpeed, VolumeFlow};
-            Grid::new(("operation", id.0))
-                .num_columns(3)
-                .show(ui, |ui| {
-                    crate::widgets::param_f64(
+        use crate::steps::{section, section_info};
+        use crate::widgets::{label, param_f64, props, value_info};
+        use QuantityKind::{Dimensionless, Head, Length, RotationalSpeed, VolumeFlow};
+        crate::steps::page(ui, egui::Id::new(("curve_settings", id.0)));
+        let Some((input, curve)) = self.computed(project, derived, id) else {
+            ui.weak(tr("The performance prediction needs a pump impeller."));
+            return;
+        };
+        let curve = match curve {
+            Ok(c) => c,
+            Err(e) => {
+                messages::card(ui, Severity::Error, &e);
+                return;
+            }
+        };
+        let o = &curve.operation;
+        let q_opt = curve.design.flow;
+        egui::ScrollArea::vertical()
+            .auto_shrink(false)
+            .show(ui, |ui| {
+                crate::widgets::shared_columns(ui, |ui| {
+                    if section_info(
                         ui,
-                        tr("Static head H_stat"),
-                        tr("Head of the system at zero flow; automatic: 0 (Gülich eq. 11.2)"),
-                        &mut self.operation.static_head,
-                        Head,
-                        Some(o.system.static_head),
-                        units,
-                        0.0..=1e4,
-                    );
-                    crate::widgets::param_f64(
-                        ui,
-                        tr("System flow"),
-                        tr("The system curve passes through this flow and head; automatic: the design point"),
-                        &mut self.operation.system_flow,
-                        VolumeFlow,
-                        Some(o.system_flow),
-                        units,
-                        1e-6..=1e3,
-                    );
-                    crate::widgets::param_f64(
-                        ui,
-                        tr("System head"),
-                        tr("Head the system needs at that flow"),
-                        &mut self.operation.system_head,
-                        Head,
-                        Some(o.system_head),
-                        units,
-                        1e-3..=1e4,
-                    );
-                    crate::widgets::param_f64(
-                        ui,
-                        tr("Speed"),
-                        tr("Q ∝ n, H ∝ n², P ∝ n³ (Gülich Table 3.4); automatic: the design speed"),
-                        &mut self.operation.speed,
-                        RotationalSpeed,
-                        Some(o.speed),
-                        units,
-                        1.0..=1e4,
-                    );
-                    crate::widgets::param_f64(
-                        ui,
-                        tr("Trimmed diameter d₂'"),
-                        tr(
-                            "Q'/Q = H'/H = (d₂'/d₂)² along rays from the origin, with a drop of the \
-                             best efficiency (Gülich eqs. 4.15 and 4.19); automatic: d₂",
-                        ),
-                        &mut self.operation.trimmed_diameter,
-                        Length,
-                        Some(o.diameter),
-                        units,
-                        0.001..=o.diameter / o.trim_ratio,
-                    );
+                        tr("Curve"),
+                        tr("They shape the curve but are seldom changed"),
+                    ) {
+                        props(ui, ("curve_range", id.0), |ui| {
+                            value_info(
+                                ui,
+                                tr("Collector"),
+                                tr("From the component after the impeller; it sets the shut-off head"),
+                                collector_name(input.collector),
+                            );
+                            param_f64(
+                                ui,
+                                tr("Recirculation below Q/Q_opt"),
+                                tr(
+                                    "Flow ratio where recirculation sets in at the impeller inlet; below it \
+                                     the curve is an estimate",
+                                ),
+                                &mut self.onset,
+                                Dimensionless,
+                                Some(curve.recirculation_flow / q_opt),
+                                units,
+                                0.05..=3.0,
+                            );
+                            param_f64(
+                                ui,
+                                tr("Shut-off ψ₀"),
+                                tr("Pressure coefficient 2gH₀/u₂² against a closed valve. Automatic: the head rise of the blade number and β₂B for nq 4–68 (Lobanoff & Ross Fig. 3-2), Gülich eqs. 3.27–3.28 outside"),
+                                &mut self.shutoff,
+                                Dimensionless,
+                                Some(curve.shutoff_coefficient),
+                                units,
+                                0.05..=3.0,
+                            );
+                            param_f64(
+                                ui,
+                                tr("Up to Q/Q_opt"),
+                                tr("Largest flow of the curve"),
+                                &mut self.max_flow,
+                                Dimensionless,
+                                Some(curve.max_flow / q_opt),
+                                units,
+                                0.05..=3.0,
+                            );
+                        });
+                    }
+                    if section(ui, tr("Losses and forces")) {
+                        props(ui, ("curve_losses", id.0), |ui| {
+                            label(
+                                ui,
+                                tr("Efficiencies from statistics"),
+                                tr(
+                                    "Leakage, disk friction and mechanical losses from the statistics of the \
+                                     design (Gülich Table 3.9) instead of the loss analysis (Chap. 3.6)",
+                                ),
+                            );
+                            ui.checkbox(&mut self.statistics, "");
+                            ui.end_row();
+                            label(
+                                ui,
+                                tr("Balance holes"),
+                                tr(
+                                    "Holes in the rear shroud with an annular seal there: most of the axial \
+                                     force on the shrouds cancels (Gülich eq. T9.2.14)",
+                                ),
+                            );
+                            ui.checkbox(&mut self.balance_holes, "");
+                            ui.end_row();
+                        });
+                    }
+                    if section(ui, tr("Liquid")) {
+                        props(ui, ("curve_liquid", id.0), |ui| {
+                            param_f64(
+                                ui,
+                                tr("Kinematic viscosity ν"),
+                                tr(
+                                    "The curve is predicted for cold water and corrected for this viscosity \
+                                     (Gülich Chap. 13.1); automatic: the liquid of the project",
+                                ),
+                                &mut self.viscosity,
+                                QuantityKind::KinematicViscosity,
+                                Some(curve.viscous.viscosity),
+                                units,
+                                1e-7..=1e-2,
+                            );
+                        });
+                    }
+                    if section(ui, tr("Operation in the system")) {
+                        props(ui, ("curve_operation", id.0), |ui| {
+                            param_f64(
+                                ui,
+                                tr("Static head H_stat"),
+                                tr("Head of the system at zero flow; automatic: 0 (Gülich eq. 11.2)"),
+                                &mut self.operation.static_head,
+                                Head,
+                                Some(o.system.static_head),
+                                units,
+                                0.0..=1e4,
+                            );
+                            param_f64(
+                                ui,
+                                tr("System flow"),
+                                tr("The system curve passes through this flow and head; automatic: the design point"),
+                                &mut self.operation.system_flow,
+                                VolumeFlow,
+                                Some(o.system_flow),
+                                units,
+                                1e-6..=1e3,
+                            );
+                            param_f64(
+                                ui,
+                                tr("System head"),
+                                tr("Head the system needs at that flow"),
+                                &mut self.operation.system_head,
+                                Head,
+                                Some(o.system_head),
+                                units,
+                                1e-3..=1e4,
+                            );
+                            param_f64(
+                                ui,
+                                tr("Speed"),
+                                tr("Q ∝ n, H ∝ n², P ∝ n³ (Gülich Table 3.4); automatic: the design speed"),
+                                &mut self.operation.speed,
+                                RotationalSpeed,
+                                Some(o.speed),
+                                units,
+                                1.0..=1e4,
+                            );
+                            param_f64(
+                                ui,
+                                tr("Trimmed diameter d₂'"),
+                                tr(
+                                    "Q'/Q = H'/H = (d₂'/d₂)² along rays from the origin, with a drop of the \
+                                     best efficiency (Gülich eqs. 4.15 and 4.19); automatic: d₂",
+                                ),
+                                &mut self.operation.trimmed_diameter,
+                                Length,
+                                Some(o.diameter),
+                                units,
+                                0.001..=o.diameter / o.trim_ratio,
+                            );
+                        });
+                    }
                 });
-        });
-        }
+            });
     }
 
     /// One line of key numbers: design, best efficiency, operating point, NPSH₃ and

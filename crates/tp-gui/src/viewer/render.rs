@@ -3,15 +3,20 @@
 //! The scene is drawn into a multisampled texture, resolved into a plain Rgba8Unorm
 //! texture and handed to egui as an image, so the view needs nothing from egui's own
 //! render pass (no depth buffer, no MSAA).
+//!
+//! Where the cut runs through a closed volume it is capped, with the stencil buffer:
+//! every face of the volume left by the cut flips the stencil of the pixels it covers,
+//! whatever its depth, so that the pixels where the plane lies inside the volume end
+//! odd; the plane is drawn there, and clears the stencil for the next volume.
 
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
 use eframe::wgpu::{self, util::DeviceExt};
 
-use super::mesh::{MeshData, Vertex};
+use super::mesh::{Cap, MAX_CAPS, MeshData, Vertex};
 
 const COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
-const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24PlusStencil8;
 const SAMPLES: u32 = 4;
 
 #[repr(C)]
@@ -32,6 +37,10 @@ pub(crate) struct Uniforms {
     pub clip: [f32; 4],
     /// Gamma-encoded tint of highlighted parts.
     pub accent: [f32; 4],
+    /// Centre and radius of the model, which the caps cover; filled in by the GPU side.
+    pub cap: [f32; 4],
+    /// Linear color of each cap.
+    pub cap_colors: [[f32; 4]; MAX_CAPS],
 }
 
 /// A part to tint, by its vertices.
@@ -48,6 +57,10 @@ struct GpuMesh {
     total: u32,
     lines: Option<wgpu::Buffer>,
     line_vertices: u32,
+    closures: Option<wgpu::Buffer>,
+    caps: Vec<Cap>,
+    /// Centre and radius of the model.
+    bounds: [f32; 4],
 }
 
 struct Target {
@@ -64,6 +77,8 @@ pub(crate) struct Gpu {
     transparent: wgpu::RenderPipeline,
     lines: wgpu::RenderPipeline,
     highlight: wgpu::RenderPipeline,
+    mark: wgpu::RenderPipeline,
+    cap: wgpu::RenderPipeline,
     uniforms: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     mesh: Option<GpuMesh>,
@@ -89,6 +104,10 @@ enum Kind {
     Lines,
     /// A part again, tinted.
     Highlight,
+    /// A closed volume, counted into the stencil and not drawn.
+    Mark,
+    /// The cutting plane where the stencil is odd.
+    Cap,
 }
 
 fn pipeline(
@@ -119,6 +138,22 @@ fn pipeline(
             "fs_highlight",
             wgpu::PrimitiveTopology::TriangleList,
         ),
+        Kind::Mark => ("vs_main", "fs_mark", wgpu::PrimitiveTopology::TriangleList),
+        Kind::Cap => ("vs_cap", "fs_cap", wgpu::PrimitiveTopology::TriangleList),
+    };
+    let stencil = |compare, pass_op| {
+        let face = wgpu::StencilFaceState {
+            compare,
+            fail_op: wgpu::StencilOperation::Keep,
+            depth_fail_op: pass_op,
+            pass_op,
+        };
+        wgpu::StencilState {
+            front: face,
+            back: face,
+            read_mask: 0xff,
+            write_mask: 0xff,
+        }
     };
     let transparent = matches!(kind, Kind::Transparent | Kind::Highlight);
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -128,7 +163,7 @@ fn pipeline(
             module: shader,
             entry_point: Some(vertex),
             compilation_options: Default::default(),
-            buffers: if kind == Kind::Background {
+            buffers: if matches!(kind, Kind::Background | Kind::Cap) {
                 &[]
             } else {
                 &vertex_layout
@@ -141,13 +176,24 @@ fn pipeline(
         },
         depth_stencil: Some(wgpu::DepthStencilState {
             format: DEPTH_FORMAT,
-            depth_write_enabled: Some(matches!(kind, Kind::Opaque | Kind::Lines)),
-            depth_compare: Some(if kind == Kind::Background {
+            depth_write_enabled: Some(matches!(kind, Kind::Opaque | Kind::Lines | Kind::Cap)),
+            depth_compare: Some(if matches!(kind, Kind::Background | Kind::Mark) {
                 wgpu::CompareFunction::Always
             } else {
                 wgpu::CompareFunction::LessEqual
             }),
-            stencil: Default::default(),
+            stencil: match kind {
+                Kind::Mark => stencil(
+                    wgpu::CompareFunction::Always,
+                    wgpu::StencilOperation::Invert,
+                ),
+                // Odd pixels only, cleared whether the plane shows there or not.
+                Kind::Cap => stencil(
+                    wgpu::CompareFunction::NotEqual,
+                    wgpu::StencilOperation::Zero,
+                ),
+                _ => Default::default(),
+            },
             bias: Default::default(),
         }),
         multisample: wgpu::MultisampleState {
@@ -161,7 +207,11 @@ fn pipeline(
             targets: &[Some(wgpu::ColorTargetState {
                 format: COLOR_FORMAT,
                 blend: transparent.then_some(wgpu::BlendState::ALPHA_BLENDING),
-                write_mask: wgpu::ColorWrites::ALL,
+                write_mask: if kind == Kind::Mark {
+                    wgpu::ColorWrites::empty()
+                } else {
+                    wgpu::ColorWrites::ALL
+                },
             })],
         }),
         multiview_mask: None,
@@ -213,6 +263,8 @@ impl Gpu {
             transparent: pipeline(device, &layout, &shader, "transparent", Kind::Transparent),
             lines: pipeline(device, &layout, &shader, "lines", Kind::Lines),
             highlight: pipeline(device, &layout, &shader, "highlight", Kind::Highlight),
+            mark: pipeline(device, &layout, &shader, "cap mark", Kind::Mark),
+            cap: pipeline(device, &layout, &shader, "cap", Kind::Cap),
             uniforms,
             bind_group,
             mesh: None,
@@ -237,6 +289,9 @@ impl Gpu {
             total: mesh.vertices.len() as u32,
             lines: buffer("impeller lines", &mesh.lines),
             line_vertices: mesh.lines.len() as u32,
+            closures: buffer("impeller closed volumes", &mesh.closures),
+            caps: mesh.caps.clone(),
+            bounds: mesh.center.extend(mesh.radius).to_array(),
         });
     }
 
@@ -342,9 +397,18 @@ impl Gpu {
         uniforms: &Uniforms,
         highlights: &[Highlight],
     ) -> wgpu::CommandEncoder {
+        let mut uniforms = *uniforms;
+        if let Some(mesh) = &self.mesh {
+            uniforms.cap = mesh.bounds;
+            for (color, cap) in uniforms.cap_colors.iter_mut().zip(&mesh.caps) {
+                *color = cap.color;
+            }
+        }
+        let [nx, ny, nz, _] = uniforms.clip;
+        let cut = nx * nx + ny * ny + nz * nz > 0.25;
         state
             .queue
-            .write_buffer(&self.uniforms, 0, bytemuck::bytes_of(uniforms));
+            .write_buffer(&self.uniforms, 0, bytemuck::bytes_of(&uniforms));
         let mut encoder = state
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -374,7 +438,10 @@ impl Gpu {
                         load: wgpu::LoadOp::Clear(1.0),
                         store: wgpu::StoreOp::Discard,
                     }),
-                    stencil_ops: None,
+                    stencil_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(0),
+                        store: wgpu::StoreOp::Discard,
+                    }),
                 }),
                 timestamp_writes: None,
                 occlusion_query_set: None,
@@ -389,6 +456,16 @@ impl Gpu {
                     if mesh.opaque > 0 {
                         pass.set_pipeline(&self.opaque);
                         pass.draw(0..mesh.opaque, 0..1);
+                    }
+                }
+                // Caps over the opaque parts, one closed volume at a time.
+                if cut && let Some(closures) = &mesh.closures {
+                    pass.set_vertex_buffer(0, closures.slice(..));
+                    for (k, cap) in (0u32..).zip(&mesh.caps) {
+                        pass.set_pipeline(&self.mark);
+                        pass.draw(cap.range.clone(), 0..1);
+                        pass.set_pipeline(&self.cap);
+                        pass.draw(0..6, k..k + 1);
                     }
                 }
                 // Lines before glass, so see-through parts tint the lines behind them.

@@ -21,6 +21,10 @@ struct Uniforms {
     clip: vec4<f32>,
     // Gamma-encoded tint of the part under the pointer and of the one selected.
     accent: vec4<f32>,
+    // Centre and radius of the model, which a cap covers.
+    cap: vec4<f32>,
+    // Linear color of each cap, by instance.
+    cap_colors: array<vec4<f32>, 8>,
 };
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -108,6 +112,57 @@ fn fs_line(in: VertexOut) -> @location(0) vec4<f32> {
         discard;
     }
     return vec4<f32>(gamma_from_linear(in.color.rgb), 1.0);
+}
+
+// A closed volume counted into the stencil: only what the cut leaves counts.
+@fragment
+fn fs_mark(in: VertexOut) -> @location(0) vec4<f32> {
+    if cut_away(in.world) {
+        discard;
+    }
+    return vec4<f32>(0.0);
+}
+
+struct CapOut {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) @interpolate(flat) color: vec4<f32>,
+};
+
+// A square on the cutting plane round the model; the stencil keeps the part of it
+// inside the volume just counted, instance `part`.
+@vertex
+fn vs_cap(@builtin(vertex_index) i: u32, @builtin(instance_index) part: u32) -> CapOut {
+    let n = normalize(u.clip.xyz);
+    let origin = u.cap.xyz - n * (dot(n, u.cap.xyz) - u.clip.w);
+    let other = select(vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0, 1.0, 0.0), abs(n.x) > 0.9);
+    let a = normalize(cross(n, other));
+    let b = cross(n, a);
+    var corners = array<vec2<f32>, 6>(
+        vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, -1.0), vec2<f32>(1.0, 1.0),
+        vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, 1.0), vec2<f32>(-1.0, 1.0),
+    );
+    let k = corners[i] * u.cap.w * 1.05;
+    var out: CapOut;
+    out.clip = u.view_projection * vec4<f32>(origin + k.x * a + k.y * b, 1.0);
+    out.color = u.cap_colors[part];
+    return out;
+}
+
+// The cut face: flat, lit as the plane faces the eye, with a fine section hatch.
+@fragment
+fn fs_cap(in: CapOut) -> @location(0) vec4<f32> {
+    var n = normalize(u.clip.xyz);
+    let toward = select(u.eye.xyz - u.cap.xyz, u.eye.xyz, u.eye.w == 0.0);
+    if dot(n, toward) < 0.0 {
+        n = -n;
+    }
+    let key = normalize(u.key_light.xyz);
+    let fill = normalize(u.fill_light.xyz);
+    let light = 0.3 + 0.55 * max(dot(n, key), 0.0) + 0.2 * max(dot(n, fill), 0.0);
+    // Hatching at 45° on screen, a line every 7 px.
+    let hatch = fract((in.clip.x + in.clip.y) / 7.0) < 0.2;
+    let rgb = in.color.rgb * light * select(1.0, 0.72, hatch);
+    return vec4<f32>(gamma_from_linear(clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0))), 1.0);
 }
 
 struct HighlightOut {

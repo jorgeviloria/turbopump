@@ -310,13 +310,55 @@ fn the_panel_accepts_steps_and_the_column_adds_components() {
 }
 
 #[test]
+fn the_curves_take_their_settings_in_the_properties_panel() {
+    use egui_kittest::kittest::NodeT;
+    let mut harness = harness();
+    harness.state_mut().focus_view(View::Performance);
+    harness.run();
+    let page = |harness: &mut Harness<'_, TurbopumpApp>, name: &str| {
+        harness
+            .get_all_by_label(name)
+            .find(|n| n.accesskit_node().role() == egui::accesskit::Role::Button)
+            .unwrap()
+            .click();
+        harness.run();
+    };
+    // The settings, in sections of rows like those of a step, without its footer.
+    for row in ["Curve", "Losses and forces", "Liquid", "Static head H_stat"] {
+        harness.get_by_label(row);
+    }
+    assert!(harness.query_by_label_contains("Accept step").is_none());
+    // The step is one click away, and the curves stay in the view.
+    page(&mut harness, "Step");
+    harness.get_by_label_contains("Accept step");
+    harness.get_by_label("Best efficiency");
+    // Folded on the step, the panel opens on the settings from the Settings tool.
+    harness.key_press(Key::Escape);
+    harness.run();
+    harness.run();
+    assert!(!harness.state().sidebar_open());
+    harness.get_by_label("Settings").click();
+    harness.run();
+    assert!(harness.state().sidebar_open());
+    harness.get_by_label("Static head H_stat");
+    page(&mut harness, "Step");
+    page(&mut harness, "Curve settings");
+    harness.get_by_label("Static head H_stat");
+}
+
+#[test]
 fn the_tabs_of_the_toolbar_are_the_views() {
     let mut harness = harness();
     harness.get_by_label("Curves tab").click();
     harness.run();
     assert_eq!(harness.state().view(), View::Performance);
-    // The tools under the tabs are those of the view: the Curves tab shows the
-    // settings of the prediction.
+    // The properties panel shows the settings of the prediction; the Settings tool
+    // under the tab gives the step back, and shows them again.
+    harness.get_by_label("Operation in the system");
+    harness.get_by_label("Settings").click();
+    harness.run();
+    assert!(harness.query_by_label("Operation in the system").is_none());
+    harness.get_by_label_contains("Accept step");
     harness.get_by_label("Settings").click();
     harness.run();
     harness.get_by_label("Operation in the system");
@@ -1142,7 +1184,8 @@ fn panel_left(h: &Harness<'_, TurbopumpApp>) -> f32 {
         .filter(|n| n.rect().left() > 700.0)
         .map(|n| n.rect().left())
         .fold(f32::INFINITY, f32::min);
-    let _ = h.get_by_label("More actions of the step");
+    // The menu of a step, or of the settings of the curves.
+    let _ = h.get_by_label_contains("More actions of the");
     crumb
 }
 
@@ -1302,7 +1345,9 @@ fn the_footer_buttons_keep_their_place() {
 
 /// The right edge of the properties panel's content: its header actions end there.
 fn panel_right(h: &Harness<'_, TurbopumpApp>) -> f32 {
-    h.get_by_label("More actions of the step").rect().right()
+    h.get_by_label_contains("More actions of the")
+        .rect()
+        .right()
 }
 
 #[test]

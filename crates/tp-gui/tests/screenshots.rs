@@ -205,6 +205,59 @@ fn row_and_dimension() {
     save_hovering(&mut harness, "dimension-and-row");
 }
 
+/// The same link in the front view: the row of d₂ lights its diameter, and the text of
+/// the diameter shades its row.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn front_dimensions() {
+    let mut harness = harness(egui::Theme::Light);
+    harness.state_mut().focus_view(View::FrontView);
+    harness.run();
+    let row = harness
+        .get_all_by_label("Outlet diameter d₂")
+        .next()
+        .unwrap()
+        .rect()
+        .center();
+    harness.hover_at(row);
+    harness.run_steps(4);
+    save_hovering(&mut harness, "front-row-and-dimension");
+    // The drawing comes before the properties, whose summary also names d₂.
+    let text = harness
+        .get_all_by_label_contains("d₂ ")
+        .next()
+        .unwrap()
+        .rect()
+        .center();
+    harness.hover_at(text);
+    harness.run_steps(4);
+    save_hovering(&mut harness, "front-dimension-and-row");
+}
+
+/// The meridional cut with an opaque casing: the cut faces of the volute, the blades
+/// and the inlet duct are capped, as seen and facing the camera.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn cut_caps() {
+    let mut harness = stage_in_3d();
+    harness.get_by_label("Opacity of Casing").click();
+    harness.run();
+    harness.get_by_label("Meridional cut").click();
+    harness.run();
+    harness.remove_cursor();
+    harness.run();
+    save(&mut harness, "cut-caps");
+    // From the side, the cut turned to face the camera: the meridional section.
+    harness.get_by_label("Views").click();
+    harness.run();
+    harness.get_by_label("From the side").click();
+    harness.run_steps(40);
+    harness.get_by_label_contains("Face the camera").click();
+    harness.remove_cursor();
+    harness.run_steps(4);
+    save(&mut harness, "cut-caps-facing");
+}
+
 /// The Views menu of the 3D tab, a view saved from the side and brought back.
 #[test]
 #[ignore = "needs a GPU; run with --ignored"]

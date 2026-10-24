@@ -91,7 +91,8 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
     sesiones, y proyección ortográfica), estilo
     (sombreado, con aristas o alambre), inspección (corte meridional y medir), y
     sólidos CAD, mallas y una imagen PNG de la vista;
-  - *Curves*: los ajustes de la predicción y el resto de resultados.
+  - *Curves*: los ajustes de la predicción (en el panel de propiedades) y el resto de
+    resultados.
 
   A la izquierda de las pestañas están el menú *File* (abre, guarda, exporta y da los
   ajustes) y el acceso rápido al flujo de diseño, guardar, deshacer y rehacer; a la derecha, los
@@ -139,10 +140,12 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
     materiales o sus cámaras laterales;
   - secciones de la voluta: la definición en edición sobre la familia de secciones a lo
     largo de la espiral, con los puntos de control de los lados Bézier y de segmentos
-    para arrastrar y esquinas que se añaden o quitan con el botón derecho;
+    para arrastrar y esquinas que se añaden o quitan con el botón derecho, acotadas
+    con el ancho de entrada b₃ y la altura H;
   - gráficas del álabe (β, θ y espesor) y, en otra página, los bordes de ataque y de
     salida en verdadera forma, con sus puntos para arrastrar;
-  - vista frontal de la etapa, con los álabes del difusor y la espiral;
+  - vista frontal de la etapa, con los álabes del difusor, la espiral y las cotas de
+    los diámetros d₂, d₁, d_n y d_z;
   - vista 3D, con aristas de las piezas, secciones de la voluta, cubo de vistas (un clic
     en una cara gira la cámara), ejes y barra de escala, en perspectiva o en proyección
     ortográfica; la imagen PNG sale con el doble de resolución y sin el cubo, los ejes
@@ -150,10 +153,15 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
     selecciona (también en la Escena) y el botón derecho la oculta, la aísla o cambia
     su opacidad. El corte meridional quita la mitad del modelo que mira a la cámara
     (o la otra); se desplaza paralelo a sí mismo con su posición, en porcentaje del
-    radio, y su plano se puede dibujar sobre el modelo. Medir da la distancia entre dos puntos del modelo y sus partes radial
-    y axial, Δr y Δz; cerca de un vértice de la malla el punto se ajusta a él;
+    radio, y su plano se puede dibujar sobre el modelo. Donde corta una pieza opaca
+    cerrada (los álabes, cada canal de la voluta, la tubería de entrada), la cara
+    cortada sale maciza y rayada, como en un plano de taller. Medir da la distancia
+    entre dos puntos del modelo y sus partes radial y axial, Δr y Δz; cerca de un
+    vértice de la malla el punto se ajusta a él;
 
-    ![Corte meridional y medida en la vista 3D](docs/img/medida-corte-3d.jpg)
+    | Corte con la carcasa opaca | Medida con la carcasa de vidrio |
+    |---|---|
+    | ![Corte meridional con las caras cortadas tapadas](docs/img/tapas-corte-3d.jpg) | ![Corte meridional y medida en la vista 3D](docs/img/medida-corte-3d.jpg) |
 
   - curvas: altura, rendimiento, potencia y NPSH₃ previstos frente al caudal (la altura
     a carga parcial según Gülich, cap. 4.3, y el NPSH₃ como banda de cinco métodos
@@ -165,7 +173,10 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
     η = η_h·η_v·η_RR·η_m), el caudal en que la garganta de la voluta pone el punto
     óptimo, la corrección
     para líquidos viscosos y el punto de trabajo en la instalación, con otra velocidad
-    o el rodete recortado y el rango de funcionamiento continuo;
+    o el rodete recortado y el rango de funcionamiento continuo. Sus ajustes (el
+    rango de la curva, las pérdidas y fuerzas, el líquido y la instalación) van en el
+    panel de propiedades, con filas como las de un paso; dos botones arriba del panel
+    pasan de los ajustes al paso, para cambiar el diseño mirando la curva;
   - informe con las mismas cifras que la línea de comandos.
 
   La vista meridional muestra también, si se pide, el flujo potencial y la velocidad
@@ -200,7 +211,9 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
     aceptado queda por revisar, una barra naranja en el margen marca las filas que
     cambiaron desde que se aceptó (también las automáticas que movió un cambio aguas
     arriba), y su ayuda dice cuánto valían. Con el ratón sobre una fila que es una
-    cota del meridiano (L, b₂, d_n, d₁ o d₂), esa cota se resalta en el dibujo,
+    cota del dibujo (L, b₂, d_n, d₁ o d₂ en el meridiano; d₂, d₁, d_n o d_z en la
+    vista frontal; b₃, o la altura de la garganta, en la de sección), esa cota se
+    resalta en el dibujo,
     aunque las cotas estén ocultas; y con el ratón sobre el valor de una cota, su fila
     se sombrea en el panel;
   - **abajo**, la cifra clave del paso, *Back* y *Accept step and continue*

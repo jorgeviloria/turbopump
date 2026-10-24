@@ -37,6 +37,9 @@ pub(crate) enum Command {
     ExportCad,
     /// A PNG picture of the 3D view.
     Picture3d,
+    /// While the curves are shown, the settings of the curves in the properties panel
+    /// (true) or the step (false).
+    CurveSettings(bool),
     Focus(View),
     Camera(CameraView),
     ToggleTree,

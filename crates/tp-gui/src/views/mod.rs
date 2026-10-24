@@ -10,7 +10,7 @@ pub(crate) mod meridional;
 pub(crate) mod performance;
 pub(crate) mod report;
 
-use eframe::egui::{self, Color32, Id, Stroke, Ui, vec2};
+use eframe::egui::{self, Color32, Id, Sense, Stroke, Ui, vec2};
 use egui_plot::PlotTransform;
 
 /// Line colors shared by the plots, tuned for light and dark themes.
@@ -65,6 +65,161 @@ impl Palette {
         };
         self.hub.lerp_to_gamma(self.shroud, t)
     }
+}
+
+/// A diameter dimension over a plot: a line across the circle of `radius` (plot units)
+/// round `center`, at `angle` from the x axis, with an arrow at each end; past the end
+/// at `angle` a short leader carries `text` on a background, outside the circle. Drawn
+/// in the accent of an active dimension when `hot`. Returns the hover response of the
+/// text, which screen readers read.
+pub(crate) fn paint_diameter(
+    ui: &Ui,
+    transform: &PlotTransform,
+    center: [f64; 2],
+    radius: f64,
+    angle: f64,
+    text: &str,
+    hot: bool,
+) -> egui::Response {
+    const LEADER: f32 = 12.0;
+    let palette = Palette::of(ui);
+    let visuals = ui.visuals();
+    let painter = ui.painter_at(*transform.frame());
+    let (sin, cos) = angle.sin_cos();
+    let at = |t: f64| {
+        transform.position_from_point(&egui_plot::PlotPoint::new(
+            center[0] + t * radius * cos,
+            center[1] + t * radius * sin,
+        ))
+    };
+    let (a, b) = (at(-1.0), at(1.0));
+    let color = if hot {
+        palette.handle_active
+    } else {
+        visuals.text_color()
+    };
+    let stroke = Stroke::new(if hot { 1.8 } else { 1.0 }, color);
+    let along = (b - a).normalized();
+    let across = along.rot90();
+    let end = b + along * LEADER;
+    painter.line_segment([a, end], stroke);
+    for (tip, back) in [(a, along), (b, -along)] {
+        let base = tip + back * 7.0;
+        painter.add(egui::Shape::convex_polygon(
+            vec![tip, base + across * 2.5, base - across * 2.5],
+            color,
+            Stroke::NONE,
+        ));
+    }
+    let text_color = if hot {
+        palette.handle_active
+    } else {
+        palette.handle
+    };
+    let galley = painter.layout_no_wrap(
+        text.to_owned(),
+        egui::FontId::proportional(12.0),
+        text_color,
+    );
+    // The text leans away from the circle: right of the leader on the right side,
+    // left of it on the left, above or below it near the vertical.
+    let size = galley.size() + vec2(6.0, 2.0);
+    let lean = vec2(
+        along.x.clamp(-0.5, 0.5) * 2.0 * size.x / 2.0,
+        along.y.clamp(-0.5, 0.5) * 2.0 * size.y / 2.0,
+    );
+    let rect = egui::Rect::from_center_size(end + lean, size);
+    painter.rect_filled(rect, 2.0, visuals.extreme_bg_color);
+    painter.rect_stroke(
+        rect,
+        2.0,
+        Stroke::new(
+            1.0,
+            if hot {
+                text_color
+            } else {
+                color.gamma_multiply(0.35)
+            },
+        ),
+        egui::StrokeKind::Inside,
+    );
+    painter.galley(rect.center() - galley.size() / 2.0, galley, text_color);
+    dimension_text(ui, rect, text)
+}
+
+/// A linear dimension over a plot between the points `a` and `b` (plot units), drawn
+/// `offset` px aside of them: extension lines from both points, a line between them
+/// with an arrow at each end and `text` on a background at its middle. Drawn in the
+/// accent of an active dimension when `hot`. Returns the hover response of the text,
+/// which screen readers read.
+pub(crate) fn paint_linear(
+    ui: &Ui,
+    transform: &PlotTransform,
+    [a, b]: [[f64; 2]; 2],
+    offset: egui::Vec2,
+    text: &str,
+    hot: bool,
+) -> egui::Response {
+    let palette = Palette::of(ui);
+    let visuals = ui.visuals();
+    let painter = ui.painter_at(*transform.frame());
+    let screen =
+        |p: [f64; 2]| transform.position_from_point(&egui_plot::PlotPoint::new(p[0], p[1]));
+    let (a, b) = (screen(a), screen(b));
+    let (color, text_color) = if hot {
+        (palette.handle_active, palette.handle_active)
+    } else {
+        (visuals.text_color(), palette.handle)
+    };
+    let thin = Stroke::new(0.8, color.gamma_multiply(0.6));
+    let out = offset.normalized() * 4.0;
+    for p in [a, b] {
+        painter.line_segment([p + out, p + offset + out], thin);
+    }
+    let (a, b) = (a + offset, b + offset);
+    painter.line_segment([a, b], Stroke::new(if hot { 1.8 } else { 1.0 }, color));
+    let along = (b - a).normalized();
+    let across = along.rot90();
+    for (tip, back) in [(a, along), (b, -along)] {
+        let base = tip + back * 7.0;
+        painter.add(egui::Shape::convex_polygon(
+            vec![tip, base + across * 2.5, base - across * 2.5],
+            color,
+            Stroke::NONE,
+        ));
+    }
+    let galley = painter.layout_no_wrap(
+        text.to_owned(),
+        egui::FontId::proportional(12.0),
+        text_color,
+    );
+    let rect = egui::Rect::from_center_size(a.lerp(b, 0.5), galley.size() + vec2(6.0, 2.0));
+    painter.rect_filled(rect, 2.0, visuals.extreme_bg_color);
+    painter.rect_stroke(
+        rect,
+        2.0,
+        Stroke::new(
+            1.0,
+            if hot {
+                text_color
+            } else {
+                color.gamma_multiply(0.35)
+            },
+        ),
+        egui::StrokeKind::Inside,
+    );
+    painter.galley(rect.center() - galley.size() / 2.0, galley, text_color);
+    dimension_text(ui, rect, text)
+}
+
+/// The text of a dimension at `rect`, hoverable and named after `text`. Keyed by its
+/// symbol, the text up to the first space, so that it keeps its id as the value
+/// changes.
+fn dimension_text(ui: &Ui, rect: egui::Rect, text: &str) -> egui::Response {
+    let symbol = text.split(' ').next().unwrap_or(text);
+    let response = ui.interact(rect, ui.id().with(("dimension", symbol)), Sense::hover());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, text));
+    response
 }
 
 /// Asks for one more frame when a plot's bounds moved. egui_plot lays out its axes
