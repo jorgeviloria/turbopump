@@ -478,8 +478,11 @@ para que no se agriete, y llevar el ángulo $\alpha_{3B}$ del flujo):
   respecto a la dirección circunferencial y llega a la punta de la cuña por el medio de
   las dos paredes (una Bézier cúbica tangente a las dos direcciones).
 - **Espesor:** de la nariz a la punta el cuerpo mide $e = 2\rho$ alrededor de esa
-  línea. Pasada la punta, cada cara es su pared desplazada hacia el flujo la mitad de
-  lo que le falta a la cuña para medir $e$. Ese desplazamiento pasa por un máximo suave
+  línea. Pasada la punta, cada cara es su pared desplazada hacia el flujo su parte de
+  lo que le falta a la cuña para medir $e$: el **reparto** (por defecto ½) es la parte
+  del lado de la espiral, y el lado del difusor toma el resto. Con un reparto distinto
+  de ½ las caras se inclinan respecto a la dirección en que se desplazan, así que se
+  mide el espesor y se aumenta el desplazamiento hasta que vuelve a ser $e$. Ese desplazamiento pasa por un máximo suave
   cuadrático, así que la cara entra en la pared con tangencia donde la cuña ya mide
   $e + k$, con $k = e/4$.
 - Así el corte de agua **no adelgaza en ningún punto** por debajo de $e$ y quita al
@@ -490,6 +493,17 @@ Una construcción anterior unía el círculo de la nariz a la punta de la cuña 
 tangentes. La cuña mide cero en su punta, y esas tangentes también, así que el corte de
 agua quedaba unido al resto de la carcasa por una línea de **espesor cero**. En la bomba
 de referencia, unos 50 mm alrededor de la punta medían menos que $e_3$.
+
+**Incidencia fuera del punto de diseño.** Con el ángulo del corte de agua fijo, la
+incidencia cambia con el caudal. A otro caudal $Q$, $c_{3m}$ crece con $Q$ y $c_{3u}$
+con la altura teórica del rodete $H_{th}$ (Euler, sin prerrotación), así que, de las
+ecs. T7.7.3 a T7.7.5:
+
+$$\tan\alpha'_3(Q) = \tan\alpha'_{3,d}\;\frac{Q/Q_d}{H_{th}(Q)/H_{th,d}}, \qquad
+i_3(Q) = \alpha_{3B} - \alpha'_3(Q)$$
+
+con $H_{th}(Q)$ de la característica prevista. A carga parcial el flujo llega más
+plano e $i_3 > 0$, como en la Fig. 9.20 de Gülich (pág. 539).
 
 **Por cortes a lo ancho.** El corte de agua se calcula en 9 planos $z$ = cte entre las
 paredes laterales de la entrada (a un 5 % de ellas). En cada plano, la pared exterior de

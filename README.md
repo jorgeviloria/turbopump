@@ -313,6 +313,29 @@ para las formas que no son elípticas.
 
 ![Bordes del álabe](docs/img/bordes-alabe.jpg)
 
+### Corte de agua
+
+La vista *Front* tiene una página *Cutwater*, que se abre con el paso *Cut-water*.
+Dibuja el corte de agua en uno de los nueve planos que lo cortan a lo ancho de la
+entrada (un deslizador elige el plano; los demás se ven en tenue), con la pared de la
+espiral, la del difusor, el círculo $d_z$ y la salida del rodete. Tres puntos se
+arrastran:
+
+- el **punto más interior de la nariz** mueve el círculo del corte de agua $d_z$;
+- el **punto delantero de la nariz** cambia su radio $\rho$, con el punto interior fijo
+  sobre $d_z$;
+- el **punto de la línea de curvatura** la gira y fija la incidencia $i_3$ frente al
+  ángulo del flujo $\alpha'_3$.
+
+Otro deslizador reparte entre el lado de la espiral y el del difusor el espesor que le
+falta a la cuña pasada la punta. Al lado, las medidas frente a Gülich (diámetro
+efectivo, holgura de la tabla 10.2, cuerpo más fino, $e/d_z$, incidencia en el diseño,
+cuña a lo ancho y corrección de la garganta de la ec. 7.28), el cuerpo en 3D, que se
+gira arrastrando, y la incidencia sobre el corte de agua en todo el rango de caudal.
+Mientras se arrastra solo se recalcula la voluta; el resto se pone al día al soltar.
+
+![Corte de agua](docs/img/corte-de-agua.jpg)
+
 Las pruebas de la interfaz usan [kittest](https://github.com/rerun-io/kittest) y no
 necesitan GPU. Las capturas con wgpu se generan a mano en `target/screenshots/`:
 
