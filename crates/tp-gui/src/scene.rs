@@ -88,10 +88,11 @@ enum Key {
     Walls,
     Volute,
     Sections,
+    Duct,
 }
 
 impl Key {
-    const ALL: [Key; 7] = [
+    const ALL: [Key; 8] = [
         Key::Blades,
         Key::Hub,
         Key::Shroud,
@@ -99,6 +100,7 @@ impl Key {
         Key::Walls,
         Key::Volute,
         Key::Sections,
+        Key::Duct,
     ];
 
     fn shown(self, o: &ViewOptions) -> bool {
@@ -125,6 +127,7 @@ impl Key {
             Key::Walls => Some(PartId::Walls),
             Key::Volute => Some(PartId::Volute),
             Key::Sections => None,
+            Key::Duct => Some(PartId::Duct),
         }
     }
 
@@ -150,6 +153,8 @@ pub(crate) struct Stage {
     pub impeller: String,
     /// Blades of the impeller, when its geometry is built.
     pub blades: Option<u32>,
+    /// Whether the inlet duct ahead of the impeller is modelled.
+    pub duct: bool,
     /// The stator after the impeller: its name and whether it has vanes.
     pub stator: Option<(String, bool)>,
     pub volute: Option<String>,
@@ -158,11 +163,11 @@ pub(crate) struct Stage {
 impl Stage {
     /// The parts it has, by component.
     fn groups(&self) -> Vec<(ComponentKind, String, Vec<Key>)> {
-        let mut groups = vec![(
-            ComponentKind::Impeller,
-            self.impeller.clone(),
-            vec![Key::Blades, Key::Hub, Key::Shroud],
-        )];
+        let mut impeller = vec![Key::Blades, Key::Hub, Key::Shroud];
+        if self.duct {
+            impeller.insert(0, Key::Duct);
+        }
+        let mut groups = vec![(ComponentKind::Impeller, self.impeller.clone(), impeller)];
         if let Some((name, vaned)) = &self.stator {
             let keys = if *vaned {
                 vec![Key::Vanes, Key::Walls]

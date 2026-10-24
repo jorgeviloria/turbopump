@@ -823,6 +823,54 @@ fn meridian_editor() {
     save(&mut harness, "editor-chambers");
 }
 
+/// The inlet duct with the side chambers: in the chambers scope of the Meridian view
+/// and in the 3D view, impeller and volute designed.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn inlet_duct() {
+    let mut project = tp_gui::default_project();
+    let id = project.components()[0].id();
+    let mut input = project.impeller_geometry_input(id).unwrap();
+    input.meridional.chambers.enabled = true;
+    input.meridional.inlet_duct.enabled = true;
+    project.set_impeller_geometry(id, input).unwrap();
+    let path = std::env::temp_dir().join("turbopump-inlet-duct.tpj");
+    project.save(&path).unwrap();
+    let mut harness = Harness::builder()
+        .with_size([1440.0, 900.0])
+        .with_pixels_per_point(1.5)
+        .with_theme(egui::Theme::Light)
+        .wgpu()
+        .build_eframe(|cc| TurbopumpApp::new(cc, Some(&path)));
+    harness.run();
+    for _ in 0..2 {
+        harness.get_by_label_contains("Accept step").click();
+        harness.run();
+    }
+    harness.state_mut().focus_view(View::Meridian);
+    harness.state_mut().set_meridian_scope(Scope::Chambers);
+    harness.run();
+    harness.get_by_label("Fit all").click();
+    harness.run();
+    save(&mut harness, "inlet-duct-meridian");
+    harness
+        .get_by_label("Complete every step of Impeller 1")
+        .click();
+    harness.run();
+    harness.get_by_label("Volute 1").click();
+    harness.run();
+    harness
+        .get_by_label("Complete every step of Volute 1")
+        .click();
+    harness.run();
+    harness.state_mut().set_sidebar_open(false);
+    harness.get_by_label("3D tab").click();
+    harness.run();
+    harness.get_by_label("Meridional cut").click();
+    harness.run_steps(4);
+    save(&mut harness, "inlet-duct-3d");
+}
+
 /// The segment types of a drawn wall: the hub as lines and an arc, the shroud as a
 /// B-spline with its menu open.
 #[test]

@@ -3308,6 +3308,35 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Opacity of {}", "Opacidad: {}"),
     ("Click for {}", "Con un clic: {}"),
     ("Color of {}", "Color: {}"),
+    ("Inlet duct", "Tubería de entrada"),
+    (
+        "An axial duct ahead of the eye, for the inlet of a CFD domain. With the side chambers designed, it ends an axial gap short of the neck tip, so the leakage through the annular seal returns into the eye inside the same domain",
+        "Una tubería axial delante de la boca, para la entrada de un dominio de CFD. Con las cámaras laterales diseñadas, termina a una holgura axial de la punta del cuello, de modo que la fuga del anillo de cierre vuelve a la boca dentro del mismo dominio",
+    ),
+    ("Model the inlet duct", "Modelar la tubería de entrada"),
+    (
+        "Export its fluid with the CAD model, alone and inside the joined flow domain; it is drawn in the Side chambers scope of the Meridian view",
+        "Exporta su fluido con el modelo CAD, solo y dentro del dominio fluido unido; se dibuja en el ámbito Cámaras laterales de la vista Meridiano",
+    ),
+    ("Length L", "Longitud L"),
+    (
+        "Upstream of the eye; automatic: the eye diameter d₁ (our choice)",
+        "Aguas arriba de la boca; automático: el diámetro de la boca d₁ (elección nuestra)",
+    ),
+    ("Duct diameter", "Diámetro de la tubería"),
+    (
+        "Automatic: the shroud diameter at the inlet, so the wall carries straight on",
+        "Automático: el diámetro de la tapa en la entrada, para que la pared siga recta",
+    ),
+    ("Axial gap Δz", "Holgura axial Δz"),
+    (
+        "Between the suction cover at the end of the duct and the tip of the neck, where the leakage comes out; automatic: the axial gap of the side chambers",
+        "Entre la tapa de aspiración al final de la tubería y la punta del cuello, por donde sale la fuga; automático: la holgura axial de las cámaras laterales",
+    ),
+    (
+        "Hub diameter through the duct",
+        "Diámetro del cubo en la tubería",
+    ),
     (
         "Complete every step of the component",
         "Completar todos los pasos del componente",
@@ -3373,8 +3402,36 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
 /// Messages of the design code, most specific first.
 pub(super) static MESSAGES: &[(&str, &str)] = &[
     (
-        "the joined fluid came out as {} solids{}; check the faces at r₂",
-        "el fluido unido salió en {} sólidos{}; revisa las caras en r₂",
+        "the joined fluid came out as {} solids{}; check the faces at r₂ and, with the inlet duct, at the eye and the seal exit",
+        "el fluido unido salió en {} sólidos{}; revisa las caras en r₂ y, con la tubería de entrada, en la boca y en la salida del sello",
+    ),
+    (
+        "the inlet duct was not built: {}",
+        "no se construyó la tubería de entrada: {}",
+    ),
+    (
+        "its length must be positive",
+        "su longitud debe ser positiva",
+    ),
+    (
+        "its diameter must be larger than the hub diameter at the inlet",
+        "su diámetro debe ser mayor que el del cubo en la entrada",
+    ),
+    (
+        "the shroud cover does not reach upstream of the inlet",
+        "la tapa no llega aguas arriba de la entrada",
+    ),
+    (
+        "the axial gap must be positive",
+        "la holgura axial debe ser positiva",
+    ),
+    (
+        "the front chamber does not end at the tip of the neck",
+        "la cámara delantera no termina en la punta del cuello",
+    ),
+    (
+        "without the side chambers its diameter must lie between the inside and the outside of the neck",
+        "sin las cámaras laterales, su diámetro debe quedar entre el interior y el exterior del cuello",
     ),
     (
         "the joined fluid was not built: {}",

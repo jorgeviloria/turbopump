@@ -8,7 +8,7 @@ use std::f64::consts::PI;
 use eframe::egui::{self, Color32, CursorIcon, DragValue, RichText, Sense, Ui};
 use egui_plot::{
     Corner, Legend, Line, LineStyle, MarkerShape, Plot, PlotBounds, PlotPoint, PlotPoints,
-    PlotTransform, Points, Text,
+    PlotTransform, Points, Polygon, Text,
 };
 use tp_design::impeller::meridian::{
     AxialReference, DesignMode, EdgeExtent, InletTilt, LeadingEdgeShape, MeridionalContour,
@@ -1679,6 +1679,70 @@ impl Default for MeridionalView {
     }
 }
 
+/// Triangles covering the simple polygon `outline`, by ear clipping.
+fn triangulate(outline: &[DVec2]) -> Vec<[DVec2; 3]> {
+    let cross = |o: DVec2, a: DVec2, b: DVec2| (a - o).perp_dot(b - o);
+    let mut index: Vec<usize> = (0..outline.len()).collect();
+    // Counter-clockwise, so ears turn left.
+    let area: f64 = (0..outline.len())
+        .map(|i| outline[i].perp_dot(outline[(i + 1) % outline.len()]))
+        .sum();
+    if area < 0.0 {
+        index.reverse();
+    }
+    let mut triangles = Vec::new();
+    let mut guard = 0;
+    while index.len() > 3 && guard < 10_000 {
+        guard += 1;
+        let n = index.len();
+        let ear = (0..n).find(|&i| {
+            let (a, b, c) = (
+                outline[index[(i + n - 1) % n]],
+                outline[index[i]],
+                outline[index[(i + 1) % n]],
+            );
+            cross(a, b, c) > 1e-18
+                && index.iter().all(|&k| {
+                    let p = outline[k];
+                    p == a
+                        || p == b
+                        || p == c
+                        || !(cross(a, b, p) >= 0.0
+                            && cross(b, c, p) >= 0.0
+                            && cross(c, a, p) >= 0.0)
+                })
+        });
+        // A degenerate corner (straight on or doubled back) is dropped.
+        let i = ear.unwrap_or_else(|| {
+            (0..n)
+                .min_by(|&i, &j| {
+                    let turn = |i: usize| {
+                        cross(
+                            outline[index[(i + n - 1) % n]],
+                            outline[index[i]],
+                            outline[index[(i + 1) % n]],
+                        )
+                        .abs()
+                    };
+                    turn(i).total_cmp(&turn(j))
+                })
+                .unwrap_or(0)
+        });
+        if ear.is_some() {
+            triangles.push([
+                outline[index[(i + n - 1) % n]],
+                outline[index[i]],
+                outline[index[(i + 1) % n]],
+            ]);
+        }
+        index.remove(i);
+    }
+    if index.len() == 3 {
+        triangles.push([outline[index[0]], outline[index[1]], outline[index[2]]]);
+    }
+    triangles
+}
+
 fn line(points: impl IntoIterator<Item = DVec2>, scale: f64) -> PlotPoints<'static> {
     points
         .into_iter()
@@ -1962,6 +2026,26 @@ impl MeridionalView {
                             .width(1.0),
                     );
                 }
+            }
+            // The inlet duct, when modelled: its fluid shaded, as it goes into the
+            // joined domain.
+            let duct = &g.contour.inlet_duct;
+            if duct.enabled && !duct.outline.is_empty() {
+                // A plot polygon fills as if convex: fill the duct triangle by triangle.
+                for t in triangulate(&duct.outline) {
+                    plot.polygon(
+                        Polygon::new("", line(t, scale))
+                            .fill_color(palette.stator.gamma_multiply(0.14))
+                            .stroke(egui::Stroke::NONE),
+                    );
+                }
+                let mut closed = duct.outline.clone();
+                closed.push(duct.outline[0]);
+                plot.line(
+                    Line::new("inlet duct", line(closed, scale))
+                        .color(palette.stator.gamma_multiply(0.8))
+                        .width(1.2),
+                );
             }
             if center_mode {
                 plot.line(
@@ -3205,6 +3289,30 @@ pub(crate) fn wall_velocities(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_l_shaped_outline_is_covered_by_triangles() {
+        let p = |x: f64, y: f64| DVec2::new(x, y);
+        let outline = [
+            p(0.0, 0.0),
+            p(2.0, 0.0),
+            p(2.0, 1.0),
+            p(1.0, 1.0),
+            p(1.0, 2.0),
+            p(0.0, 2.0),
+        ];
+        let triangles = triangulate(&outline);
+        let area: f64 = triangles
+            .iter()
+            .map(|[a, b, c]| (*b - *a).perp_dot(*c - *a).abs() / 2.0)
+            .sum();
+        assert_eq!(triangles.len(), 4);
+        assert!((area - 3.0).abs() < 1e-12);
+        // Either way round.
+        let mut reversed = outline.to_vec();
+        reversed.reverse();
+        assert_eq!(triangulate(&reversed).len(), 4);
+    }
     use crate::default_project;
     use crate::derived::Derived;
 

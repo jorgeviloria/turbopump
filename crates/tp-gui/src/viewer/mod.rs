@@ -118,6 +118,7 @@ pub(crate) fn part_name(id: PartId) -> &'static str {
         PartId::Vanes => "Vanes",
         PartId::Walls => "Side walls",
         PartId::Volute => "Casing",
+        PartId::Duct => "Inlet duct",
     })
 }
 

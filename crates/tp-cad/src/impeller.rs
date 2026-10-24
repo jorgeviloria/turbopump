@@ -89,6 +89,8 @@ pub struct ImpellerCad {
     pub impeller: Shape,
     /// Fluid of the side chambers between the impeller and the casing, when designed.
     pub side_chambers: Option<Shape>,
+    /// Fluid of the axial inlet duct ahead of the eye, when modelled and built.
+    pub inlet_duct: Option<Shape>,
     /// Wall thickness used, m.
     pub wall_thickness: f64,
     /// Bore and boss diameters, m.
@@ -345,6 +347,15 @@ pub fn build_impeller(g: &ImpellerGeometry, options: &CadOptions) -> Result<Impe
     } else {
         None
     };
+    // The inlet duct, revolved from its outline.
+    let duct = &g.contour.inlet_duct;
+    let inlet_duct = if duct.enabled && !duct.outline.is_empty() {
+        Some(occ::revolve_z(&profile_face(&outline_chains(
+            &duct.outline,
+        ))?)?)
+    } else {
+        None
+    };
 
     // Blades.
     let blade = blade_solid(g, options.blade_extension)?;
@@ -439,6 +450,7 @@ pub fn build_impeller(g: &ImpellerGeometry, options: &CadOptions) -> Result<Impe
         blades,
         impeller,
         side_chambers,
+        inlet_duct,
         wall_thickness: t,
         bore_diameter: 2.0 * rb,
         boss_diameter: 2.0 * rboss,
@@ -768,6 +780,25 @@ mod tests {
         let c = &with.contour.chambers;
         let pappus = revolved_volume(&c.front) + revolved_volume(&c.rear);
         assert_relative_eq!(chambers.volume() * 1e-9, pappus, max_relative = 5e-3);
+    }
+
+    #[test]
+    fn a_modelled_inlet_duct_is_revolved_into_its_fluid() {
+        let mut input = tp_design::impeller::ImpellerGeometryInput::default();
+        input.meridional.chambers.enabled = true;
+        input.meridional.inlet_duct.enabled = true;
+        let g = reference();
+        let with = tp_design::impeller::build(&g.basis, &input).unwrap();
+        let sharp = CadOptions {
+            fillet_radius: Some(0.0),
+            ..CadOptions::default()
+        };
+        let cad = build_impeller(&with, &sharp).unwrap();
+        let duct = cad.inlet_duct.unwrap();
+        assert!(duct.is_valid());
+        assert_eq!(duct.solid_count(), 1);
+        let pappus = revolved_volume(&with.contour.inlet_duct.outline);
+        assert_relative_eq!(duct.volume() * 1e-9, pappus, max_relative = 5e-3);
     }
 
     #[test]

@@ -2047,6 +2047,76 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
             }
         });
     }
+    if section_info(
+        ui,
+        tr("Inlet duct"),
+        tr(
+            "An axial duct ahead of the eye, for the inlet of a CFD domain. With the side chambers designed, it ends an axial gap short of the neck tip, so the leakage through the annular seal returns into the eye inside the same domain",
+        ),
+    ) {
+        props(ui, "inlet_duct", |ui| {
+            let built = g.map(|g| g.contour.inlet_duct.values);
+            let duct = &mut m.inlet_duct;
+            label(
+                ui,
+                tr("Model the inlet duct"),
+                tr(
+                    "Export its fluid with the CAD model, alone and inside the joined flow domain; it is drawn in the Side chambers scope of the Meridian view",
+                ),
+            );
+            let enabled = duct.enabled;
+            let response = ui.checkbox(&mut duct.enabled, "");
+            response.widget_info(|| {
+                egui::WidgetInfo::selected(
+                    egui::WidgetType::Checkbox,
+                    true,
+                    enabled,
+                    tr("Model the inlet duct"),
+                )
+            });
+            changed |= response.changed();
+            ui.end_row();
+            changed |= param_f64(
+                ui,
+                tr("Length L"),
+                tr("Upstream of the eye; automatic: the eye diameter d₁ (our choice)"),
+                &mut duct.length,
+                Length,
+                built.map(|v| v.length),
+                &units,
+                0.001..=5.0,
+            );
+            changed |= param_f64(
+                ui,
+                tr("Duct diameter"),
+                tr("Automatic: the shroud diameter at the inlet, so the wall carries straight on"),
+                &mut duct.diameter,
+                Length,
+                built.map(|v| v.diameter),
+                &units,
+                0.001..=5.0,
+            );
+            changed |= param_f64(
+                ui,
+                tr("Axial gap Δz"),
+                tr(
+                    "Between the suction cover at the end of the duct and the tip of the neck, where the leakage comes out; automatic: the axial gap of the side chambers",
+                ),
+                &mut duct.axial_gap,
+                Length,
+                built.map(|v| v.axial_gap),
+                &units,
+                0.00001..=0.2,
+            );
+            if let Some(v) = built {
+                value_row(
+                    ui,
+                    tr("Hub diameter through the duct"),
+                    units.show(Length, v.hub_diameter),
+                );
+            }
+        });
+    }
     if changed {
         edit_geometry(cx, id, "edit meridional contour", input);
     }

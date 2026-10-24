@@ -9,7 +9,7 @@ use tp_design::diffuser::DiffuserDesign;
 use tp_design::impeller::ImpellerGeometry;
 use tp_design::volute::VoluteGeometry;
 use tp_io::mesh::{Triangle, diffuser_parts, impeller_parts, volute_triangles};
-use tp_math::DVec3;
+use tp_math::{DVec2, DVec3};
 
 /// How much of a part the eye sees through.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -52,6 +52,8 @@ pub(crate) enum PartId {
     /// Side walls of a diffuser.
     Walls,
     Volute,
+    /// The fluid of the inlet duct ahead of the eye.
+    Duct,
 }
 
 /// How one part of the model is drawn.
@@ -91,6 +93,8 @@ pub(crate) struct ViewOptions {
     /// Side walls of a diffuser.
     pub walls: Part,
     pub volute: Part,
+    /// The inlet duct, when modelled.
+    pub duct: Part,
     /// Every blade, or only the first.
     pub all_blades: bool,
     /// Outlines and sharp edges of the parts.
@@ -110,6 +114,7 @@ impl ViewOptions {
             PartId::Vanes => &self.vanes,
             PartId::Walls => &self.walls,
             PartId::Volute => &self.volute,
+            PartId::Duct => &self.duct,
         }
     }
 
@@ -121,6 +126,7 @@ impl ViewOptions {
             PartId::Vanes => &mut self.vanes,
             PartId::Walls => &mut self.walls,
             PartId::Volute => &mut self.volute,
+            PartId::Duct => &mut self.duct,
         }
     }
 }
@@ -134,6 +140,7 @@ impl Default for ViewOptions {
             vanes: Part::solid(VANES),
             walls: Part::glass(WALLS),
             volute: Part::glass(VOLUTE),
+            duct: Part::glass(DUCT),
             all_blades: true,
             edges: true,
             sections: true,
@@ -181,6 +188,10 @@ const SHROUD: [u8; 3] = [196, 153, 105];
 const VANES: [u8; 3] = [69, 158, 144];
 const WALLS: [u8; 3] = [89, 170, 160];
 const VOLUTE: [u8; 3] = [85, 129, 188];
+/// The inlet duct: a cool grey, a fluid rather than a part of the pump.
+const DUCT: [u8; 3] = [120, 150, 170];
+/// Steps round the axis of a revolved outline.
+const REVOLVE_STEPS: usize = 72;
 /// Lines are drawn in the part's color times this.
 const LINE_SHADE: f32 = 0.35;
 /// One volute section of this many is drawn as a line.
@@ -325,6 +336,25 @@ fn line_color(rgb: [f32; 3]) -> [f32; 4] {
     rgba(rgb.map(|c| c * LINE_SHADE), 1.0)
 }
 
+/// The surface of a closed outline (z, r) revolved about the z axis.
+fn revolved(outline: &[DVec2]) -> Vec<Triangle> {
+    let n = outline.len();
+    let mut triangles = Vec::with_capacity(n * REVOLVE_STEPS * 2);
+    let at = |p: DVec2, k: usize| {
+        let a = std::f64::consts::TAU * k as f64 / REVOLVE_STEPS as f64;
+        DVec3::new(p.y * a.cos(), p.y * a.sin(), p.x)
+    };
+    for i in 0..n {
+        let (p, q) = (outline[i], outline[(i + 1) % n]);
+        for k in 0..REVOLVE_STEPS {
+            let (a, b, c, d) = (at(p, k), at(q, k), at(q, k + 1), at(p, k + 1));
+            triangles.push([a, b, c]);
+            triangles.push([a, c, d]);
+        }
+    }
+    triangles
+}
+
 /// Builds the vertices of the stage as `options` ask.
 pub(crate) fn build(
     g: &ImpellerGeometry,
@@ -340,13 +370,20 @@ pub(crate) fn build(
     };
     let diffuser = stator.map(diffuser_parts).unwrap_or_default();
     let casing = volute.map(volute_triangles).unwrap_or_default();
-    let shown: [(&[Triangle], PartId); 6] = [
+    let duct = &g.contour.inlet_duct;
+    let duct = if duct.enabled {
+        revolved(&duct.outline)
+    } else {
+        Vec::new()
+    };
+    let shown: [(&[Triangle], PartId); 7] = [
         (&blades, PartId::Blades),
         (&parts.hub, PartId::Hub),
         (&parts.shroud, PartId::Shroud),
         (&diffuser.vanes, PartId::Vanes),
         (&diffuser.walls, PartId::Walls),
         (&casing, PartId::Volute),
+        (&duct, PartId::Duct),
     ];
 
     let mut mesh = MeshData::default();
@@ -421,6 +458,7 @@ pub(crate) fn build(
         .chain(&parts.shroud)
         .chain(&diffuser.walls)
         .chain(&casing)
+        .chain(&duct)
         .flatten();
     let (min, max) = all.clone().fold(
         (DVec3::splat(f64::INFINITY), DVec3::splat(f64::NEG_INFINITY)),
@@ -579,6 +617,22 @@ mod tests {
         assert_eq!(mesh.parts[1].range.end, mesh.opaque);
         assert_eq!(mesh.parts[2].range.end as usize, mesh.vertices.len());
         assert!(mesh.parts.iter().all(|p| p.range.len().is_multiple_of(3)));
+    }
+
+    #[test]
+    fn a_modelled_inlet_duct_is_a_part_of_its_own() {
+        let mut g = geometry();
+        let without = build(&g, None, None, &ViewOptions::default());
+        assert!(without.parts.iter().all(|p| p.id != PartId::Duct));
+        let mut input = tp_design::impeller::ImpellerGeometryInput::default();
+        input.meridional.chambers.enabled = true;
+        input.meridional.inlet_duct.enabled = true;
+        g = tp_design::impeller::build(&g.basis, &input).unwrap();
+        let with = build(&g, None, None, &ViewOptions::default());
+        let duct = with.parts.iter().find(|p| p.id == PartId::Duct).unwrap();
+        assert_eq!(duct.opacity, Opacity::Glass);
+        // The duct reaches upstream of the eye: the bounds grow that way.
+        assert!(with.radius > without.radius);
     }
 
     #[test]

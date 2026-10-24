@@ -1109,6 +1109,11 @@ impl TurbopumpApp {
             blades: impeller
                 .and_then(|id| self.derived.geometry(id))
                 .map(|g| g.blade.count),
+            duct: impeller
+                .and_then(|id| self.derived.geometry(id))
+                .is_some_and(|g| {
+                    g.contour.inlet_duct.enabled && !g.contour.inlet_duct.outline.is_empty()
+                }),
             stator: self.active_stator().and_then(|id| {
                 let c = project.component(id)?;
                 Some((
@@ -2492,6 +2497,48 @@ mod tests {
             "{}",
             gap(moved)
         );
+    }
+
+    #[test]
+    fn the_inlet_duct_is_modelled_from_the_contour_step() {
+        let mut harness = editor();
+        let id = harness.state().active_impeller().unwrap();
+        harness.state_mut().meridional.set_scope(Scope::Chambers);
+        harness.run();
+        harness
+            .get_all_by_label("Design the side chambers")
+            .next()
+            .unwrap()
+            .click();
+        harness.run();
+        // Every section folded but the duct's, so it is in sight.
+        steps::fold_sections(&harness.ctx, true);
+        harness.run();
+        harness
+            .get_all_by_label("Inlet duct")
+            .last()
+            .unwrap()
+            .click();
+        harness.run();
+        {
+            use egui_kittest::kittest::NodeT;
+            harness
+                .get_all_by_label("Model the inlet duct")
+                .find(|n| n.accesskit_node().role() == egui::accesskit::Role::CheckBox)
+                .unwrap()
+                .click();
+        }
+        harness.run();
+        assert!(meridional(harness.state()).inlet_duct.enabled);
+        let g = harness.state().derived.geometry(id).unwrap();
+        let duct = &g.contour.inlet_duct;
+        assert!(
+            duct.joins_seal && !duct.outline.is_empty(),
+            "{:?}",
+            duct.warnings
+        );
+        // The 3D scene lists it under the impeller.
+        assert!(harness.state().scene_stage().duct);
     }
 
     #[test]

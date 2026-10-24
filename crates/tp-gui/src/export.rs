@@ -403,9 +403,11 @@ mod cad {
         let mut files = Vec::new();
         for format in formats {
             let chambers = cad.side_chambers.as_ref().map(|s| ("side-chambers", s));
+            let duct = cad.inlet_duct.as_ref().map(|s| ("inlet-duct", s));
             for (stem, shape) in [("impeller", &cad.impeller), ("fluid", &cad.fluid)]
                 .into_iter()
                 .chain(chambers)
+                .chain(duct)
             {
                 let path = folder.join(format!("{stem}.{format}"));
                 write(shape, &path, format, deflection)?;
