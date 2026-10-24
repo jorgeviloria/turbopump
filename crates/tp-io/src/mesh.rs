@@ -218,16 +218,12 @@ pub fn volute_triangles(g: &VoluteGeometry) -> Vec<Triangle> {
     out
 }
 
-/// The body of a rounded cutwater as a closed surface: lofted through its outline in
-/// each plane across the inlet width and closed at the outermost planes. Empty unless
-/// rounded.
+/// The body of a rounded cutwater as a closed surface: lofted through its outlines
+/// across the inlet width ([`VoluteGeometry::cutwater_body`]) and closed at the
+/// outermost planes. Empty unless rounded.
 pub fn cutwater_triangles(g: &VoluteGeometry) -> Vec<Triangle> {
-    let rings: Vec<&Vec<DVec3>> = g
-        .cutwater_slices
-        .iter()
-        .map(|s| &s.outline)
-        .filter(|o| o.len() > 2)
-        .collect();
+    let body = g.cutwater_body();
+    let rings: Vec<&Vec<DVec3>> = body.iter().collect();
     let mut out = Vec::new();
     let Some(&first) = rings.first() else {
         return out;
@@ -300,6 +296,20 @@ pub fn volute_view_triangles(g: &VoluteGeometry) -> Vec<Triangle> {
             .min_by(|a, b| (a.z - z).abs().total_cmp(&(b.z - z).abs()))
             .expect("some planes")
     };
+    // The body between the planes too, as the CAD lofts it.
+    let fine = g.cutwater_body();
+    let body: Vec<Vec<DVec2>> = fine
+        .iter()
+        .map(|o| o.iter().map(|q| q.truncate()).collect())
+        .collect();
+    let levels: Vec<f64> = fine.iter().map(|o| o[0].z).collect();
+    let outline = |z: f64| {
+        levels
+            .iter()
+            .enumerate()
+            .min_by(|a, b| (a.1 - z).abs().total_cmp(&(b.1 - z).abs()))
+            .map(|(k, _)| &body[k])
+    };
     // The channels again, each with its own triangles, the diffuser last.
     let mut out = Vec::new();
     let count = channels.len();
@@ -315,15 +325,15 @@ pub fn volute_view_triangles(g: &VoluteGeometry) -> Vec<Triangle> {
             cap(&mut own, last);
         }
         let diffuser = i + 1 == count;
+        // Only triangles wholly inside go, so that no hole opens along the edge: what
+        // is left pokes a little into the opaque body or into the other channel.
         out.extend(own.into_iter().filter(|t| {
             let c = (t[0] + t[1] + t[2]) / 3.0;
             if !near(c) {
                 return true;
             }
             let s = plane(c.z);
-            let p = c.truncate();
-            let body: Vec<DVec2> = s.outline.iter().map(|q| q.truncate()).collect();
-            if body.len() > 2 && inside(&body, p) {
+            if outline(c.z).is_some_and(|body| t.iter().all(|q| inside(body, q.truncate()))) {
                 return false;
             }
             // A spiral wall inside the diffuser, or a diffuser wall inside the spiral.
@@ -333,7 +343,7 @@ pub fn volute_view_triangles(g: &VoluteGeometry) -> Vec<Triangle> {
                 (&s.diffuser_wall, false)
             };
             let other: Vec<DVec2> = other.iter().map(|q| q.truncate()).collect();
-            !beside(&other, p, toward_axis)
+            !t.iter().all(|q| beside(&other, q.truncate(), toward_axis))
         }));
     }
     out
@@ -617,13 +627,13 @@ pub(crate) mod tests {
             view.len(),
             all.len()
         );
-        // Nothing of the walls is left inside the body in the midplane.
+        // No triangle of the walls is left wholly inside the body in the midplane.
         let mid = &g.cutwater_slices[g.cutwater_slices.len() / 2];
         let body: Vec<DVec2> = mid.outline.iter().map(|p| p.truncate()).collect();
         for t in &view {
             let c = (t[0] + t[1] + t[2]) / 3.0;
             if (c.z - mid.z).abs() < 1e-3 {
-                assert!(!inside(&body, c.truncate()), "{c}");
+                assert!(!t.iter().all(|q| inside(&body, q.truncate())), "{c}");
             }
         }
         // A tangent cutwater is drawn as it is.
