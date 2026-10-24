@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use eframe::egui;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
-use tp_gui::{TurbopumpApp, View};
+use tp_gui::{Scope, TurbopumpApp, View};
 
 fn output(name: &str) -> PathBuf {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/screenshots");
@@ -56,8 +56,7 @@ fn main_window() {
             let name = view.title().to_lowercase().replace(' ', "-");
             save(&mut harness, &format!("{name}-{suffix}"));
         }
-        // The home tab of the toolbar and the tree of the 3D model.
-        harness.get_by_label("Home tab").click();
+        // The 3D tab of the toolbar and the tree of the 3D model.
         harness.get_by_label_contains("3D model").click();
         harness.state_mut().focus_view(View::View3d);
         harness.run();
@@ -175,8 +174,10 @@ fn internal_volute() {
     harness.remove_cursor();
     harness.run();
     save(&mut harness, "internal-section");
-    harness.get_by_label_contains("Properties").click();
-    harness.state_mut().focus_view(View::Meridional);
+    let open = harness.state().sidebar_open();
+    harness.state_mut().set_sidebar_open(!open);
+    harness.state_mut().set_meridian_scope(Scope::Stage);
+    harness.state_mut().focus_view(View::Meridian);
     harness.remove_cursor();
     harness.run();
     save(&mut harness, "internal-meridional");
@@ -215,14 +216,19 @@ fn diffuser() {
 #[ignore = "needs a GPU; run with --ignored"]
 fn potential_flow() {
     let mut harness = harness(egui::Theme::Light);
-    harness.state_mut().focus_view(View::Meridional);
+    harness.state_mut().set_meridian_scope(Scope::Stage);
+    harness.state_mut().focus_view(View::Meridian);
+    harness.run();
+    harness.get_by_label_contains("Analysis").click();
     harness.run();
     harness.get_by_label("potential flow").click();
+    harness.run();
+    harness.get_by_label_contains("Analysis").click();
     harness.remove_cursor();
     harness.run();
     save(&mut harness, "potential-flow");
     // The color map of c_m with its iso-lines and vectors, the blades blocking the flow.
-    harness.get_by_label_contains("Potential").click();
+    harness.get_by_label_contains("Analysis").click();
     harness.run();
     for option in [
         "c_m iso-lines",
@@ -277,8 +283,7 @@ fn spanish() {
     for (view, name) in [
         (View::Report, "es-report"),
         (View::Performance, "es-curves"),
-        (View::Meridional, "es-meridional"),
-        (View::MeridianEditor, "es-editor"),
+        (View::Meridian, "es-meridian"),
         (View::View3d, "es-3d"),
     ] {
         harness.state_mut().focus_view(view);
@@ -334,7 +339,8 @@ fn double_volute() {
     harness.run();
     save(&mut harness, "double-volute-front");
     // Without the properties panel the rib nose shows on the right.
-    harness.get_by_label_contains("Properties").click();
+    let open = harness.state().sidebar_open();
+    harness.state_mut().set_sidebar_open(!open);
     harness.remove_cursor();
     harness.run();
     save(&mut harness, "double-volute-rib");
@@ -376,7 +382,8 @@ fn radial_discharge() {
         .click();
     harness.run();
     front(&mut harness, "tangential-discharge-front");
-    harness.get_by_label_contains("Properties").click();
+    let open = harness.state().sidebar_open();
+    harness.state_mut().set_sidebar_open(!open);
     harness.run();
     harness
         .get_by_value("tangential, opening to both sides")
@@ -428,7 +435,8 @@ fn spiral_development() {
     harness.run();
     save(&mut harness, "spiral-development");
     harness.state_mut().focus_view(View::FrontView);
-    harness.get_by_label_contains("Properties").click();
+    let open = harness.state().sidebar_open();
+    harness.state_mut().set_sidebar_open(!open);
     harness.remove_cursor();
     harness.run();
     save(&mut harness, "spiral-development-front");
@@ -459,7 +467,7 @@ fn view_cube() {
 fn dialogs() {
     for (theme, suffix) in [(egui::Theme::Light, "light"), (egui::Theme::Dark, "dark")] {
         let mut harness = harness(theme);
-        harness.get_by_label("Help tab").click();
+        harness.get_all_by_label("Help").next().unwrap().click();
         harness.run();
         harness.get_by_label_contains("About").click();
         harness.run();
@@ -541,10 +549,11 @@ fn semi_axial() {
     save(&mut harness, "semi-axial-main");
     harness.get_by_label_contains("Accept step").click();
     harness.run();
-    harness.state_mut().focus_view(View::Meridional);
+    harness.state_mut().set_meridian_scope(Scope::Stage);
+    harness.state_mut().focus_view(View::Meridian);
     harness.run();
     save(&mut harness, "semi-axial-meridional");
-    harness.state_mut().focus_view(View::MeridianEditor);
+    harness.state_mut().set_meridian_scope(Scope::Channel);
     harness.run();
     save(&mut harness, "semi-axial-editor");
     harness.state_mut().focus_view(View::View3d);
@@ -594,10 +603,11 @@ fn meridional_segments() {
         .wgpu()
         .build_eframe(|cc| TurbopumpApp::new(cc, Some(&path)));
     harness.run();
-    harness.state_mut().focus_view(View::Meridional);
+    harness.state_mut().set_meridian_scope(Scope::Stage);
+    harness.state_mut().focus_view(View::Meridian);
     harness.run();
     save(&mut harness, "meridional-segments");
-    harness.state_mut().focus_view(View::MeridianEditor);
+    harness.state_mut().set_meridian_scope(Scope::Channel);
     harness.run();
     save(&mut harness, "meridian-editor");
 }
@@ -608,13 +618,13 @@ fn meridional_segments() {
 fn meridian_editor() {
     for (theme, suffix) in [(egui::Theme::Dark, "dark"), (egui::Theme::Light, "light")] {
         let mut harness = harness(theme);
-        harness.state_mut().focus_view(View::MeridianEditor);
+        harness.state_mut().focus_view(View::Meridian);
         harness.run();
         save(&mut harness, &format!("editor-{suffix}"));
     }
     // The analysis menu open, with the charts under the diagram.
     let mut harness = harness(egui::Theme::Light);
-    harness.state_mut().focus_view(View::MeridianEditor);
+    harness.state_mut().focus_view(View::Meridian);
     harness.run();
     harness.get_by_label_contains("Analysis").click();
     harness.run();
@@ -636,7 +646,11 @@ fn meridian_editor() {
         .unwrap()
         .click();
     harness.run();
-    harness.get_by_label("design the side chambers").click();
+    harness
+        .get_all_by_label("Design the side chambers")
+        .next()
+        .unwrap()
+        .click();
     harness.run();
     harness.run();
     save(&mut harness, "editor-chambers");
@@ -681,7 +695,7 @@ fn meridian_segment_kinds() {
         .wgpu()
         .build_eframe(|cc| TurbopumpApp::new(cc, Some(&path)));
     harness.run();
-    harness.state_mut().focus_view(View::MeridianEditor);
+    harness.state_mut().focus_view(View::Meridian);
     harness.run();
     save(&mut harness, "meridian-kinds");
 }
@@ -720,7 +734,7 @@ fn center_line_mode() {
         .wgpu()
         .build_eframe(|cc| TurbopumpApp::new(cc, Some(&path)));
     harness.run();
-    harness.state_mut().focus_view(View::MeridianEditor);
+    harness.state_mut().focus_view(View::Meridian);
     harness.run();
     harness.run();
     save(&mut harness, "editor-center-line");

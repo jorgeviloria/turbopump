@@ -19,13 +19,14 @@ use crate::new_project::{NewProjectForm, Outcome};
 use crate::objective;
 use crate::ribbon::{Command, Ribbon, RibbonCx};
 use crate::settings::{self, Section, SettingsCx};
-use crate::steps::AcceptState;
 use crate::theme::{self, Palette, icon};
+use crate::tools::{self, ToolsCx};
 use crate::tree::StageParts;
 use crate::viewer::Viewer;
 use crate::views::cross_section::CrossSectionView;
+use crate::views::meridional::{MeridionalView, Scope};
 use crate::views::performance::PerformanceView;
-use crate::views::{blade, front, meridional::MeridionalView, report};
+use crate::views::{blade, front, report};
 use crate::{default_project, steps, tree};
 
 /// What the step panel shows.
@@ -100,23 +101,23 @@ impl EditCtx<'_> {
 /// The views of the main area, one at a time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum View {
-    Meridional,
-    MeridianEditor,
-    CrossSection,
+    /// The meridional section, in one of its scopes.
+    Meridian,
     Blade,
     FrontView,
+    CrossSection,
     View3d,
     Performance,
     Report,
 }
 
 impl View {
-    pub const ALL: [View; 8] = [
-        View::Meridional,
-        View::MeridianEditor,
-        View::CrossSection,
+    /// The views in the order of their tabs.
+    pub const ALL: [View; 7] = [
+        View::Meridian,
         View::Blade,
         View::FrontView,
+        View::CrossSection,
         View::View3d,
         View::Performance,
         View::Report,
@@ -124,8 +125,7 @@ impl View {
 
     pub fn title(self) -> &'static str {
         tr(match self {
-            View::Meridional => "Meridional view",
-            View::MeridianEditor => "Meridian editor",
+            View::Meridian => "Meridional section",
             View::CrossSection => "Volute cross sections",
             View::Blade => "Blade",
             View::FrontView => "Front view",
@@ -135,11 +135,10 @@ impl View {
         })
     }
 
-    /// Name under a toolbar button.
+    /// Name on its tab.
     pub fn short_title(self) -> &'static str {
         tr(match self {
-            View::Meridional => "Meridional",
-            View::MeridianEditor => "Editor",
+            View::Meridian => "Meridian",
             View::CrossSection => "Section",
             View::Blade => "Blade",
             View::FrontView => "Front",
@@ -151,8 +150,7 @@ impl View {
 
     pub fn icon(self) -> &'static str {
         match self {
-            View::Meridional => icon::BEZIER_CURVE,
-            View::MeridianEditor => icon::PENCIL_RULER,
+            View::Meridian => icon::BEZIER_CURVE,
             View::CrossSection => icon::CIRCLE_HALF,
             View::Blade => icon::WAVE_SINE,
             View::FrontView => icon::FAN,
@@ -247,25 +245,28 @@ fn folded_strip(ui: &mut Ui, rect: egui::Rect, p: &Palette) -> bool {
     response.clicked()
 }
 
-/// The view that suits a step best, if any.
-fn view_for(kind: ComponentKind, step: DesignStep) -> Option<View> {
+/// The view that suits a step best, if any, and for the Meridian view its scope.
+fn view_for(kind: ComponentKind, step: DesignStep) -> Option<(View, Option<Scope>)> {
     use DesignStep::*;
+    let view = |v| Some((v, None));
     match (kind, step) {
-        (_, ModelSettings) => Some(View::View3d),
-        (ComponentKind::Impeller, MeridionalContour) => Some(View::MeridianEditor),
+        (_, ModelSettings) => view(View::View3d),
+        (ComponentKind::Impeller, MeridionalContour) => {
+            Some((View::Meridian, Some(Scope::Channel)))
+        }
         (
             ComponentKind::Impeller,
             BladeProperties | BladeMeanLines | BladeProfiles | BladeEdges,
-        ) => Some(View::Blade),
-        (ComponentKind::Volute, CrossSection) => Some(View::CrossSection),
-        (ComponentKind::Volute, WallThickness) => Some(View::Meridional),
+        ) => view(View::Blade),
+        (ComponentKind::Volute, CrossSection) => view(View::CrossSection),
+        (ComponentKind::Volute, WallThickness) => Some((View::Meridian, Some(Scope::Stage))),
         (ComponentKind::Volute, VoluteSetup | SpiralDevelopment | Diffuser | CutWater) => {
-            Some(View::FrontView)
+            view(View::FrontView)
         }
         (ComponentKind::Stator { .. }, MainDimensions | MeridionalContour) => {
-            Some(View::Meridional)
+            Some((View::Meridian, Some(Scope::Stage)))
         }
-        (ComponentKind::Stator { .. }, _) => Some(View::FrontView),
+        (ComponentKind::Stator { .. }, _) => view(View::FrontView),
         _ => None,
     }
 }
@@ -438,6 +439,16 @@ impl TurbopumpApp {
         self.sidebar_open
     }
 
+    /// What the Meridian view shows and edits.
+    pub fn set_meridian_scope(&mut self, scope: Scope) {
+        self.meridional.set_scope(scope);
+    }
+
+    /// Opens or folds the properties panel.
+    pub fn set_sidebar_open(&mut self, open: bool) {
+        self.sidebar_open = open;
+    }
+
     /// Draws the whole window. `render_state` enables the 3D view.
     pub fn show(&mut self, ui: &mut Ui, render_state: Option<&RenderState>) {
         let ctx = ui.ctx().clone();
@@ -465,34 +476,40 @@ impl TurbopumpApp {
             .frame(Frame::new().fill(p.ribbon))
             .show_separator_line(false)
             .show(ui, |ui| {
-                let accept = match self.selection {
-                    Selection::Step(id, step) => {
-                        steps::accept_state(self.doc.project(), &self.derived, id, step)
-                    }
-                    Selection::Setup => AcceptState::NotApplicable,
-                };
                 let impeller = self.active_impeller();
                 let volute = self.active_volute();
                 let history = self.doc.history();
-                let mut cx = RibbonCx {
+                let tools = ToolsCx {
+                    has_geometry: impeller.is_some_and(|id| self.derived.geometry(id).is_some()),
+                    has_volute: volute.is_some_and(|id| self.derived.volute(id).is_some()),
+                };
+                let cx = RibbonCx {
                     project: self.doc.project(),
-                    selection: self.selection,
+                    view: self.view,
                     dirty: self.doc.is_dirty(),
                     can_undo: history.can_undo(),
                     can_redo: history.can_redo(),
                     undo_label: history.undo_label(),
                     redo_label: history.redo_label(),
-                    accept,
-                    has_geometry: impeller.is_some_and(|id| self.derived.geometry(id).is_some()),
-                    has_volute: volute.is_some_and(|id| self.derived.volute(id).is_some()),
-                    cad_running: self.exports.cad_running(),
-                    options: &mut self.viewer.options,
+                    has_geometry: tools.has_geometry,
+                    has_volute: tools.has_volute,
                     tree_open: self.tree_open,
-                    sidebar_open: self.sidebar_open,
-                    messages_open: self.show_messages,
-                    follow_step: self.follow_step,
                 };
-                command = self.ribbon.show(ui, &mut cx);
+                let units = self.doc.project().display_units.clone();
+                let view = self.view;
+                let meridional = &mut self.meridional;
+                let blade = &mut self.blade;
+                let options = &mut self.viewer.options;
+                let performance = &mut self.performance;
+                command = self.ribbon.show(ui, &cx, |ui| match view {
+                    View::Meridian => tools::meridian(ui, meridional, &units, tools),
+                    View::Blade => tools::blade(ui, blade, tools),
+                    View::FrontView => tools::front(ui, tools),
+                    View::CrossSection => tools::section(ui, tools),
+                    View::View3d => tools::view3d(ui, options, tools),
+                    View::Performance => tools::curves(ui, performance),
+                    View::Report => tools::report(ui, tools),
+                });
             });
         let mut objective = None;
         Panel::top("objective")
@@ -610,15 +627,17 @@ impl TurbopumpApp {
         let mut main_area = ui.available_rect_before_wrap();
         CentralPanel::no_frame().show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
-            self.view_bar(ui);
             main_area = ui.available_rect_before_wrap();
             // The width the floating properties panel hides on the right of the view.
             let cover = self.sidebar_extent(ui.ctx(), main_area) + SIDEBAR_MARGIN;
             let active = self.active_impeller();
-            // The editor opens on the meridian, framed, with its step in the panel.
-            if self.view == View::MeridianEditor && self.shown != Some(View::MeridianEditor) {
+            // The Meridian view opens framed. Outside the stage scope it edits the
+            // impeller channel, so the contour step comes into the panel.
+            if self.view == View::Meridian && self.shown != Some(View::Meridian) {
                 self.meridional.framed = false;
-                if let Some(id) = active {
+                if self.meridional.scope != Scope::Stage
+                    && let Some(id) = active
+                {
                     self.selection = Selection::Step(id, DesignStep::MeridionalContour);
                 }
             }
@@ -636,7 +655,7 @@ impl TurbopumpApp {
             let Some(id) = active else {
                 ui.centered_and_justified(|ui| {
                     ui.weak(tr(
-                        "Add an impeller to see its geometry (Home > Components).",
+                        "Add an impeller to see its geometry (the + of the component column).",
                     ));
                 });
                 return;
@@ -655,12 +674,8 @@ impl TurbopumpApp {
             ui.scope_builder(egui::UiBuilder::new().max_rect(target), |ui| {
                 ui.set_min_size(target.size());
                 match self.view {
-                    View::Meridional => {
-                        self.meridional.show(ui, &mut cx, id, stator, volute);
-                    }
-                    View::MeridianEditor => {
-                        self.meridional
-                            .show_editor(ui, &mut cx, id, stator, volute, cover);
+                    View::Meridian => {
+                        self.meridional.show(ui, &mut cx, id, stator, volute, cover);
                     }
                     View::CrossSection => self.cross_section.show(ui, &mut cx, volute, cover),
                     View::Blade => self.blade.show(ui, &mut cx, id, &units, cover),
@@ -708,9 +723,18 @@ impl TurbopumpApp {
             if self.follow_step
                 && let Selection::Step(id, step) = self.selection
                 && let Some(kind) = self.doc.project().component(id).map(|c| c.kind())
-                && let Some(view) = view_for(kind, step)
+                && let Some((view, scope)) = view_for(kind, step)
             {
                 self.view = view;
+                // The scope follows the step, but one picked by hand outside the stage
+                // stays while the channel is edited.
+                match scope {
+                    Some(Scope::Stage) => self.meridional.set_scope(Scope::Stage),
+                    Some(scope) if self.meridional.scope == Scope::Stage => {
+                        self.meridional.set_scope(scope);
+                    }
+                    _ => {}
+                }
             }
             self.followed = Some(self.selection);
         }
@@ -720,56 +744,6 @@ impl TurbopumpApp {
         if idle {
             self.doc.end_gesture();
         }
-    }
-
-    /// The strip above the main view: the tree toggle, the views and the dialog toggle.
-    fn view_bar(&mut self, ui: &mut Ui) {
-        let p = Palette::of(ui);
-        Frame::new()
-            .fill(p.strip)
-            .inner_margin(Margin::symmetric(6, 3))
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.horizontal(|ui| {
-                    let tip = if self.tree_open {
-                        tr("Hide the tree")
-                    } else {
-                        tr("Show the tree")
-                    };
-                    if ui
-                        .add(Button::selectable(
-                            self.tree_open,
-                            RichText::new(icon::SIDEBAR_SIMPLE).size(16.0),
-                        ))
-                        .on_hover_text(tip)
-                        .clicked()
-                    {
-                        self.tree_open = !self.tree_open;
-                    }
-                    const TAB: f32 = 104.0;
-                    let total = TAB * View::ALL.len() as f32;
-                    let free = ui.available_width() - total - 150.0;
-                    ui.add_space((free / 2.0).max(8.0));
-                    for view in View::ALL {
-                        let text = format!("{}  {}", view.icon(), view.short_title());
-                        let button = Button::selectable(self.view == view, text)
-                            .min_size(egui::vec2(TAB, 26.0));
-                        if ui.add(button).on_hover_text(view.title()).clicked() {
-                            self.view = view;
-                        }
-                    }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let text = format!("{}  {}", icon::SLIDERS_HORIZONTAL, tr("Properties"));
-                        if ui
-                            .add(Button::selectable(self.sidebar_open, text))
-                            .on_hover_text(tr("Show or hide the dialog of the selected step"))
-                            .clicked()
-                        {
-                            self.sidebar_open = !self.sidebar_open;
-                        }
-                    });
-                });
-            });
     }
 
     /// Width the properties panel takes this frame, animated between folded and open.
@@ -887,7 +861,6 @@ impl TurbopumpApp {
             Command::Quit => ctx.send_viewport_cmd(ViewportCommand::Close),
             Command::Undo => self.undo(),
             Command::Redo => self.redo(),
-            Command::GlobalSetup => self.edit_ctx().open(Selection::Setup),
             Command::UsUnits(us) => {
                 let preset = if us {
                     DisplayUnits::us()
@@ -909,14 +882,6 @@ impl TurbopumpApp {
                         Ok(())
                     });
                 }
-            }
-            Command::Add(index) => tree::add_component(&mut self.edit_ctx(), index),
-            Command::Remove(id) => tree::remove_component(&mut self.edit_ctx(), id),
-            Command::Select(id, step) => self.edit_ctx().open(Selection::Step(id, step)),
-            Command::Accept(id, step) => steps::accept(&mut self.edit_ctx(), id, step),
-            Command::Reset(id, step) => {
-                let project = self.doc.project().clone();
-                steps::reset(&mut self.edit_ctx(), &project, id, step);
             }
             Command::ExportText(kind) => {
                 if let Some(g) = self
@@ -949,8 +914,6 @@ impl TurbopumpApp {
                 self.viewer.apply(view);
             }
             Command::ToggleTree => self.tree_open = !self.tree_open,
-            Command::ToggleDialog => self.sidebar_open = !self.sidebar_open,
-            Command::ToggleMessages => self.show_messages = !self.show_messages,
             Command::FollowStep => self.follow_step = !self.follow_step,
             Command::Theme(preference) => ctx.set_theme(preference),
             Command::Zoom(zoom) => ctx.set_zoom_factor(zoom),
@@ -1413,7 +1376,7 @@ mod tests {
             .build_eframe(|cc| TurbopumpApp::new(cc, None));
         harness.run();
         // The dialog stays open: it does not block the views.
-        harness.state_mut().focus_view(View::Meridional);
+        harness.state_mut().focus_view(View::Meridian);
         harness.run();
         assert!(harness.state().sidebar_open);
         let id = harness.state().active_impeller().unwrap();
@@ -1481,7 +1444,7 @@ mod tests {
             .with_size([1440.0, 900.0])
             .build_eframe(|cc| TurbopumpApp::new(cc, None));
         harness.run();
-        harness.state_mut().focus_view(View::Meridional);
+        harness.state_mut().focus_view(View::Meridian);
         harness.run();
         let id = harness.state().active_impeller().unwrap();
         let segments = |app: &TurbopumpApp| {
@@ -1539,7 +1502,7 @@ mod tests {
             .with_size([1440.0, 900.0])
             .build_eframe(|cc| TurbopumpApp::new(cc, None));
         harness.run();
-        harness.state_mut().focus_view(View::MeridianEditor);
+        harness.state_mut().focus_view(View::Meridian);
         harness.run();
         let id = harness.state().active_impeller().unwrap();
         let app = harness.state();
@@ -1618,7 +1581,7 @@ mod tests {
             .with_size([1440.0, 900.0])
             .build_eframe(|cc| TurbopumpApp::new(cc, None));
         harness.run();
-        harness.state_mut().focus_view(View::MeridianEditor);
+        harness.state_mut().focus_view(View::Meridian);
         harness.run();
         let id = harness.state().active_impeller().unwrap();
         // A hub control point below the axis leaves no geometry.
@@ -1646,7 +1609,7 @@ mod tests {
             .with_size([1440.0, 900.0])
             .build_eframe(|cc| TurbopumpApp::new(cc, None));
         harness.run();
-        harness.state_mut().focus_view(View::MeridianEditor);
+        harness.state_mut().focus_view(View::Meridian);
         harness.run();
         let id = harness.state().active_impeller().unwrap();
         let on_screen = |app: &TurbopumpApp, p: tp_math::DVec2| {
@@ -1732,7 +1695,7 @@ mod tests {
             .with_size([1440.0, 900.0])
             .build_eframe(|cc| TurbopumpApp::new(cc, None));
         harness.run();
-        harness.state_mut().focus_view(View::Meridional);
+        harness.state_mut().focus_view(View::Meridian);
         harness.run();
         let id = harness.state().active_impeller().unwrap();
         let shape = |app: &TurbopumpApp| {
@@ -1843,7 +1806,7 @@ mod tests {
             .with_size([1440.0, 900.0])
             .build_eframe(|cc| TurbopumpApp::new(cc, None));
         harness.run();
-        harness.state_mut().focus_view(View::MeridianEditor);
+        harness.state_mut().focus_view(View::Meridian);
         harness.run();
         harness
     }
@@ -1901,7 +1864,7 @@ mod tests {
             harness.state().selection(),
             Selection::Step(id, DesignStep::MeridionalContour)
         );
-        assert_eq!(harness.state().view(), View::MeridianEditor);
+        assert_eq!(harness.state().view(), View::Meridian);
         assert!(harness.state().sidebar_open());
         harness.get_by_label("Check against Gülich");
         // Another step keeps the editor; from another view the meridional step opens it.
@@ -1911,7 +1874,7 @@ mod tests {
             .unwrap()
             .click();
         harness.run();
-        assert_eq!(harness.state().view(), View::MeridianEditor);
+        assert_eq!(harness.state().view(), View::Meridian);
         harness.state_mut().focus_view(View::Blade);
         harness.run();
         harness
@@ -1920,7 +1883,7 @@ mod tests {
             .unwrap()
             .click();
         harness.run();
-        assert_eq!(harness.state().view(), View::MeridianEditor);
+        assert_eq!(harness.state().view(), View::Meridian);
     }
 
     #[test]
@@ -2191,7 +2154,7 @@ mod tests {
             .with_size([1440.0, 900.0])
             .build_eframe(|cc| TurbopumpApp::new(cc, Some(&path)));
         harness.run();
-        harness.state_mut().focus_view(View::MeridianEditor);
+        harness.state_mut().focus_view(View::Meridian);
         harness.run();
         let id = harness.state().active_impeller().unwrap();
         let basis = |app: &TurbopumpApp| app.derived.geometry(id).unwrap().basis;
@@ -2349,14 +2312,18 @@ mod tests {
 
     #[test]
     fn the_side_chambers_page_designs_and_shapes_the_casing_walls() {
-        use crate::views::meridional::{Page, Side};
+        use crate::views::meridional::Side;
         use tp_design::impeller::wall::WallPoint;
         let mut harness = editor();
         let id = harness.state().active_impeller().unwrap();
-        harness.state_mut().meridional.editor.page = Page::Chambers;
+        harness.state_mut().meridional.set_scope(Scope::Chambers);
         harness.run();
         harness.run();
-        harness.get_by_label("design the side chambers").click();
+        harness
+            .get_all_by_label("Design the side chambers")
+            .next()
+            .unwrap()
+            .click();
         harness.run();
         assert!(meridional(harness.state()).chambers.enabled);
 

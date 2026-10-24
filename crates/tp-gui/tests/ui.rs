@@ -265,20 +265,19 @@ fn a_diffuser_goes_between_impeller_and_volute() {
 }
 
 #[test]
-fn the_toolbar_accepts_steps_and_adds_components() {
+fn the_panel_accepts_steps_and_the_column_adds_components() {
     use tp_project::ComponentKind;
     let mut harness = harness();
-    // The tab of the selected component accepts its step.
-    harness.get_by_label("Accept").click();
-    harness.run();
+    accept(&mut harness);
     assert_eq!(
         status(&harness, DesignStep::MainDimensions),
         StepStatus::Done
     );
-    // The home tab adds a vaneless diffuser, which goes before the outlet volute.
-    harness.get_by_label("Home tab").click();
+    // The + of the component column adds a vaneless diffuser, which goes before the
+    // outlet volute.
+    harness.get_by_label("Add component").click();
     harness.run();
-    harness.get_by_label("Vaneless diffuser").click();
+    harness.get_by_label_contains("Vaneless stator").click();
     harness.run();
     let kinds: Vec<ComponentKind> = harness
         .state()
@@ -308,10 +307,41 @@ fn the_toolbar_accepts_steps_and_adds_components() {
 }
 
 #[test]
+fn the_tabs_of_the_toolbar_are_the_views() {
+    let mut harness = harness();
+    harness.get_by_label("Curves tab").click();
+    harness.run();
+    assert_eq!(harness.state().view(), View::Performance);
+    // The tools under the tabs are those of the view: the Curves tab shows the
+    // settings of the prediction.
+    harness.get_by_label("Settings").click();
+    harness.run();
+    harness.get_by_label("Operation in the system");
+    // The Meridian tab opens on the impeller channel with its step in the panel.
+    harness.get_by_label("Meridian tab").click();
+    harness.run();
+    assert_eq!(harness.state().view(), View::Meridian);
+    assert!(matches!(
+        harness.state().selection(),
+        Selection::Step(_, DesignStep::MeridionalContour)
+    ));
+    harness.get_by_label("Impeller channel");
+    harness.get_by_label("Stage").click();
+    harness.run();
+    // Folded, the toolbar leaves the tabs, which still pick the view.
+    harness
+        .get_by_label("Hide the tools; the tabs still pick the view")
+        .click();
+    harness.run();
+    assert!(harness.query_by_label("Stage").is_none());
+    harness.get_by_label("3D tab").click();
+    harness.run();
+    assert_eq!(harness.state().view(), View::View3d);
+}
+
+#[test]
 fn the_interface_switches_to_spanish_and_back() {
     let mut harness = harness();
-    harness.get_by_label("View tab").click();
-    harness.run();
     choose_language(&mut harness, "Language", "Español", "Cerrar");
     // The step editor, the tree and the toolbar now read in Spanish.
     harness.get_by_label_contains("Aceptar paso");
@@ -321,7 +351,7 @@ fn the_interface_switches_to_spanish_and_back() {
             .next()
             .is_some()
     );
-    harness.get_by_label("Vista tab");
+    harness.get_by_label("Meridiano tab");
     assert!(harness.query_by_label_contains(ACCEPT).is_none());
     // Every view draws in Spanish, and the steps still go forward.
     for view in View::ALL {
@@ -330,7 +360,7 @@ fn the_interface_switches_to_spanish_and_back() {
     }
     harness.state_mut().focus_view(View::Report);
     harness.run();
-    harness.get_by_label("Informe");
+    harness.get_by_label("Informe tab");
     // The editor moved the panel to the meridional contour: back to the first step.
     harness
         .get_all_by_label("Dimensiones principales")
@@ -351,10 +381,10 @@ fn the_interface_switches_to_spanish_and_back() {
 #[test]
 fn the_settings_window_changes_theme_size_and_units() {
     let mut harness = harness();
-    // From the View tab of the toolbar.
-    harness.get_by_label("View tab").click();
-    harness.run();
-    harness.get_all_by_label("Settings").next().unwrap().click();
+    // From the gear of the toolbar.
+    harness
+        .get_by_label("Settings: theme, language, units…")
+        .click();
     harness.run();
     harness.get_by_label_contains("Dark").click();
     harness.run();

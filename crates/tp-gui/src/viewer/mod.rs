@@ -9,8 +9,7 @@ mod render;
 use std::f32::consts::FRAC_PI_2;
 
 use eframe::egui::{
-    self, Align2, Color32, FontId, Pos2, Rect, RichText, Sense, Shape, Stroke, Ui, UiBuilder, Vec2,
-    pos2, vec2,
+    self, Align2, Color32, FontId, Pos2, Rect, Sense, Shape, Stroke, Ui, Vec2, pos2, vec2,
 };
 use eframe::egui_wgpu::RenderState;
 use glam::Vec3;
@@ -268,59 +267,6 @@ impl Viewer {
             Some(CubeAction::Home) => self.apply(CameraView::Iso),
             None => {}
         }
-        if let Some(view) = self.toolbar(ui, free) {
-            self.apply(view);
-        }
-    }
-
-    /// The floating toolbar in the top-left corner.
-    fn toolbar(&mut self, ui: &mut Ui, rect: Rect) -> Option<CameraView> {
-        let p = Palette::of(ui);
-        let mut view = None;
-        let area = Rect::from_min_size(rect.min + vec2(8.0, 8.0), vec2(rect.width() - 16.0, 34.0));
-        ui.scope_builder(UiBuilder::new().max_rect(area), |ui| {
-            egui::Frame::new()
-                .fill(p.ribbon.gamma_multiply(0.92))
-                .stroke(Stroke::new(1.0, p.border))
-                .corner_radius(6)
-                .inner_margin(egui::Margin::symmetric(4, 2))
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 0.0;
-                        let tool = |ui: &mut Ui, glyph: &str, tip: &'static str, on: bool| {
-                            let text = RichText::new(glyph).size(17.0);
-                            ui.add(egui::Button::selectable(on, text).min_size(vec2(28.0, 26.0)))
-                                .on_hover_text(tr(tip))
-                                .clicked()
-                        };
-                        // The standard views are on the view cube; fitting is here.
-                        if tool(ui, icon::CORNERS_OUT, "Fit the model (double-click)", false) {
-                            view = Some(CameraView::Fit);
-                        }
-                        ui.add_space(4.0);
-                        ui.separator();
-                        ui.add_space(4.0);
-                        let o = &mut self.options;
-                        if tool(ui, icon::POLYGON, "Feature edges", o.edges) {
-                            o.edges = !o.edges;
-                        }
-                        if tool(ui, icon::CUBE_TRANSPARENT, "Wireframe", o.wireframe) {
-                            o.wireframe = !o.wireframe;
-                        }
-                        if tool(ui, icon::FAN, "All blades, or only one", o.all_blades) {
-                            o.all_blades = !o.all_blades;
-                        }
-                        ui.add_space(4.0);
-                        ui.separator();
-                        ui.label(RichText::new(icon::QUESTION).size(16.0).color(p.weak))
-                            .on_hover_text(tr(
-                                "Drag: rotate\nRight-drag or Shift-drag: pan\nScroll or pinch: \
-                                 zoom\nDouble-click: fit\nView cube: click a face, edge or corner",
-                            ));
-                    });
-                });
-        });
-        view
     }
 }
 

@@ -368,8 +368,8 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Extremo del cubo del borde de salida; d₂ es el extremo de la carcasa d₂a. Automático: Gülich, ec. 7.13–7.14 en un rodete semiaxial, d₂ en uno radial; fijado a mano en uno radial inclina el borde y el diseño usa el diámetro medio",
     ),
     (
-        "Export their fluid with the CAD model, alone and, with a volute after them, joined to the impeller and the volute in one flow domain for CFD; shape them on the Side chambers page of the editor",
-        "Exporta su fluido con el modelo CAD, solo y, con una voluta detrás, unido al rodete y a la voluta en un único dominio para CFD; se modelan en la página Cámaras laterales del editor",
+        "Export their fluid with the CAD model, alone and, with a volute after them, joined to the impeller and the volute in one flow domain for CFD; shape them in the Side chambers scope of the Meridian view",
+        "Exporta su fluido con el modelo CAD, solo y, con una voluta detrás, unido al rodete y a la voluta en un único dominio para CFD; se modelan en el ámbito Cámaras laterales de la vista Meridiano",
     ),
     (
         "the joined fluid needs a radial outlet edge parallel to the axis (d₂i = d₂): the chambers then open at one radius",
@@ -3111,6 +3111,90 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ),
     ("Criteria", "Criterios"),
     ("edit acceptance", "editar la aceptación"),
+    (
+        "The side chambers are not designed yet.",
+        "Las cámaras laterales aún no están diseñadas.",
+    ),
+    (
+        "Add an impeller to see its geometry (the + of the component column).",
+        "Añade un rodete para ver su geometría (el + de la columna de componentes).",
+    ),
+    ("Drawing", "Dibujo"),
+    ("Scope", "Ámbito"),
+    ("Adjacent components", "Componentes vecinos"),
+    (
+        "The diffuser or volute after the impeller; the Stage scope always shows them",
+        "El difusor o la voluta tras el rodete; el ámbito Etapa los muestra siempre",
+    ),
+    ("Legend", "Leyenda"),
+    ("References", "Referencias"),
+    (
+        "Curves drawn for comparison: pasted points or copies of a wall",
+        "Curvas dibujadas para comparar: puntos pegados o copias de una pared",
+    ),
+    ("Fit scope", "Encajar el ámbito"),
+    (
+        "Frame what the scope edits, with its dimensions",
+        "Encuadra lo que edita el ámbito, con sus cotas",
+    ),
+    ("Frame everything drawn", "Encuadra todo lo dibujado"),
+    ("Snap", "Imanes"),
+    ("How to edit", "Cómo editar"),
+    (
+        "Drag a point to shape the meridian: hollow points are automatic, filled ones set by hand. Double-click a point to make it automatic again. Right-click a point or a wall for exact values, segments and joints. Click a dimension to type it. Hold Alt and drag to measure a distance. Drag the background to pan, scroll to zoom, double-click to fit.",
+        "Arrastra un punto para dar forma al meridiano: los huecos son automáticos y los rellenos, fijados a mano. Doble clic en un punto lo vuelve automático. Clic derecho en un punto o una pared para valores exactos, tramos y uniones. Clic en una cota para escribirla. Alt y arrastrar mide una distancia. Arrastra el fondo para desplazar, la rueda para acercar y doble clic para encajar.",
+    ),
+    ("Page", "Página"),
+    (
+        "Angles, thickness and loading along the mean line",
+        "Ángulos, espesor y carga a lo largo de la línea media",
+    ),
+    (
+        "The shapes of the leading and trailing edges at the hub and the shroud",
+        "La forma de los bordes de ataque y de salida en el cubo y en la carcasa",
+    ),
+    ("Points (TXT)", "Puntos (TXT)"),
+    ("Mesh (STL)", "Malla (STL)"),
+    (
+        "Drag the green points: the shape goes to the values of the panel. Solid lines are the suction face, dashed ones the pressure face.",
+        "Arrastra los puntos verdes: la forma pasa a los valores del panel. Línea continua: cara de succión; discontinua: cara de presión.",
+    ),
+    (
+        "Fit the model in the view (double-click)",
+        "Encajar el modelo en la vista (doble clic)",
+    ),
+    (
+        "Oblique, from the inlet side; the view cube has the others",
+        "Oblicua, desde el lado de la entrada; el cubo de vista tiene las demás",
+    ),
+    ("Style", "Estilo"),
+    ("Shaded", "Sombreado"),
+    ("With edges", "Con aristas"),
+    ("Meshes", "Mallas"),
+    ("Gestures", "Gestos"),
+    (
+        "Recirculation, shut-off, liquid and operation in the system: they shape the curve but are seldom changed",
+        "Recirculación, válvula cerrada, líquido y funcionamiento en la instalación: dan forma a la curva pero se cambian poco",
+    ),
+    (
+        "Losses, forces and the rest of the results; the report has them too",
+        "Pérdidas, fuerzas y el resto de resultados; también están en el informe",
+    ),
+    ("Show the tools", "Mostrar las herramientas"),
+    (
+        "Hide the tools; the tabs still pick the view",
+        "Ocultar las herramientas; las pestañas siguen eligiendo la vista",
+    ),
+    ("Impeller channel", "Canal del rodete"),
+    ("Meridional section", "Sección meridional"),
+    (
+        "The impeller with the diffuser or volute after it; the handles edit the impeller",
+        "El rodete con el difusor o la voluta que lo siguen; los puntos editan el rodete",
+    ),
+    (
+        "Hub, shroud and blade edges; click a dimension to type it",
+        "Cubo, carcasa y bordes del álabe; clic en una cota para escribirla",
+    ),
 ];
 
 /// Messages of the design code, most specific first.

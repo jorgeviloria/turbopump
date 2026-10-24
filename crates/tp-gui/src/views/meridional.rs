@@ -5,8 +5,7 @@
 
 use std::f64::consts::PI;
 
-use eframe::egui::containers::menu::{MenuButton, MenuConfig};
-use eframe::egui::{self, Color32, CursorIcon, DragValue, PopupCloseBehavior, RichText, Sense, Ui};
+use eframe::egui::{self, Color32, CursorIcon, DragValue, RichText, Sense, Ui};
 use egui_plot::{
     Corner, Legend, Line, LineStyle, MarkerShape, Plot, PlotBounds, PlotPoint, PlotPoints,
     PlotTransform, Points, Text,
@@ -24,9 +23,10 @@ use tp_math::DVec2;
 use tp_project::ComponentId;
 use tp_units::{DisplayUnits, QuantityKind};
 
-use super::{Palette, unavailable};
+use super::Palette;
 use crate::app::EditCtx;
 use crate::i18n::{tf, tr};
+use crate::theme::icon;
 
 /// A wall of the meridional section: hub and shroud of the flow path, and the wires
 /// that close the hub disk and the shroud cover.
@@ -721,25 +721,80 @@ impl Display {
     }
 }
 
+/// What the Meridian view shows and edits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scope {
+    /// The impeller with the diffuser or volute after it.
+    Stage,
+    /// Hub, shroud and blade edges of the impeller.
+    Channel,
+    /// The closed material of hub disk and shroud cover.
+    Materials,
+    /// The casing walls of the side chambers.
+    Chambers,
+}
+
+impl Scope {
+    pub(crate) const ALL: [Scope; 4] = [
+        Scope::Stage,
+        Scope::Channel,
+        Scope::Materials,
+        Scope::Chambers,
+    ];
+
+    pub(crate) fn title(self) -> &'static str {
+        tr(match self {
+            Scope::Stage => "Stage",
+            Scope::Channel => "Impeller channel",
+            Scope::Materials => "Materials",
+            Scope::Chambers => "Side chambers",
+        })
+    }
+
+    pub(crate) fn hint(self) -> &'static str {
+        tr(match self {
+            Scope::Stage => {
+                "The impeller with the diffuser or volute after it; the handles edit the impeller"
+            }
+            Scope::Channel => "Hub, shroud and blade edges; click a dimension to type it",
+            Scope::Materials => {
+                "The closed contours of the hub disk and the shroud cover: drag their points, right-click a wire for its segments"
+            }
+            Scope::Chambers => {
+                "The casing walls beside the impeller: the front chamber down to the annular seal, the rear one down to the shaft seal"
+            }
+        })
+    }
+
+    pub(crate) fn icon(self) -> &'static str {
+        match self {
+            Scope::Stage => icon::CIRCLES_THREE,
+            Scope::Channel => icon::BEZIER_CURVE,
+            Scope::Materials => icon::SQUARE_HALF,
+            Scope::Chambers => icon::BRACKETS_ROUND,
+        }
+    }
+
+    /// What the handles edit.
+    pub(crate) fn page(self) -> Page {
+        match self {
+            Scope::Stage | Scope::Channel => Page::FlowPath,
+            Scope::Materials => Page::Materials,
+            Scope::Chambers => Page::Chambers,
+        }
+    }
+
+    /// How a new scope frames the drawing.
+    pub(crate) fn fit(self) -> Fit {
+        match self {
+            Scope::Stage => Fit::All,
+            _ => Fit::Meridian,
+        }
+    }
+}
+
 impl Display {
-    const VIEW: Display = Display {
-        stream_lines: true,
-        quasi_orthogonals: false,
-        potential: false,
-        potential_view: PotentialView::DEFAULT,
-        dimensions: false,
-        curvature: false,
-        area_circles: false,
-        adjacent: true,
-        legend: true,
-        charts: false,
-        snap: 0.0,
-        snap_points: false,
-        snap_lines: false,
-        material_lines: false,
-        page: Page::FlowPath,
-    };
-    pub(crate) const EDITOR: Display = Display {
+    pub(crate) const DEFAULT: Display = Display {
         stream_lines: false,
         quasi_orthogonals: false,
         potential: false,
@@ -1577,15 +1632,18 @@ pub(crate) struct MeridionalView {
     /// Plot transform of the last frame, used to find the handle under the pointer
     /// before the plot is drawn.
     transform: Option<PlotTransform>,
-    pub(crate) view: Display,
-    pub(crate) editor: Display,
+    /// What the diagram draws; the scope sets its page.
+    pub(crate) display: Display,
+    pub(crate) scope: Scope,
+    /// The scope shown last frame: a new one frames its drawing.
+    pub(crate) shown_scope: Option<Scope>,
     /// Framing asked for the next frame.
     pub(crate) fit: Option<Fit>,
     /// The dimension being typed.
     dimension_edit: Option<DimensionEdit>,
     /// Pointer position in the diagram, (z, r) in m.
     pub(crate) pointer: Option<DVec2>,
-    /// Whether the editor has framed the meridian since it was last opened.
+    /// Whether the view has framed its drawing since it was last opened.
     pub(crate) framed: bool,
     /// The distance being measured with Alt and a drag, from and to (z, r) in m.
     measure: Option<(DVec2, DVec2)>,
@@ -1605,8 +1663,9 @@ impl Default for MeridionalView {
             dragging: None,
             menu: None,
             transform: None,
-            view: Display::VIEW,
-            editor: Display::EDITOR,
+            display: Display::DEFAULT,
+            scope: Scope::Channel,
+            shown_scope: None,
             fit: None,
             dimension_edit: None,
             pointer: None,
@@ -1640,6 +1699,11 @@ pub(crate) struct Scene<'a> {
 }
 
 impl MeridionalView {
+    /// Shows `scope` from the next frame on.
+    pub(crate) fn set_scope(&mut self, scope: Scope) {
+        self.scope = scope;
+    }
+
     /// Plot transform of the last frame.
     #[cfg(test)]
     pub(crate) fn transform(&self) -> Option<&PlotTransform> {
@@ -1659,7 +1723,7 @@ impl MeridionalView {
         id: ComponentId,
         g: &ImpellerGeometry,
     ) -> Option<&Result<PotentialFlow, String>> {
-        let blades = self.view.potential_view.blades;
+        let blades = self.display.potential_view.blades;
         let key = (revision, id, blades);
         if self.potential.as_ref().is_none_or(|(k, _)| *k != key) {
             let mesh = PotentialMesh::default();
@@ -1672,114 +1736,6 @@ impl MeridionalView {
             self.potential = Some((key, solution));
         }
         self.potential.as_ref().map(|(_, s)| s)
-    }
-
-    pub(crate) fn show(
-        &mut self,
-        ui: &mut Ui,
-        cx: &mut EditCtx<'_>,
-        id: ComponentId,
-        stator: Option<ComponentId>,
-        volute: Option<ComponentId>,
-    ) {
-        let derived = cx.derived;
-        let stator = stator.and_then(|s| derived.diffuser(s));
-        let volute = volute.and_then(|v| derived.volute(v));
-        let Some(results) = derived.impeller(id) else {
-            return;
-        };
-        let g = match &results.geometry {
-            Ok(g) => g,
-            Err(e) => {
-                unavailable(ui, e);
-                return;
-            }
-        };
-        let units = cx.units();
-        // Back from the editor, whose framing includes its dimensions.
-        if self.framed {
-            self.fit = Some(Fit::All);
-        }
-        self.framed = false;
-
-        ui.horizontal_wrapped(|ui| {
-            let d = &mut self.view;
-            ui.checkbox(&mut d.stream_lines, tr("stream lines"));
-            ui.checkbox(&mut d.quasi_orthogonals, tr("quasi-orthogonals"));
-            ui.checkbox(&mut d.dimensions, tr("dimensions"));
-            ui.checkbox(&mut d.potential, tr("potential flow"))
-                .on_hover_text(tr(
-                    "Two-dimensional potential flow between hub and shroud: its stream \
-                     lines, and the meridional velocity along the walls against the \
-                     quasi-one-dimensional flow of the design",
-                ));
-            if d.potential {
-                let v = &mut d.potential_view;
-                MenuButton::new(format!("{} {}", crate::theme::icon::EYE, tr("Potential")))
-                    .config(
-                        MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside),
-                    )
-                    .ui(ui, |ui| {
-                        ui.checkbox(&mut v.stream_lines, tr("stream lines"));
-                        ui.checkbox(&mut v.iso_lines, tr("c_m iso-lines"));
-                        ui.checkbox(&mut v.map, tr("c_m color map"));
-                        ui.checkbox(&mut v.vectors, tr("velocity vectors"));
-                        ui.separator();
-                        ui.checkbox(&mut v.blades, tr("blade blockage"))
-                            .on_hover_text(tr(
-                                "Solve with the thickness of the blades: among them only the \
-                                 open part of the circumference carries the flow (Gülich eqs. \
-                                 3.1.7 and 3.2.3)",
-                            ));
-                    });
-            }
-            ui.weak("(?)").on_hover_text(tr(
-                "Drag the round handles to shape the contour; right-click a point or a \
-                 wall to type exact values, split a wall into segments or join them. Drag \
-                 the background to pan, scroll to zoom, double-click to fit.",
-            ));
-        });
-
-        let current = cx
-            .doc
-            .project()
-            .impeller_geometry_input(id)
-            .unwrap_or_default();
-        let display = self.view;
-        let flow = display
-            .potential
-            .then(|| self.potential(derived.revision(), id, g).cloned())
-            .flatten();
-        let velocity_height = if flow.is_some() {
-            (ui.available_height() * 0.3).max(120.0)
-        } else {
-            0.0
-        };
-        let size = egui::vec2(
-            ui.available_width(),
-            (ui.available_height() - velocity_height).max(150.0),
-        );
-        self.diagram(
-            ui,
-            cx,
-            &Scene {
-                id,
-                g,
-                current: &current,
-                stator,
-                volute,
-                potential: flow.as_ref(),
-                display,
-                size,
-            },
-        );
-        match &flow {
-            Some(Ok(flow)) => wall_velocities(ui, flow, g, id, velocity_height, &units),
-            Some(Err(e)) => {
-                ui.colored_label(ui.visuals().error_fg_color, format!("Potential flow: {e}"));
-            }
-            None => {}
-        }
     }
 
     /// The meridional diagram with its handles, menus, dimensions and drags.
@@ -3196,7 +3152,7 @@ fn edit_menu(
 
 /// Meridional velocity along hub and shroud: the potential flow against the uniform
 /// velocity of the quasi-one-dimensional flow.
-fn wall_velocities(
+pub(crate) fn wall_velocities(
     ui: &mut Ui,
     flow: &PotentialFlow,
     g: &tp_design::impeller::ImpellerGeometry,

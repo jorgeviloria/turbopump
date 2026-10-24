@@ -1707,10 +1707,20 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
             ui,
             tr("Design the side chambers"),
             tr(
-                "Export their fluid with the CAD model, alone and, with a volute after them, joined to the impeller and the volute in one flow domain for CFD; shape them on the Side chambers page of the editor",
+                "Export their fluid with the CAD model, alone and, with a volute after them, joined to the impeller and the volute in one flow domain for CFD; shape them in the Side chambers scope of the Meridian view",
             ),
         );
-        changed |= ui.checkbox(&mut chambers.enabled, "").changed();
+        let enabled = chambers.enabled;
+        let response = ui.checkbox(&mut chambers.enabled, "");
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(
+                egui::WidgetType::Checkbox,
+                true,
+                enabled,
+                tr("Design the side chambers"),
+            )
+        });
+        changed |= response.changed();
         ui.end_row();
         changed |= param_f64(
             ui,

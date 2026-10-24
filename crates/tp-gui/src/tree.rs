@@ -71,8 +71,6 @@ fn machine_name(machine: tp_project::MachineType) -> &'static str {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct AddEntry {
     pub label: &'static str,
-    /// Label under a toolbar button.
-    pub short: &'static str,
     pub kind: ComponentKind,
     /// Goes before every other component.
     pub at_inlet: bool,
@@ -81,31 +79,26 @@ pub(crate) struct AddEntry {
 pub(crate) const ADD_ENTRIES: [AddEntry; 5] = [
     AddEntry {
         label: "Impeller",
-        short: "Impeller",
         kind: ComponentKind::Impeller,
         at_inlet: false,
     },
     AddEntry {
         label: "Stator (vaned diffuser)",
-        short: "Vaned diffuser",
         kind: ComponentKind::Stator { vaned: true },
         at_inlet: false,
     },
     AddEntry {
         label: "Vaneless stator",
-        short: "Vaneless diffuser",
         kind: ComponentKind::Stator { vaned: false },
         at_inlet: false,
     },
     AddEntry {
         label: "Volute at the outlet",
-        short: "Volute",
         kind: ComponentKind::Volute,
         at_inlet: false,
     },
     AddEntry {
         label: "Volute at the inlet",
-        short: "Inlet volute",
         kind: ComponentKind::Volute,
         at_inlet: true,
     },
@@ -603,13 +596,5 @@ mod tests {
     fn titles_start_with_a_capital() {
         assert_eq!(step_title(DesignStep::MainDimensions), "Main dimensions");
         assert_eq!(step_title(DesignStep::CfdSetup), "CFD setup");
-    }
-
-    #[test]
-    fn the_toolbar_adds_the_four_common_components_first() {
-        let kinds: Vec<ComponentKind> = ADD_ENTRIES.iter().take(4).map(|e| e.kind).collect();
-        assert_eq!(kinds[0], ComponentKind::Impeller);
-        assert!(kinds.contains(&ComponentKind::Volute));
-        assert!(!ADD_ENTRIES[..4].iter().any(|e| e.at_inlet));
     }
 }

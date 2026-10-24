@@ -153,12 +153,6 @@ impl CrossSectionView {
                     &units.show(QuantityKind::Length, h),
                 ],
             ));
-            ui.weak("(?)").on_hover_text(tr(
-                "Drag the round handles to shape Bézier and line-segment sides; right-click \
-                 to add or remove a corner. Ctrl (⌘) keeps a corner's distance to the \
-                 previous one, Alt keeps it on its line; add Shift for the next one. Drag \
-                 the background to pan, scroll to zoom, double-click to fit.",
-            ));
         });
 
         let points = handles(&definition.shape, b3, h);

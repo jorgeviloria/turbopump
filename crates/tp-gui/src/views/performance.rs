@@ -2,7 +2,7 @@
 //! required NPSH against flow, with the estimated recirculation range dashed and the
 //! losses of the volute after the impeller.
 
-use eframe::egui::{self, CollapsingHeader, Color32, DragValue, Grid, RichText, Ui};
+use eframe::egui::{self, Color32, DragValue, Grid, RichText, Ui};
 use egui_plot::{
     Corner, HLine, Legend, Line, LineStyle, MarkerShape, Plot, PlotPoints, Points, VLine,
 };
@@ -17,6 +17,7 @@ use crate::derived::Derived;
 use crate::i18n::{tf, tr};
 use crate::messages::{self, Severity};
 use crate::theme;
+use crate::theme::bold;
 
 /// What the cached curve was computed from.
 type Key = (u64, ComponentId, PerformanceInput);
@@ -32,6 +33,10 @@ pub(crate) struct PerformanceView {
     viscosity: Param<f64>,
     operation: OperationInput,
     cache: Option<(Key, Result<PumpPerformance, String>)>,
+    /// The settings show above the curves; the toolbar switches them.
+    pub(crate) settings_open: bool,
+    /// The results beyond the key numbers show under them.
+    pub(crate) details_open: bool,
 }
 
 fn collector_name(c: Collector) -> &'static str {
@@ -127,19 +132,21 @@ impl PerformanceView {
             }
         };
 
-        // Settings, folded: they shape the curve but are seldom changed.
+        // The settings, when the toolbar shows them: they shape the curve but are
+        // seldom changed.
         let o = curve.operation.clone();
-        CollapsingHeader::new(tr("Settings"))
-            .id_salt(("curve_settings", id.0))
-            .default_open(false)
-            .show(ui, |ui| self.settings(ui, &curve, &input, &o, id, units));
+        if self.settings_open {
+            ui.label(bold(tr("Settings")));
+            self.settings(ui, &curve, &input, &o, id, units);
+            ui.separator();
+        }
 
-        // The key numbers; the rest folded below, and in the report.
+        // The key numbers; the rest below when the toolbar shows it, and in the report.
         self.summary(ui, &curve, units);
-        CollapsingHeader::new(tr("More results"))
-            .id_salt(("curve_details", id.0))
-            .default_open(false)
-            .show(ui, |ui| details(ui, &curve, units));
+        if self.details_open {
+            ui.separator();
+            details(ui, &curve, units);
+        }
         for w in &curve.warnings {
             messages::card(ui, Severity::Warning, w);
         }
