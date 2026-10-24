@@ -310,6 +310,31 @@ fn the_panel_accepts_steps_and_the_column_adds_components() {
 }
 
 #[test]
+fn the_report_shows_its_values_whole_and_clear_of_the_panel() {
+    let mut harness = harness();
+    harness.get_by_label("Report tab").click();
+    harness.run();
+    harness.run();
+    let panel = panel_left(&harness);
+    let in_report = |name: &str| {
+        harness
+            .get_all_by_label(name)
+            .map(|n| n.rect())
+            .find(|r| r.left() > 380.0 && r.right() < panel)
+            .unwrap_or_else(|| panic!("{name} is not in the report, clear of the panel"))
+    };
+    // A value sits centred in a field as wide as those of the panel, its unit after
+    // the field: well apart, not squeezed into a few characters.
+    for (value, unit) in [("998.2", "kg/m³"), ("0.02339", "bar"), ("2900", "rpm")] {
+        let (value, unit) = (in_report(value), in_report(unit));
+        assert!(
+            unit.left() - value.right() > 40.0,
+            "{value:?} then {unit:?}"
+        );
+    }
+}
+
+#[test]
 fn the_curves_take_their_settings_in_the_properties_panel() {
     use egui_kittest::kittest::NodeT;
     let mut harness = harness();

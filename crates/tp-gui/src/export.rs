@@ -304,7 +304,7 @@ mod cad {
     use std::path::{Path, PathBuf};
     use std::sync::mpsc::{Receiver, TryRecvError, channel};
 
-    use eframe::egui::{self, Grid, Ui};
+    use eframe::egui::{self, Ui};
     use tp_cad::{BalanceHoleOptions, BalanceHoles, CadOptions, Shape};
     use tp_design::Param;
     use tp_design::diffuser::DiffuserDesign;
@@ -318,7 +318,7 @@ mod cad {
     use tp_units::QuantityKind;
 
     use crate::derived::Derived;
-    use crate::widgets::{param_f64, quantity, value_row};
+    use crate::widgets::{label, param_f64, quantity, value_info, value_row};
 
     /// What a finished export produced.
     #[derive(Debug, Clone)]
@@ -650,36 +650,33 @@ mod cad {
                 })
                 .and_then(|s| derived.diffuser(s));
 
-            Grid::new("cad_options")
-                .num_columns(3)
-                .spacing([10.0, 4.0])
-                .show(ui, |ui| {
-                    // The material comes from the meridional design.
-                    let m = g.contour.material;
-                    let hint = tr("Set in the meridional editor, Materials page");
-                    for (name, value) in [
-                        (tr("Wall thickness"), m.wall_thickness),
-                        (tr("Bore diameter"), m.bore_diameter),
-                        (tr("Boss diameter"), m.boss_diameter),
-                    ] {
-                        ui.label(name).on_hover_text(hint);
-                        ui.label(units.show(Length, value)).on_hover_text(hint);
-                        ui.end_row();
-                    }
-                    param_f64(
-                        ui,
-                        tr("Fillet radius"),
-                        tr("Where the blades meet hub and shroud; automatic: half the blade thickness; 0 for sharp edges"),
-                        &mut self.fillet,
-                        Length,
-                        Some(0.5 * g.basis.blade_thickness),
-                        &units,
-                        0.0..=0.05,
-                    );
-                    ui.label(tr("Material density"));
-                    quantity(ui, &mut self.density, Density, &units, 100.0..=30_000.0);
-                    ui.end_row();
-                });
+            crate::widgets::props(ui, "cad_options", |ui| {
+                // The material comes from the meridional design.
+                let m = g.contour.material;
+                let hint = tr("Set in the meridional editor, Materials page");
+                for (name, value) in [
+                    (tr("Wall thickness"), m.wall_thickness),
+                    (tr("Bore diameter"), m.bore_diameter),
+                    (tr("Boss diameter"), m.boss_diameter),
+                ] {
+                    value_info(ui, name, hint, units.show(Length, value));
+                }
+                param_f64(
+                    ui,
+                    tr("Fillet radius"),
+                    tr(
+                        "Where the blades meet hub and shroud; automatic: half the blade thickness; 0 for sharp edges",
+                    ),
+                    &mut self.fillet,
+                    Length,
+                    Some(0.5 * g.basis.blade_thickness),
+                    &units,
+                    0.0..=0.05,
+                );
+                label(ui, tr("Material density"), "");
+                quantity(ui, &mut self.density, Density, &units, 100.0..=30_000.0);
+                ui.end_row();
+            });
             ui.checkbox(&mut self.balance_holes, tr("Balance holes"))
                 .on_hover_text(tr(
                     "One per channel inside the rear seal, sized by Gülich Chap. 9.2.2",
@@ -755,7 +752,7 @@ mod cad {
                             format!("{kg:.2} kg")
                         }
                     };
-                    Grid::new("cad_report").num_columns(2).show(ui, |ui| {
+                    crate::widgets::table(ui, "cad_report", |ui| {
                         value_row(ui, tr("Folder"), report.folder.display().to_string());
                         value_row(
                             ui,

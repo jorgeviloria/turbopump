@@ -86,6 +86,35 @@ pub fn props(ui: &mut Ui, id: impl Hash + std::fmt::Debug, add: impl FnOnce(&mut
         });
 }
 
+/// Columns of a [`table`]: the label, and the value field with its unit.
+const TABLE_COLUMNS: Columns = Columns {
+    label: 280.0,
+    value: 200.0,
+};
+
+/// A striped table of rows for documents and dialogs, such as the report: labels, then
+/// values in fields of one width with their units after them, whatever the property
+/// panel drew before. Build the rows with [`value_row`] and the other row helpers.
+pub fn table(ui: &mut Ui, id: impl Hash + std::fmt::Debug, add: impl FnOnce(&mut Ui)) {
+    let columns = TABLE_COLUMNS;
+    ui.data_mut(|d| d.insert_temp(Columns::id(), columns));
+    egui::Grid::new(id)
+        .num_columns(2)
+        .striped(true)
+        .spacing([GAP, 4.0])
+        .min_row_height(ROW_HEIGHT)
+        .show(ui, |ui| {
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+            let spacing = ui.spacing_mut();
+            spacing.interact_size.x = columns.value;
+            let field = columns.value - UNIT_WIDTH - 4.0;
+            spacing.combo_width = field;
+            spacing.text_edit_width = field - 2.0 * spacing.button_padding.x;
+            add(ui);
+        });
+    ui.data_mut(|d| d.remove::<Columns>(Columns::id()));
+}
+
 /// Draws `add` with every grid of rows in it on the same columns, worked out from the
 /// width of `ui`: labels, fields, lists and units line up down the whole panel, whatever
 /// frames or indents a group sits in.
