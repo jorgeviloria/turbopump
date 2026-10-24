@@ -107,7 +107,10 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
     pasos) y dibujos y mallas.
 
   Funciona como un acordeón: solo queda abierto el componente activo, salvo los que
-  se fijan con la chincheta, que se recuerdan por proyecto. Pasando el ratón entre
+  se fijan con la chincheta, que se recuerdan por proyecto. Junto a la chincheta, un
+  botón (también en el menú del botón derecho) acepta de una vez los pasos que le
+  faltan al componente con los valores sugeridos; si uno falla, se detiene ahí, y
+  todo se deshace con un solo Cmd/Ctrl+Z. Pasando el ratón entre
   dos componentes aparece «Insertar aquí», que ofrece solo lo que admiten las reglas
   de composición. Alt+↑ y Alt+↓ recorren los pasos de todos los componentes.
 
@@ -177,7 +180,8 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
     clic derecho en el valor, lo vuelve automático;
   - **abajo**, la cifra clave del paso, *Back* y *Accept step and continue*
     (Cmd/Ctrl+Intro), que marca el paso como hecho y abre el siguiente, también en
-    el componente siguiente.
+    el componente siguiente. Con Mayús (o desde el menú ⋯), se completan todos los
+    pasos que le faltan al componente con los valores sugeridos.
 
   El panel flota sobre la vista sin reducirla: se pliega a una franja estrecha (con su
   flecha o con Esc), se ensancha arrastrando su borde izquierdo y no bloquea las
