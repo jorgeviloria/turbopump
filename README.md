@@ -185,8 +185,9 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
   - **en medio**, secciones que se pliegan, marcadas como resultados o comprobación
     cuando lo son. Cada valor que puede ser automático lleva un punto, como los del
     editor del meridiano: hueco y en gris si lo propone el programa, relleno si está
-    fijado a mano. Escribir en un valor automático lo fija; un clic en el punto, o
-    clic derecho en el valor, lo vuelve automático. La cabecera de cada sección dice
+    fijado a mano. Las unidades van fuera del campo, en una columna propia a su
+    derecha, también en los resultados. Escribir en un valor automático lo fija; un
+    clic en el punto, o clic derecho en el valor, lo vuelve automático. La cabecera de cada sección dice
     cuántos valores tiene fijados a mano («● 2 a mano»); un clic ahí los vuelve todos
     automáticos de una vez, y un solo Cmd/Ctrl+Z los recupera. Cuando un paso ya
     aceptado queda por revisar, una barra naranja en el margen marca las filas que
