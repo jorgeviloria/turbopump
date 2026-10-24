@@ -22,6 +22,9 @@ pub(crate) struct Palette {
     pub guide: Color32,
     pub handle: Color32,
     pub handle_active: Color32,
+    /// A dimension that stands out, for its row under the pointer or the pointer on
+    /// it: the accent of the interface.
+    pub dimension_active: Color32,
     pub volute: Color32,
     pub stator: Color32,
 }
@@ -37,6 +40,7 @@ impl Palette {
                 guide: Color32::from_gray(90),
                 handle: Color32::from_rgb(90, 200, 160),
                 handle_active: Color32::WHITE,
+                dimension_active: crate::theme::Palette::for_dark(true).accent,
                 volute: Color32::from_rgb(170, 190, 120),
                 stator: Color32::from_rgb(110, 200, 200),
             }
@@ -49,6 +53,7 @@ impl Palette {
                 guide: Color32::from_gray(185),
                 handle: Color32::from_rgb(0, 140, 110),
                 handle_active: Color32::BLACK,
+                dimension_active: crate::theme::Palette::for_dark(false).accent,
                 volute: Color32::from_rgb(90, 120, 30),
                 stator: Color32::from_rgb(0, 120, 130),
             }
@@ -96,7 +101,7 @@ pub(crate) fn paint_diameter(
     };
     let (a, b) = (at(-1.0), at(1.0));
     let color = if hot {
-        palette.handle_active
+        palette.dimension_active
     } else {
         visuals.text_color()
     };
@@ -114,7 +119,7 @@ pub(crate) fn paint_diameter(
         ));
     }
     let text_color = if hot {
-        palette.handle_active
+        palette.dimension_active
     } else {
         palette.handle
     };
@@ -169,7 +174,7 @@ pub(crate) fn paint_linear(
         |p: [f64; 2]| transform.position_from_point(&egui_plot::PlotPoint::new(p[0], p[1]));
     let (a, b) = (screen(a), screen(b));
     let (color, text_color) = if hot {
-        (palette.handle_active, palette.handle_active)
+        (palette.dimension_active, palette.dimension_active)
     } else {
         (visuals.text_color(), palette.handle)
     };
@@ -395,6 +400,29 @@ mod tests {
         });
         output.textures_delta.clear();
         distance
+    }
+
+    #[test]
+    fn a_dimension_stands_out_in_the_accent_of_either_theme() {
+        for dark in [false, true] {
+            let ctx = egui::Context::default();
+            ctx.set_visuals(if dark {
+                egui::Visuals::dark()
+            } else {
+                egui::Visuals::light()
+            });
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let p = Palette::of(ui);
+                assert_eq!(
+                    p.dimension_active,
+                    crate::theme::Palette::for_dark(dark).accent
+                );
+                // Not the black or white of a dragged point, nor the text.
+                assert_ne!(p.dimension_active, p.handle_active);
+                assert_ne!(p.dimension_active, ui.visuals().text_color());
+            });
+            output.textures_delta.clear();
+        }
     }
 
     #[test]

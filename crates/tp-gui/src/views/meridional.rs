@@ -1225,7 +1225,7 @@ fn paint_dimensions(
         }
         let (a, b) = (screen(d.from), screen(d.to));
         let line = if hovered == Some(d.dimension) {
-            egui::Stroke::new(1.8, palette.handle_active)
+            egui::Stroke::new(1.8, palette.dimension_active)
         } else {
             solid
         };
@@ -1236,12 +1236,12 @@ fn paint_dimensions(
             let base = tip + back * 7.0;
             painter.add(egui::Shape::convex_polygon(
                 vec![tip, base + across * 2.5, base - across * 2.5],
-                visuals.text_color(),
+                line.color,
                 egui::Stroke::NONE,
             ));
         }
         let color = if hovered == Some(d.dimension) {
-            palette.handle_active
+            palette.dimension_active
         } else if d.dimension.editable() {
             palette.handle
         } else {
