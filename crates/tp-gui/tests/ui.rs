@@ -1214,3 +1214,48 @@ fn the_inputs_of_the_properties_line_up() {
     }
     assert!(checked > 10, "{checked}");
 }
+
+#[test]
+fn warnings_appearing_do_not_move_the_form() {
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::NodeT;
+    // The meridional contour without warnings, and with the inlet line leaning 15°,
+    // which warns that the meridional velocity rises.
+    let contour_top = |tilted: bool| {
+        let mut project = tp_gui::default_project();
+        let id = project.components()[0].id();
+        project.design_step(id, DesignStep::MainDimensions).unwrap();
+        if tilted {
+            let mut input = project.impeller_geometry_input(id).unwrap();
+            input.meridional.inlet_tilt =
+                tp_design::impeller::meridian::InletTilt::Angle(15f64.to_radians());
+            project.set_impeller_geometry(id, input).unwrap();
+        }
+        let path = std::env::temp_dir().join(format!("turbopump-warnings-{tilted}.tpj"));
+        project.save(&path).unwrap();
+        let mut harness = Harness::builder()
+            .with_size([1440.0, 900.0])
+            .build_eframe(|cc| TurbopumpApp::new(cc, Some(&path)));
+        harness.run();
+        // Its row in the design flow.
+        harness
+            .get_all_by_label("Meridional contour")
+            .find(|n| n.rect().left() < 400.0)
+            .unwrap()
+            .click();
+        harness.run();
+        harness.run();
+        let warned = harness.query_by_label("Warnings of the step").is_some();
+        assert_eq!(
+            warned, tilted,
+            "the tilted inlet warns, the straight one does not"
+        );
+        harness
+            .get_all_by_label("Contour")
+            .filter(|n| n.rect().left() > 1000.0 && n.accesskit_node().role() != Role::Label)
+            .map(|n| n.rect().top())
+            .reduce(f32::min)
+            .unwrap()
+    };
+    assert_eq!(contour_top(false), contour_top(true));
+}

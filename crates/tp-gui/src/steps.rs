@@ -1133,8 +1133,13 @@ fn step_panel(ui: &mut Ui, cx: &mut EditCtx<'_>, id: ComponentId, step: DesignSt
         if let Some(text) = intro(kind, step) {
             widgets::info(ui, text);
         }
+        // The error or the warnings at the end of the same row, so that their coming
+        // and going never moves the form below.
+        let (error, warnings) = problems(cx, id, step);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            problems_chip(ui, error.as_ref(), &warnings);
+        });
     });
-    problems(ui, cx, id, step);
 
     if !is_available(component.kind(), step) {
         ui.separator();
@@ -1210,30 +1215,26 @@ pub(crate) fn reset(cx: &mut EditCtx<'_>, project: &Project, id: ComponentId, st
     cx.edit(&label, |p| p.set_impeller_geometry(id, input));
 }
 
-/// Errors and warnings of the computation behind `step`.
-fn problems(ui: &mut Ui, cx: &EditCtx<'_>, id: ComponentId, step: DesignStep) {
+/// The error and the warnings of the computation behind `step`.
+fn problems(cx: &EditCtx<'_>, id: ComponentId, step: DesignStep) -> (Option<String>, Vec<String>) {
     if let Some(result) = cx.derived.diffuser_result(id) {
-        let (error, warnings) = match result {
+        return match result {
             Ok(d) => (None, d.warnings.clone()),
-            Err(e) => (Some(e), Vec::new()),
+            Err(e) => (Some(e.clone()), Vec::new()),
         };
-        show_problems(ui, error, &warnings);
-        return;
     }
     if let Some(result) = cx.derived.volute_result(id) {
-        let (error, warnings) = match result {
+        return match result {
             Ok(g) => (None, g.warnings.clone()),
-            Err(e) => (Some(e), Vec::new()),
+            Err(e) => (Some(e.clone()), Vec::new()),
         };
-        show_problems(ui, error, &warnings);
-        return;
     }
     let Some(results) = cx.derived.impeller(id) else {
-        return;
+        return (None, Vec::new());
     };
-    let (error, warnings) = match step {
+    match step {
         DesignStep::MainDimensions => (
-            results.main.as_ref().err(),
+            results.main.as_ref().err().cloned(),
             results
                 .main
                 .as_ref()
@@ -1241,64 +1242,74 @@ fn problems(ui: &mut Ui, cx: &EditCtx<'_>, id: ComponentId, step: DesignStep) {
                 .unwrap_or_default(),
         ),
         _ => (
-            results.geometry.as_ref().err(),
+            results.geometry.as_ref().err().cloned(),
             results
                 .geometry
                 .as_ref()
                 .map(|g| g.warnings.clone())
                 .unwrap_or_default(),
         ),
-    };
-    show_problems(ui, error, &warnings);
+    }
 }
 
-/// The error and warnings of the step, in a strip under its heading: the error always
-/// shows; the warnings fold into one line with the first of them.
-fn show_problems(ui: &mut Ui, error: Option<&String>, warnings: &[String]) {
-    if error.is_none() && warnings.is_empty() {
-        return;
-    }
-    ui.add_space(6.0);
-    if let Some(e) = error {
-        messages::card(ui, Severity::Error, e);
-        ui.add_space(3.0);
-    }
-    if warnings.is_empty() {
-        return;
-    }
-    let id = egui::Id::new("properties_warnings");
-    let mut open = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
-    let first = crate::i18n::message(&warnings[0]);
-    let text = if warnings.len() == 1 {
-        tf("1 warning: {}", &[&first])
-    } else {
-        tf("{} warnings: {}", &[&warnings.len(), &first])
-    };
-    let caret = if open {
-        icon::CARET_UP
-    } else {
-        icon::CARET_DOWN
-    };
-    let warn = ui.visuals().warn_fg_color;
-    let head = ui.add(
-        egui::Button::new(RichText::new(format!("{}  {text}  {caret}", icon::WARNING)).color(warn))
-            .fill(Palette::of(ui).warning_bg)
-            .truncate(),
-    );
-    head.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &text));
-    if head
-        .on_hover_text(tr("Show or fold the warnings"))
-        .clicked()
-    {
-        open = !open;
-        ui.data_mut(|d| d.insert_temp(id, open));
-    }
-    if open {
-        for w in warnings {
-            messages::card(ui, Severity::Warning, w);
-            ui.add_space(3.0);
+/// The error of the step, or its warnings, as one line that takes what is left of the
+/// status row: the first message cut to fit, whole on hover; a click lists them all
+/// over the form.
+fn problems_chip(ui: &mut Ui, error: Option<&String>, warnings: &[String]) {
+    let p = Palette::of(ui);
+    let (glyph, color, fill, text) = match (error, warnings) {
+        (Some(e), _) => (
+            icon::X_CIRCLE,
+            ui.visuals().error_fg_color,
+            p.error_bg,
+            crate::i18n::message(e),
+        ),
+        (None, [first, ..]) => {
+            let first = crate::i18n::message(first);
+            let text = if warnings.len() == 1 {
+                first
+            } else {
+                format!("{} · {first}", warnings.len())
+            };
+            (
+                icon::WARNING,
+                ui.visuals().warn_fg_color,
+                p.warning_bg,
+                text,
+            )
         }
-    }
+        (None, []) => return,
+    };
+    let chip = ui.add(
+        egui::Button::new(
+            RichText::new(format!("{glyph} {text}"))
+                .size(11.5)
+                .color(color),
+        )
+        .fill(fill)
+        .corner_radius(10)
+        .truncate(),
+    );
+    let label = if error.is_some() {
+        tr("Error of the step")
+    } else {
+        tr("Warnings of the step")
+    };
+    chip.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
+    let chip = chip.on_hover_text(format!("{text}\n\n{}", tr("Click to list them")));
+    egui::Popup::menu(&chip)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            ui.set_width(360.0);
+            if let Some(e) = error {
+                messages::card(ui, Severity::Error, e);
+                ui.add_space(3.0);
+            }
+            for w in warnings {
+                messages::card(ui, Severity::Warning, w);
+                ui.add_space(3.0);
+            }
+        });
 }
 
 fn main_dimensions(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: ComponentId) {
