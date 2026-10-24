@@ -393,7 +393,10 @@ fn edge_shape(ui: &mut Ui, salt: &str, shape: &mut EdgeShape) {
     let ellipse = matches!(shape, EdgeShape::Ellipse { .. });
     crate::widgets::list(ui, |ui| {
         ComboBox::from_id_salt(salt)
-            .selected_text(tr(if ellipse { "elliptic" } else { "blunt (cut)" }))
+            .selected_text(crate::widgets::noted(
+                ui,
+                tr(if ellipse { "elliptic" } else { "blunt (cut)" }),
+            ))
             .show_ui(ui, |ui| {
                 if ui.selectable_label(ellipse, tr("elliptic")).clicked() && !ellipse {
                     *shape = EdgeShape::Ellipse { ratio: 3.0 };

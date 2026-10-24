@@ -1057,7 +1057,20 @@ fn nothing_moves_when_the_pointer_rests_on_the_objective() {
 fn nothing_moves_on_hover(harness: &mut Harness<'_, TurbopumpApp>) {
     harness.remove_cursor();
     harness.run();
+    let settled = layout(harness);
+    harness.run_steps(20);
     let baseline = layout(harness);
+    let settling = moved(&settled, &baseline);
+    assert!(
+        settling.is_empty(),
+        "still moving with nothing touched:\n{}",
+        settling
+            .iter()
+            .take(6)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
     let mut problems = Vec::new();
     for (label, rect) in &baseline {
         harness.hover_at(rect.center());
@@ -1120,4 +1133,271 @@ fn nothing_moves_when_a_toggle_is_selected() {
             .collect();
         assert!(shifted.is_empty(), "{toggle}:\n{}", shifted.join("\n"));
     }
+}
+
+/// The left edge of what the properties panel shows: its labels start there.
+fn panel_left(h: &Harness<'_, TurbopumpApp>) -> f32 {
+    let crumb = h
+        .get_all_by_label_contains("›")
+        .filter(|n| n.rect().left() > 700.0)
+        .map(|n| n.rect().left())
+        .fold(f32::INFINITY, f32::min);
+    let _ = h.get_by_label("More actions of the step");
+    crumb
+}
+
+#[test]
+fn the_properties_panel_keeps_its_width_in_every_view_and_step() {
+    let mut harness = harness();
+    // Every place of the design, in every view.
+    let mut widths = Vec::new();
+    for tab in [
+        "Meridian tab",
+        "Blade tab",
+        "Front tab",
+        "Section tab",
+        "3D tab",
+        "Curves tab",
+        "Report tab",
+    ] {
+        harness.get_by_label(tab).click();
+        harness.run();
+        for _ in 0..14 {
+            harness.key_press_modifiers(Modifiers::ALT, Key::ArrowDown);
+            harness.run();
+            harness.get_by_label(tab).click();
+            harness.run();
+            widths.push((tab, panel_left(&harness)));
+        }
+    }
+    let first = widths[0].1;
+    let off: Vec<String> = widths
+        .iter()
+        .filter(|(_, x)| x.is_finite() && (x - first).abs() > 0.5)
+        .map(|(tab, x)| format!("{tab}: {x}"))
+        .collect();
+    assert!(
+        off.is_empty(),
+        "panel left at {first}, but\n{}",
+        off.join("\n")
+    );
+}
+
+/// The inputs of the properties panel: numeric fields, lists and text fields.
+fn panel_inputs(h: &Harness<'_, TurbopumpApp>) -> Vec<(String, egui::Rect)> {
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::NodeT;
+    h.query_all_by_role(Role::SpinButton)
+        .chain(h.query_all_by_role(Role::ComboBox))
+        .chain(h.query_all_by_role(Role::TextInput))
+        .filter(|n| {
+            matches!(
+                n.accesskit_node().role(),
+                Role::SpinButton | Role::ComboBox | Role::TextInput
+            ) && n.rect().left() > 1000.0
+        })
+        .map(|n| {
+            let name = n.accesskit_node().label().or(n.accesskit_node().value());
+            (name.unwrap_or_default(), n.rect())
+        })
+        .collect()
+}
+
+#[test]
+fn the_inputs_of_the_properties_line_up() {
+    let mut harness = harness();
+    // The design point, the main dimensions and the meridional contour.
+    let mut checked = 0;
+    for _ in 0..3 {
+        let inputs = panel_inputs(&harness);
+        if let Some((_, first)) = inputs.first() {
+            let off: Vec<String> = inputs
+                .iter()
+                .filter(|(_, r)| {
+                    (r.left() - first.left()).abs() > 1.0 || (r.right() - first.right()).abs() > 1.0
+                })
+                .map(|(name, r)| format!("{name}: {r:?} (first {first:?})"))
+                .collect();
+            assert!(off.is_empty(), "{}", off.join("\n"));
+            checked += inputs.len();
+        }
+        harness.key_press_modifiers(Modifiers::ALT, Key::ArrowDown);
+        harness.run();
+        harness.run();
+    }
+    assert!(checked > 10, "{checked}");
+}
+
+#[test]
+fn warnings_appearing_do_not_move_the_form() {
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::NodeT;
+    // The meridional contour without warnings, and with the inlet line leaning 15°,
+    // which warns that the meridional velocity rises.
+    let contour_top = |tilted: bool| {
+        let mut project = tp_gui::default_project();
+        let id = project.components()[0].id();
+        project.design_step(id, DesignStep::MainDimensions).unwrap();
+        if tilted {
+            let mut input = project.impeller_geometry_input(id).unwrap();
+            input.meridional.inlet_tilt =
+                tp_design::impeller::meridian::InletTilt::Angle(15f64.to_radians());
+            project.set_impeller_geometry(id, input).unwrap();
+        }
+        let path = std::env::temp_dir().join(format!("turbopump-warnings-{tilted}.tpj"));
+        project.save(&path).unwrap();
+        let mut harness = Harness::builder()
+            .with_size([1440.0, 900.0])
+            .build_eframe(|cc| TurbopumpApp::new(cc, Some(&path)));
+        harness.run();
+        // Its row in the design flow.
+        harness
+            .get_all_by_label("Meridional contour")
+            .find(|n| n.rect().left() < 400.0)
+            .unwrap()
+            .click();
+        harness.run();
+        harness.run();
+        let warned = harness.query_by_label("Warnings of the step").is_some();
+        assert_eq!(
+            warned, tilted,
+            "the tilted inlet warns, the straight one does not"
+        );
+        harness
+            .get_all_by_label("Contour")
+            .filter(|n| n.rect().left() > 1000.0 && n.accesskit_node().role() != Role::Label)
+            .map(|n| n.rect().top())
+            .reduce(f32::min)
+            .unwrap()
+    };
+    assert_eq!(contour_top(false), contour_top(true));
+}
+
+#[test]
+fn the_footer_buttons_keep_their_place() {
+    let mut harness = harness();
+    let back = |h: &Harness<'_, TurbopumpApp>| h.get_by_label_contains("Back").rect();
+    // Pending main dimensions: Accept.
+    let pending = back(&harness);
+    accept(&mut harness);
+    // A later step that waits for the earlier ones: Accept, disabled.
+    harness.key_press_modifiers(Modifiers::ALT, Key::ArrowDown);
+    harness.run();
+    harness.run();
+    let blocked = back(&harness);
+    // The accepted step: Next.
+    for _ in 0..2 {
+        harness.key_press_modifiers(Modifiers::ALT, Key::ArrowUp);
+        harness.run();
+    }
+    harness.run();
+    assert_eq!(
+        status(&harness, DesignStep::MainDimensions),
+        StepStatus::Done
+    );
+    let done = back(&harness);
+    assert_eq!(pending, done, "Back moved between Accept and Next");
+    assert_eq!(pending, blocked, "Back moved for a blocked step");
+}
+
+/// The right edge of the properties panel's content: its header actions end there.
+fn panel_right(h: &Harness<'_, TurbopumpApp>) -> f32 {
+    h.get_by_label("More actions of the step").rect().right()
+}
+
+#[test]
+fn the_fields_reach_the_right_edge_of_the_panel() {
+    let mut harness = harness();
+    let check = |h: &Harness<'_, TurbopumpApp>| {
+        let right = panel_right(h);
+        // The units follow the fields, and the unit column ends at the panel's edge.
+        for (name, r) in panel_inputs(h) {
+            assert!(
+                right - r.right() < 42.0 && right - r.right() > 15.0,
+                "{name} ends at {} but the panel at {right}",
+                r.right()
+            );
+        }
+    };
+    check(&harness);
+    // Wider by dragging its left edge: the fields follow.
+    let edge = harness.get_by_label("More actions of the step").rect();
+    let left = harness
+        .get_all_by_label_contains("›")
+        .find(|n| n.rect().left() > 700.0)
+        .unwrap()
+        .rect()
+        .left()
+        - 14.0;
+    let from = egui::pos2(left, edge.center().y + 300.0);
+    harness.drag_at(from);
+    harness.run();
+    harness.hover_at(from - egui::vec2(120.0, 0.0));
+    harness.run();
+    harness.drop_at(from - egui::vec2(120.0, 0.0));
+    harness.run();
+    harness.run();
+    check(&harness);
+}
+
+#[test]
+fn nothing_moves_on_hover_in_the_other_views() {
+    let mut harness = harness();
+    for tab in ["Blade tab", "Front tab", "Section tab", "Report tab"] {
+        harness.get_by_label(tab).click();
+        harness.run();
+        nothing_moves_on_hover(&mut harness);
+    }
+}
+
+#[test]
+fn nothing_moves_on_hover_in_the_dialogs() {
+    let mut harness = harness();
+    // Every page of the settings.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run();
+    for page in ["Appearance", "Language", "Units", "Behavior"] {
+        harness
+            .get_all_by_label_contains(page)
+            .next()
+            .unwrap()
+            .click();
+        harness.run();
+        nothing_moves_on_hover(&mut harness);
+    }
+    harness.get_by_label("Close").click();
+    harness.run();
+    // About.
+    harness.get_all_by_label("Help").next().unwrap().click();
+    harness.run();
+    harness.get_by_label_contains("About").click();
+    harness.run();
+    nothing_moves_on_hover(&mut harness);
+    harness.get_by_label("Close").click();
+    harness.run();
+    // The export of CAD solids, once the stage is designed.
+    harness
+        .get_by_label("Complete every step of Impeller 1")
+        .click();
+    harness.run();
+    harness.get_by_label("Volute 1").click();
+    harness.run();
+    harness
+        .get_by_label("Complete every step of Volute 1")
+        .click();
+    harness.run();
+    harness
+        .get_all_by_label_contains("CAD solids")
+        .find(|n| n.rect().left() < 400.0)
+        .unwrap()
+        .click();
+    harness.run();
+    harness.get_by_label_contains("Export CAD solids");
+    nothing_moves_on_hover(&mut harness);
+    harness.key_press(Key::Escape);
+    harness.run();
+    // A new project.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::N);
+    harness.run();
+    nothing_moves_on_hover(&mut harness);
 }

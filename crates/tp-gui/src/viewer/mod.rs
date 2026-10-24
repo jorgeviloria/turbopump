@@ -177,6 +177,11 @@ pub(crate) struct Viewer {
     /// Angle about the axis of the normal of the meridional cut, rad, when the model is
     /// cut. The half the normal points to is removed.
     pub cut: Option<f32>,
+    /// Where the cut lies along its normal, as a fraction of the model's radius; 0
+    /// through the axis.
+    pub cut_offset: f32,
+    /// Outline the cutting plane over the view.
+    pub show_cut_plane: bool,
     /// Clicks put points to measure between, instead of selecting parts.
     measuring: bool,
     /// The points measured: none, the first, or both.
@@ -218,6 +223,29 @@ pub(crate) fn part_name(id: PartId) -> &'static str {
 /// The normal of a cut through the axis at `angle`.
 fn cut_normal(angle: f32) -> Vec3 {
     Vec3::new(angle.cos(), angle.sin(), 0.0)
+}
+
+/// A cutting plane: the points p with normal · p = offset; the side the normal points
+/// to is removed.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Plane {
+    pub normal: Vec3,
+    pub offset: f32,
+}
+
+impl Plane {
+    /// Whether `p` lies on the side the plane removes.
+    pub fn removes(&self, p: Vec3) -> bool {
+        self.normal.dot(p) > self.offset
+    }
+}
+
+/// The plane of a cut at `angle`, moved `offset` times `radius` along its normal.
+fn cut_plane(angle: f32, offset: f32, radius: f32) -> Plane {
+    Plane {
+        normal: cut_normal(angle),
+        offset: offset * radius,
+    }
 }
 
 /// A pointer this close to a vertex of the mesh measures from the vertex, points.
@@ -466,7 +494,8 @@ impl Viewer {
         }
 
         let p = Palette::of(ui);
-        let cut = self.cut.map(cut_normal);
+        let radius = self.bounds.map_or(0.0, |(_, r)| r);
+        let cut = self.cut.map(|a| cut_plane(a, self.cut_offset, radius));
         let matrix = clip_matrix(camera, rect, free);
         // What lies under the pointer, unless the camera is moving.
         let hit = match (response.hover_pos(), &self.mesh) {
@@ -566,6 +595,10 @@ impl Viewer {
             target.filter(|_| self.measuring),
             units,
         );
+        if let (Some(plane), true, Some((center, radius))) = (cut, self.show_cut_plane, self.bounds)
+        {
+            plane_outline(ui, matrix, (rect, free), plane, center, radius, &p);
+        }
         if self.measuring {
             let hint = if self.points.len() == 1 {
                 tr("Click the second point; Esc clears")
@@ -592,7 +625,8 @@ impl Viewer {
     pub(crate) fn capture(&mut self, state: &RenderState, dark: bool) -> Option<Capture> {
         let (free, ppp) = self.frame?;
         let camera = self.camera?;
-        let cut = self.cut.map(cut_normal);
+        let radius = self.bounds.map_or(0.0, |(_, r)| r);
+        let cut = self.cut.map(|a| cut_plane(a, self.cut_offset, radius));
         let gpu = self.gpu.as_mut()?;
         let limit = state.device.limits().max_texture_dimension_2d as f32;
         let scale = (ppp * CAPTURE_SCALE).min(limit / free.width().max(free.height()).max(1.0));
@@ -608,6 +642,49 @@ impl Viewer {
             rgba,
         })
     }
+}
+
+/// The cutting plane as a frame over the view, as big as the model: its trace, not a
+/// solid face, so it hides nothing.
+fn plane_outline(
+    ui: &Ui,
+    matrix: Mat4,
+    (rect, free): (Rect, Rect),
+    plane: Plane,
+    center: Vec3,
+    radius: f32,
+    p: &Palette,
+) {
+    let across = Vec3::new(-plane.normal.y, plane.normal.x, 0.0);
+    let on = plane.normal * plane.offset + Vec3::new(0.0, 0.0, center.z);
+    let half = 1.1 * radius;
+    let corners: Option<Vec<Pos2>> = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)]
+        .iter()
+        .map(|(s, t)| {
+            to_screen(
+                matrix,
+                rect,
+                on + across * (s * half) + Vec3::Z * (t * half),
+            )
+        })
+        .collect();
+    let Some(corners) = corners else {
+        return;
+    };
+    let painter = ui.painter().with_clip_rect(free);
+    painter.add(Shape::convex_polygon(
+        corners.clone(),
+        p.accent.gamma_multiply(0.06),
+        Stroke::NONE,
+    ));
+    let mut closed = corners;
+    closed.push(closed[0]);
+    painter.add(Shape::dashed_line(
+        &closed,
+        Stroke::new(1.2, p.accent),
+        8.0,
+        5.0,
+    ));
 }
 
 /// The right-click menu of a part, or of the model when `part` is `None`.
@@ -784,14 +861,13 @@ fn measurement(
 }
 
 /// Lights fixed to the camera, and the background of the theme. The model is centered
-/// in `free`, the part of `rect` nothing covers, and cut by the plane through the axis
-/// with normal `cut`.
+/// in `free`, the part of `rect` nothing covers, and cut by the plane `cut`.
 fn uniforms(
     camera: &Camera,
     rect: Rect,
     free: Rect,
     dark: bool,
-    cut: Option<Vec3>,
+    cut: Option<Plane>,
     accent: Color32,
 ) -> Uniforms {
     let view = camera.view();
@@ -820,7 +896,7 @@ fn uniforms(
         up: up.extend(0.0).to_array(),
         sky,
         ground,
-        clip: cut.map_or([0.0; 4], |n| n.extend(1.0).to_array()),
+        clip: cut.map_or([0.0; 4], |c| c.normal.extend(c.offset).to_array()),
         accent: [
             f32::from(r) / 255.0,
             f32::from(g) / 255.0,

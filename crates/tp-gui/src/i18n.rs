@@ -107,6 +107,26 @@ pub fn tf(template: &'static str, args: &[&dyn Display]) -> String {
     fill(tr(template), &args)
 }
 
+/// The name of a fluid to show: the common CoolProp names in words of the current
+/// language ("HeavyWater" is heavy water); any other name as typed.
+pub fn fluid_name(name: &str) -> String {
+    let words = match name {
+        "Water" => "Water",
+        "HeavyWater" => "Heavy water",
+        "Ethanol" => "Ethanol",
+        "Methanol" => "Methanol",
+        "Acetone" => "Acetone",
+        "Toluene" => "Toluene",
+        "n-Hexane" => "n-Hexane",
+        "n-Heptane" => "n-Heptane",
+        "n-Decane" => "n-Decane",
+        "Ammonia" => "Ammonia",
+        "Propane" => "Propane",
+        other => return other.to_owned(),
+    };
+    tr(words).to_owned()
+}
+
 /// A component name in the current language: the default names ("Impeller 2") are
 /// translated; names the user typed stay as they are.
 pub fn component_name(name: &str) -> String {

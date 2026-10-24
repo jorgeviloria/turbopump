@@ -210,7 +210,7 @@ fn kind_combo(
     // Tall enough to list every kind without scrolling.
     crate::widgets::list(ui, |ui| {
         ComboBox::from_id_salt(salt)
-            .selected_text(text)
+            .selected_text(crate::widgets::noted(ui, text))
             .height(400.0)
             .show_ui(ui, |ui| {
                 if let Some(none) = none
@@ -694,10 +694,13 @@ fn bezier_editor(ui: &mut Ui, id: &str, b: &mut BezierSide, b3: Option<f64>, uni
         let before = b.position;
         crate::widgets::list(ui, |ui| {
             ComboBox::from_id_salt((id, "position"))
-                .selected_text(match b.position {
-                    InnerPosition::Relative => tr("relative"),
-                    InnerPosition::Absolute => tr("absolute"),
-                })
+                .selected_text(crate::widgets::noted(
+                    ui,
+                    match b.position {
+                        InnerPosition::Relative => tr("relative"),
+                        InnerPosition::Absolute => tr("absolute"),
+                    },
+                ))
                 .show_ui(ui, |ui| {
                     ui.selectable_value(&mut b.position, InnerPosition::Relative, tr("relative"));
                     ui.selectable_value(&mut b.position, InnerPosition::Absolute, tr("absolute"));
@@ -827,7 +830,7 @@ fn bend_combo(ui: &mut Ui, salt: &str, wall: &mut BendWall) {
     };
     crate::widgets::list(ui, |ui| {
         ComboBox::from_id_salt(salt)
-            .selected_text(text(*wall))
+            .selected_text(crate::widgets::noted(ui, text(*wall)))
             .show_ui(ui, |ui| {
                 for w in [BendWall::Sharp, BendWall::Straight, BendWall::Round] {
                     ui.selectable_value(wall, w, text(w));

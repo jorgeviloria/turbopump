@@ -76,10 +76,21 @@ impl Line {
     }
 }
 
-/// A frameless button holding `line`, framed while hovered.
-fn chip(ui: &mut Ui, line: &mut Line, tip: &str) -> Response {
+/// A frameless button holding `line`, framed while hovered. It keeps the widest it has
+/// been under `key`, so that a number growing shorter does not pull the chips after it.
+fn chip(ui: &mut Ui, key: &str, line: &mut Line, tip: &str) -> Response {
     let job = std::mem::take(&mut line.job);
-    let response = ui.add(egui::Button::new(job).frame_when_inactive(false));
+    let id = egui::Id::new(("objective_chip", key));
+    let widest = ui.data(|d| d.get_temp::<f32>(id)).unwrap_or(0.0);
+    let response = ui.add(
+        egui::Button::new(job)
+            .frame_when_inactive(false)
+            .min_size(egui::vec2(widest, 0.0)),
+    );
+    let width = response.rect.width();
+    if width > widest {
+        ui.data_mut(|d| d.insert_temp(id, width));
+    }
     if tip.is_empty() {
         response
     } else {
@@ -122,7 +133,7 @@ pub(crate) fn show(
             "{}\n{source}",
             tr("The design point, the fluid and the inlet conditions: click to edit them")
         );
-        if chip(ui, &mut line, &tip).clicked() {
+        if chip(ui, "target", &mut line, &tip).clicked() {
             action = Some(Action::Setup);
         }
         ui.separator();
@@ -181,7 +192,7 @@ fn target(
     line.dot(p).text(
         &format!(
             "{} {}",
-            setup.fluid,
+            crate::i18n::fluid_name(&setup.fluid),
             units.show(QuantityKind::Temperature, setup.inlet.total_temperature)
         ),
         p.text,
@@ -221,6 +232,7 @@ fn prediction(
     }
     chip(
         ui,
+        "caption",
         &mut caption,
         tr(
             "One-dimensional model of the performance prediction: main dimensions and collector. Editing the mean lines or the profiles does not change it, and it is not a CFD result.",
@@ -233,7 +245,7 @@ fn prediction(
             let mut line = Line::new();
             line.text(&format!("{} ", icon::X_CIRCLE), error)
                 .text(tr("no prediction"), error);
-            chip(ui, &mut line, &message(e));
+            chip(ui, "failed", &mut line, &message(e));
             return None;
         }
     };
@@ -272,7 +284,7 @@ fn prediction(
             ],
         );
     }
-    curves(chip(ui, &mut line, &tip));
+    curves(chip(ui, "head", &mut line, &tip));
 
     // Efficiency, with the scatter of the statistics.
     if detail >= Detail::Medium {
@@ -296,7 +308,7 @@ fn prediction(
                 &format!("{:.1}", main.efficiency_tolerance * 100.0),
             ],
         );
-        curves(chip(ui, &mut line, &tip));
+        curves(chip(ui, "efficiency", &mut line, &tip));
     }
 
     // Power.
@@ -304,7 +316,12 @@ fn prediction(
         dot(ui, p);
         let mut line = Line::new();
         line.value("P", &units.show(QuantityKind::Power, perf.design.power), p);
-        curves(chip(ui, &mut line, tr("Shaft power at the design flow")));
+        curves(chip(
+            ui,
+            "power",
+            &mut line,
+            tr("Shaft power at the design flow"),
+        ));
     }
 
     // Cavitation: the NPSH₃ against the NPSH available.
@@ -339,7 +356,7 @@ fn prediction(
             "The NPSH₃ at the design flow reaches the NPSH available of the inlet conditions: the pump cavitates.",
         )
     };
-    curves(chip(ui, &mut line, tip));
+    curves(chip(ui, "npsh", &mut line, tip));
 
     // Where the best efficiency is.
     if detail == Detail::Full && perf.design.flow > 0.0 {
@@ -350,6 +367,7 @@ fn prediction(
             .text(" Q", p.text);
         curves(chip(
             ui,
+            "best",
             &mut line,
             tr("Flow of the best efficiency over the design flow"),
         ));
@@ -384,9 +402,36 @@ fn stale(ui: &mut Ui, project: &Project, p: &Palette) -> Option<Action> {
     line.text(&format!("{}  {text}", icon::ARROWS_CLOCKWISE), p.stale);
     chip(
         ui,
+        "stale",
         &mut line,
         tr("An earlier change left these steps outdated: click to open the first"),
     )
     .clicked()
     .then_some(Action::Step(id, step))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A number growing shorter leaves its chip as wide as it was, so the chips after it
+    /// stay put.
+    #[test]
+    fn a_chip_keeps_the_widest_it_has_been() {
+        let ctx = egui::Context::default();
+        let width = |text: &str| {
+            let mut width = 0.0;
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let mut line = Line::new();
+                line.text(text, Color32::WHITE);
+                width = chip(ui, "test", &mut line, "").rect.width();
+            });
+            output.textures_delta.clear();
+            width
+        };
+        let long = width("H 32.32 m  +15.4 %");
+        let short = width("H 32.32 m  +1.0 %");
+        assert!(long > 0.0);
+        assert_eq!(short, long);
+    }
 }

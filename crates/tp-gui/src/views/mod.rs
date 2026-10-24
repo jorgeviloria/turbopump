@@ -128,6 +128,36 @@ pub(crate) enum Mark {
 
 /// A small drawn symbol and its name, as in a plot legend.
 pub(crate) fn marker(ui: &mut Ui, mark: Mark, color: Color32, text: &str) {
+    // The mark and its words as one piece: a wrapping legend moves it whole to the next
+    // line rather than splitting it.
+    let width = 14.0 + ui.spacing().item_spacing.x + text_width(ui, text, false);
+    whole(ui, width, |ui| marker_piece(ui, mark, color, text));
+    ui.add_space(10.0);
+}
+
+/// Width of `text` in the body font, bold or not.
+pub(crate) fn text_width(ui: &Ui, text: &str, bold: bool) -> f32 {
+    let mut font = egui::TextStyle::Body.resolve(ui.style());
+    if bold {
+        font.family = crate::theme::bold_family();
+    }
+    ui.painter()
+        .layout_no_wrap(text.to_owned(), font, Color32::WHITE)
+        .size()
+        .x
+}
+
+/// Adds a piece `width` wide to a wrapping row in one go: on a new line when it does
+/// not fit in what is left of this one.
+pub(crate) fn whole(ui: &mut Ui, width: f32, add: impl FnOnce(&mut Ui)) {
+    if ui.available_size_before_wrap().x < width && ui.cursor().left() > ui.max_rect().left() + 1.0
+    {
+        ui.end_row();
+    }
+    ui.horizontal(add);
+}
+
+fn marker_piece(ui: &mut Ui, mark: Mark, color: Color32, text: &str) {
     let (rect, _) = ui.allocate_exact_size(vec2(14.0, 14.0), egui::Sense::hover());
     let painter = ui.painter_at(rect);
     let c = rect.center();
@@ -184,6 +214,5 @@ pub(crate) fn marker(ui: &mut Ui, mark: Mark, color: Color32, text: &str) {
             }
         }
     }
-    ui.label(text);
-    ui.add_space(10.0);
+    ui.add(egui::Label::new(text).extend());
 }

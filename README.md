@@ -149,8 +149,12 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
     ni la escala. La pieza bajo el ratón se tiñe y dice su nombre; un clic la
     selecciona (también en la Escena) y el botón derecho la oculta, la aísla o cambia
     su opacidad. El corte meridional quita la mitad del modelo que mira a la cámara
-    (o la otra). Medir da la distancia entre dos puntos del modelo y sus partes radial
+    (o la otra); se desplaza paralelo a sí mismo con su posición, en porcentaje del
+    radio, y su plano se puede dibujar sobre el modelo. Medir da la distancia entre dos puntos del modelo y sus partes radial
     y axial, Δr y Δz; cerca de un vértice de la malla el punto se ajusta a él;
+
+    ![Corte meridional y medida en la vista 3D](docs/img/medida-corte-3d.jpg)
+
   - curvas: altura, rendimiento, potencia y NPSH₃ previstos frente al caudal (la altura
     a carga parcial según Gülich, cap. 4.3, y el NPSH₃ como banda de cinco métodos
     publicados), con la zona de recirculación estimada a trazos, el NPSH disponible y la pérdida en la
@@ -182,8 +186,9 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
   con sus datos:
   - **arriba**, la ruta (componente › fase), el título, el estado, «paso n de m», la ⓘ
     con lo que hace el paso y un menú ⋯ para devolver el paso a automático o plegar
-    todas sus secciones. El error del paso se ve siempre; los avisos, en una línea
-    con el primero que se despliega;
+    todas sus secciones. El error del paso, o sus avisos, van al final de la misma
+    fila del estado, recortados al sitio que queda (enteros al pasar el ratón; un clic
+    los lista todos encima del formulario), así que al aparecer no mueven nada;
   - **en medio**, secciones que se pliegan, marcadas como resultados o comprobación
     cuando lo son. Cada valor que puede ser automático lleva un punto, como los del
     editor del meridiano: hueco y en gris si lo propone el programa, relleno si está
@@ -204,8 +209,10 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
     pasos que le faltan al componente con los valores sugeridos.
 
   El panel flota sobre la vista sin reducirla: se pliega a una franja estrecha (con su
-  flecha o con Esc), se ensancha arrastrando su borde izquierdo y no bloquea las
-  vistas, así que con él abierto se siguen arrastrando los puntos del contorno. La
+  flecha o con Esc) y tiene el mismo ancho en todas las vistas y pasos; solo cambia
+  arrastrando su borde izquierdo, y ese ancho se recuerda entre sesiones. Todas sus
+  filas comparten columnas: etiquetas, campos, listas y unidades quedan alineados de
+  arriba abajo. No bloquea las vistas, así que con él abierto se siguen arrastrando los puntos del contorno. La
   vista 3D centra la pieza en la parte que queda libre.
 - **Barra de estado** (abajo): el último mensaje, las unidades y el contador de errores
   y avisos, que abre el panel de mensajes de todo el proyecto.
@@ -270,6 +277,11 @@ mientras se edite el rodete.
   de la punta del cuello: la fuga del anillo de cierre sale a ese hueco y vuelve a la
   boca dentro del mismo dominio. Se dibuja en el ámbito Cámaras laterales y aparece en
   la Escena del 3D.
+
+  | Meridiano | 3D, con el corte meridional |
+  |---|---|
+  | ![Tubería de entrada en el meridiano](docs/img/tuberia-entrada-meridiano.jpg) | ![Tubería de entrada en 3D](docs/img/tuberia-entrada-3d.jpg) |
+
 - **Cruces:** si dos paredes se cruzan, o una se cruza consigo misma, el punto se
   marca en rojo y sale un aviso.
 - **Análisis:** la curvatura de las paredes, los círculos de área, las gráficas de área

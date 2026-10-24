@@ -35,10 +35,10 @@ struct Columns {
 impl Columns {
     /// The columns for a panel `width` points wide.
     fn for_width(width: f32) -> Self {
-        // A little slack: rows exactly as wide as the panel would nudge its width
-        // through rounding, and the columns would take frames to settle.
-        let free = (width - GAP - 12.0).max(160.0);
-        let label = (free * 0.56).clamp(100.0, 260.0);
+        // The value column reaches the right edge; a hair of slack keeps rounding from
+        // nudging the panel.
+        let free = (width - GAP - 2.0).max(160.0);
+        let label = (free * 0.52).clamp(100.0, 360.0);
         Self {
             label,
             value: free - label,
@@ -47,6 +47,11 @@ impl Columns {
 
     fn id() -> egui::Id {
         egui::Id::new("tp_property_columns")
+    }
+
+    /// Where a panel keeps the columns all its grids share.
+    fn panel_id() -> egui::Id {
+        egui::Id::new("tp_panel_columns")
     }
 
     /// The columns of the grid being drawn.
@@ -59,7 +64,9 @@ impl Columns {
 /// A grid of property rows. Inputs, combo boxes and text fields in it fill the value
 /// column; build the rows with [`label`], [`param_f64`], [`param_u32`] and [`value_row`].
 pub fn props(ui: &mut Ui, id: impl Hash + std::fmt::Debug, add: impl FnOnce(&mut Ui)) {
-    let columns = Columns::for_width(ui.available_width());
+    let columns = ui
+        .data(|d| d.get_temp::<Columns>(Columns::panel_id()))
+        .unwrap_or_else(|| Columns::for_width(ui.available_width()));
     ui.data_mut(|d| d.insert_temp(Columns::id(), columns));
     egui::Grid::new(id)
         .num_columns(2)
@@ -70,11 +77,25 @@ pub fn props(ui: &mut Ui, id: impl Hash + std::fmt::Debug, add: impl FnOnce(&mut
             ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
             let spacing = ui.spacing_mut();
             spacing.interact_size.x = columns.value;
-            // Lists as wide as a numeric field and its unit together.
-            spacing.combo_width = columns.value;
-            spacing.text_edit_width = columns.value - 2.0 * spacing.button_padding.x;
+            // Lists and text fields as wide as the numeric fields, which leave the
+            // rest of the column to their unit: all line up on both edges.
+            let field = columns.value - UNIT_WIDTH - 4.0;
+            spacing.combo_width = field;
+            spacing.text_edit_width = field - 2.0 * spacing.button_padding.x;
             add(ui);
         });
+}
+
+/// Draws `add` with every grid of rows in it on the same columns, worked out from the
+/// width of `ui`: labels, fields, lists and units line up down the whole panel, whatever
+/// frames or indents a group sits in.
+pub fn shared_columns<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    // The scroll bar floats over the content: a little room under it.
+    let columns = Columns::for_width(ui.available_width() - 4.0);
+    ui.data_mut(|d| d.insert_temp(Columns::panel_id(), columns));
+    let inner = add(ui);
+    ui.data_mut(|d| d.remove::<Columns>(Columns::panel_id()));
+    inner
 }
 
 /// An ⓘ that shows `text` when the pointer rests on it.
@@ -302,7 +323,7 @@ fn value_box(ui: &mut Ui, text: egui::WidgetText) -> egui::Response {
 }
 
 /// Width of the unit after a numeric field.
-const UNIT_WIDTH: f32 = 42.0;
+const UNIT_WIDTH: f32 = 34.0;
 
 /// A numeric field and, after it and outside it, its `unit` in the weak color, as
 /// engineering programs show them. The field leaves room for a unit even when there is
@@ -350,15 +371,70 @@ pub fn then_unit(
 /// would otherwise stretch to the edge of the panel.
 pub fn list<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
     let width = ui.spacing().combo_width;
-    ui.allocate_ui_with_layout(
+    ui.data_mut(|d| d.remove::<String>(list_text_id()));
+    let inner = ui.allocate_ui_with_layout(
         vec2(width, ROW_HEIGHT - 2.0),
         Layout::left_to_right(Align::Center),
         |ui| {
             ui.set_max_width(width);
             add(ui)
         },
-    )
-    .inner
+    );
+    // A choice cut to fit shows whole on hover.
+    if let Some(text) = ui.data_mut(|d| d.remove_temp::<String>(list_text_id())) {
+        let font = egui::TextStyle::Button.resolve(ui.style());
+        let room = width
+            - ui.spacing().icon_width
+            - ui.spacing().icon_spacing
+            - 2.0 * ui.spacing().button_padding.x;
+        let needed = ui
+            .painter()
+            .layout_no_wrap(text.clone(), font, egui::Color32::WHITE)
+            .size()
+            .x;
+        if needed > room {
+            inner.response.on_hover_text(text);
+        }
+    }
+    inner.inner
+}
+
+/// The value of a wire drawn by hand: how many segments it has and a button back to
+/// the automatic one at the right, both within the width of a field so the row keeps to
+/// the columns of the others. Returns whether the button was clicked.
+pub fn drawn_wire(ui: &mut Ui, count: &str) -> bool {
+    let width = ui.spacing().combo_width;
+    let mut clicked = false;
+    ui.allocate_ui_with_layout(
+        vec2(width + UNIT_WIDTH + 4.0, ROW_HEIGHT - 2.0),
+        Layout::left_to_right(Align::Center),
+        |ui| {
+            ui.allocate_ui_with_layout(
+                vec2(width, ROW_HEIGHT - 2.0),
+                Layout::left_to_right(Align::Center),
+                |ui| {
+                    ui.set_min_width(width);
+                    ui.add(egui::Label::new(count).extend());
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        clicked = ui.button(tr("Automatic")).clicked();
+                    });
+                },
+            );
+        },
+    );
+    clicked
+}
+
+fn list_text_id() -> egui::Id {
+    egui::Id::new("tp_list_text")
+}
+
+/// The text a list shows, noted so that [`list`] can show it whole on hover when it does
+/// not fit.
+pub fn noted(ui: &Ui, text: impl Into<egui::WidgetText>) -> egui::WidgetText {
+    let text = text.into();
+    ui.data_mut(|d| d.insert_temp(list_text_id(), text.text().to_owned()));
+    text
 }
 
 /// The unit of `kind` to show after a field: none for a plain number.
@@ -653,7 +729,7 @@ pub fn param_choice<T: Copy + PartialEq>(
                 let mut chosen = None;
                 list(ui, |ui| {
                     egui::ComboBox::from_id_salt(("param_choice", label))
-                        .selected_text(egui::RichText::new(name(value)).color(weak))
+                        .selected_text(noted(ui, egui::RichText::new(name(value)).color(weak)))
                         .show_ui(ui, |ui| {
                             for &option in options {
                                 if ui.selectable_label(option == value, name(option)).clicked() {
@@ -672,7 +748,7 @@ pub fn param_choice<T: Copy + PartialEq>(
         Param::Manual(value) => {
             list(ui, |ui| {
                 egui::ComboBox::from_id_salt(("param_choice", label))
-                    .selected_text(name(*value))
+                    .selected_text(noted(ui, name(*value)))
                     .show_ui(ui, |ui| {
                         for &option in options {
                             changed |= ui.selectable_value(value, option, name(option)).changed();

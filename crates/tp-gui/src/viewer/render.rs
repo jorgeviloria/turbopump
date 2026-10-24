@@ -28,7 +28,7 @@ pub(crate) struct Uniforms {
     /// Gamma-encoded background at the top and at the bottom of the view.
     pub sky: [f32; 4],
     pub ground: [f32; 4],
-    /// Normal of the cutting plane through the axis, w = 1 when the model is cut.
+    /// The cutting plane, normal · p = w; a zero normal when the model is whole.
     pub clip: [f32; 4],
     /// Gamma-encoded tint of highlighted parts.
     pub accent: [f32; 4],

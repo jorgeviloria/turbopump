@@ -65,8 +65,8 @@ impl Ray {
 
 /// The nearest point of a shown part on `ray`. Glass parts only count where nothing
 /// else lies behind them, so the parts inside the casing can be picked through it.
-/// Points that `cut` removes (the side of the plane its normal points to) are skipped.
-pub(crate) fn pick(mesh: &MeshData, ray: &Ray, cut: Option<Vec3>) -> Option<Hit> {
+/// Points that `cut` removes are skipped.
+pub(crate) fn pick(mesh: &MeshData, ray: &Ray, cut: Option<super::Plane>) -> Option<Hit> {
     let mut solid: Option<(f32, Hit)> = None;
     let mut glass: Option<(f32, Hit)> = None;
     for part in &mesh.parts {
@@ -85,7 +85,7 @@ pub(crate) fn pick(mesh: &MeshData, ray: &Ray, cut: Option<Vec3>) -> Option<Hit>
                 continue;
             }
             let point = ray.at(along);
-            if cut.is_some_and(|n| n.dot(point) > 0.0) {
+            if cut.is_some_and(|plane| plane.removes(point)) {
                 continue;
             }
             *best = Some((
@@ -194,9 +194,12 @@ mod tests {
             origin: Vec3::new(0.5, 0.0, -5.0),
             direction: Vec3::Z,
         };
+        let plane = |normal: Vec3, offset: f32| Some(super::super::Plane { normal, offset });
         // The plane x = 0 removes x > 0: the ray at x = 0.5 meets nothing.
-        assert!(pick(&mesh, &ray, Some(Vec3::X)).is_none());
-        assert!(pick(&mesh, &ray, Some(Vec3::NEG_X)).is_some());
+        assert!(pick(&mesh, &ray, plane(Vec3::X, 0.0)).is_none());
+        assert!(pick(&mesh, &ray, plane(Vec3::NEG_X, 0.0)).is_some());
+        // Moved past the ray, the plane leaves it its part.
+        assert!(pick(&mesh, &ray, plane(Vec3::X, 0.6)).is_some());
     }
 
     #[test]

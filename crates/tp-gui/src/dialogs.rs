@@ -149,52 +149,58 @@ pub(crate) fn about(ctx: &egui::Context) -> bool {
             ),
         );
         ui.separator();
-        // As tall as the window allows, leaving room for the header and the buttons.
+        // As tall as the window allows, leaving room for the header and the buttons;
+        // that tall from the first frame, so the dialog does not move while its content
+        // settles.
         let room = (ui.ctx().content_rect().height() - 240.0).clamp(160.0, 560.0);
-        ScrollArea::vertical().max_height(room).show(ui, |ui| {
-            heading(ui, tr("Author"));
-            ui.horizontal(|ui| {
-                ui.label(bold("Jorge Viloria"));
-                ui.label(RichText::new(tr("and the Turbopump contributors")).color(p.weak));
-            });
-            ui.hyperlink_to(
-                format!("{}  {PROJECT_PAGE}", icon::GITHUB_LOGO),
-                PROJECT_PAGE,
-            );
-
-            heading(ui, tr("Built with"));
-            egui::Grid::new("about_built_with")
-                .num_columns(3)
-                .spacing([16.0, 4.0])
-                .striped(true)
-                .show(ui, |ui| {
-                    for (name, purpose, license, page) in BUILT_WITH {
-                        ui.hyperlink_to(*name, *page);
-                        ui.label(tr(purpose));
-                        ui.label(RichText::new(*license).color(p.weak).small());
-                        ui.end_row();
-                    }
+        ScrollArea::vertical()
+            .auto_shrink(false)
+            .min_scrolled_height(room)
+            .max_height(room)
+            .show(ui, |ui| {
+                heading(ui, tr("Author"));
+                ui.horizontal(|ui| {
+                    ui.label(bold("Jorge Viloria"));
+                    ui.label(RichText::new(tr("and the Turbopump contributors")).color(p.weak));
                 });
+                ui.hyperlink_to(
+                    format!("{}  {PROJECT_PAGE}", icon::GITHUB_LOGO),
+                    PROJECT_PAGE,
+                );
 
-            heading(ui, tr("Methods and references"));
-            for book in REFERENCES {
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(RichText::new("•").color(p.weak));
-                    ui.label(*book);
-                });
-            }
+                heading(ui, tr("Built with"));
+                egui::Grid::new("about_built_with")
+                    .num_columns(3)
+                    .spacing([16.0, 4.0])
+                    .striped(true)
+                    .show(ui, |ui| {
+                        for (name, purpose, license, page) in BUILT_WITH {
+                            ui.hyperlink_to(*name, *page);
+                            ui.label(tr(purpose));
+                            ui.label(RichText::new(*license).color(p.weak).small());
+                            ui.end_row();
+                        }
+                    });
 
-            heading(ui, tr("License"));
-            ui.label(tr(
-                "Free software: you may use, study, change and share it under the MIT or the \
+                heading(ui, tr("Methods and references"));
+                for book in REFERENCES {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(RichText::new("•").color(p.weak));
+                        ui.label(*book);
+                    });
+                }
+
+                heading(ui, tr("License"));
+                ui.label(tr(
+                    "Free software: you may use, study, change and share it under the MIT or the \
                  Apache-2.0 license, at your choice. It comes without any warranty.",
-            ));
-            ui.label(
-                RichText::new("© 2026 Jorge Viloria and the Turbopump contributors")
-                    .color(p.weak)
-                    .small(),
-            );
-        });
+                ));
+                ui.label(
+                    RichText::new("© 2026 Jorge Viloria and the Turbopump contributors")
+                        .color(p.weak)
+                        .small(),
+                );
+            });
         ui.add_space(6.0);
         ui.separator();
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
