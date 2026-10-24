@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use eframe::egui;
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use tp_gui::{Scope, TurbopumpApp, View};
 
 fn output(name: &str) -> PathBuf {
@@ -140,6 +140,102 @@ fn scene_colors_and_picture() {
     let path = output("picture-3d");
     std::fs::write(&path, png).unwrap();
     println!("wrote {}", path.display());
+}
+
+/// A primary click at `pos`, with the pointer left there.
+fn click_at(harness: &mut Harness<'_, TurbopumpApp>, pos: egui::Pos2) {
+    harness.hover_at(pos);
+    harness.run();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run();
+    }
+}
+
+/// The stage with its impeller and volute designed, in the 3D view, properties folded.
+fn stage_in_3d() -> Harness<'static, TurbopumpApp> {
+    let mut harness = harness(egui::Theme::Light);
+    for _ in 0..6 {
+        harness.get_by_label_contains("Accept step").click();
+        harness.run();
+    }
+    harness.get_by_label("Volute 1").click();
+    harness.run();
+    for _ in 0..2 {
+        harness.get_by_label_contains("Accept step").click();
+        harness.run();
+    }
+    harness.state_mut().set_sidebar_open(false);
+    harness.get_by_label("3D tab").click();
+    harness.run();
+    harness
+}
+
+/// Phase C of the 3D view: a part selected and another under the pointer, the
+/// meridional cut, and a distance measured on the cut model.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn inspect_3d() {
+    let mut harness = stage_in_3d();
+    let impeller = egui::pos2(960.0, 560.0);
+    let casing = egui::pos2(960.0, 700.0);
+    click_at(&mut harness, impeller);
+    harness.hover_at(casing);
+    harness.run_steps(4);
+    save_hovering(&mut harness, "pick");
+
+    // A right-click on the casing offers to hide it.
+    harness.hover_at(casing);
+    harness.run();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: casing,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run();
+    }
+    save(&mut harness, "part-menu");
+    harness
+        .get_all_by_label_contains("Hide")
+        .find(|n| {
+            n.accesskit_node()
+                .label()
+                .is_some_and(|l| l.ends_with("  Hide"))
+        })
+        .expect("the menu's Hide")
+        .click();
+    harness.run();
+    let casing_shown = harness
+        .get_all_by_label("Casing")
+        .find(|n| n.accesskit_node().role() == egui::accesskit::Role::CheckBox)
+        .and_then(|n| n.accesskit_node().toggled());
+    assert_eq!(casing_shown, Some(egui::accesskit::Toggled::False));
+    harness.get_by_label("Scene menu").click();
+    harness.run();
+    harness.get_by_label("Show all").click();
+    harness.run();
+
+    harness.get_by_label("Meridional cut").click();
+    harness.run();
+    save(&mut harness, "cut");
+
+    harness.get_by_label("Measure").click();
+    harness.run();
+    click_at(&mut harness, egui::pos2(900.0, 520.0));
+    // The casing on the far side, which the cut leaves.
+    let far = egui::pos2(1205.0, 520.0);
+    harness.hover_at(far);
+    harness.run_steps(4);
+    save_hovering(&mut harness, "measure-rubber");
+    click_at(&mut harness, far);
+    save(&mut harness, "measure");
 }
 
 /// The whole stage: impeller and volute designed, the spiral step selected.

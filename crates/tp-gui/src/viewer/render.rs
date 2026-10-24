@@ -28,6 +28,18 @@ pub(crate) struct Uniforms {
     /// Gamma-encoded background at the top and at the bottom of the view.
     pub sky: [f32; 4],
     pub ground: [f32; 4],
+    /// Normal of the cutting plane through the axis, w = 1 when the model is cut.
+    pub clip: [f32; 4],
+    /// Gamma-encoded tint of highlighted parts.
+    pub accent: [f32; 4],
+}
+
+/// A part to tint, by its vertices.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Highlight {
+    pub range: std::ops::Range<u32>,
+    /// Selected, rather than only under the pointer.
+    pub selected: bool,
 }
 
 struct GpuMesh {
@@ -51,6 +63,7 @@ pub(crate) struct Gpu {
     opaque: wgpu::RenderPipeline,
     transparent: wgpu::RenderPipeline,
     lines: wgpu::RenderPipeline,
+    highlight: wgpu::RenderPipeline,
     uniforms: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     mesh: Option<GpuMesh>,
@@ -74,6 +87,8 @@ enum Kind {
     Opaque,
     Transparent,
     Lines,
+    /// A part again, tinted.
+    Highlight,
 }
 
 fn pipeline(
@@ -99,8 +114,13 @@ fn pipeline(
             ("vs_main", "fs_main", wgpu::PrimitiveTopology::TriangleList)
         }
         Kind::Lines => ("vs_line", "fs_line", wgpu::PrimitiveTopology::LineList),
+        Kind::Highlight => (
+            "vs_highlight",
+            "fs_highlight",
+            wgpu::PrimitiveTopology::TriangleList,
+        ),
     };
-    let transparent = kind == Kind::Transparent;
+    let transparent = matches!(kind, Kind::Transparent | Kind::Highlight);
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some(label),
         layout: Some(layout),
@@ -192,6 +212,7 @@ impl Gpu {
             opaque: pipeline(device, &layout, &shader, "opaque", Kind::Opaque),
             transparent: pipeline(device, &layout, &shader, "transparent", Kind::Transparent),
             lines: pipeline(device, &layout, &shader, "lines", Kind::Lines),
+            highlight: pipeline(device, &layout, &shader, "highlight", Kind::Highlight),
             uniforms,
             bind_group,
             mesh: None,
@@ -251,10 +272,11 @@ impl Gpu {
         state: &RenderState,
         size: [u32; 2],
         uniforms: &Uniforms,
+        highlights: &[Highlight],
     ) -> egui::TextureId {
         let texture = self.ensure_target(state, size);
         let target = self.target.as_ref().expect("created above");
-        let encoder = self.draw(state, target, uniforms);
+        let encoder = self.draw(state, target, uniforms, highlights);
         state.queue.submit([encoder.finish()]);
         texture
     }
@@ -269,7 +291,7 @@ impl Gpu {
     ) -> Option<Vec<u8>> {
         let device = &state.device;
         let (image, target) = Target::new(device, size, wgpu::TextureUsages::COPY_SRC);
-        let mut encoder = self.draw(state, &target, uniforms);
+        let mut encoder = self.draw(state, &target, uniforms, &[]);
         let row = 4 * size[0] as usize;
         let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize;
         let padded = row.div_ceil(align) * align;
@@ -312,12 +334,13 @@ impl Gpu {
         )
     }
 
-    /// Records the background and the mesh into `target`.
+    /// Records the background, the mesh and the tints of `highlights` into `target`.
     fn draw(
         &self,
         state: &RenderState,
         target: &Target,
         uniforms: &Uniforms,
+        highlights: &[Highlight],
     ) -> wgpu::CommandEncoder {
         state
             .queue
@@ -380,6 +403,16 @@ impl Gpu {
                     pass.set_pipeline(&self.transparent);
                     pass.set_vertex_buffer(0, vertices.slice(..));
                     pass.draw(mesh.opaque..mesh.total, 0..1);
+                }
+                if let Some(vertices) = &mesh.vertices
+                    && !highlights.is_empty()
+                {
+                    pass.set_pipeline(&self.highlight);
+                    pass.set_vertex_buffer(0, vertices.slice(..));
+                    for h in highlights {
+                        let instance = u32::from(h.selected);
+                        pass.draw(h.range.clone(), instance..instance + 1);
+                    }
                 }
             }
         }

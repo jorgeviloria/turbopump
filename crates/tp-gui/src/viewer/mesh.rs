@@ -1,6 +1,7 @@
 //! Vertex data of the impeller for the 3D view, with smooth normals.
 
 use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 
 use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
@@ -39,6 +40,18 @@ impl Opacity {
             Opacity::Glass => Opacity::Opaque,
         }
     }
+}
+
+/// A shaded part of the stage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum PartId {
+    Blades,
+    Hub,
+    Shroud,
+    Vanes,
+    /// Side walls of a diffuser.
+    Walls,
+    Volute,
 }
 
 /// How one part of the model is drawn.
@@ -88,6 +101,30 @@ pub(crate) struct ViewOptions {
     pub wireframe: bool,
 }
 
+impl ViewOptions {
+    pub fn part(&self, id: PartId) -> &Part {
+        match id {
+            PartId::Blades => &self.blades,
+            PartId::Hub => &self.hub,
+            PartId::Shroud => &self.shroud,
+            PartId::Vanes => &self.vanes,
+            PartId::Walls => &self.walls,
+            PartId::Volute => &self.volute,
+        }
+    }
+
+    pub fn part_mut(&mut self, id: PartId) -> &mut Part {
+        match id {
+            PartId::Blades => &mut self.blades,
+            PartId::Hub => &mut self.hub,
+            PartId::Shroud => &mut self.shroud,
+            PartId::Vanes => &mut self.vanes,
+            PartId::Walls => &mut self.walls,
+            PartId::Volute => &mut self.volute,
+        }
+    }
+}
+
 impl Default for ViewOptions {
     fn default() -> Self {
         Self {
@@ -114,12 +151,22 @@ pub(crate) struct Vertex {
     pub color: [f32; 4],
 }
 
+/// The triangles of one part among the vertices.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Shaded {
+    pub id: PartId,
+    pub range: Range<u32>,
+    pub opacity: Opacity,
+}
+
 /// Triangles split by how they are drawn, plus wireframe lines.
 #[derive(Debug, Default)]
 pub(crate) struct MeshData {
     /// Opaque triangles first, then transparent ones.
     pub vertices: Vec<Vertex>,
     pub opaque: u32,
+    /// Where each shaded part lies in `vertices`, for picking and highlights.
+    pub parts: Vec<Shaded>,
     /// Pairs of vertices.
     pub lines: Vec<Vertex>,
     pub center: Vec3,
@@ -293,33 +340,49 @@ pub(crate) fn build(
     };
     let diffuser = stator.map(diffuser_parts).unwrap_or_default();
     let casing = volute.map(volute_triangles).unwrap_or_default();
-    let shown: [(&[Triangle], Part); 6] = [
-        (&blades, options.blades),
-        (&parts.hub, options.hub),
-        (&parts.shroud, options.shroud),
-        (&diffuser.vanes, options.vanes),
-        (&diffuser.walls, options.walls),
-        (&casing, options.volute),
+    let shown: [(&[Triangle], PartId); 6] = [
+        (&blades, PartId::Blades),
+        (&parts.hub, PartId::Hub),
+        (&parts.shroud, PartId::Shroud),
+        (&diffuser.vanes, PartId::Vanes),
+        (&diffuser.walls, PartId::Walls),
+        (&casing, PartId::Volute),
     ];
 
     let mut mesh = MeshData::default();
-    let visible = shown.iter().filter(|(t, part)| part.shown && !t.is_empty());
+    let visible = shown.iter().filter_map(|(t, id)| {
+        let part = options.part(*id);
+        (part.shown && !t.is_empty()).then_some((*t, *id, *part))
+    });
     if options.wireframe {
-        for (triangles, part) in visible.clone() {
+        for (triangles, _, part) in visible.clone() {
             push_all_edges(&mut mesh.lines, triangles, rgba(linear(part.color), 1.0));
         }
     } else {
         let opaque = |part: &Part| part.opacity == Opacity::Opaque;
-        for (triangles, part) in visible.clone().filter(|(_, part)| opaque(part)) {
-            push_triangles(&mut mesh.vertices, triangles, rgba(linear(part.color), 1.0));
-        }
-        mesh.opaque = mesh.vertices.len() as u32;
-        for (triangles, part) in visible.clone().filter(|(_, part)| !opaque(part)) {
-            let color = rgba(linear(part.color), part.opacity.alpha());
-            push_triangles(&mut mesh.vertices, triangles, color);
+        // Opaque parts first, so the blended ones draw over them.
+        let ordered = visible
+            .clone()
+            .filter(|(_, _, part)| opaque(part))
+            .chain(visible.clone().filter(|(_, _, part)| !opaque(part)));
+        for (triangles, id, part) in ordered {
+            let start = mesh.vertices.len() as u32;
+            push_triangles(
+                &mut mesh.vertices,
+                triangles,
+                rgba(linear(part.color), part.opacity.alpha()),
+            );
+            if opaque(&part) {
+                mesh.opaque = mesh.vertices.len() as u32;
+            }
+            mesh.parts.push(Shaded {
+                id,
+                range: start..mesh.vertices.len() as u32,
+                opacity: part.opacity,
+            });
         }
         if options.edges {
-            for (triangles, part) in visible.clone() {
+            for (triangles, _, part) in visible.clone() {
                 let color = line_color(linear(part.color));
                 for [a, b] in feature_edges(triangles) {
                     mesh.lines.push(line_vertex(a, color));
@@ -505,6 +568,17 @@ mod tests {
         ];
         // Folded at 90°: the shared edge is a crease.
         assert_eq!(feature_edges(&folded).len(), 5);
+    }
+
+    #[test]
+    fn parts_know_their_vertices() {
+        let g = geometry();
+        let mesh = build(&g, None, None, &ViewOptions::default());
+        let ids: Vec<PartId> = mesh.parts.iter().map(|p| p.id).collect();
+        assert_eq!(ids, [PartId::Blades, PartId::Hub, PartId::Shroud]);
+        assert_eq!(mesh.parts[1].range.end, mesh.opaque);
+        assert_eq!(mesh.parts[2].range.end as usize, mesh.vertices.len());
+        assert!(mesh.parts.iter().all(|p| p.range.len().is_multiple_of(3)));
     }
 
     #[test]

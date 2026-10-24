@@ -13,7 +13,7 @@ use crate::floating;
 use crate::i18n::{tf, tr};
 use crate::icons;
 use crate::theme::{Palette, component_color, icon};
-use crate::viewer::{Opacity, Part, ViewOptions};
+use crate::viewer::{Opacity, Part, PartAction, PartId, ViewOptions, opacity_name, part_name};
 
 /// Width of the open panel.
 const WIDTH: f32 = 250.0;
@@ -115,28 +115,32 @@ impl Key {
         }
     }
 
-    fn part(self, o: &ViewOptions) -> Option<&Part> {
+    /// The shaded part; the section curves are lines only.
+    fn id(self) -> Option<PartId> {
         match self {
-            Key::Blades => Some(&o.blades),
-            Key::Hub => Some(&o.hub),
-            Key::Shroud => Some(&o.shroud),
-            Key::Vanes => Some(&o.vanes),
-            Key::Walls => Some(&o.walls),
-            Key::Volute => Some(&o.volute),
+            Key::Blades => Some(PartId::Blades),
+            Key::Hub => Some(PartId::Hub),
+            Key::Shroud => Some(PartId::Shroud),
+            Key::Vanes => Some(PartId::Vanes),
+            Key::Walls => Some(PartId::Walls),
+            Key::Volute => Some(PartId::Volute),
             Key::Sections => None,
         }
     }
 
+    fn of(id: PartId) -> Key {
+        Key::ALL
+            .into_iter()
+            .find(|k| k.id() == Some(id))
+            .expect("every part has a key")
+    }
+
+    fn part(self, o: &ViewOptions) -> Option<&Part> {
+        self.id().map(|id| o.part(id))
+    }
+
     fn part_mut(self, o: &mut ViewOptions) -> Option<&mut Part> {
-        match self {
-            Key::Blades => Some(&mut o.blades),
-            Key::Hub => Some(&mut o.hub),
-            Key::Shroud => Some(&mut o.shroud),
-            Key::Vanes => Some(&mut o.vanes),
-            Key::Walls => Some(&mut o.walls),
-            Key::Volute => Some(&mut o.volute),
-            Key::Sections => None,
-        }
+        self.id().map(|id| o.part_mut(id))
     }
 }
 
@@ -178,14 +182,6 @@ impl Stage {
     }
 }
 
-fn opacity_name(opacity: Opacity) -> &'static str {
-    tr(match opacity {
-        Opacity::Opaque => "Opaque",
-        Opacity::Translucent => "Translucent",
-        Opacity::Glass => "Glass",
-    })
-}
-
 /// A small square in `color`, filled as much as `opacity` lets through.
 fn opacity_square(painter: &egui::Painter, center: Pos2, opacity: Opacity, color: Color32) {
     let rect = Rect::from_center_size(center, Vec2::splat(11.0));
@@ -199,15 +195,7 @@ fn opacity_square(painter: &egui::Painter, center: Pos2, opacity: Opacity, color
 }
 
 fn name(key: Key) -> &'static str {
-    tr(match key {
-        Key::Blades => "Blades",
-        Key::Hub => "Hub (disk)",
-        Key::Shroud => "Shroud (cover)",
-        Key::Vanes => "Vanes",
-        Key::Walls => "Side walls",
-        Key::Volute => "Casing",
-        Key::Sections => "Section curves",
-    })
+    key.id().map_or_else(|| tr("Section curves"), part_name)
 }
 
 /// The Scene between frames.
@@ -234,7 +222,8 @@ impl ScenePanel {
         }
     }
 
-    /// The panel over `area`, clear of the `right` points the properties hide.
+    /// The panel over `area`, clear of the `right` points the properties hide. The
+    /// `marked` parts, selected and under the pointer in the view, stand out.
     pub(crate) fn show(
         &mut self,
         ctx: &egui::Context,
@@ -242,6 +231,7 @@ impl ScenePanel {
         right: f32,
         options: &mut ViewOptions,
         stage: &Stage,
+        marked: [Option<PartId>; 2],
     ) {
         let free = Rect::from_min_max(area.min, pos2(area.right() - right, area.bottom()));
         let size = if self.size == Vec2::ZERO {
@@ -275,7 +265,7 @@ impl ScenePanel {
                             self.pill(ui, options, stage);
                         } else {
                             ui.set_width(WIDTH - 16.0);
-                            self.panel(ui, options, stage, free);
+                            self.panel(ui, options, stage, free, marked);
                         }
                     });
             });
@@ -313,7 +303,14 @@ impl ScenePanel {
         }
     }
 
-    fn panel(&mut self, ui: &mut Ui, options: &mut ViewOptions, stage: &Stage, free: Rect) {
+    fn panel(
+        &mut self,
+        ui: &mut Ui,
+        options: &mut ViewOptions,
+        stage: &Stage,
+        free: Rect,
+        marked: [Option<PartId>; 2],
+    ) {
         let p = Palette::of(ui);
         let mut fold = false;
         let mut menu = None;
@@ -389,7 +386,8 @@ impl ScenePanel {
         for (kind, component, parts) in stage.groups() {
             self.component_row(ui, kind, &component, &parts, options, &p);
             for key in parts {
-                self.part_row(ui, key, options, stage, &p);
+                let mark = key.id().is_some_and(|id| marked.contains(&Some(id)));
+                self.part_row(ui, key, options, stage, mark, &p);
             }
         }
     }
@@ -439,6 +437,7 @@ impl ScenePanel {
         key: Key,
         options: &mut ViewOptions,
         stage: &Stage,
+        marked: bool,
         p: &Palette,
     ) {
         let label = name(key);
@@ -473,7 +472,12 @@ impl ScenePanel {
                     );
                 }
             }
-            painted(ui, label, egui::FontFamily::Proportional, color);
+            painted(
+                ui,
+                label,
+                egui::FontFamily::Proportional,
+                if marked && shown { p.accent } else { color },
+            );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 2.0;
                 let tip = tf("Isolate {}", &[&label]);
@@ -537,6 +541,24 @@ impl ScenePanel {
                 }
             });
         });
+    }
+
+    /// Carries out what a right-click on the model asked for.
+    pub(crate) fn apply(&mut self, action: PartAction, options: &mut ViewOptions) {
+        match action {
+            PartAction::Hide(id) => {
+                Key::of(id).set_shown(options, false);
+                self.isolated = None;
+            }
+            PartAction::Isolate(id) => self.isolate(Key::of(id), options),
+            PartAction::Opacity(id, opacity) => options.part_mut(id).opacity = opacity,
+            PartAction::ShowAll => {
+                for k in Key::ALL {
+                    k.set_shown(options, true);
+                }
+                self.isolated = None;
+            }
+        }
     }
 
     /// Shows only `key`, or, when it is isolated already, every part as before.

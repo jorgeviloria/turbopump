@@ -1,28 +1,33 @@
 //! 3D view of the stage, rendered with wgpu from the design's own mesh, so it follows
-//! every edit at once. On top of the image: a small toolbar, a view cube that turns
-//! the camera to a face, the axes and a scale bar.
+//! every edit at once. On top of the image: a view cube that turns the camera to a
+//! face, the axes, a scale bar and the distance being measured. The part under the
+//! pointer is tinted; a click selects it, a right-click offers to hide or isolate it.
 
 mod camera;
 mod mesh;
+mod pick;
 mod render;
 
-use std::f32::consts::FRAC_PI_2;
+use std::f32::consts::{FRAC_PI_2, PI};
 
 use eframe::egui::{
     self, Align2, Color32, FontId, Pos2, Rect, Sense, Shape, Stroke, Ui, Vec2, pos2, vec2,
 };
 use eframe::egui_wgpu::RenderState;
+use glam::Mat4;
 use glam::Vec3;
 use tp_project::ComponentId;
 use tp_units::{DisplayUnits, QuantityKind};
 
 use crate::derived::Derived;
 use crate::i18n::tr;
-use crate::theme::{Palette, icon};
+use crate::theme::{Palette, bold, icon};
 use crate::views::unavailable;
 use camera::Camera;
-pub(crate) use mesh::{Opacity, Part, ViewOptions};
-use render::{Gpu, Uniforms};
+use mesh::MeshData;
+pub(crate) use mesh::{Opacity, Part, PartId, ViewOptions};
+use pick::{Hit, Ray};
+use render::{Gpu, Highlight, Uniforms};
 
 /// What the uploaded mesh was built from: results revision, impeller, stator, volute
 /// and display options.
@@ -78,7 +83,51 @@ pub(crate) struct Viewer {
     moved: bool,
     /// The free part of the view and the pixels per point, last frame, for captures.
     frame: Option<(Rect, f32)>,
+    /// Angle about the axis of the normal of the meridional cut, rad, when the model is
+    /// cut. The half the normal points to is removed.
+    pub cut: Option<f32>,
+    /// Clicks put points to measure between, instead of selecting parts.
+    measuring: bool,
+    /// The points measured: none, the first, or both.
+    points: Vec<Vec3>,
+    /// The part selected with a click.
+    pub selected: Option<PartId>,
+    /// The part under the pointer, last frame.
+    pub hovered: Option<PartId>,
+    /// The part the context menu is about.
+    menu_part: Option<PartId>,
+    /// The mesh last uploaded, for picking.
+    mesh: Option<MeshData>,
 }
+
+/// What a right-click on the model asks of the scene.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum PartAction {
+    Hide(PartId),
+    Isolate(PartId),
+    Opacity(PartId, Opacity),
+    ShowAll,
+}
+
+/// The name of a part, as the scene lists it.
+pub(crate) fn part_name(id: PartId) -> &'static str {
+    tr(match id {
+        PartId::Blades => "Blades",
+        PartId::Hub => "Hub (disk)",
+        PartId::Shroud => "Shroud (cover)",
+        PartId::Vanes => "Vanes",
+        PartId::Walls => "Side walls",
+        PartId::Volute => "Casing",
+    })
+}
+
+/// The normal of a cut through the axis at `angle`.
+fn cut_normal(angle: f32) -> Vec3 {
+    Vec3::new(angle.cos(), angle.sin(), 0.0)
+}
+
+/// A pointer this close to a vertex of the mesh measures from the vertex, points.
+const SNAP: f32 = 10.0;
 
 /// A picture of the 3D view: `width` by `height` pixels, RGBA row by row.
 #[derive(Debug, Clone)]
@@ -135,6 +184,36 @@ impl Viewer {
         }
     }
 
+    /// Cuts the model through its axis, removing the half toward the camera, or puts
+    /// it back whole.
+    pub(crate) fn set_cut(&mut self, on: bool) {
+        self.cut = on.then(|| self.camera.map_or(0.0, |c| c.yaw));
+    }
+
+    /// Turns the cut to remove the half toward the camera.
+    pub(crate) fn aim_cut(&mut self) {
+        if self.cut.is_some() {
+            self.set_cut(true);
+        }
+    }
+
+    /// Removes the other half instead.
+    pub(crate) fn flip_cut(&mut self) {
+        if let Some(angle) = self.cut.as_mut() {
+            *angle = wrap_angle(*angle + PI);
+        }
+    }
+
+    pub(crate) fn measuring(&self) -> bool {
+        self.measuring
+    }
+
+    /// Starts or stops measuring; either way the points go.
+    pub(crate) fn set_measuring(&mut self, on: bool) {
+        self.measuring = on;
+        self.points.clear();
+    }
+
     /// Starts turning the camera to `yaw` and `pitch`, the short way round.
     fn turn_to(&mut self, (yaw, pitch): (f32, f32)) {
         let Some(camera) = self.camera.as_ref() else {
@@ -160,12 +239,12 @@ impl Viewer {
         volute: Option<ComponentId>,
         units: &DisplayUnits,
         (left, right): (f32, f32),
-    ) {
+    ) -> Option<PartAction> {
         let stator = stator.and_then(|s| derived.diffuser(s).map(|d| (s, d)));
         let volute = volute.and_then(|v| derived.volute(v).map(|g| (v, g)));
         let Some(state) = render_state else {
             unavailable(ui, tr("The 3D view needs the wgpu renderer."));
-            return;
+            return None;
         };
         let Some(g) = derived.geometry(id) else {
             let reason = derived
@@ -176,7 +255,7 @@ impl Viewer {
                     |e| crate::i18n::message(e),
                 );
             unavailable(ui, &reason);
-            return;
+            return None;
         };
 
         let (rect, response) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
@@ -207,10 +286,9 @@ impl Viewer {
                 self.moved = false;
             }
             self.mesh_key = Some(key);
+            self.mesh = Some(mesh);
         }
-        let Some(camera) = self.camera.as_mut() else {
-            return;
-        };
+        let camera = self.camera.as_mut()?;
         camera.orthographic = self.orthographic;
         // Until the user zooms or pans, the framing follows the free part of the view,
         // which changes as the dialog opens, closes or moves.
@@ -260,14 +338,89 @@ impl Viewer {
             self.moved = false;
         }
 
+        let p = Palette::of(ui);
+        let cut = self.cut.map(cut_normal);
+        let matrix = clip_matrix(camera, rect, free);
+        // What lies under the pointer, unless the camera is moving.
+        let hit = match (response.hover_pos(), &self.mesh) {
+            (Some(pos), Some(mesh)) if !response.dragged() && self.turn.is_none() => {
+                let ndc = (
+                    (pos.x - rect.left()) / rect.width().max(1.0) * 2.0 - 1.0,
+                    1.0 - (pos.y - rect.top()) / rect.height().max(1.0) * 2.0,
+                );
+                pick::pick(mesh, &Ray::through(matrix, ndc), cut)
+            }
+            _ => None,
+        };
+        let target = hit.map(|h| snap(&h, matrix, rect, response.hover_pos()));
+        self.hovered = hit.filter(|_| !self.measuring).map(|h| h.part);
+
+        if response.clicked() {
+            if self.measuring {
+                if let Some((point, _)) = target {
+                    if self.points.len() >= 2 {
+                        self.points.clear();
+                    }
+                    self.points.push(point);
+                }
+            } else {
+                self.selected = hit.map(|h| h.part);
+            }
+        }
+        if response.hovered() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            if self.points.is_empty() {
+                self.selected = None;
+            } else {
+                self.points.clear();
+            }
+        }
+        if self.measuring && response.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+        }
+        if response.secondary_clicked() {
+            self.menu_part = hit.map(|h| h.part);
+        }
+        let mut action = None;
+        let menu_part = self.menu_part;
+        let options = &self.options;
+        response.context_menu(|ui| action = part_menu(ui, menu_part, options));
+        if let Some(part) = self.hovered
+            && !response.context_menu_opened()
+        {
+            response.clone().on_hover_text_at_pointer(part_name(part));
+        }
+
+        let range = |id: PartId| {
+            self.mesh
+                .as_ref()
+                .and_then(|m| m.parts.iter().find(|s| s.id == id))
+                .map(|s| s.range.clone())
+        };
+        let mut highlights = Vec::new();
+        if let Some(range) = self.selected.and_then(range) {
+            highlights.push(Highlight {
+                range,
+                selected: true,
+            });
+        }
+        if let Some(id) = self.hovered.filter(|id| Some(*id) != self.selected)
+            && let Some(range) = range(id)
+        {
+            highlights.push(Highlight {
+                range,
+                selected: false,
+            });
+        }
+
         let ppp = ui.ctx().pixels_per_point();
         self.frame = Some((free, ppp));
         let size = [
             ((rect.width() * ppp).round() as u32).max(1),
             ((rect.height() * ppp).round() as u32).max(1),
         ];
-        let uniforms = uniforms(camera, rect, free, ui.visuals().dark_mode);
-        let texture = gpu.render(state, size, &uniforms);
+        let dark = ui.visuals().dark_mode;
+        let uniforms = uniforms(camera, rect, free, dark, cut, p.accent);
+        let texture = gpu.render(state, size, &uniforms, &highlights);
         ui.painter().image(
             texture,
             rect,
@@ -278,6 +431,22 @@ impl Viewer {
         let camera = *camera;
         axes(ui, free, &camera);
         scale_bar(ui, free, &camera, units);
+        measurement(
+            ui,
+            matrix,
+            rect,
+            &self.points,
+            target.filter(|_| self.measuring),
+            units,
+        );
+        if self.measuring {
+            let hint = if self.points.len() == 1 {
+                tr("Click the second point; Esc clears")
+            } else {
+                tr("Click two points of the model to measure between them")
+            };
+            chip(ui, free.center_top() + vec2(0.0, 18.0), hint, &p);
+        }
         match view_cube(ui, free, &camera) {
             Some(CubeAction::Look(direction)) => {
                 if let Some(target) = camera.orientation_along(direction) {
@@ -288,6 +457,7 @@ impl Viewer {
             Some(CubeAction::Home) => self.apply(CameraView::Iso),
             None => {}
         }
+        action
     }
 
     /// Renders the free part of the view, without the cube, axes and scale, sharper
@@ -295,6 +465,7 @@ impl Viewer {
     pub(crate) fn capture(&mut self, state: &RenderState, dark: bool) -> Option<Capture> {
         let (free, ppp) = self.frame?;
         let camera = self.camera?;
+        let cut = self.cut.map(cut_normal);
         let gpu = self.gpu.as_mut()?;
         let limit = state.device.limits().max_texture_dimension_2d as f32;
         let scale = (ppp * CAPTURE_SCALE).min(limit / free.width().max(free.height()).max(1.0));
@@ -302,7 +473,8 @@ impl Viewer {
             ((free.width() * scale).round() as u32).max(1),
             ((free.height() * scale).round() as u32).max(1),
         ];
-        let rgba = gpu.capture(state, size, &uniforms(&camera, free, free, dark))?;
+        let uniforms = uniforms(&camera, free, free, dark, cut, Color32::TRANSPARENT);
+        let rgba = gpu.capture(state, size, &uniforms)?;
         Some(Capture {
             width: size[0],
             height: size[1],
@@ -311,9 +483,190 @@ impl Viewer {
     }
 }
 
+/// The right-click menu of a part, or of the model when `part` is `None`.
+fn part_menu(ui: &mut Ui, part: Option<PartId>, options: &ViewOptions) -> Option<PartAction> {
+    let mut action = None;
+    if let Some(id) = part {
+        ui.label(bold(part_name(id)));
+        if ui
+            .button(format!("{}  {}", icon::EYE_SLASH, tr("Hide")))
+            .clicked()
+        {
+            action = Some(PartAction::Hide(id));
+        }
+        if ui
+            .button(format!(
+                "{}  {}",
+                icon::CROSSHAIR_SIMPLE,
+                tr("Show only this part")
+            ))
+            .clicked()
+        {
+            action = Some(PartAction::Isolate(id));
+        }
+        ui.horizontal(|ui| {
+            for level in Opacity::ALL {
+                let current = options.part(id).opacity == level;
+                if ui.selectable_label(current, opacity_name(level)).clicked() {
+                    action = Some(PartAction::Opacity(id, level));
+                }
+            }
+        });
+        ui.separator();
+    }
+    if ui.button(tr("Show all parts")).clicked() {
+        action = Some(PartAction::ShowAll);
+    }
+    if action.is_some() {
+        ui.close();
+    }
+    action
+}
+
+/// The name of an opacity level.
+pub(crate) fn opacity_name(opacity: Opacity) -> &'static str {
+    tr(match opacity {
+        Opacity::Opaque => "Opaque",
+        Opacity::Translucent => "Translucent",
+        Opacity::Glass => "Glass",
+    })
+}
+
+/// From model space to clip space, with the model centred in `free`, the part of
+/// `rect` nothing covers.
+fn clip_matrix(camera: &Camera, rect: Rect, free: Rect) -> Mat4 {
+    // Normalized device x runs from −1 to 1 across the view.
+    let shift = (free.center().x - rect.center().x) / (rect.width() / 2.0).max(1.0);
+    Mat4::from_translation(Vec3::new(shift, 0.0, 0.0))
+        * camera.view_projection(rect.width() / rect.height().max(1.0))
+}
+
+/// Where a point of the model lands in `rect`, or `None` behind the eye.
+fn to_screen(matrix: Mat4, rect: Rect, point: Vec3) -> Option<Pos2> {
+    let clip = matrix * point.extend(1.0);
+    if clip.w <= 1e-9 {
+        return None;
+    }
+    let ndc = clip.truncate() / clip.w;
+    Some(pos2(
+        rect.left() + (ndc.x + 1.0) / 2.0 * rect.width(),
+        rect.top() + (1.0 - ndc.y) / 2.0 * rect.height(),
+    ))
+}
+
+/// The point to measure from for `hit`: the nearest corner of the triangle when the
+/// pointer is within [`SNAP`] points of it (then `true`), the surface point otherwise.
+fn snap(hit: &Hit, matrix: Mat4, rect: Rect, pointer: Option<Pos2>) -> (Vec3, bool) {
+    let Some(pointer) = pointer else {
+        return (hit.point, false);
+    };
+    hit.corners
+        .iter()
+        .filter_map(|&c| to_screen(matrix, rect, c).map(|s| (c, s.distance(pointer))))
+        .filter(|(_, d)| *d <= SNAP)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map_or((hit.point, false), |(c, _)| (c, true))
+}
+
+/// A short text on a rounded chip centred at `at`.
+fn chip(ui: &Ui, at: Pos2, text: &str, p: &Palette) {
+    let painter = ui.painter();
+    let galley = painter.layout_no_wrap(text.to_owned(), FontId::proportional(12.0), p.text);
+    let rect = Rect::from_center_size(at, galley.size() + vec2(16.0, 8.0));
+    painter.rect(
+        rect,
+        rect.height() / 2.0,
+        ui.visuals().window_fill,
+        Stroke::new(1.0, p.border),
+        egui::StrokeKind::Inside,
+    );
+    painter.galley(rect.min + vec2(8.0, 4.0), galley, p.text);
+}
+
+/// The distance between the points measured, or from the first to the pointer, with
+/// its radial and axial parts.
+fn measurement(
+    ui: &Ui,
+    matrix: Mat4,
+    rect: Rect,
+    points: &[Vec3],
+    pointer: Option<(Vec3, bool)>,
+    units: &DisplayUnits,
+) {
+    let p = Palette::of(ui);
+    let painter = ui.painter().with_clip_rect(rect);
+    let end = points.get(1).copied().or(pointer.map(|t| t.0));
+    if let (Some(&a), Some(b)) = (points.first(), end)
+        && let (Some(sa), Some(sb)) = (to_screen(matrix, rect, a), to_screen(matrix, rect, b))
+    {
+        let stroke = Stroke::new(2.0, p.accent);
+        if points.len() == 2 {
+            painter.line_segment([sa, sb], stroke);
+        } else {
+            painter.add(Shape::dashed_line(&[sa, sb], stroke, 6.0, 4.0));
+        }
+        let length = |v: f32| units.show(QuantityKind::Length, f64::from(v));
+        let radius = |q: Vec3| q.x.hypot(q.y);
+        let text = format!(
+            "{}\nΔr {}  ·  Δz {}",
+            length(a.distance(b)),
+            length((radius(b) - radius(a)).abs()),
+            length((b.z - a.z).abs()),
+        );
+        chip(ui, sa.lerp(sb, 0.5) + vec2(0.0, -22.0), &text, &p);
+    }
+    for (i, q) in points.iter().enumerate() {
+        if let Some(s) = to_screen(matrix, rect, *q) {
+            painter.circle(s, 4.0, p.accent, Stroke::new(1.5, Color32::WHITE));
+            let label = if i == 0 { "1" } else { "2" };
+            // A halo in the window color keeps the number legible on any part.
+            let halo = ui.visuals().window_fill;
+            for offset in [
+                vec2(-1.0, 0.0),
+                vec2(1.0, 0.0),
+                vec2(0.0, -1.0),
+                vec2(0.0, 1.0),
+            ] {
+                painter.text(
+                    s + vec2(8.0, -8.0) + offset,
+                    Align2::LEFT_BOTTOM,
+                    label,
+                    FontId::new(12.0, crate::theme::bold_family()),
+                    halo,
+                );
+            }
+            painter.text(
+                s + vec2(8.0, -8.0),
+                Align2::LEFT_BOTTOM,
+                label,
+                FontId::new(12.0, crate::theme::bold_family()),
+                p.accent,
+            );
+        }
+    }
+    // Where a click would put the next point: a dot on a vertex, a ring elsewhere.
+    if let Some((q, snapped)) = pointer
+        && let Some(s) = to_screen(matrix, rect, q)
+    {
+        if snapped {
+            painter.circle_filled(s, 4.5, p.accent);
+        } else {
+            painter.circle_stroke(s, 5.0, Stroke::new(1.5, p.accent));
+        }
+    }
+}
+
 /// Lights fixed to the camera, and the background of the theme. The model is centered
-/// in `free`, the part of `rect` nothing covers.
-fn uniforms(camera: &Camera, rect: Rect, free: Rect, dark: bool) -> Uniforms {
+/// in `free`, the part of `rect` nothing covers, and cut by the plane through the axis
+/// with normal `cut`.
+fn uniforms(
+    camera: &Camera,
+    rect: Rect,
+    free: Rect,
+    dark: bool,
+    cut: Option<Vec3>,
+    accent: Color32,
+) -> Uniforms {
     let view = camera.view();
     let right = view.row(0).truncate();
     let up = view.row(1).truncate();
@@ -325,24 +678,28 @@ fn uniforms(camera: &Camera, rect: Rect, free: Rect, dark: bool) -> Uniforms {
     } else {
         ([1.0, 1.0, 1.0, 1.0], [0.84, 0.87, 0.91, 1.0])
     };
-    // Normalized device x runs from −1 to 1 across the view.
-    let shift = (free.center().x - rect.center().x) / (rect.width() / 2.0).max(1.0);
-    let projection = glam::Mat4::from_translation(Vec3::new(shift, 0.0, 0.0))
-        * camera.view_projection(rect.width() / rect.height().max(1.0));
     // A parallel view looks along one direction: w = 0 tells the shader so.
     let eye = if camera.orthographic {
         camera.backward().extend(0.0)
     } else {
         camera.eye().extend(1.0)
     };
+    let [r, g, b, _] = accent.to_array();
     Uniforms {
-        view_projection: projection.to_cols_array_2d(),
+        view_projection: clip_matrix(camera, rect, free).to_cols_array_2d(),
         eye: eye.to_array(),
         key_light: key.extend(0.0).to_array(),
         fill_light: fill.extend(0.0).to_array(),
         up: up.extend(0.0).to_array(),
         sky,
         ground,
+        clip: cut.map_or([0.0; 4], |n| n.extend(1.0).to_array()),
+        accent: [
+            f32::from(r) / 255.0,
+            f32::from(g) / 255.0,
+            f32::from(b) / 255.0,
+            1.0,
+        ],
     }
 }
 
@@ -856,6 +1213,50 @@ mod tests {
         assert!(!step_turn(&mut turn, camera, TURN_TIME));
         assert!((wrap_angle(camera.yaw + 3.0)).abs() < 1e-5);
         assert!((camera.pitch - 0.5).abs() < 1e-6);
+    }
+
+    /// The cut removes the half toward the camera, flips to the other, and measuring
+    /// starts afresh each time it is switched.
+    #[test]
+    fn the_cut_faces_the_camera_and_flips() {
+        let mut viewer = Viewer {
+            camera: Some(Camera::fit(Vec3::ZERO, 1.0, 1.0)),
+            ..Viewer::default()
+        };
+        viewer.set_cut(true);
+        let camera = viewer.camera.unwrap();
+        let normal = cut_normal(viewer.cut.unwrap());
+        assert!(normal.dot(camera.eye()) > 0.0, "the eye's half goes");
+        viewer.flip_cut();
+        assert!(cut_normal(viewer.cut.unwrap()).dot(camera.eye()) < 0.0);
+        viewer.aim_cut();
+        assert!(cut_normal(viewer.cut.unwrap()).dot(camera.eye()) > 0.0);
+        viewer.set_cut(false);
+        viewer.aim_cut();
+        assert!(viewer.cut.is_none(), "aiming does not cut a whole model");
+
+        viewer.set_measuring(true);
+        viewer.points.push(Vec3::ZERO);
+        viewer.set_measuring(false);
+        assert!(viewer.points.is_empty() && !viewer.measuring());
+    }
+
+    /// A point projected to the screen and a ray back through it meet again.
+    #[test]
+    fn screen_points_and_rays_agree() {
+        let camera = Camera::fit(Vec3::ZERO, 0.1, 1.5);
+        let rect = Rect::from_min_size(pos2(10.0, 20.0), vec2(600.0, 400.0));
+        let free = Rect::from_min_max(pos2(200.0, 20.0), rect.max);
+        let matrix = clip_matrix(&camera, rect, free);
+        let point = Vec3::new(0.03, -0.02, 0.01);
+        let s = to_screen(matrix, rect, point).unwrap();
+        let ndc = (
+            (s.x - rect.left()) / rect.width() * 2.0 - 1.0,
+            1.0 - (s.y - rect.top()) / rect.height() * 2.0,
+        );
+        let ray = Ray::through(matrix, ndc);
+        let closest = ray.direction.normalize().cross(point - ray.origin).length();
+        assert!(closest < 1e-5, "{closest}");
     }
 
     #[test]

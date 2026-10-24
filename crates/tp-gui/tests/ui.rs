@@ -795,6 +795,34 @@ fn the_scene_sets_opacity_and_color_and_the_camera_goes_parallel() {
 }
 
 #[test]
+fn the_3d_tab_cuts_and_measures() {
+    use egui_kittest::kittest::NodeT;
+    let mut harness = harness();
+    harness.get_by_label("3D tab").click();
+    harness.run();
+    // The cut's own buttons wait for the cut.
+    let disabled = |h: &Harness<'_, TurbopumpApp>, label: &str| {
+        h.get_by_label_contains(label)
+            .accesskit_node()
+            .is_disabled()
+    };
+    assert!(disabled(&harness, "Other half"));
+    harness.get_by_label("Meridional cut").click();
+    harness.run();
+    assert!(is_on(&harness.get_by_label("Meridional cut")));
+    assert!(!disabled(&harness, "Other half"));
+    harness.get_by_label_contains("Other half").click();
+    harness.run();
+    harness.get_by_label("Meridional cut").click();
+    harness.run();
+    assert!(!is_on(&harness.get_by_label("Meridional cut")));
+    assert!(disabled(&harness, "Face the camera"));
+    harness.get_by_label("Measure").click();
+    harness.run();
+    assert!(is_on(&harness.get_by_label("Measure")));
+}
+
+#[test]
 fn folded_sections_still_save_the_step() {
     let mut harness = harness();
     // The last section of the main dimensions folds; an edit above it still counts.

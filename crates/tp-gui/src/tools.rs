@@ -451,6 +451,54 @@ pub(crate) fn view3d(ui: &mut Ui, viewer: &mut Viewer, cx: ToolsCx) -> Option<Co
             }
         }
     });
+    group(ui, tr("Inspect"), |ui| {
+        let cut = viewer.cut.is_some();
+        if big_button(
+            ui,
+            Icon::Glyph(icon::SCISSORS),
+            tr("Meridional cut"),
+            true,
+            cut,
+            None,
+        )
+        .on_hover_text(tr(
+            "Cut the model through its axis and remove the half toward the camera",
+        ))
+        .clicked()
+        {
+            viewer.set_cut(!cut);
+        }
+        stack(ui, |ui| {
+            if small_button(ui, icon::CROSSHAIR, tr("Face the camera"), cut, false)
+                .on_hover_text(tr("Turn the cut to the side the camera looks from"))
+                .clicked()
+            {
+                viewer.aim_cut();
+            }
+            if small_button(ui, icon::ARROWS_LEFT_RIGHT, tr("Other half"), cut, false)
+                .on_hover_text(tr("Remove the other half instead"))
+                .clicked()
+            {
+                viewer.flip_cut();
+            }
+        });
+        let measuring = viewer.measuring();
+        if big_button(
+            ui,
+            Icon::Glyph(icon::RULER),
+            tr("Measure"),
+            cx.has_geometry,
+            measuring,
+            None,
+        )
+        .on_hover_text(tr(
+            "Click two points of the model for the distance between them and its radial and axial parts; near a corner of the mesh the point snaps to it",
+        ))
+        .clicked()
+        {
+            viewer.set_measuring(!measuring);
+        }
+    });
     group(ui, tr("Export"), |ui| {
         if big_button(
             ui,
@@ -494,7 +542,7 @@ pub(crate) fn view3d(ui: &mut Ui, viewer: &mut Viewer, cx: ToolsCx) -> Option<Co
         ui,
         tr("Gestures"),
         tr(
-            "Drag: rotate\nRight-drag or Shift-drag: pan\nScroll or pinch: zoom\nDouble-click: fit\nView cube: click a face, edge or corner",
+            "Drag: rotate\nRight-drag or Shift-drag: pan\nScroll or pinch: zoom\nDouble-click: fit\nClick a part: select it; right-click: hide, isolate, opacity\nEsc: clear the measure, then the selection\nView cube: click a face, edge or corner",
         ),
     );
     command

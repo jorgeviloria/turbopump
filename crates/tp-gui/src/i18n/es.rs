@@ -1704,9 +1704,8 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ),
     ("All blades, or only one", "Todos los álabes, o solo uno"),
     (
-        "Drag: rotate\nRight-drag or Shift-drag: pan\nScroll or pinch: \
-                                 zoom\nDouble-click: fit\nView cube: click a face, edge or corner",
-        "Arrastrar: girar\nArrastrar con el botón derecho o con Mayús: desplazar\nRueda o pellizco: zoom\nDoble clic: encuadrar\nCubo de vistas: clic en una cara, arista o esquina",
+        "Drag: rotate\nRight-drag or Shift-drag: pan\nScroll or pinch: zoom\nDouble-click: fit\nClick a part: select it; right-click: hide, isolate, opacity\nEsc: clear the measure, then the selection\nView cube: click a face, edge or corner",
+        "Arrastrar: girar\nArrastrar con el botón derecho o con Mayús: desplazar\nRueda o pellizco: zoom\nDoble clic: encuadrar\nClic en una pieza: seleccionarla; botón derecho: ocultar, aislar, opacidad\nEsc: borra la medida y luego la selección\nCubo de vistas: clic en una cara, arista o esquina",
     ),
     ("Rear", "Trasera"),
     // Property rows: sources and recommended ranges behind the ⓘ.
@@ -3309,6 +3308,33 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Opacity of {}", "Opacidad: {}"),
     ("Click for {}", "Con un clic: {}"),
     ("Color of {}", "Color: {}"),
+    (
+        "Click the second point; Esc clears",
+        "Clic en el segundo punto; Esc borra",
+    ),
+    (
+        "Click two points of the model to measure between them",
+        "Clic en dos puntos del modelo para medir entre ellos",
+    ),
+    ("Show all parts", "Mostrar todas las piezas"),
+    ("Inspect", "Inspeccionar"),
+    ("Meridional cut", "Corte meridional"),
+    (
+        "Cut the model through its axis and remove the half toward the camera",
+        "Corta el modelo por su eje y quita la mitad que mira a la cámara",
+    ),
+    ("Face the camera", "Hacia la cámara"),
+    (
+        "Turn the cut to the side the camera looks from",
+        "Gira el corte hacia el lado desde el que mira la cámara",
+    ),
+    ("Other half", "Otra mitad"),
+    ("Remove the other half instead", "Quita la otra mitad"),
+    ("Measure", "Medir"),
+    (
+        "Click two points of the model for the distance between them and its radial and axial parts; near a corner of the mesh the point snaps to it",
+        "Clic en dos puntos del modelo: da la distancia entre ellos y sus partes radial y axial; cerca de un vértice de la malla el punto se ajusta a él",
+    ),
 ];
 
 /// Messages of the design code, most specific first.

@@ -662,6 +662,7 @@ impl TurbopumpApp {
         command = command.or(flow_command);
         let mut main_area = ui.available_rect_before_wrap();
         let mut scene_area = None;
+        let mut part_action = None;
         CentralPanel::no_frame().show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             main_area = ui.available_rect_before_wrap();
@@ -721,7 +722,7 @@ impl TurbopumpApp {
                     }
                     View::View3d => {
                         scene_area = Some(target);
-                        self.viewer.show(
+                        part_action = self.viewer.show(
                             ui,
                             render_state,
                             cx.derived,
@@ -744,8 +745,12 @@ impl TurbopumpApp {
         });
         if let Some(area) = scene_area {
             let cover = self.sidebar_extent(&ctx, main_area) + SIDEBAR_MARGIN;
+            let marked = [self.viewer.selected, self.viewer.hovered];
             self.scene
-                .show(&ctx, area, cover, &mut self.viewer.options, &stage);
+                .show(&ctx, area, cover, &mut self.viewer.options, &stage, marked);
+            if let Some(action) = part_action {
+                self.scene.apply(action, &mut self.viewer.options);
+            }
         }
         self.properties_panel(&ctx, main_area);
 

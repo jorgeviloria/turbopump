@@ -16,6 +16,11 @@ struct Uniforms {
     // Background at the top and at the bottom of the view.
     sky: vec4<f32>,
     ground: vec4<f32>,
+    // Normal of the cutting plane through the axis; w = 1 when the model is cut. The
+    // side the normal points to is removed.
+    clip: vec4<f32>,
+    // Gamma-encoded tint of the part under the pointer and of the one selected.
+    accent: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -56,6 +61,10 @@ fn vs_line(v: VertexIn) -> VertexOut {
     return out;
 }
 
+fn cut_away(p: vec3<f32>) -> bool {
+    return u.clip.w > 0.5 && dot(u.clip.xyz, p) > 0.0;
+}
+
 fn gamma_from_linear(c: vec3<f32>) -> vec3<f32> {
     let cutoff = c < vec3<f32>(0.0031308);
     let lower = c * 12.92;
@@ -65,6 +74,9 @@ fn gamma_from_linear(c: vec3<f32>) -> vec3<f32> {
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
+    if cut_away(in.world) {
+        discard;
+    }
     let to_eye = select(normalize(u.eye.xyz - in.world), normalize(u.eye.xyz), u.eye.w == 0.0);
     var n = normalize(in.normal);
     // Open surfaces: light both faces.
@@ -92,7 +104,37 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
 
 @fragment
 fn fs_line(in: VertexOut) -> @location(0) vec4<f32> {
+    if cut_away(in.world) {
+        discard;
+    }
     return vec4<f32>(gamma_from_linear(in.color.rgb), 1.0);
+}
+
+struct HighlightOut {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) world: vec3<f32>,
+    @location(1) @interpolate(flat) strength: f32,
+};
+
+// A part drawn again over itself in the accent color: instance 0 is the part under
+// the pointer, instance 1 the selected one, more strongly.
+@vertex
+fn vs_highlight(v: VertexIn, @builtin(instance_index) i: u32) -> HighlightOut {
+    var out: HighlightOut;
+    out.clip = u.view_projection * vec4<f32>(v.position, 1.0);
+    // A hair toward the eye, so the tint wins the depth test on its own surface.
+    out.clip.z = out.clip.z - 0.0002 * out.clip.w;
+    out.world = v.position;
+    out.strength = select(0.22, 0.4, i == 1u);
+    return out;
+}
+
+@fragment
+fn fs_highlight(in: HighlightOut) -> @location(0) vec4<f32> {
+    if cut_away(in.world) {
+        discard;
+    }
+    return vec4<f32>(u.accent.rgb, in.strength);
 }
 
 struct BackgroundOut {
