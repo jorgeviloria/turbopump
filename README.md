@@ -137,10 +137,12 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
     materiales o sus cámaras laterales;
   - secciones de la voluta: la definición en edición sobre la familia de secciones a lo
     largo de la espiral, con los puntos de control de los lados Bézier y de segmentos
-    para arrastrar y esquinas que se añaden o quitan con el botón derecho;
+    para arrastrar y esquinas que se añaden o quitan con el botón derecho, acotadas
+    con el ancho de entrada b₃ y la altura H;
   - gráficas del álabe (β, θ y espesor) y, en otra página, los bordes de ataque y de
     salida en verdadera forma, con sus puntos para arrastrar;
-  - vista frontal de la etapa, con los álabes del difusor y la espiral;
+  - vista frontal de la etapa, con los álabes del difusor, la espiral y las cotas de
+    los diámetros d₂, d₁, d_n y d_z;
   - vista 3D, con aristas de las piezas, secciones de la voluta, cubo de vistas (un clic
     en una cara gira la cámara), ejes y barra de escala, en perspectiva o en proyección
     ortográfica; la imagen PNG sale con el doble de resolución y sin el cubo, los ejes
@@ -198,7 +200,9 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
     aceptado queda por revisar, una barra naranja en el margen marca las filas que
     cambiaron desde que se aceptó (también las automáticas que movió un cambio aguas
     arriba), y su ayuda dice cuánto valían. Con el ratón sobre una fila que es una
-    cota del meridiano (L, b₂, d_n, d₁ o d₂), esa cota se resalta en el dibujo,
+    cota del dibujo (L, b₂, d_n, d₁ o d₂ en el meridiano; d₂, d₁, d_n o d_z en la
+    vista frontal; b₃, o la altura de la garganta, en la de sección), esa cota se
+    resalta en el dibujo,
     aunque las cotas estén ocultas; y con el ratón sobre el valor de una cota, su fila
     se sombrea en el panel;
   - **abajo**, la cifra clave del paso, *Back* y *Accept step and continue*
