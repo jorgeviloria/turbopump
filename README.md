@@ -149,6 +149,9 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
     su opacidad. El corte meridional quita la mitad del modelo que mira a la cámara
     (o la otra). Medir da la distancia entre dos puntos del modelo y sus partes radial
     y axial, Δr y Δz; cerca de un vértice de la malla el punto se ajusta a él;
+
+    ![Corte meridional y medida en la vista 3D](docs/img/medida-corte-3d.jpg)
+
   - curvas: altura, rendimiento, potencia y NPSH₃ previstos frente al caudal (la altura
     a carga parcial según Gülich, cap. 4.3, y el NPSH₃ como banda de cinco métodos
     publicados), con la zona de recirculación estimada a trazos, el NPSH disponible y la pérdida en la
@@ -271,6 +274,11 @@ mientras se edite el rodete.
   de la punta del cuello: la fuga del anillo de cierre sale a ese hueco y vuelve a la
   boca dentro del mismo dominio. Se dibuja en el ámbito Cámaras laterales y aparece en
   la Escena del 3D.
+
+  | Meridiano | 3D, con el corte meridional |
+  |---|---|
+  | ![Tubería de entrada en el meridiano](docs/img/tuberia-entrada-meridiano.jpg) | ![Tubería de entrada en 3D](docs/img/tuberia-entrada-3d.jpg) |
+
 - **Cruces:** si dos paredes se cruzan, o una se cruza consigo misma, el punto se
   marca en rojo y sale un aviso.
 - **Análisis:** la curvatura de las paredes, los círculos de área, las gráficas de área
