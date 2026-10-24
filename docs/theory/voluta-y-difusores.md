@@ -464,14 +464,42 @@ vale 0 por defecto, y fuera de ±3° el programa avisa.
 |---|---|
 | Tangente | la espiral empieza donde su pared exterior deja libre la pared interior de la tobera; el corte de agua es una cuña fina tangente al círculo base, sin nariz diseñada |
 | Afilado | la espiral empieza junto al corte de agua (3°) y corta la pared interior de la tobera; el corte de agua es la cuña entre las dos paredes, con la punta donde se cruzan |
-| Redondeado (por defecto) | la cuña afilada más una **nariz** de radio $\rho$ cuyo punto más interior queda sobre el círculo $d_z$, unida a la punta por sus tangentes |
+| Redondeado (por defecto) | la cuña afilada más un **cuerpo** con una nariz de radio $\rho$ cuyo punto más interior queda sobre el círculo $d_z$; el cuerpo nunca es más fino que la nariz y se une a las dos paredes con tangencia |
 
-**La nariz redondeada:**
+**El corte de agua redondeado** (construcción propia sobre el punto 7 del cap. 7.8.1:
+el corte de agua debe estar perfilado, ser corto y grueso salvo el radio de la nariz
+para que no se agriete, y llevar el ángulo $\alpha_{3B}$ del flujo):
 
-- $\rho$ vale por defecto $e_3/2$, así que su centro cae en el punto de remanso
-  $r'_z = r_z + e_3/2$ de Gülich. La holgura con el rodete es la de diseño, $d_z$.
-- No puede pasar de la distancia entre el círculo $d_z$ y la punta de la cuña; si no,
-  la nariz saldría de la cuña y estrecharía la garganta.
+- **Nariz:** un círculo de radio $\rho$, por defecto $e_3/2$, con el centro en el punto
+  de remanso $r'_z = r_z + e_3/2$ de Gülich sobre el eje x. Se desplaza en radio lo
+  justo para que el punto más interior del corte de agua quede sobre $d_z$: la holgura
+  con el rodete es la de diseño.
+- **Línea de curvatura:** sale de la nariz con el ángulo $\alpha_{3B} = \alpha'_3 + i_3$
+  respecto a la dirección circunferencial y llega a la punta de la cuña por el medio de
+  las dos paredes (una Bézier cúbica tangente a las dos direcciones).
+- **Espesor:** de la nariz a la punta el cuerpo mide $e = 2\rho$ alrededor de esa
+  línea. Pasada la punta, cada cara es su pared desplazada hacia el flujo la mitad de
+  lo que le falta a la cuña para medir $e$. Ese desplazamiento pasa por un máximo suave
+  cuadrático, así que la cara entra en la pared con tangencia donde la cuña ya mide
+  $e + k$, con $k = e/4$.
+- Así el corte de agua **no adelgaza en ningún punto** por debajo de $e$ y quita al
+  flujo solo lo que ese espesor exige.
+- $\rho$ no puede pasar de la distancia entre el círculo $d_z$ y la punta de la cuña.
+
+Una construcción anterior unía el círculo de la nariz a la punta de la cuña con dos
+tangentes. La cuña mide cero en su punta, y esas tangentes también, así que el corte de
+agua quedaba unido al resto de la carcasa por una línea de **espesor cero**. En la bomba
+de referencia, unos 50 mm alrededor de la punta medían menos que $e_3$.
+
+**Por cortes a lo ancho.** El corte de agua se calcula en 9 planos $z$ = cte entre las
+paredes laterales de la entrada (a un 5 % de ellas). En cada plano, la pared exterior de
+la espiral sale de las secciones ajustadas, cada grado desde el inicio de la espiral, y
+la pared interior del difusor de una spline por sus secciones, como el loft del CAD. La
+nariz queda en la misma línea paralela al eje en todos los planos; las caras siguen las
+paredes de cada plano. Con secciones de paredes rectas los planos son casi iguales. Con
+secciones redondas la línea donde se cruzan las paredes se curva: en la bomba de
+referencia la punta pasa de 98,3 mm del eje junto a las paredes laterales a 104,1 mm en
+el plano medio.
 
 **Por qué no un simple redondeo tangente a las dos paredes:** la cuña natural es muy
 fina (5,5° en la bomba de referencia con la pared del corte de agua recta), porque la pared
@@ -488,15 +516,23 @@ paredes solo se rozan (cuña de menos de 4°).
 
 El informe da la posición de la punta, el ángulo de la cuña y el **diámetro efectivo del
 corte de agua**: el doble de la distancia del eje al punto más cercano del corte de agua.
+También da, a lo ancho, entre qué radios queda la punta y entre qué ángulos la cuña, y
+para el redondeado el espesor mínimo del cuerpo y dónde se une a las paredes.
 
-En la bomba de referencia:
+En la bomba de referencia (en el plano medio):
 
 | Descarga | Corte de agua | Punta | Cuña | Más cerca del eje |
 |---|---|---|---|---|
-| Tangencial abierta a ambos lados | afilado | 22,1°, a 103,3 mm | 11,6° | 103,3 mm |
+| Tangencial abierta a ambos lados | afilado | 23,4°, a 103,6 mm | 11,9° | 103,6 mm |
 | Tangencial con la pared del corte de agua recta | afilado | 10,4°, a 100,8 mm | 5,5° | 100,8 mm |
-| Radial central | afilado | 12,8°, a 101,3 mm | 6,8° | 101,3 mm |
+| Radial central | afilado | 11,9°, a 101,1 mm | 10,6° | 101,1 mm |
 | Cualquiera | redondeado, $\rho$ = 1,72 mm | igual | igual | 96,6 mm ($d_z/2$) |
+
+El cuerpo redondeado mide 3,44 mm en todos los planos y se une a las paredes entre 14 mm
+(radial) y 21 mm (tangencial con la pared recta) pasada la punta. La punta y la cuña de
+la descarga radial cambiaron respecto a versiones anteriores (12,8° y 6,8°): antes la
+pared del difusor se prolongaba en línea recta desde la garganta, y en la radial ya se
+curva hacia fuera antes de cruzar la espiral; ahora sigue la superficie del difusor.
 
 Al abrirse a ambos lados, la pared interior de la tobera se inclina hacia el eje y el
 corte de agua queda más largo y más grueso. Con la descarga radial central, la brida de

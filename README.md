@@ -130,7 +130,9 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
   empuje radial). La voluta admite descarga radial (por defecto, central sobre la línea
   del eje de la bomba) o tangencial, abierta a ambos lados o con una pared recta. Por
   defecto gira para que la descarga quede vertical. El corte de agua puede ser tangente,
-  afilado o redondeado con su radio.
+  afilado o redondeado con su radio; el redondeado es un cuerpo con la nariz sobre d_z
+  y el ángulo α₃B, nunca más fino que la nariz, que se une suavemente a las dos paredes
+  y se calcula en nueve planos a lo ancho de la entrada.
 - **Vista principal**, una a la vez y a pantalla completa, elegida en las pestañas:
   - sección meridional (ver [La vista Meridian](#la-vista-meridian)): la etapa
     completa con el difusor y la voluta, o el rodete solo para dibujar su canal, sus
