@@ -79,8 +79,9 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
     potencial y las curvas de referencia), el encuadre, los imanes y los dibujos;
   - *Blade*: las páginas de gráficas y de bordes, y la exportación de puntos y malla;
   - *Front* y *Section*: sus dibujos y exportaciones, y cómo se edita una sección;
-  - *3D*: cámara, estilo (sombreado, con aristas o alambre), y
-    sólidos CAD y mallas;
+  - *3D*: cámara (encuadrar, vista inicial y proyección ortográfica), estilo
+    (sombreado, con aristas o alambre), y sólidos CAD, mallas y una imagen PNG de la
+    vista;
   - *Curves*: los ajustes de la predicción y el resto de resultados.
 
   A la izquierda de las pestañas están el menú *File* (abre, guarda, exporta y da los
@@ -129,7 +130,9 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
     salida en verdadera forma, con sus puntos para arrastrar;
   - vista frontal de la etapa, con los álabes del difusor y la espiral;
   - vista 3D, con aristas de las piezas, secciones de la voluta, cubo de vistas (un clic
-    en una cara gira la cámara), ejes y barra de escala;
+    en una cara gira la cámara), ejes y barra de escala, en perspectiva o en proyección
+    ortográfica; la imagen PNG sale con el doble de resolución y sin el cubo, los ejes
+    ni la escala;
   - curvas: altura, rendimiento, potencia y NPSH₃ previstos frente al caudal (la altura
     a carga parcial según Gülich, cap. 4.3, y el NPSH₃ como banda de cinco métodos
     publicados), con la zona de recirculación estimada a trazos, el NPSH disponible y la pérdida en la
@@ -151,8 +154,9 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
   el ámbito (se puede desactivar en los ajustes, *Behavior*).
 - **Escena** (flota sobre la vista 3D): las piezas del modelo por componente, en el
   orden del flujo. Cada pieza tiene un ojo que la muestra u oculta (Alt+clic la aísla),
-  su color, un botón de transparencia y otro que la aísla; los álabes, además, uno o
-  todos. El menú muestra u oculta todo, restablece la escena o la acopla a otra
+  su color (un clic abre el selector de color y opacidad), un botón que pasa por las
+  tres opacidades (opaca, translúcida y cristal) y otro que la aísla; los álabes,
+  además, uno o todos. El menú muestra u oculta todo, restablece la escena o la acopla a otra
   esquina; también se acopla arrastrando su cabecera a la esquina más cercana, y se
   pliega a una píldora. El modelo se centra en lo que dejan libre la Escena y el panel
   de propiedades. La esquina y el plegado se recuerdan.
