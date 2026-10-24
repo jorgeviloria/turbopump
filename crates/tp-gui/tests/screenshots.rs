@@ -18,7 +18,15 @@ fn output(name: &str) -> PathBuf {
     dir.join(format!("{name}.png"))
 }
 
+/// Saves the window without the pointer kittest paints, as a real screenshot would.
 fn save(harness: &mut Harness<'_, TurbopumpApp>, name: &str) {
+    harness.remove_cursor();
+    harness.run_steps(4);
+    save_hovering(harness, name);
+}
+
+/// Saves the window with the pointer, for hover states.
+fn save_hovering(harness: &mut Harness<'_, TurbopumpApp>, name: &str) {
     let image = harness.render().expect("wgpu rendering");
     let path = output(name);
     image.save(&path).unwrap();
@@ -460,7 +468,7 @@ fn view_cube() {
         ] {
             harness.hover_at(pos);
             harness.run();
-            save(&mut harness, &format!("cube-{name}-{suffix}"));
+            save_hovering(&mut harness, &format!("cube-{name}-{suffix}"));
         }
     }
 }
