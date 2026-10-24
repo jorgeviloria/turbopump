@@ -908,3 +908,33 @@ fn every_step_of_a_component_completes_at_once() {
         assert_eq!(volute.status(step), StepStatus::Done, "{step}");
     }
 }
+
+#[test]
+fn a_section_counts_its_values_by_hand_and_makes_them_automatic() {
+    let mut harness = harness();
+    let manual = |h: &Harness<'_, TurbopumpApp>| {
+        let project = h.state().document().project();
+        let id = project.components()[0].id();
+        let input = project.pump_impeller_input(id).unwrap();
+        [
+            input.hydraulic_efficiency.manual_value().is_some(),
+            input.volumetric_efficiency.manual_value().is_some(),
+        ]
+    };
+    // Two efficiencies by hand: their section counts them (the frame after).
+    for i in 0..2 {
+        harness.get_all_by_label("auto").nth(i).unwrap().click();
+        harness.run();
+    }
+    harness.run();
+    assert_eq!(manual(&harness), [true, true]);
+    // One click puts both back, as one edit.
+    harness.get_by_label("All 2 to automatic").click();
+    harness.run();
+    assert_eq!(manual(&harness), [false, false]);
+    harness.run();
+    assert!(harness.query_by_label_contains("to automatic").is_none());
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert_eq!(manual(&harness), [true, true]);
+}

@@ -3308,6 +3308,12 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Opacity of {}", "Opacidad: {}"),
     ("Click for {}", "Con un clic: {}"),
     ("Color of {}", "Color: {}"),
+    ("All {} to automatic", "Los {} a automático"),
+    ("{} by hand", "{} a mano"),
+    (
+        "Values of this section set by hand; click to make them all automatic again",
+        "Valores de esta sección fijados a mano; un clic los vuelve todos automáticos",
+    ),
     ("Inlet duct", "Tubería de entrada"),
     (
         "An axial duct ahead of the eye, for the inlet of a CFD domain. With the side chambers designed, it ends an axial gap short of the neck tip, so the leakage through the annular seal returns into the eye inside the same domain",

@@ -185,6 +185,8 @@ pub(crate) fn heading(project: &Project, selection: Selection) -> (&'static str,
 
 /// The inputs and results of the selected step, or of the global setup.
 pub(crate) fn show(ui: &mut Ui, cx: &mut EditCtx<'_>) {
+    // Rows above the first section belong to none.
+    ui.data_mut(|d| d.remove::<egui::Id>(current_section_id()));
     match *cx.selection {
         Selection::Setup => setup(ui, cx),
         Selection::Step(id, step) => step_panel(ui, cx, id, step),
@@ -408,7 +410,33 @@ pub(crate) fn sections_folded(ctx: &egui::Context) -> bool {
         .unwrap_or(false)
 }
 
-/// A section heading of any [`Kind`]. Returns whether its group is open.
+fn current_section_id() -> egui::Id {
+    egui::Id::new("current_section")
+}
+
+/// The open section whose rows are being drawn.
+pub(crate) fn current_section(ui: &Ui) -> Option<egui::Id> {
+    ui.data(|d| d.get_temp::<egui::Id>(current_section_id()))
+}
+
+/// Counts one more value set by hand in `section`.
+pub(crate) fn count_manual(ui: &Ui, section: egui::Id) {
+    ui.data_mut(|d| {
+        let n = d.get_temp::<usize>(section.with("manual")).unwrap_or(0);
+        d.insert_temp(section.with("manual"), n + 1);
+    });
+}
+
+/// Whether the heading of `section` asked, this frame, for its values back to
+/// automatic.
+pub(crate) fn section_to_automatic(ui: &Ui, section: egui::Id) -> bool {
+    ui.data(|d| d.get_temp::<bool>(section.with("to_automatic")))
+        .unwrap_or(false)
+}
+
+/// A section heading of any [`Kind`]. Returns whether its group is open. An open
+/// heading shows how many of its values are set by hand (counted last frame) and puts
+/// them all back to automatic with a click.
 pub(crate) fn section_kind(ui: &mut Ui, title: &str, hint: &str, kind: Kind) -> bool {
     let p = Palette::of(ui);
     let step = sections_id(ui);
@@ -458,15 +486,55 @@ pub(crate) fn section_kind(ui: &mut Ui, title: &str, hint: &str, kind: Kind) -> 
                     ui.label(RichText::new(tag).size(10.5).color(p.weak));
                 });
         }
-        let rect = ui.available_rect_before_wrap();
+        let manual = ui
+            .data(|d| d.get_temp::<usize>(key.with("manual")))
+            .unwrap_or(0);
+        let mut to_automatic = false;
+        let rest = ui.available_rect_before_wrap();
+        let rule_end = if manual > 0 {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let label = tf("All {} to automatic", &[&manual]);
+                let chip = ui.add(
+                    egui::Button::new(
+                        RichText::new(format!("● {}", tf("{} by hand", &[&manual])))
+                            .size(11.0)
+                            .color(p.accent),
+                    )
+                    .frame(false),
+                );
+                chip.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label)
+                });
+                to_automatic = chip
+                    .on_hover_text(tr(
+                        "Values of this section set by hand; click to make them all automatic again",
+                    ))
+                    .clicked();
+                ui.min_rect().left() - 6.0
+            })
+            .inner
+        } else {
+            rest.right()
+        };
         ui.painter().hline(
-            (rect.left() + 4.0)..=rect.right(),
-            rect.center().y,
+            (rest.left() + 4.0)..=rule_end.max(rest.left() + 4.0),
+            rest.center().y,
             egui::Stroke::new(1.0, p.border),
         );
-        if clicked {
+        // A click on the count of a folded section opens it, to apply there.
+        if clicked || (to_automatic && !open) {
             open = !open;
             ui.data_mut(|d| d.insert_temp(key, (generation, open)));
+        }
+        if open {
+            // The rows that follow count afresh, and hear the click.
+            ui.data_mut(|d| {
+                d.insert_temp(key.with("manual"), 0usize);
+                d.insert_temp(key.with("to_automatic"), to_automatic);
+                d.insert_temp(current_section_id(), key);
+            });
+        } else {
+            ui.data_mut(|d| d.remove::<egui::Id>(current_section_id()));
         }
     });
     ui.add_space(2.0);

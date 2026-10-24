@@ -519,10 +519,19 @@ fn auto_toggle<T: Copy>(
         } else {
             Param::Manual(manual_start())
         };
-        true
-    } else {
-        false
+        return true;
     }
+    // The section this row is in counts it, or asks for it back to automatic.
+    if !param.is_auto()
+        && let Some(section) = crate::steps::current_section(ui)
+    {
+        if crate::steps::section_to_automatic(ui, section) {
+            *param = Param::Auto;
+            return true;
+        }
+        crate::steps::count_manual(ui, section);
+    }
+    false
 }
 
 /// One grid row with a computed value.
