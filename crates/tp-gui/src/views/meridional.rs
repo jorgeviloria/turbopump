@@ -1165,7 +1165,12 @@ fn paint_dimensions(
             painter.line_segment([screen(*a), screen(*b)], thin);
         }
         let (a, b) = (screen(d.from), screen(d.to));
-        painter.line_segment([a, b], solid);
+        let line = if hovered == Some(d.dimension) {
+            egui::Stroke::new(1.8, palette.handle_active)
+        } else {
+            solid
+        };
+        painter.line_segment([a, b], line);
         let along = (b - a).normalized();
         let across = along.rot90();
         for (tip, back) in [(a, along), (b, -along)] {
@@ -1856,7 +1861,18 @@ impl MeridionalView {
         // The main dimensions belong to the flow path; the material shows only the
         // point under the pointer.
         let permanent = display.dimensions && display.page == Page::FlowPath;
-        let dimensions = dimension_lines(&g.contour, &g.basis, permanent, active);
+        let mut dimensions = dimension_lines(&g.contour, &g.basis, permanent, active);
+        // The property row under the pointer shows its dimension, drawn or not.
+        let row_dimension = crate::widgets::hovered_row(ui.ctx()).and_then(|row| {
+            dimension_lines(&g.contour, &g.basis, true, None)
+                .into_iter()
+                .find(|d| d.dimension.label() == row)
+        });
+        if let Some(line) = &row_dimension
+            && !dimensions.iter().any(|d| d.dimension == line.dimension)
+        {
+            dimensions.push(line.clone());
+        }
         // Dimension values as drawn, to find the one under the pointer.
         let font = egui::FontId::proportional(12.0);
         let texts: Vec<String> = dimensions
@@ -1879,6 +1895,8 @@ impl MeridionalView {
                 .map(|(d, _)| d.dimension),
             _ => None,
         };
+        crate::widgets::set_drawing_hover(ui.ctx(), hovered_dimension.map(|d| d.label()));
+        let hovered_dimension = hovered_dimension.or(row_dimension.map(|d| d.dimension));
         let fit = self.fit.take();
         // Extent of the contour with its permanent dimensions, and room for their
         // values. The dimensions are painted over the plot so they never move its bounds.

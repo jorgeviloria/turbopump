@@ -175,6 +175,36 @@ fn changed_since_accepted() {
     save(&mut harness, "changed-since-accepted");
 }
 
+/// The pointer on the row of the axial length L in the properties: its dimension
+/// stands out in the meridian.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn row_and_dimension() {
+    let mut harness = harness(egui::Theme::Light);
+    harness.state_mut().focus_view(View::Meridian);
+    harness.run();
+    // Only the section of L open, so its row is in sight.
+    harness.get_by_label("More actions of the step").click();
+    harness.run();
+    harness.get_by_label_contains("Fold every section").click();
+    harness.run();
+    harness.get_all_by_label("Contour").last().unwrap().click();
+    harness.run();
+    let row = harness
+        .get_all_by_label("Axial length L")
+        .next()
+        .unwrap()
+        .rect()
+        .center();
+    harness.hover_at(row);
+    harness.run_steps(4);
+    save_hovering(&mut harness, "row-and-dimension");
+    // The other way: the value of L in the drawing shades its row.
+    harness.hover_at(egui::pos2(683.0, 751.0));
+    harness.run_steps(4);
+    save_hovering(&mut harness, "dimension-and-row");
+}
+
 /// A primary click at `pos`, with the pointer left there.
 fn click_at(harness: &mut Harness<'_, TurbopumpApp>, pos: egui::Pos2) {
     harness.hover_at(pos);

@@ -126,6 +126,38 @@ pub(crate) fn auto_dot(ui: &mut Ui, auto: &mut bool) -> egui::Response {
     response
 }
 
+/// Where the property rows and the drawings tell each other what the pointer is on, by
+/// the row's label: the row under it, the dimension under it.
+fn hover_id(what: &str) -> egui::Id {
+    egui::Id::new(("hover_link", what))
+}
+
+/// The label of the property row under the pointer, this frame or the last.
+pub(crate) fn hovered_row(ctx: &egui::Context) -> Option<String> {
+    let now = ctx.cumulative_pass_nr();
+    ctx.data(|d| d.get_temp::<(u64, String)>(hover_id("row")))
+        .filter(|(pass, _)| now <= pass + 1)
+        .map(|(_, label)| label)
+}
+
+/// Tells the property rows which of them a drawing has under the pointer.
+pub(crate) fn set_drawing_hover(ctx: &egui::Context, label: Option<String>) {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|d| match label {
+        Some(label) => {
+            d.insert_temp(hover_id("drawing"), (pass, label));
+        }
+        None => d.remove::<(u64, String)>(hover_id("drawing")),
+    });
+}
+
+/// Whether a drawing has the row `label` under the pointer, this frame or the last.
+fn drawing_hovers(ctx: &egui::Context, label: &str) -> bool {
+    let now = ctx.cumulative_pass_nr();
+    ctx.data(|d| d.get_temp::<(u64, String)>(hover_id("drawing")))
+        .is_some_and(|(pass, l)| now <= pass + 1 && l == label)
+}
+
 /// The label cell; with `auto`, the automatic/manual dot at its right end, just
 /// before the input. With `shown`, what the row shows: a bar in the margin marks it
 /// when it changed since the step was accepted. Returns the dot's response.
@@ -136,8 +168,24 @@ fn label_cell(
     auto: Option<&mut bool>,
     shown: Option<&str>,
 ) -> Option<egui::Response> {
-    let width = Columns::of(ui).label;
+    let columns = Columns::of(ui);
+    let width = columns.label;
     let was = shown.and_then(|v| crate::steps::changed_since_accepted(ui, text, v));
+    // The whole row, label and value: shaded while a drawing points at its dimension,
+    // and published while the pointer is on it.
+    let row = egui::Rect::from_min_size(
+        ui.cursor().min,
+        vec2(columns.label + GAP + columns.value, ROW_HEIGHT),
+    );
+    if drawing_hovers(ui.ctx(), text) {
+        let p = Palette::of(ui);
+        ui.painter()
+            .rect_filled(row.expand2(vec2(4.0, 1.0)), 4, p.hover);
+    }
+    if ui.rect_contains_pointer(row) {
+        let pass = ui.ctx().cumulative_pass_nr();
+        ui.data_mut(|d| d.insert_temp(hover_id("row"), (pass, text.to_owned())));
+    }
     let cell = ui.allocate_ui_with_layout(
         vec2(width, ROW_HEIGHT),
         Layout::left_to_right(Align::Center),
@@ -624,5 +672,29 @@ mod tests {
     fn manual_tag_marks_only_manual_values() {
         assert_eq!(manual_tag(&Param::<f64>::Auto), "");
         assert_eq!(manual_tag(&Param::Manual(1.0)), " (manual)");
+    }
+
+    /// A row and a drawing hear each other for this frame and the next, then forget.
+    #[test]
+    fn the_hover_link_lasts_one_frame() {
+        let ctx = egui::Context::default();
+        let pass = |ctx: &egui::Context| {
+            let mut output = ctx.run_ui(egui::RawInput::default(), |_| {});
+            output.textures_delta.clear();
+        };
+        pass(&ctx);
+        set_drawing_hover(&ctx, Some("Axial length L".into()));
+        let now = ctx.cumulative_pass_nr();
+        ctx.data_mut(|d| d.insert_temp(hover_id("row"), (now, "Outlet width b₂".to_owned())));
+        assert!(drawing_hovers(&ctx, "Axial length L"));
+        assert!(!drawing_hovers(&ctx, "Outlet width b₂"));
+        assert_eq!(hovered_row(&ctx).as_deref(), Some("Outlet width b₂"));
+        pass(&ctx);
+        assert!(drawing_hovers(&ctx, "Axial length L"));
+        pass(&ctx);
+        assert!(!drawing_hovers(&ctx, "Axial length L"));
+        assert!(hovered_row(&ctx).is_none());
+        set_drawing_hover(&ctx, None);
+        assert!(!drawing_hovers(&ctx, "Axial length L"));
     }
 }
