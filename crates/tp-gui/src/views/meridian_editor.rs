@@ -317,7 +317,8 @@ fn recover(ui: &mut Ui, cx: &mut EditCtx<'_>, id: ComponentId, reason: &str) {
     });
 }
 
-/// Cross-section area along the channel and curvature along the walls.
+/// Cross-section area along the channel, static moment along the blade sections and
+/// curvature along the walls.
 fn progressions(
     ui: &mut Ui,
     id: ComponentId,
@@ -330,12 +331,12 @@ fn progressions(
     let unit = units.get(QuantityKind::Length).symbol;
     // Curvature in 1/display unit.
     let per_unit = 1.0 / units.to_display(QuantityKind::Length, 1.0);
-    let half = (width - 8.0) / 2.0;
+    let third = (width - 16.0) / 3.0;
     ui.horizontal_top(|ui| {
         let qos = &g.channel.quasi_orthogonals;
         let inlet = qos[0].area;
         Plot::new(("meridian_area", id.0))
-            .width(half)
+            .width(third)
             .height(height)
             .allow_drag(false)
             .allow_zoom(false)
@@ -351,8 +352,45 @@ fn progressions(
                         .width(1.8),
                 );
             });
+        // Pfleiderer's static moment S = ∫ r dm of each section, from its leading edge.
+        let area_unit = units.get(QuantityKind::Area).symbol;
+        let sections = &g.blade.sections;
+        Plot::new(("meridian_static_moment", id.0))
+            .width(third)
+            .height(height)
+            .allow_drag(false)
+            .allow_zoom(false)
+            .allow_scroll(false)
+            .x_axis_label(tr("fraction of the blade length"))
+            .y_axis_label(format!("S = ∫ r dm [{area_unit}]"))
+            .legend(Legend::default().position(Corner::LeftTop))
+            .show(ui, |plot| {
+                let last = sections.len().saturating_sub(1);
+                for (i, section) in sections.iter().enumerate() {
+                    let moment = section.static_moment();
+                    let length = section.m.last().copied().unwrap_or(1.0).max(f64::EPSILON);
+                    let points: PlotPoints = section
+                        .m
+                        .iter()
+                        .zip(&moment)
+                        .map(|(&m, &s)| [m / length, units.to_display(QuantityKind::Area, s)])
+                        .collect();
+                    let total =
+                        units.show(QuantityKind::Area, moment.last().copied().unwrap_or(0.0));
+                    let line = match i {
+                        0 => Line::new(format!("{} {total}", tr("hub")), points)
+                            .color(palette.hub)
+                            .width(1.8),
+                        i if i == last => Line::new(format!("{} {total}", tr("shroud")), points)
+                            .color(palette.shroud)
+                            .width(1.8),
+                        _ => Line::new("", points).color(palette.guide).width(1.0),
+                    };
+                    plot.line(line);
+                }
+            });
         Plot::new(("meridian_curvature", id.0))
-            .width(half)
+            .width(third)
             .height(height)
             .allow_drag(false)
             .allow_zoom(false)

@@ -151,11 +151,16 @@ pub(crate) fn meridian(
                         ));
                     ui.checkbox(&mut d.area_circles, tr("area circles"))
                         .on_hover_text(tr("Circles as wide as the channel normal to the flow"));
-                    ui.checkbox(&mut d.charts, tr("area and curvature charts"))
-                        .on_hover_text(tr(
-                            "Cross-section area along the channel and curvature along the \
-                             walls, under the diagram: both should change smoothly",
-                        ));
+                    ui.checkbox(
+                        &mut d.charts,
+                        tr("area, static moment and curvature charts"),
+                    )
+                    .on_hover_text(tr(
+                        "Cross-section area along the channel, static moment S = ∫ r dm of \
+                             the blade sections and curvature along the walls, under the \
+                             diagram: all should change smoothly; the larger S, the less the \
+                             slip (Pfleiderer)",
+                    ));
                     ui.separator();
                     ui.checkbox(&mut d.potential, tr("potential flow"))
                         .on_hover_text(tr(

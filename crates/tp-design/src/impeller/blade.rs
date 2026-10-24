@@ -353,6 +353,25 @@ pub struct Face {
 }
 
 impl BladeSection {
+    /// Static moment S = ∫ r dm about the axis of the meridional projection of the
+    /// section, from the leading edge to each station, m² (trapezoids over the
+    /// stations). Its total is that of Pfleiderer's slip factor: the longer the blade
+    /// and the farther out it runs, the less the slip (Gülich 2nd ed., Chap. 3.3, p. 78).
+    pub fn static_moment(&self) -> Vec<f64> {
+        let mut total = 0.0;
+        std::iter::once(0.0)
+            .chain(
+                self.m
+                    .windows(2)
+                    .zip(self.meridional.windows(2))
+                    .map(|(m, p)| {
+                        total += 0.5 * (p[0].y + p[1].y) * (m[1] - m[0]);
+                        total
+                    }),
+            )
+            .collect()
+    }
+
     /// θ at the leading edge.
     pub fn wrap_angle(&self) -> f64 {
         self.theta[0]
@@ -1185,6 +1204,40 @@ mod tests {
 
     fn reference() -> Blade {
         blade_with(MeanLineInput::default(), EdgeInput::default())
+    }
+
+    #[test]
+    fn the_static_moment_grows_with_the_radius_along_the_blade() {
+        let blade = reference();
+        for section in &blade.sections {
+            let s = section.static_moment();
+            assert_eq!(s.len(), section.m.len());
+            assert_eq!(s[0], 0.0);
+            assert!(s.windows(2).all(|w| w[1] > w[0]));
+            // Between the moments of the same length at the smallest and the largest
+            // radius it passes through.
+            let length = *section.m.last().unwrap();
+            let (low, high) = section
+                .meridional
+                .iter()
+                .fold((f64::INFINITY, 0.0f64), |(lo, hi), p| {
+                    (lo.min(p.y), hi.max(p.y))
+                });
+            let total = *s.last().unwrap();
+            assert!(low * length < total && total < high * length);
+        }
+        // A purely radial section from r₁ to r₂: S = (r₂² − r₁²)/2.
+        let mut radial = blade.sections[0].clone();
+        let (r1, r2, n) = (0.04, 0.09, 50);
+        radial.meridional = (0..=n)
+            .map(|i| DVec2::new(0.0, r1 + (r2 - r1) * i as f64 / n as f64))
+            .collect();
+        radial.m = radial.meridional.iter().map(|p| p.y - r1).collect();
+        assert_relative_eq!(
+            *radial.static_moment().last().unwrap(),
+            (r2 * r2 - r1 * r1) / 2.0,
+            max_relative = 1e-12
+        );
     }
 
     #[test]

@@ -929,7 +929,9 @@ fn meridian_editor() {
     harness.run();
     harness.get_by_label_contains("Analysis").click();
     harness.run();
-    harness.get_by_label("area and curvature charts").click();
+    harness
+        .get_by_label("area, static moment and curvature charts")
+        .click();
     harness.get_by_label("curvature maximum").click();
     harness.run();
     save(&mut harness, "editor-analysis");

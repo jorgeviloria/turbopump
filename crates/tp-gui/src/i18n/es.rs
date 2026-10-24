@@ -85,10 +85,17 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Las dimensiones principales d_n, d₁, d₂, b₂ y L. Haz clic en un valor para escribirlo.",
     ),
     ("Analysis", "Análisis"),
-    ("area and curvature charts", "gráficas de área y curvatura"),
     (
-        "Cross-section area along the channel and curvature along the walls, under the diagram: both should change smoothly",
-        "Área de paso a lo largo del canal y curvatura a lo largo de las paredes, bajo el dibujo: las dos deben variar con suavidad",
+        "area, static moment and curvature charts",
+        "gráficas de área, momento estático y curvatura",
+    ),
+    (
+        "Cross-section area along the channel, static moment S = ∫ r dm of the blade sections and curvature along the walls, under the diagram: all should change smoothly; the larger S, the less the slip (Pfleiderer)",
+        "Área de paso a lo largo del canal, momento estático S = ∫ r dm de las secciones del álabe y curvatura a lo largo de las paredes, bajo el dibujo: todas deben variar con suavidad; cuanto mayor es S, menor el deslizamiento (Pfleiderer)",
+    ),
+    (
+        "fraction of the blade length",
+        "fracción de la longitud del álabe",
     ),
     (
         "Drag a point to shape the meridian: hollow points are automatic, filled ones set by hand. Double-click a point to make it automatic again. Right-click a point or a wall for exact values, segments and joints. Click a dimension to type it. Hold Alt and drag to measure a distance.",
