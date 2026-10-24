@@ -103,9 +103,9 @@ fn undo_and_redo_shortcuts() {
 fn changing_the_global_setup_makes_done_steps_outdated() {
     let mut harness = harness();
     accept(&mut harness);
-    // The component bar and the tree both open it.
+    // The design flow opens it.
     harness
-        .get_all_by_label("Global setup")
+        .get_all_by_label("Design point and fluid")
         .next()
         .unwrap()
         .click();
@@ -204,8 +204,8 @@ fn the_volute_is_designed_after_the_impeller() {
     for _ in 0..6 {
         accept(&mut harness);
     }
-    // Then every volute step, from the tree.
-    harness.get_by_label("Volute setup").click();
+    // Then every volute step: Alt+↓ goes on from the impeller to the volute.
+    harness.key_press_modifiers(Modifiers::ALT, Key::ArrowDown);
     harness.run();
     for step in tp_project::VOLUTE_STEPS {
         assert!(matches!(harness.state().selection(), Selection::Step(_, s) if s == step));
@@ -432,7 +432,7 @@ fn cross_sections_are_defined_round_the_spiral() {
     for _ in 0..6 {
         accept(&mut harness);
     }
-    harness.get_by_label("Volute setup").click();
+    harness.key_press_modifiers(Modifiers::ALT, Key::ArrowDown);
     harness.run();
     accept(&mut harness);
     assert!(matches!(
@@ -494,7 +494,7 @@ fn internal_sections_share_their_bend() {
     for _ in 0..6 {
         accept(&mut harness);
     }
-    harness.get_by_label("Volute setup").click();
+    harness.key_press_modifiers(Modifiers::ALT, Key::ArrowDown);
     harness.run();
     accept(&mut harness);
     let input = |harness: &Harness<'_, TurbopumpApp>| {
@@ -630,4 +630,54 @@ fn the_acceptance_settings_leave_the_steps_as_they_are() {
         status(&harness, DesignStep::MainDimensions),
         StepStatus::Done
     );
+}
+
+#[test]
+fn the_design_flow_keeps_the_active_component_open() {
+    let mut harness = harness();
+    // The impeller is active: its steps show, the volute's do not.
+    harness.get_by_label("Blade properties");
+    assert!(harness.query_by_label("Cross section").is_none());
+    // Its caret folds it, and opening the volute keeps it folded.
+    harness.get_by_label("Fold Impeller 1").click();
+    harness.run();
+    assert!(harness.query_by_label("Blade properties").is_none());
+    harness.get_by_label("Volute 1").click();
+    harness.run();
+    harness.get_by_label("Cross section");
+    assert!(harness.query_by_label("Blade properties").is_none());
+    // The caret folds the active volute until another step opens.
+    harness.get_by_label("Fold Volute 1").click();
+    harness.run();
+    assert!(harness.query_by_label("Cross section").is_none());
+    harness.key_press_modifiers(Modifiers::ALT, Key::ArrowDown);
+    harness.run();
+    harness.get_by_label("Cross section");
+    assert!(matches!(
+        harness.state().selection(),
+        Selection::Step(_, DesignStep::CrossSection)
+    ));
+    // Pinned, the impeller stays open while the volute is active.
+    harness.get_all_by_label("Pin open").next().unwrap().click();
+    harness.run();
+    harness.get_by_label("Blade properties");
+    harness.get_by_label("Cross section");
+}
+
+#[test]
+fn the_design_flow_folds_to_a_rail() {
+    let mut harness = harness();
+    harness.get_by_label("Fold the design flow").click();
+    harness.run();
+    assert!(harness.query_by_label("Blade properties").is_none());
+    // The rail opens a component at its next step.
+    harness.get_by_label("Volute 1").click();
+    harness.run();
+    assert!(matches!(
+        harness.state().selection(),
+        Selection::Step(_, DesignStep::VoluteSetup)
+    ));
+    harness.get_by_label("Show the design flow").click();
+    harness.run();
+    harness.get_by_label("Cross section");
 }

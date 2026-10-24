@@ -13,6 +13,7 @@ mod derived;
 mod dialogs;
 mod diffuser_steps;
 mod export;
+mod flow;
 mod i18n;
 mod icons;
 mod messages;

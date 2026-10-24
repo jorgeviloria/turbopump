@@ -62,13 +62,13 @@ fn main_window() {
         harness.run();
         save(&mut harness, &format!("home-{suffix}"));
         // The global setup: rows with a value and its kind side by side.
-        harness
-            .get_all_by_label("Global setup")
-            .next()
-            .unwrap()
-            .click();
+        harness.get_by_label_contains("TARGET").click();
         harness.run();
         save(&mut harness, &format!("setup-{suffix}"));
+        // The design flow folded to its rail.
+        harness.get_by_label("Fold the design flow").click();
+        harness.run();
+        save(&mut harness, &format!("flow-rail-{suffix}"));
     }
 }
 
@@ -81,7 +81,7 @@ fn documentation() {
         harness.get_by_label_contains("Accept step").click();
         harness.run();
     }
-    harness.get_by_label_contains("Volute setup").click();
+    harness.get_by_label("Volute 1").click();
     harness.run();
     for _ in 0..2 {
         harness.get_by_label_contains("Accept step").click();
@@ -102,7 +102,7 @@ fn volute() {
         harness.get_by_label_contains("Accept step").click();
         harness.run();
     }
-    harness.get_by_label_contains("Volute setup").click();
+    harness.get_by_label("Volute 1").click();
     harness.run();
     for _ in 0..2 {
         harness.get_by_label_contains("Accept step").click();
@@ -126,7 +126,7 @@ fn cross_sections() {
         harness.get_by_label_contains("Accept step").click();
         harness.run();
     }
-    harness.get_by_label_contains("Volute setup").click();
+    harness.get_by_label("Volute 1").click();
     harness.run();
     harness.get_by_label_contains("Accept step").click();
     harness.run();
@@ -163,7 +163,7 @@ fn internal_volute() {
         harness.get_by_label_contains("Accept step").click();
         harness.run();
     }
-    harness.get_by_label_contains("Volute setup").click();
+    harness.get_by_label("Volute 1").click();
     harness.run();
     harness.get_by_label_contains("Accept step").click();
     harness.run();
@@ -328,7 +328,7 @@ fn double_volute() {
         harness.get_by_label_contains("Accept step").click();
         harness.run();
     }
-    harness.get_by_label_contains("Volute setup").click();
+    harness.get_by_label("Volute 1").click();
     harness.run();
     harness.get_by_value("single").click();
     harness.run();
@@ -359,7 +359,7 @@ fn radial_discharge() {
         harness.get_by_label_contains("Accept step").click();
         harness.run();
     }
-    harness.get_by_label_contains("Volute setup").click();
+    harness.get_by_label("Volute 1").click();
     harness.run();
     for _ in 0..3 {
         harness.get_by_label_contains("Accept step").click();
@@ -429,6 +429,9 @@ fn spiral_development() {
         .with_theme(egui::Theme::Light)
         .wgpu()
         .build_eframe(|cc| TurbopumpApp::new(cc, Some(&path)));
+    harness.run();
+    // The volute folds with the accordion: open it, then its step.
+    harness.get_by_label("Volute 1").click();
     harness.run();
     harness.get_by_label_contains("Spiral development").click();
     harness.remove_cursor();

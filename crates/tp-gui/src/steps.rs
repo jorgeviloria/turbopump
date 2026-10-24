@@ -166,7 +166,7 @@ fn can_accept(kind: ComponentKind, step: DesignStep) -> bool {
 /// Title of the dialog for `selection`: icon, component and step.
 pub(crate) fn title(project: &Project, selection: Selection) -> String {
     match selection {
-        Selection::Setup => format!("{}  {}", icon::GEAR, tr("Global setup")),
+        Selection::Setup => format!("{}  {}", icon::TARGET, tr("Design point and fluid")),
         Selection::Step(id, step) => {
             let name = project.component(id).map_or("", |c| c.name.as_str());
             format!(
@@ -2491,23 +2491,27 @@ fn edges(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: ComponentId) 
     }
 }
 
-fn model(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: ComponentId) {
-    let Some(component) = project.component(id) else {
-        return;
-    };
-    let kind = component.kind();
-    let volute = kind == ComponentKind::Volute;
+/// Whether the design steps a CAD model needs are done.
+pub(crate) fn ready_for_cad(component: &tp_project::Component) -> bool {
     let done = |steps: &[DesignStep]| {
         steps
             .iter()
             .all(|&s| component.status(s) == StepStatus::Done)
     };
-    let ready = match kind {
+    match component.kind() {
         ComponentKind::Volute => done(&VOLUTE_STEPS),
         ComponentKind::Stator { vaned: true } => done(&VANED_STEPS),
         ComponentKind::Stator { vaned: false } => done(&VANELESS_STEPS),
         ComponentKind::Impeller => component.status(DesignStep::BladeEdges) == StepStatus::Done,
+    }
+}
+
+fn model(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: ComponentId) {
+    let Some(component) = project.component(id) else {
+        return;
     };
+    let volute = component.kind() == ComponentKind::Volute;
+    let ready = ready_for_cad(component);
     if !crate::export::CAD_AVAILABLE {
         ui.label(tr(
             "This build has no CAD support (built without the `cad` feature).",

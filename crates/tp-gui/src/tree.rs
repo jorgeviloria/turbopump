@@ -1,18 +1,16 @@
-//! Left side of the window: the component bar, the tree of design steps and the tree
-//! of what the 3D view shows.
+//! What the left side of the window shares: the step names and statuses, adding and
+//! removing components, and the tree of what the 3D view shows.
 
 use eframe::egui::{
-    self, Align2, Color32, FontId, Id, Popup, Rect, Response, RichText, Sense, Stroke, StrokeKind,
-    Ui, Vec2, WidgetInfo, WidgetType, pos2, vec2,
+    self, Align2, Color32, FontId, Id, Rect, Response, RichText, Sense, Ui, Vec2, WidgetInfo,
+    WidgetType, pos2, vec2,
 };
 use tp_project::{ComponentId, ComponentKind, DesignStep, StepStatus};
 
 use crate::app::{EditCtx, Selection};
-use crate::i18n::{component_name, project_name, tf, tr};
+use crate::i18n::{component_name, tf, tr};
 use crate::icons;
-use crate::messages::{self, Severity};
-use crate::steps;
-use crate::theme::{Palette, bold, bold_family, component_color, icon};
+use crate::theme::{Palette, bold_family, component_color, icon};
 use crate::viewer::{Part, ViewOptions};
 
 /// Step name with a capital first letter.
@@ -28,7 +26,7 @@ pub(crate) fn step_title(step: DesignStep) -> String {
         VoluteSetup => "Volute setup",
         CrossSection => "Cross section",
         SpiralDevelopment => "Spiral development",
-        Diffuser => "Diffuser",
+        Diffuser => "Discharge diffuser",
         CutWater => "Cut-water",
         WallThickness => "Wall thickness",
         CfdSetup => "CFD setup",
@@ -56,7 +54,7 @@ pub(crate) fn status_icon(p: &Palette, status: StepStatus) -> (&'static str, Col
 }
 
 /// Name of a machine type, as `MachineType` writes it.
-fn machine_name(machine: tp_project::MachineType) -> &'static str {
+pub(crate) fn machine_name(machine: tp_project::MachineType) -> &'static str {
     match machine.to_string().as_str() {
         "pump" => "pump",
         "fan" => "fan",
@@ -104,7 +102,8 @@ pub(crate) const ADD_ENTRIES: [AddEntry; 5] = [
     },
 ];
 
-/// Adds the component of `ADD_ENTRIES[index]` and selects its first step.
+/// Adds the component of `ADD_ENTRIES[index]` where it usually goes and selects its
+/// first step.
 pub(crate) fn add_component(cx: &mut EditCtx<'_>, index: usize) {
     let Some(entry) = ADD_ENTRIES.get(index) else {
         return;
@@ -120,6 +119,15 @@ pub(crate) fn add_component(cx: &mut EditCtx<'_>, index: usize) {
         (_, true) => 0,
         (ComponentKind::Volute, false) => len,
         _ => end,
+    };
+    add_component_at(cx, index, at);
+}
+
+/// Adds the component of `ADD_ENTRIES[index]` at position `at` and selects its first
+/// step.
+pub(crate) fn add_component_at(cx: &mut EditCtx<'_>, index: usize, at: usize) {
+    let Some(entry) = ADD_ENTRIES.get(index) else {
+        return;
     };
     let kind = entry.kind;
     let label = tf("add {}", &[&tr(kind.label()).to_lowercase()]);
@@ -165,199 +173,10 @@ pub(crate) fn entry_step(cx: &EditCtx<'_>, id: ComponentId) -> Option<DesignStep
     Some(c.next_step().unwrap_or(c.kind().steps()[0]))
 }
 
-/// Summary status of a component: outdated if any step is, done if all are.
-fn component_status(cx: &EditCtx<'_>, id: ComponentId) -> Option<StepStatus> {
-    let c = cx.doc.project().component(id)?;
-    let kind = c.kind();
-    let available: Vec<StepStatus> = kind
-        .steps()
-        .iter()
-        .filter(|&&s| steps::is_available(kind, s) && s != DesignStep::ModelSettings)
-        .map(|&s| c.status(s))
-        .collect();
-    Some(if available.contains(&StepStatus::Stale) {
-        StepStatus::Stale
-    } else if available.iter().all(|&s| s == StepStatus::Done) {
-        StepStatus::Done
-    } else {
-        StepStatus::Pending
-    })
-}
-
-// ---------------------------------------------------------------------------------------
-// Component bar
-
-const TILE: f32 = 46.0;
-
-/// One square tile of the component bar.
-fn tile(
-    ui: &mut Ui,
-    label: &str,
-    selected: bool,
-    draw: impl FnOnce(&egui::Painter, Rect, Color32),
-) -> Response {
-    let p = Palette::of(ui);
-    let (rect, response) = ui.allocate_exact_size(Vec2::splat(TILE), Sense::click());
-    response.widget_info(|| WidgetInfo::selected(WidgetType::Button, true, selected, label));
-    let fill = if selected {
-        p.selected
-    } else if response.hovered() {
-        p.hover
-    } else {
-        Color32::TRANSPARENT
-    };
-    let stroke = if selected {
-        Stroke::new(1.5, p.accent)
-    } else {
-        Stroke::NONE
-    };
-    ui.painter().rect(rect, 7, fill, stroke, StrokeKind::Inside);
-    draw(ui.painter(), rect.shrink(8.0), p.text);
-    response.on_hover_text(label)
-}
-
-/// The column of component pictograms at the far left.
-pub(crate) fn component_bar(ui: &mut Ui, cx: &mut EditCtx<'_>) {
-    let p = Palette::of(ui);
-    ui.add_space(6.0);
-    ui.vertical_centered(|ui| {
-        ui.spacing_mut().item_spacing.y = 6.0;
-        let setup = *cx.selection == Selection::Setup;
-        if tile(ui, tr("Global setup"), setup, |painter, rect, color| {
-            painter.text(
-                rect.center(),
-                Align2::CENTER_CENTER,
-                icon::GEAR,
-                FontId::proportional(24.0),
-                color,
-            );
-        })
-        .clicked()
-        {
-            cx.open(Selection::Setup);
-        }
-        let r = ui.cursor();
-        ui.painter().hline(
-            (r.left() + 10.0)..=(r.right() - 10.0),
-            r.top(),
-            Stroke::new(1.0, p.border),
-        );
-        ui.add_space(4.0);
-
-        let components: Vec<(ComponentId, ComponentKind, String)> = cx
-            .doc
-            .project()
-            .components()
-            .iter()
-            .map(|c| (c.id(), c.kind(), c.name.clone()))
-            .collect();
-        let mut remove = None;
-        for (id, kind, name) in components {
-            let selected = matches!(*cx.selection, Selection::Step(s, _) if s == id);
-            let status = component_status(cx, id);
-            let response = tile(ui, &component_name(&name), selected, |painter, rect, _| {
-                icons::component(painter, rect, kind, component_color(kind));
-            });
-            let dot = match status {
-                Some(StepStatus::Done) => Some(p.done),
-                Some(StepStatus::Stale) => Some(p.stale),
-                _ => None,
-            };
-            if let Some(color) = dot {
-                ui.painter().circle(
-                    response.rect.right_bottom() - vec2(7.0, 7.0),
-                    4.0,
-                    color,
-                    Stroke::new(1.5, p.strip),
-                );
-            }
-            if response.clicked()
-                && let Some(step) = entry_step(cx, id)
-            {
-                cx.open(Selection::Step(id, step));
-            }
-            response.context_menu(|ui| {
-                if ui
-                    .button(format!(
-                        "{}  {}",
-                        icon::TRASH,
-                        tf("Remove {}", &[&component_name(&name)])
-                    ))
-                    .clicked()
-                {
-                    remove = Some(id);
-                }
-            });
-        }
-        if let Some(id) = remove {
-            remove_component(cx, id);
-        }
-
-        let add = tile(ui, tr("Add component"), false, |painter, rect, color| {
-            painter.text(
-                rect.center(),
-                Align2::CENTER_CENTER,
-                icon::PLUS,
-                FontId::proportional(22.0),
-                color,
-            );
-        });
-        Popup::menu(&add).show(|ui| {
-            ui.set_min_width(200.0);
-            add_component_menu(ui, cx);
-        });
-    });
-}
-
 // ---------------------------------------------------------------------------------------
 // Trees
 
 const ROW: f32 = 22.0;
-
-/// A full-width tree row with an icon and a text, `indent` points in.
-#[allow(clippy::too_many_arguments)]
-fn row(
-    ui: &mut Ui,
-    indent: f32,
-    glyph: &str,
-    glyph_color: Color32,
-    text: &str,
-    selected: bool,
-    enabled: bool,
-) -> Response {
-    let p = Palette::of(ui);
-    let sense = if enabled {
-        Sense::click()
-    } else {
-        Sense::hover()
-    };
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), ROW), sense);
-    response.widget_info(|| WidgetInfo::selected(WidgetType::Button, enabled, selected, text));
-    let fill = if selected {
-        p.selected
-    } else if response.hovered() && enabled {
-        p.hover
-    } else {
-        Color32::TRANSPARENT
-    };
-    ui.painter().rect_filled(rect, 4, fill);
-    let y = rect.center().y;
-    ui.painter().text(
-        pos2(rect.left() + indent + 9.0, y),
-        Align2::CENTER_CENTER,
-        glyph,
-        FontId::proportional(15.0),
-        glyph_color,
-    );
-    ui.painter().text(
-        pos2(rect.left() + indent + 22.0, y),
-        Align2::LEFT_CENTER,
-        text,
-        FontId::proportional(13.0),
-        if enabled { p.text } else { p.weak },
-    );
-    response
-}
 
 /// Caption above a tree.
 fn caption(ui: &mut Ui, text: &str) {
@@ -434,78 +253,6 @@ fn component_header(
         }
     }
     (open, response)
-}
-
-/// The tree of design steps.
-pub(crate) fn design_tree(ui: &mut Ui, cx: &mut EditCtx<'_>) {
-    let p = Palette::of(ui);
-    let project = cx.doc.project().clone();
-    ui.add_space(6.0);
-    ui.label(bold(project_name(&project.info.name)).size(15.0));
-    ui.label(
-        RichText::new(tf("{} project", &[&tr(machine_name(project.machine()))]))
-            .size(11.5)
-            .color(p.weak),
-    );
-    caption(ui, tr("DESIGN"));
-    let setup = *cx.selection == Selection::Setup;
-    if row(ui, 0.0, icon::GEAR, p.text, tr("Global setup"), setup, true)
-        .on_hover_text(tr("Design point, fluid, inlet conditions and units"))
-        .clicked()
-    {
-        cx.open(Selection::Setup);
-    }
-
-    let mut remove = None;
-    for component in project.components() {
-        let id = component.id();
-        let kind = component.kind();
-        let all = messages::of_component(cx.derived, id);
-        let errors = all.iter().filter(|m| m.severity == Severity::Error).count();
-        let (open, header) = component_header(
-            ui,
-            Id::new(("design_open", id.0)),
-            kind,
-            &component_name(&component.name),
-            Some((errors, all.len() - errors)),
-        );
-        header.context_menu(|ui| {
-            if ui
-                .button(format!("{}  {}", icon::TRASH, tr("Remove component")))
-                .clicked()
-            {
-                remove = Some(id);
-            }
-        });
-        if !open {
-            continue;
-        }
-        for (step, status) in component.steps() {
-            let available = steps::is_available(kind, step);
-            let selected = *cx.selection == Selection::Step(id, step);
-            let (glyph, color) = status_icon(&p, status);
-            let title = step_title(step);
-            let response = row(ui, 14.0, glyph, color, &title, selected, available);
-            let response = if available {
-                response.on_hover_text(status_text(status))
-            } else {
-                response.on_hover_text(steps::planned_phase(kind, step))
-            };
-            if response.clicked() {
-                cx.open(Selection::Step(id, step));
-            }
-        }
-    }
-    if let Some(id) = remove {
-        remove_component(cx, id);
-    }
-    ui.add_space(4.0);
-    let add =
-        ui.add(egui::Button::new(format!("{}  {}", icon::PLUS, tr("Add component"))).frame(false));
-    Popup::menu(&add).show(|ui| {
-        ui.set_min_width(200.0);
-        add_component_menu(ui, cx);
-    });
 }
 
 /// Which parts the active stage has, for the model tree.

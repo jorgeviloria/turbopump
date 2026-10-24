@@ -13,6 +13,7 @@ use tp_units::DisplayUnits;
 use crate::derived::Derived;
 use crate::dialogs::{self, Choice};
 use crate::export::{self, Exports};
+use crate::flow::FlowPanel;
 use crate::i18n::{self, Language, message, project_name, tf, tr};
 use crate::messages::{self, Message};
 use crate::new_project::{NewProjectForm, Outcome};
@@ -167,6 +168,8 @@ const LANGUAGE_KEY: &str = "language";
 const THEME_KEY: &str = "theme";
 const ZOOM_KEY: &str = "zoom";
 const FOLLOW_STEP_KEY: &str = "follow_step";
+/// Key of the components pinned open in the design flow, by project file.
+const PINS_KEY: &str = "pinned_components";
 
 /// Code of a theme in the stored preferences.
 fn theme_code(theme: ThemePreference) -> &'static str {
@@ -327,6 +330,8 @@ pub struct TurbopumpApp {
     status: Option<Status>,
     dialog: Option<Dialog>,
     ribbon: Ribbon,
+    /// The design flow on the left, or its rail.
+    flow: FlowPanel,
     /// Which tree the left panel shows.
     left: LeftTab,
     /// Whether the messages panel is open.
@@ -373,6 +378,9 @@ impl TurbopumpApp {
             {
                 app.follow_step = follow;
             }
+            if let Some(pins) = storage.get_string(PINS_KEY) {
+                app.flow.load_pins(&pins);
+            }
         }
         i18n::set(app.language);
         if let Some(path) = path {
@@ -406,6 +414,7 @@ impl TurbopumpApp {
             status: None,
             dialog: None,
             ribbon: Ribbon::default(),
+            flow: FlowPanel::default(),
             left: LeftTab::Design,
             show_messages: false,
             styled: false,
@@ -569,14 +578,6 @@ impl TurbopumpApp {
                     }
                 });
         }
-        Panel::left("component_bar")
-            .exact_size(62.0)
-            .resizable(false)
-            .frame(Frame::new().fill(p.strip))
-            .show(ui, |ui| {
-                let mut cx = self.edit_ctx();
-                tree::component_bar(ui, &mut cx);
-            });
         let stage = StageParts {
             stator: self
                 .active_stator()
@@ -584,46 +585,99 @@ impl TurbopumpApp {
                 .map(|c| matches!(c.kind(), ComponentKind::Stator { vaned: true })),
             volute: self.active_volute().is_some(),
         };
-        Panel::left("project_tree")
-            .default_size(250.0)
-            .size_range(200.0..=420.0)
-            .show_collapsible(ui, &mut self.tree_open, |ui| {
-                ui.add_space(6.0);
-                ui.columns(2, |columns| {
-                    let tabs = [
-                        (
-                            LeftTab::Design,
-                            format!("{}  {}", icon::TREE_STRUCTURE, tr("Design")),
-                        ),
-                        (
-                            LeftTab::Model,
-                            format!("{}  {}", icon::CUBE, tr("3D model")),
-                        ),
-                    ];
-                    for (ui, (tab, label)) in columns.iter_mut().zip(tabs) {
-                        let button = Button::selectable(self.left == tab, label)
-                            .min_size(egui::vec2(ui.available_width(), 24.0));
-                        if ui.add(button).clicked() {
-                            self.left = tab;
+        self.flow.follow(self.selection);
+        let file = self
+            .doc
+            .path()
+            .map_or_else(String::new, |p| p.display().to_string());
+        let has_geometry = self
+            .active_impeller()
+            .is_some_and(|id| self.derived.geometry(id).is_some());
+        let has_volute = self
+            .active_volute()
+            .is_some_and(|id| self.derived.volute(id).is_some());
+        let mut flow_command = None;
+        if self.tree_open {
+            Panel::left("design_flow")
+                .default_size(270.0)
+                .size_range(220.0..=380.0)
+                .frame(
+                    Frame::new()
+                        .fill(ui.visuals().panel_fill)
+                        .inner_margin(Margin::symmetric(8, 6)),
+                )
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        let tabs = [
+                            (LeftTab::Design, icon::TREE_STRUCTURE, tr("Design")),
+                            (LeftTab::Model, icon::CUBE, tr("3D model")),
+                        ];
+                        for (tab, glyph, label) in tabs {
+                            if ui
+                                .add(Button::selectable(
+                                    self.left == tab,
+                                    format!("{glyph}  {label}"),
+                                ))
+                                .clicked()
+                            {
+                                self.left = tab;
+                            }
+                        }
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let tip = tr("Fold the design flow");
+                            let fold = ui.add(Button::new(icon::CARET_DOUBLE_LEFT).frame(false));
+                            fold.widget_info(|| {
+                                egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tip)
+                            });
+                            if fold.on_hover_text(tip).clicked() {
+                                flow_command = Some(Command::ToggleTree);
+                            }
+                        });
+                    });
+                    ui.separator();
+                    match self.left {
+                        LeftTab::Design => {
+                            let mut cx = EditCtx {
+                                doc: &mut self.doc,
+                                derived: &self.derived,
+                                selection: &mut self.selection,
+                                status: &mut self.status,
+                                exports: &mut self.exports,
+                                properties: &mut self.sidebar_open,
+                            };
+                            flow_command = flow_command.or(self.flow.show(
+                                ui,
+                                &mut cx,
+                                &file,
+                                has_geometry,
+                                has_volute,
+                            ));
+                        }
+                        LeftTab::Model => {
+                            egui::ScrollArea::vertical().show(ui, |ui| {
+                                tree::model_tree(ui, &mut self.viewer.options, stage);
+                            });
                         }
                     }
                 });
-                ui.separator();
-                egui::ScrollArea::vertical().show(ui, |ui| match self.left {
-                    LeftTab::Design => {
-                        let mut cx = EditCtx {
-                            doc: &mut self.doc,
-                            derived: &self.derived,
-                            selection: &mut self.selection,
-                            status: &mut self.status,
-                            exports: &mut self.exports,
-                            properties: &mut self.sidebar_open,
-                        };
-                        tree::design_tree(ui, &mut cx);
-                    }
-                    LeftTab::Model => tree::model_tree(ui, &mut self.viewer.options, stage),
+        } else {
+            Panel::left("design_rail")
+                .exact_size(56.0)
+                .resizable(false)
+                .frame(Frame::new().fill(p.strip))
+                .show(ui, |ui| {
+                    let mut cx = EditCtx {
+                        doc: &mut self.doc,
+                        derived: &self.derived,
+                        selection: &mut self.selection,
+                        status: &mut self.status,
+                        exports: &mut self.exports,
+                        properties: &mut self.sidebar_open,
+                    };
+                    flow_command = self.flow.rail(ui, &mut cx);
                 });
-            });
+        }
+        command = command.or(flow_command);
         let mut main_area = ui.available_rect_before_wrap();
         CentralPanel::no_frame().show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
@@ -1042,6 +1096,7 @@ impl TurbopumpApp {
         let command_shift = Modifiers::COMMAND | Modifiers::SHIFT;
         // Text fields handle their own undo while the user types in them.
         let editing = ctx.text_edit_focused();
+        let mut step = 0;
         ctx.input_mut(|i| {
             if i.consume_shortcut(&shortcut(command_shift, Key::S)) {
                 self.save_as();
@@ -1058,6 +1113,11 @@ impl TurbopumpApp {
                 self.dialog = Some(Dialog::Settings(Section::default()));
             }
             if !editing {
+                if i.consume_shortcut(&shortcut(Modifiers::ALT, Key::ArrowDown)) {
+                    step = 1;
+                } else if i.consume_shortcut(&shortcut(Modifiers::ALT, Key::ArrowUp)) {
+                    step = -1;
+                }
                 if i.consume_shortcut(&shortcut(command_shift, Key::Z))
                     || i.consume_shortcut(&shortcut(Modifiers::COMMAND, Key::Y))
                 {
@@ -1067,6 +1127,28 @@ impl TurbopumpApp {
                 }
             }
         });
+        if step != 0 {
+            self.step_by(step);
+        }
+    }
+
+    /// Opens the step `by` places after the selected one (before, if negative), across
+    /// components; the design point comes first.
+    fn step_by(&mut self, by: i32) {
+        let project = self.doc.project();
+        let mut order = vec![Selection::Setup];
+        for c in project.components() {
+            for &step in c.kind().steps() {
+                if steps::is_available(c.kind(), step) {
+                    order.push(Selection::Step(c.id(), step));
+                }
+            }
+        }
+        let Some(at) = order.iter().position(|&s| s == self.selection) else {
+            return;
+        };
+        let to = (at as i32 + by).clamp(0, order.len() as i32 - 1) as usize;
+        self.edit_ctx().open(order[to]);
     }
 
     fn handle_close_request(&mut self, ctx: &egui::Context) {
@@ -1340,6 +1422,7 @@ impl eframe::App for TurbopumpApp {
         storage.set_string(THEME_KEY, theme_code(self.theme).to_owned());
         storage.set_string(ZOOM_KEY, self.zoom.to_string());
         storage.set_string(FOLLOW_STEP_KEY, self.follow_step.to_string());
+        storage.set_string(PINS_KEY, self.flow.pins_text());
     }
 }
 

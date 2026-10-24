@@ -1265,6 +1265,7 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Redo", "Rehacer"),
     ("Setup", "Configuración"),
     ("Global setup", "Configuración global"),
+    ("Design point and fluid", "Punto de diseño y fluido"),
     (
         "Design point, fluid, inlet conditions and units",
         "Punto de diseño, fluido, condiciones de entrada y unidades",
@@ -3195,6 +3196,40 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Hub, shroud and blade edges; click a dimension to type it",
         "Cubo, carcasa y bordes del álabe; clic en una cota para escribirla",
     ),
+    ("Fold the design flow", "Plegar el flujo de diseño"),
+    ("INLET", "ENTRADA"),
+    ("OUTLET", "SALIDA"),
+    (
+        "Pinned open: click to let it fold with the others",
+        "Fijado abierto: clic para que se pliegue con los demás",
+    ),
+    (
+        "Pin open: it stays open when another component is active",
+        "Fijar abierto: sigue abierto aunque otro componente esté activo",
+    ),
+    ("Pin open", "Fijar abierto"),
+    (
+        "Go to the first outdated step",
+        "Ir al primer paso desactualizado",
+    ),
+    ("planned", "previsto"),
+    ("Show the design flow", "Mostrar el flujo de diseño"),
+    ("Insert here", "Insertar aquí"),
+    ("RESULTS", "RESULTADOS"),
+    ("Drawings and meshes", "Dibujos y mallas"),
+    ("Fold {}", "Plegar {}"),
+    ("{} project · {}/{} steps", "proyecto de {} · {}/{} pasos"),
+    (
+        "Accept the design steps first: {}",
+        "Antes hay que aceptar los pasos del diseño: {}",
+    ),
+    ("SIZING", "DIMENSIONADO"),
+    ("MERIDIAN", "MERIDIANO"),
+    ("BLADING", "ÁLABES"),
+    ("MODEL", "MODELO"),
+    ("SETUP", "CONFIGURACIÓN"),
+    ("GEOMETRY", "GEOMETRÍA"),
+    ("WALL", "PARED"),
 ];
 
 /// Messages of the design code, most specific first.
