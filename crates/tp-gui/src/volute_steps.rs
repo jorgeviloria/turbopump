@@ -138,13 +138,15 @@ fn setup(
                     VoluteKind::Double => "double",
                 })
             };
-            ComboBox::from_id_salt("volute_kind")
-                .selected_text(text(input.setup.kind))
-                .show_ui(ui, |ui| {
-                    for kind in [VoluteKind::Single, VoluteKind::Double] {
-                        ui.selectable_value(&mut input.setup.kind, kind, text(kind));
-                    }
-                });
+            crate::widgets::list(ui, |ui| {
+                ComboBox::from_id_salt("volute_kind")
+                    .selected_text(text(input.setup.kind))
+                    .show_ui(ui, |ui| {
+                        for kind in [VoluteKind::Single, VoluteKind::Double] {
+                            ui.selectable_value(&mut input.setup.kind, kind, text(kind));
+                        }
+                    })
+            });
             ui.end_row();
             if input.setup.kind == VoluteKind::Double {
                 let rib = d.and_then(|d| d.rib);
@@ -321,25 +323,27 @@ fn spiral(
                 (AreaLaw::Auto, Some(law)) => tf("automatic: {}", &[&law_name(law)]),
                 (law, _) => law_name(law).to_owned(),
             };
-            ComboBox::from_id_salt("volute_law")
-                .selected_text(selected)
-                .height(400.0)
-                .show_ui(ui, |ui| {
-                    ui.weak(tr("Velocity-based"));
-                    for law in [
-                        AreaLaw::Auto,
-                        AreaLaw::AngularMomentum,
-                        AreaLaw::ConstantVelocity,
-                        AreaLaw::Stepanoff,
-                    ] {
-                        ui.selectable_value(&mut spiral.law, law, law_name(law));
-                    }
-                    ui.separator();
-                    ui.weak(tr("Geometry-based"));
-                    for law in [AreaLaw::Height, AreaLaw::Area, AreaLaw::AreaRadius] {
-                        ui.selectable_value(&mut spiral.law, law, law_name(law));
-                    }
-                });
+            crate::widgets::list(ui, |ui| {
+                ComboBox::from_id_salt("volute_law")
+                    .selected_text(selected)
+                    .height(400.0)
+                    .show_ui(ui, |ui| {
+                        ui.weak(tr("Velocity-based"));
+                        for law in [
+                            AreaLaw::Auto,
+                            AreaLaw::AngularMomentum,
+                            AreaLaw::ConstantVelocity,
+                            AreaLaw::Stepanoff,
+                        ] {
+                            ui.selectable_value(&mut spiral.law, law, law_name(law));
+                        }
+                        ui.separator();
+                        ui.weak(tr("Geometry-based"));
+                        for law in [AreaLaw::Height, AreaLaw::Area, AreaLaw::AreaRadius] {
+                            ui.selectable_value(&mut spiral.law, law, law_name(law));
+                        }
+                    })
+            });
             ui.end_row();
             param_u32(
                 ui,
@@ -482,21 +486,24 @@ fn spiral(
                         ),
                     );
                     let bezier = matches!(spiral.progression, Progression::Bezier { .. });
-                    ComboBox::from_id_salt("volute_progression")
-                        .selected_text(if bezier {
-                            tr("Bézier curve")
-                        } else {
-                            tr("linear")
-                        })
-                        .show_ui(ui, |ui| {
-                            if ui.selectable_label(!bezier, tr("linear")).clicked() {
-                                spiral.progression = Progression::Linear;
-                            }
-                            if ui.selectable_label(bezier, tr("Bézier curve")).clicked() && !bezier
-                            {
-                                spiral.progression = Progression::bezier();
-                            }
-                        });
+                    crate::widgets::list(ui, |ui| {
+                        ComboBox::from_id_salt("volute_progression")
+                            .selected_text(if bezier {
+                                tr("Bézier curve")
+                            } else {
+                                tr("linear")
+                            })
+                            .show_ui(ui, |ui| {
+                                if ui.selectable_label(!bezier, tr("linear")).clicked() {
+                                    spiral.progression = Progression::Linear;
+                                }
+                                if ui.selectable_label(bezier, tr("Bézier curve")).clicked()
+                                    && !bezier
+                                {
+                                    spiral.progression = Progression::bezier();
+                                }
+                            })
+                    });
                     ui.end_row();
                 });
                 if let Progression::Bezier { points } = &mut spiral.progression {
@@ -873,30 +880,32 @@ fn diffuser(
                 })
             };
             let current = input.diffuser.shape;
-            ComboBox::from_id_salt("volute_discharge")
-                .selected_text(text(&current))
-                .show_ui(ui, |ui| {
-                    for option in [
-                        DischargeShape::Radial { axis_angle: 0.0 },
-                        DischargeShape::Tangential {
-                            straight_wall: StraightWall::Centered,
-                        },
-                        DischargeShape::Tangential {
-                            straight_wall: StraightWall::Inner,
-                        },
-                        DischargeShape::Tangential {
-                            straight_wall: StraightWall::Outer,
-                        },
-                    ] {
-                        let same = std::mem::discriminant(&option)
-                            == std::mem::discriminant(&current)
-                            && (matches!(option, DischargeShape::Radial { .. })
-                                || option == current);
-                        if ui.selectable_label(same, text(&option)).clicked() && !same {
-                            input.diffuser.shape = option;
+            crate::widgets::list(ui, |ui| {
+                ComboBox::from_id_salt("volute_discharge")
+                    .selected_text(text(&current))
+                    .show_ui(ui, |ui| {
+                        for option in [
+                            DischargeShape::Radial { axis_angle: 0.0 },
+                            DischargeShape::Tangential {
+                                straight_wall: StraightWall::Centered,
+                            },
+                            DischargeShape::Tangential {
+                                straight_wall: StraightWall::Inner,
+                            },
+                            DischargeShape::Tangential {
+                                straight_wall: StraightWall::Outer,
+                            },
+                        ] {
+                            let same = std::mem::discriminant(&option)
+                                == std::mem::discriminant(&current)
+                                && (matches!(option, DischargeShape::Radial { .. })
+                                    || option == current);
+                            if ui.selectable_label(same, text(&option)).clicked() && !same {
+                                input.diffuser.shape = option;
+                            }
                         }
-                    }
-                });
+                    })
+            });
             ui.end_row();
             if let DischargeShape::Radial { axis_angle } = &mut input.diffuser.shape {
                 let mut angle = Param::Manual(*axis_angle);
@@ -1059,23 +1068,25 @@ fn cutwater(
                 })
             };
             let current = input.cutwater.shape;
-            ComboBox::from_id_salt("volute_cutwater_shape")
-                .selected_text(text(&current))
-                .show_ui(ui, |ui| {
-                    for option in [
-                        CutwaterShape::Tangent,
-                        CutwaterShape::Sharp,
-                        CutwaterShape::Rounded {
-                            radius: Param::Auto,
-                        },
-                    ] {
-                        let same =
-                            std::mem::discriminant(&option) == std::mem::discriminant(&current);
-                        if ui.selectable_label(same, text(&option)).clicked() && !same {
-                            input.cutwater.shape = option;
+            crate::widgets::list(ui, |ui| {
+                ComboBox::from_id_salt("volute_cutwater_shape")
+                    .selected_text(text(&current))
+                    .show_ui(ui, |ui| {
+                        for option in [
+                            CutwaterShape::Tangent,
+                            CutwaterShape::Sharp,
+                            CutwaterShape::Rounded {
+                                radius: Param::Auto,
+                            },
+                        ] {
+                            let same =
+                                std::mem::discriminant(&option) == std::mem::discriminant(&current);
+                            if ui.selectable_label(same, text(&option)).clicked() && !same {
+                                input.cutwater.shape = option;
+                            }
                         }
-                    }
-                });
+                    })
+            });
             ui.end_row();
             if let CutwaterShape::Rounded { radius } = &mut input.cutwater.shape {
                 param_f64(

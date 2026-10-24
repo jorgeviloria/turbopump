@@ -2697,15 +2697,15 @@ pub(crate) fn inlet_tilt(
             let mut degrees = angle.to_degrees();
             ui.horizontal(|ui| {
                 ui.label(tr("from the normal to the axis"));
-                if ui
-                    .add(
+                if crate::widgets::then_unit(ui, "°", |ui| {
+                    ui.add(
                         DragValue::new(&mut degrees)
                             .speed(0.2)
                             .range(-60.0..=60.0)
-                            .max_decimals(2)
-                            .suffix("°"),
+                            .max_decimals(2),
                     )
-                    .changed()
+                })
+                .changed()
                 {
                     *angle = degrees.to_radians();
                 }
@@ -2802,12 +2802,9 @@ fn length_field(ui: &mut Ui, label: &str, value: &mut f64, units: &DisplayUnits)
     let changed = ui
         .horizontal(|ui| {
             ui.label(label);
-            ui.add(
-                DragValue::new(&mut shown)
-                    .speed(0.1)
-                    .max_decimals(4)
-                    .suffix(format!(" {}", unit.symbol)),
-            )
+            crate::widgets::then_unit(ui, unit.symbol, |ui| {
+                ui.add(DragValue::new(&mut shown).speed(0.1).max_decimals(4))
+            })
             .changed()
         })
         .inner;
@@ -2835,16 +2832,16 @@ fn angle_field(ui: &mut Ui, label: &str, value: Option<f64>, current: f64) -> Op
         let mut fixed = value.is_some();
         let mut degrees = value.unwrap_or(current).to_degrees();
         let toggled = ui.checkbox(&mut fixed, label).changed();
-        let typed = ui
-            .add_enabled(
+        let typed = crate::widgets::then_unit(ui, "°", |ui| {
+            ui.add_enabled(
                 fixed,
                 DragValue::new(&mut degrees)
                     .speed(0.2)
                     .range(-180.0..=180.0)
-                    .max_decimals(2)
-                    .suffix("°"),
+                    .max_decimals(2),
             )
-            .changed();
+        })
+        .changed();
         (toggled || typed).then(|| fixed.then(|| degrees.to_radians()))
     })
     .inner
@@ -3025,13 +3022,14 @@ fn trailing_edge_menu(
         tilt = ui
             .horizontal(|ui| {
                 ui.label("ε_s");
-                ui.add(
-                    DragValue::new(&mut degrees)
-                        .speed(0.2)
-                        .range(0.5..=80.0)
-                        .max_decimals(2)
-                        .suffix("°"),
-                )
+                crate::widgets::then_unit(ui, "°", |ui| {
+                    ui.add(
+                        DragValue::new(&mut degrees)
+                            .speed(0.2)
+                            .range(0.5..=80.0)
+                            .max_decimals(2),
+                    )
+                })
                 .changed()
             })
             .inner;
@@ -3112,13 +3110,14 @@ fn edit_menu(
                 && ui
                     .horizontal(|ui| {
                         ui.label(tr("Position along the wall"));
-                        ui.add(
-                            DragValue::new(&mut percent)
-                                .speed(0.2)
-                                .range(0.0..=90.0)
-                                .max_decimals(2)
-                                .suffix(" %"),
-                        )
+                        crate::widgets::then_unit(ui, "%", |ui| {
+                            ui.add(
+                                DragValue::new(&mut percent)
+                                    .speed(0.2)
+                                    .range(0.0..=90.0)
+                                    .max_decimals(2),
+                            )
+                        })
                         .changed()
                     })
                     .inner;

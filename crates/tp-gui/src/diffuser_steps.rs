@@ -391,16 +391,18 @@ fn profiles(
 
 fn edge_shape(ui: &mut Ui, salt: &str, shape: &mut EdgeShape) {
     let ellipse = matches!(shape, EdgeShape::Ellipse { .. });
-    ComboBox::from_id_salt(salt)
-        .selected_text(tr(if ellipse { "elliptic" } else { "blunt (cut)" }))
-        .show_ui(ui, |ui| {
-            if ui.selectable_label(ellipse, tr("elliptic")).clicked() && !ellipse {
-                *shape = EdgeShape::Ellipse { ratio: 3.0 };
-            }
-            if ui.selectable_label(!ellipse, tr("blunt (cut)")).clicked() && ellipse {
-                *shape = EdgeShape::Cut;
-            }
-        });
+    crate::widgets::list(ui, |ui| {
+        ComboBox::from_id_salt(salt)
+            .selected_text(tr(if ellipse { "elliptic" } else { "blunt (cut)" }))
+            .show_ui(ui, |ui| {
+                if ui.selectable_label(ellipse, tr("elliptic")).clicked() && !ellipse {
+                    *shape = EdgeShape::Ellipse { ratio: 3.0 };
+                }
+                if ui.selectable_label(!ellipse, tr("blunt (cut)")).clicked() && ellipse {
+                    *shape = EdgeShape::Cut;
+                }
+            })
+    });
     ui.end_row();
     if let EdgeShape::Ellipse { ratio } = shape {
         label(
@@ -408,12 +410,9 @@ fn edge_shape(ui: &mut Ui, salt: &str, shape: &mut EdgeShape) {
             tr("Nose ratio"),
             tr("Length of the nose over the half thickness (1 = round)"),
         );
-        ui.add(
-            DragValue::new(ratio)
-                .range(1.0..=8.0)
-                .speed(0.02)
-                .suffix(" : 1"),
-        );
+        crate::widgets::with_unit(ui, ": 1", |ui| {
+            ui.add(DragValue::new(ratio).range(1.0..=8.0).speed(0.02))
+        });
         ui.end_row();
     }
 }

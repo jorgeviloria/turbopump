@@ -208,25 +208,27 @@ fn kind_combo(
     let mut picked = None;
     let text = current.map_or_else(|| none.unwrap_or("").to_owned(), |k| k.label().to_owned());
     // Tall enough to list every kind without scrolling.
-    ComboBox::from_id_salt(salt)
-        .selected_text(text)
-        .height(400.0)
-        .show_ui(ui, |ui| {
-            if let Some(none) = none
-                && ui.selectable_label(current.is_none(), none).clicked()
-            {
-                picked = Some(None);
-            }
-            for &kind in kinds {
-                if ui
-                    .selectable_label(current == Some(kind), kind.label())
-                    .on_hover_text(kind.hint())
-                    .clicked()
+    crate::widgets::list(ui, |ui| {
+        ComboBox::from_id_salt(salt)
+            .selected_text(text)
+            .height(400.0)
+            .show_ui(ui, |ui| {
+                if let Some(none) = none
+                    && ui.selectable_label(current.is_none(), none).clicked()
                 {
-                    picked = Some(Some(kind));
+                    picked = Some(None);
                 }
-            }
-        });
+                for &kind in kinds {
+                    if ui
+                        .selectable_label(current == Some(kind), kind.label())
+                        .on_hover_text(kind.hint())
+                        .clicked()
+                    {
+                        picked = Some(Some(kind));
+                    }
+                }
+            })
+    });
     picked
 }
 
@@ -690,15 +692,17 @@ fn bezier_editor(ui: &mut Ui, id: &str, b: &mut BezierSide, b3: Option<f64>, uni
             ),
         );
         let before = b.position;
-        ComboBox::from_id_salt((id, "position"))
-            .selected_text(match b.position {
-                InnerPosition::Relative => tr("relative"),
-                InnerPosition::Absolute => tr("absolute"),
-            })
-            .show_ui(ui, |ui| {
-                ui.selectable_value(&mut b.position, InnerPosition::Relative, tr("relative"));
-                ui.selectable_value(&mut b.position, InnerPosition::Absolute, tr("absolute"));
-            });
+        crate::widgets::list(ui, |ui| {
+            ComboBox::from_id_salt((id, "position"))
+                .selected_text(match b.position {
+                    InnerPosition::Relative => tr("relative"),
+                    InnerPosition::Absolute => tr("absolute"),
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut b.position, InnerPosition::Relative, tr("relative"));
+                    ui.selectable_value(&mut b.position, InnerPosition::Absolute, tr("absolute"));
+                })
+        });
         ui.label("");
         ui.end_row();
         if b.position != before {
@@ -821,13 +825,15 @@ fn bend_combo(ui: &mut Ui, salt: &str, wall: &mut BendWall) {
             BendWall::Round => "quarter ellipse",
         })
     };
-    ComboBox::from_id_salt(salt)
-        .selected_text(text(*wall))
-        .show_ui(ui, |ui| {
-            for w in [BendWall::Sharp, BendWall::Straight, BendWall::Round] {
-                ui.selectable_value(wall, w, text(w));
-            }
-        });
+    crate::widgets::list(ui, |ui| {
+        ComboBox::from_id_salt(salt)
+            .selected_text(text(*wall))
+            .show_ui(ui, |ui| {
+                for w in [BendWall::Sharp, BendWall::Straight, BendWall::Round] {
+                    ui.selectable_value(wall, w, text(w));
+                }
+            })
+    });
 }
 
 fn internal_editor(

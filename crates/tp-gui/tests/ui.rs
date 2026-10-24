@@ -415,7 +415,15 @@ fn the_settings_window_changes_theme_size_and_units() {
     // The status bar opens the units page; a single unit makes the set custom.
     harness.get_by_label("SI units").click();
     harness.run();
-    harness.get_by_value("mm").click();
+    {
+        // The list of the length unit, not the units shown after the fields.
+        use egui_kittest::kittest::NodeT;
+        harness
+            .get_all_by_value("mm")
+            .find(|n| n.accesskit_node().role() == egui::accesskit::Role::ComboBox)
+            .unwrap()
+            .click();
+    }
     harness.run();
     harness.get_by_label("in").click();
     harness.run();
@@ -996,4 +1004,120 @@ fn the_views_menu_names_the_views_of_a_pump() {
             .accesskit_node()
             .is_disabled()
     );
+}
+
+/// Where every labelled widget is, by label (the first of a name).
+fn layout(h: &Harness<'_, TurbopumpApp>) -> std::collections::BTreeMap<String, egui::Rect> {
+    use egui_kittest::kittest::NodeT;
+    let mut map = std::collections::BTreeMap::new();
+    for node in h.get_all_by_label_contains("") {
+        if let Some(label) = node.accesskit_node().label()
+            && !label.is_empty()
+        {
+            map.entry(label).or_insert_with(|| node.rect());
+        }
+    }
+    map
+}
+
+/// The labelled widgets that moved between two layouts, with how far.
+fn moved(
+    before: &std::collections::BTreeMap<String, egui::Rect>,
+    after: &std::collections::BTreeMap<String, egui::Rect>,
+) -> Vec<String> {
+    before
+        .iter()
+        .filter_map(|(label, a)| {
+            let b = after.get(label)?;
+            let shift = (a.min - b.min).length().max((a.max - b.max).length());
+            (shift > 0.5).then(|| format!("{label}: {a:?} -> {b:?}"))
+        })
+        .collect()
+}
+
+#[test]
+fn nothing_moves_when_the_pointer_rests_on_the_objective() {
+    let mut harness = harness();
+    harness.run();
+    let before = layout(&harness);
+    let target = harness
+        .get_all_by_label_contains("TARGET")
+        .next()
+        .unwrap()
+        .rect()
+        .center();
+    harness.hover_at(target);
+    harness.run_steps(30);
+    let after = layout(&harness);
+    let shifted = moved(&before, &after);
+    assert!(shifted.is_empty(), "{}", shifted.join("\n"));
+}
+
+/// Hovers every labelled widget in turn: no other widget may move.
+fn nothing_moves_on_hover(harness: &mut Harness<'_, TurbopumpApp>) {
+    harness.remove_cursor();
+    harness.run();
+    let baseline = layout(harness);
+    let mut problems = Vec::new();
+    for (label, rect) in &baseline {
+        harness.hover_at(rect.center());
+        harness.run_steps(3);
+        for line in moved(&baseline, &layout(harness)) {
+            problems.push(format!("hovering {label:?}: {line}"));
+        }
+        harness.remove_cursor();
+        harness.run_steps(3);
+    }
+    problems.dedup();
+    assert!(
+        problems.is_empty(),
+        "{} shifts, first ones:\n{}",
+        problems.len(),
+        problems
+            .iter()
+            .take(12)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
+
+#[test]
+fn nothing_moves_on_hover_in_any_view() {
+    let mut harness = harness();
+    nothing_moves_on_hover(&mut harness);
+    for tab in ["3D tab", "Meridian tab", "Curves tab"] {
+        harness.get_by_label(tab).click();
+        harness.run();
+        nothing_moves_on_hover(&mut harness);
+    }
+}
+
+#[test]
+fn nothing_moves_when_a_toggle_is_selected() {
+    let mut harness = harness();
+    harness.get_by_label("3D tab").click();
+    harness.run();
+    for toggle in [
+        "Orthographic",
+        "Opacity of Casing",
+        "Opacity of Blades",
+        "Shaded",
+        "Meridional cut",
+        "Pin open",
+    ] {
+        harness.remove_cursor();
+        harness.run();
+        let before = layout(&harness);
+        harness.get_all_by_label(toggle).next().unwrap().click();
+        harness.run();
+        harness.remove_cursor();
+        harness.run();
+        let after = layout(&harness);
+        let shifted: Vec<String> = moved(&before, &after)
+            .into_iter()
+            .filter(|line| !line.starts_with(toggle))
+            .collect();
+        assert!(shifted.is_empty(), "{toggle}:\n{}", shifted.join("\n"));
+    }
 }

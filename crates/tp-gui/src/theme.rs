@@ -235,26 +235,32 @@ fn visuals(theme: Theme) -> Visuals {
     w.inactive.bg_stroke = Stroke::new(1.0, p.border);
     w.inactive.fg_stroke = Stroke::new(1.0, p.text);
     w.inactive.corner_radius = radius;
+    // egui lays a button out without its frame as padding + expansion − stroke of the
+    // state, and with its frame as the padding alone: an expansion equal to the stroke
+    // keeps buttons whose frame shows only on hover or selection from growing then, and
+    // the same expansion in every state keeps their frames from jumping.
+    w.inactive.expansion = 1.0;
 
     w.hovered.bg_fill = button_hover;
     w.hovered.weak_bg_fill = button_hover;
     w.hovered.bg_stroke = Stroke::new(1.0, p.accent.gamma_multiply(0.6));
     w.hovered.fg_stroke = Stroke::new(1.5, p.text);
     w.hovered.corner_radius = radius;
-    w.hovered.expansion = 0.0;
+    w.hovered.expansion = 1.0;
 
     w.active.bg_fill = button_active;
     w.active.weak_bg_fill = button_active;
     w.active.bg_stroke = Stroke::new(1.0, p.accent);
     w.active.fg_stroke = Stroke::new(1.5, p.text);
     w.active.corner_radius = radius;
-    w.active.expansion = 0.0;
+    w.active.expansion = 1.0;
 
     w.open.bg_fill = button_hover;
     w.open.weak_bg_fill = button_hover;
     w.open.bg_stroke = Stroke::new(1.0, p.accent.gamma_multiply(0.6));
     w.open.fg_stroke = Stroke::new(1.0, p.text);
     w.open.corner_radius = radius;
+    w.open.expansion = 1.0;
     v
 }
 

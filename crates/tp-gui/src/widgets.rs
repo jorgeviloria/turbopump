@@ -70,6 +70,7 @@ pub fn props(ui: &mut Ui, id: impl Hash + std::fmt::Debug, add: impl FnOnce(&mut
             ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
             let spacing = ui.spacing_mut();
             spacing.interact_size.x = columns.value;
+            // Lists as wide as a numeric field and its unit together.
             spacing.combo_width = columns.value;
             spacing.text_edit_width = columns.value - 2.0 * spacing.button_padding.x;
             add(ui);
@@ -254,8 +255,32 @@ pub fn halves(ui: &mut Ui) {
 /// A computed value in the value column: a flat field, so results read apart from
 /// the inputs but line up with them.
 pub fn value(ui: &mut Ui, text: impl Into<egui::WidgetText>) {
+    let text: egui::WidgetText = text.into();
+    let plain = text.text().to_owned();
+    match split_unit(&plain) {
+        Some((number, unit)) => {
+            let number = number.to_owned();
+            with_unit(ui, unit, |ui| value_box(ui, number.into()))
+        }
+        None => with_unit(ui, "", |ui| value_box(ui, text)),
+    };
+}
+
+/// A number and the unit after it ("3123 mm²" → "3123", "mm²"), so the unit can go
+/// outside the field like that of an input.
+fn split_unit(text: &str) -> Option<(&str, &str)> {
+    let (number, unit) = text.rsplit_once(' ')?;
+    let digits = number.trim_start_matches(['±', '+', ' ']);
+    (digits.parse::<f64>().is_ok()
+        && !unit.is_empty()
+        && !unit.starts_with(|c: char| c.is_ascii_digit()))
+    .then_some((number, unit))
+}
+
+/// The flat box of a computed value, as wide as an input.
+fn value_box(ui: &mut Ui, text: egui::WidgetText) -> egui::Response {
     let p = Palette::of(ui);
-    let width = Columns::of(ui).value;
+    let width = ui.spacing().interact_size.x;
     let fill = if ui.visuals().dark_mode {
         egui::Color32::from_white_alpha(9)
     } else {
@@ -272,12 +297,80 @@ pub fn value(ui: &mut Ui, text: impl Into<egui::WidgetText>) {
             ui.with_layout(Layout::top_down(Align::Center), |ui| {
                 ui.add(egui::Label::new(text).truncate());
             });
-        });
+        })
+        .response
 }
 
-/// Drag value showing `display` (already in display units) with its unit symbol.
-fn drag<'a>(display: &'a mut f64, kind: QuantityKind, units: &DisplayUnits) -> DragValue<'a> {
-    let symbol = units.get(kind).symbol;
+/// Width of the unit after a numeric field.
+const UNIT_WIDTH: f32 = 42.0;
+
+/// A numeric field and, after it and outside it, its `unit` in the weak color, as
+/// engineering programs show them. The field leaves room for a unit even when there is
+/// none, so the fields of a column line up and their units start at one edge.
+pub fn with_unit(
+    ui: &mut Ui,
+    unit: &str,
+    field: impl FnOnce(&mut Ui) -> egui::Response,
+) -> egui::Response {
+    let full = ui.spacing().interact_size.x;
+    let weak = Palette::of(ui).weak;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        ui.spacing_mut().interact_size.x = (full - UNIT_WIDTH - 4.0).max(36.0);
+        let response = field(ui);
+        ui.allocate_ui_with_layout(
+            vec2(UNIT_WIDTH, ROW_HEIGHT - 2.0),
+            Layout::left_to_right(Align::Center),
+            |ui| {
+                ui.set_min_width(UNIT_WIDTH);
+                if !unit.is_empty() {
+                    ui.add(egui::Label::new(RichText::new(unit).color(weak)).truncate());
+                }
+            },
+        );
+        response
+    })
+    .inner
+}
+
+/// A field and its `unit` right after it, in the weak color, where no column is kept
+/// (menus and editors on the drawings).
+pub fn then_unit(
+    ui: &mut Ui,
+    unit: &str,
+    field: impl FnOnce(&mut Ui) -> egui::Response,
+) -> egui::Response {
+    let response = field(ui);
+    let weak = Palette::of(ui).weak;
+    ui.label(RichText::new(unit).color(weak));
+    response
+}
+
+/// Keeps a list to the width of its column however long its text, which a combo box
+/// would otherwise stretch to the edge of the panel.
+pub fn list<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let width = ui.spacing().combo_width;
+    ui.allocate_ui_with_layout(
+        vec2(width, ROW_HEIGHT - 2.0),
+        Layout::left_to_right(Align::Center),
+        |ui| {
+            ui.set_max_width(width);
+            add(ui)
+        },
+    )
+    .inner
+}
+
+/// The unit of `kind` to show after a field: none for a plain number.
+fn unit_of(kind: QuantityKind, units: &DisplayUnits) -> &'static str {
+    match units.get(kind).symbol {
+        "-" => "",
+        symbol => symbol,
+    }
+}
+
+/// Drag value showing `display`, already in display units; its unit goes after it.
+fn drag(display: &mut f64) -> DragValue<'_> {
     let magnitude = display.abs();
     let speed = if magnitude > 1e-9 {
         magnitude * 0.003
@@ -285,16 +378,11 @@ fn drag<'a>(display: &'a mut f64, kind: QuantityKind, units: &DisplayUnits) -> D
         0.01
     };
     let decimals = decimals_for(*display);
-    let widget = DragValue::new(display)
+    DragValue::new(display)
         .speed(speed)
         .min_decimals(decimals.min(2))
         .max_decimals(decimals + 1)
-        .update_while_editing(false);
-    if symbol == "-" {
-        widget
-    } else {
-        widget.suffix(format!(" {symbol}"))
-    }
+        .update_while_editing(false)
 }
 
 /// Range in SI converted to display units.
@@ -326,7 +414,10 @@ fn quantity_response(
     range: RangeInclusive<f64>,
 ) -> egui::Response {
     let mut shown = units.to_display(kind, *si);
-    let response = ui.add(drag(&mut shown, kind, units).range(display_range(&range, kind, units)));
+    let range = display_range(&range, kind, units);
+    let response = with_unit(ui, unit_of(kind, units), |ui| {
+        ui.add(drag(&mut shown).range(range))
+    });
     if response.changed() {
         *si = units.from_display(kind, shown);
     }
@@ -443,7 +534,9 @@ pub fn param_u32(
             Some(value) => {
                 let (response, edited) = automatic(ui, |ui| {
                     let mut v = value;
-                    let r = ui.add(DragValue::new(&mut v).speed(0.05).range(range.clone()));
+                    let r = with_unit(ui, "", |ui| {
+                        ui.add(DragValue::new(&mut v).speed(0.05).range(range.clone()))
+                    });
                     (r, v)
                 });
                 if response.changed() {
@@ -454,7 +547,9 @@ pub fn param_u32(
             None => self::value(ui, "—"),
         },
         Param::Manual(value) => {
-            let response = ui.add(DragValue::new(value).speed(0.05).range(range.clone()));
+            let response = with_unit(ui, "", |ui| {
+                ui.add(DragValue::new(value).speed(0.05).range(range.clone()))
+            });
             changed |= response.changed();
             if back_to_automatic(&response) {
                 *param = Param::Auto;
@@ -472,7 +567,6 @@ fn percent(value: &mut f64) -> DragValue<'_> {
         .speed(0.05)
         .max_decimals(2)
         .prefix("± ")
-        .suffix(" %")
 }
 
 /// One grid row for a fraction shown in percent, like [`param_f64`]. `range` is in
@@ -501,7 +595,9 @@ pub fn param_percent(
             Some(value) => {
                 let (response, edited) = automatic(ui, |ui| {
                     let mut shown = value * 100.0;
-                    let r = ui.add(percent(&mut shown).range(percent_range.clone()));
+                    let r = with_unit(ui, "%", |ui| {
+                        ui.add(percent(&mut shown).range(percent_range.clone()))
+                    });
                     (r, shown / 100.0)
                 });
                 if response.changed() {
@@ -513,7 +609,9 @@ pub fn param_percent(
         },
         Param::Manual(value) => {
             let mut shown = *value * 100.0;
-            let response = ui.add(percent(&mut shown).range(percent_range));
+            let response = with_unit(ui, "%", |ui| {
+                ui.add(percent(&mut shown).range(percent_range))
+            });
             if response.changed() {
                 *value = shown / 100.0;
                 changed = true;
@@ -553,15 +651,17 @@ pub fn param_choice<T: Copy + PartialEq>(
             Some(value) => {
                 let weak = Palette::of(ui).weak;
                 let mut chosen = None;
-                egui::ComboBox::from_id_salt(("param_choice", label))
-                    .selected_text(egui::RichText::new(name(value)).color(weak))
-                    .show_ui(ui, |ui| {
-                        for &option in options {
-                            if ui.selectable_label(option == value, name(option)).clicked() {
-                                chosen = Some(option);
+                list(ui, |ui| {
+                    egui::ComboBox::from_id_salt(("param_choice", label))
+                        .selected_text(egui::RichText::new(name(value)).color(weak))
+                        .show_ui(ui, |ui| {
+                            for &option in options {
+                                if ui.selectable_label(option == value, name(option)).clicked() {
+                                    chosen = Some(option);
+                                }
                             }
-                        }
-                    });
+                        })
+                });
                 if let Some(option) = chosen {
                     *param = Param::Manual(option);
                     changed = true;
@@ -570,13 +670,15 @@ pub fn param_choice<T: Copy + PartialEq>(
             None => self::value(ui, "—"),
         },
         Param::Manual(value) => {
-            egui::ComboBox::from_id_salt(("param_choice", label))
-                .selected_text(name(*value))
-                .show_ui(ui, |ui| {
-                    for &option in options {
-                        changed |= ui.selectable_value(value, option, name(option)).changed();
-                    }
-                });
+            list(ui, |ui| {
+                egui::ComboBox::from_id_salt(("param_choice", label))
+                    .selected_text(name(*value))
+                    .show_ui(ui, |ui| {
+                        for &option in options {
+                            changed |= ui.selectable_value(value, option, name(option)).changed();
+                        }
+                    })
+            });
         }
     }
     ui.end_row();
@@ -666,6 +768,16 @@ mod tests {
         let us = DisplayUnits::us();
         let t = display_range(&(273.15..=373.15), QuantityKind::Temperature, &us);
         assert!((t.start() - 32.0).abs() < 1e-9 && (t.end() - 212.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn computed_values_give_their_unit_up() {
+        assert_eq!(split_unit("3123 mm²"), Some(("3123", "mm²")));
+        assert_eq!(split_unit("-0.5 m/s"), Some(("-0.5", "m/s")));
+        assert_eq!(split_unit("± 3.00 %"), Some(("± 3.00", "%")));
+        assert_eq!(split_unit("1.60 : 1"), None);
+        assert_eq!(split_unit("radial"), None);
+        assert_eq!(split_unit("7 3"), None);
     }
 
     #[test]

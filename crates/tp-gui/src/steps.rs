@@ -779,12 +779,14 @@ fn setup(ui: &mut Ui, cx: &mut EditCtx<'_>) {
                         };
                         changed |= widgets::quantity(ui, &mut value, kind, &units, 1e-6..=1e5);
                         let mut is_mass = mass;
-                        ComboBox::from_id_salt("flow_kind")
-                            .selected_text(tr(if mass { "mass" } else { "volume" }))
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut is_mass, false, tr("volume"));
-                                ui.selectable_value(&mut is_mass, true, tr("mass"));
-                            });
+                        widgets::list(ui, |ui| {
+                            ComboBox::from_id_salt("flow_kind")
+                                .selected_text(tr(if mass { "mass" } else { "volume" }))
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(&mut is_mass, false, tr("volume"));
+                                    ui.selectable_value(&mut is_mass, true, tr("mass"));
+                                })
+                        });
                         let density = cx
                             .derived
                             .liquid
@@ -819,12 +821,18 @@ fn setup(ui: &mut Ui, cx: &mut EditCtx<'_>) {
                         };
                         changed |= widgets::quantity(ui, &mut value, kind, &units, 1e-3..=1e9);
                         let mut is_pressure = pressure;
-                        ComboBox::from_id_salt("energy_kind")
-                            .selected_text(tr(if pressure { "pressure rise" } else { "head" }))
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut is_pressure, false, tr("head"));
-                                ui.selectable_value(&mut is_pressure, true, tr("pressure rise"));
-                            });
+                        widgets::list(ui, |ui| {
+                            ComboBox::from_id_salt("energy_kind")
+                                .selected_text(tr(if pressure { "pressure rise" } else { "head" }))
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(&mut is_pressure, false, tr("head"));
+                                    ui.selectable_value(
+                                        &mut is_pressure,
+                                        true,
+                                        tr("pressure rise"),
+                                    );
+                                })
+                        });
                         if is_pressure != pressure {
                             let rho_g = cx
                                 .derived
@@ -869,15 +877,17 @@ fn setup(ui: &mut Ui, cx: &mut EditCtx<'_>) {
                             Rotation::CounterClockwise => "counter-clockwise",
                         })
                     };
-                    ComboBox::from_id_salt("rotation")
-                        .selected_text(text(setup.rotation))
-                        .show_ui(ui, |ui| {
-                            for r in [Rotation::Clockwise, Rotation::CounterClockwise] {
-                                changed |= ui
-                                    .selectable_value(&mut setup.rotation, r, text(r))
-                                    .changed();
-                            }
-                        });
+                    widgets::list(ui, |ui| {
+                        ComboBox::from_id_salt("rotation")
+                            .selected_text(text(setup.rotation))
+                            .show_ui(ui, |ui| {
+                                for r in [Rotation::Clockwise, Rotation::CounterClockwise] {
+                                    changed |= ui
+                                        .selectable_value(&mut setup.rotation, r, text(r))
+                                        .changed();
+                                }
+                            })
+                    });
                     ui.end_row();
                 });
             }
@@ -888,16 +898,21 @@ fn setup(ui: &mut Ui, cx: &mut EditCtx<'_>) {
                     ui.horizontal(|ui| {
                         widgets::halves(ui);
                         changed |= widgets::text_field(ui, &mut setup.fluid).changed();
-                        ComboBox::from_id_salt("common_fluids")
-                            .selected_text(tr("common…"))
-                            .show_ui(ui, |ui| {
-                                for name in COMMON_FLUIDS {
-                                    if ui.selectable_label(setup.fluid == *name, *name).clicked() {
-                                        setup.fluid = (*name).to_owned();
-                                        changed = true;
+                        widgets::list(ui, |ui| {
+                            ComboBox::from_id_salt("common_fluids")
+                                .selected_text(tr("common…"))
+                                .show_ui(ui, |ui| {
+                                    for name in COMMON_FLUIDS {
+                                        if ui
+                                            .selectable_label(setup.fluid == *name, *name)
+                                            .clicked()
+                                        {
+                                            setup.fluid = (*name).to_owned();
+                                            changed = true;
+                                        }
                                     }
-                                }
-                            });
+                                })
+                        });
                     });
                     ui.end_row();
                     label(ui, tr("Inlet total pressure"), "");
@@ -1282,62 +1297,76 @@ fn main_dimensions(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Com
                 ),
             );
             let semi = d.is_some_and(|d| d.semi_axial);
-            ComboBox::from_id_salt("impeller_kind")
-                .selected_text(match input.impeller_type {
-                    ImpellerType::Auto if semi => tr("automatic: semi-axial"),
-                    ImpellerType::Auto => tr("automatic: radial"),
-                    ImpellerType::Radial => tr("radial"),
-                    ImpellerType::SemiAxial => tr("semi-axial (mixed flow)"),
-                })
-                .show_ui(ui, |ui| {
-                    for (kind, text) in [
-                        (ImpellerType::Auto, tr("automatic")),
-                        (ImpellerType::Radial, tr("radial")),
-                        (ImpellerType::SemiAxial, tr("semi-axial (mixed flow)")),
-                    ] {
-                        changed |= ui
-                            .selectable_value(&mut input.impeller_type, kind, text)
-                            .changed();
-                    }
-                });
+            widgets::list(ui, |ui| {
+                ComboBox::from_id_salt("impeller_kind")
+                    .selected_text(match input.impeller_type {
+                        ImpellerType::Auto if semi => tr("automatic: semi-axial"),
+                        ImpellerType::Auto => tr("automatic: radial"),
+                        ImpellerType::Radial => tr("radial"),
+                        ImpellerType::SemiAxial => tr("semi-axial (mixed flow)"),
+                    })
+                    .show_ui(ui, |ui| {
+                        for (kind, text) in [
+                            (ImpellerType::Auto, tr("automatic")),
+                            (ImpellerType::Radial, tr("radial")),
+                            (ImpellerType::SemiAxial, tr("semi-axial (mixed flow)")),
+                        ] {
+                            changed |= ui
+                                .selectable_value(&mut input.impeller_type, kind, text)
+                                .changed();
+                        }
+                    })
+            });
             ui.end_row();
             label(ui, tr("Suction"), "");
-            ComboBox::from_id_salt("suction")
-                .selected_text(tr(match input.suction {
-                    Suction::Single => "single entry",
-                    Suction::Double => "double entry",
-                }))
-                .show_ui(ui, |ui| {
-                    changed |= ui
-                        .selectable_value(&mut input.suction, Suction::Single, tr("single entry"))
-                        .changed();
-                    changed |= ui
-                        .selectable_value(&mut input.suction, Suction::Double, tr("double entry"))
-                        .changed();
-                });
+            widgets::list(ui, |ui| {
+                ComboBox::from_id_salt("suction")
+                    .selected_text(tr(match input.suction {
+                        Suction::Single => "single entry",
+                        Suction::Double => "double entry",
+                    }))
+                    .show_ui(ui, |ui| {
+                        changed |= ui
+                            .selectable_value(
+                                &mut input.suction,
+                                Suction::Single,
+                                tr("single entry"),
+                            )
+                            .changed();
+                        changed |= ui
+                            .selectable_value(
+                                &mut input.suction,
+                                Suction::Double,
+                                tr("double entry"),
+                            )
+                            .changed();
+                    })
+            });
             ui.end_row();
             label(ui, tr("Inlet design"), "");
-            ComboBox::from_id_salt("inlet_design")
-                .selected_text(tr(match input.inlet_design {
-                    InletDesign::Normal => "normal impeller",
-                    InletDesign::Suction => "suction impeller (low NPSH)",
-                }))
-                .show_ui(ui, |ui| {
-                    changed |= ui
-                        .selectable_value(
-                            &mut input.inlet_design,
-                            InletDesign::Normal,
-                            tr("normal impeller"),
-                        )
-                        .changed();
-                    changed |= ui
-                        .selectable_value(
-                            &mut input.inlet_design,
-                            InletDesign::Suction,
-                            tr("suction impeller (low NPSH)"),
-                        )
-                        .changed();
-                });
+            widgets::list(ui, |ui| {
+                ComboBox::from_id_salt("inlet_design")
+                    .selected_text(tr(match input.inlet_design {
+                        InletDesign::Normal => "normal impeller",
+                        InletDesign::Suction => "suction impeller (low NPSH)",
+                    }))
+                    .show_ui(ui, |ui| {
+                        changed |= ui
+                            .selectable_value(
+                                &mut input.inlet_design,
+                                InletDesign::Normal,
+                                tr("normal impeller"),
+                            )
+                            .changed();
+                        changed |= ui
+                            .selectable_value(
+                                &mut input.inlet_design,
+                                InletDesign::Suction,
+                                tr("suction impeller (low NPSH)"),
+                            )
+                            .changed();
+                    })
+            });
             ui.end_row();
         });
     }
@@ -1635,13 +1664,15 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                     DesignMode::CenterLine => "center line and area",
                 })
             };
-            ComboBox::from_id_salt("design_mode")
-                .selected_text(mode_name(mode))
-                .show_ui(ui, |ui| {
-                    for option in [DesignMode::Walls, DesignMode::CenterLine] {
-                        ui.selectable_value(&mut m.design_mode, option, mode_name(option));
-                    }
-                });
+            widgets::list(ui, |ui| {
+                ComboBox::from_id_salt("design_mode")
+                    .selected_text(mode_name(mode))
+                    .show_ui(ui, |ui| {
+                        for option in [DesignMode::Walls, DesignMode::CenterLine] {
+                            ui.selectable_value(&mut m.design_mode, option, mode_name(option));
+                        }
+                    })
+            });
             ui.end_row();
             changed |= m.design_mode != mode;
             changed |= param_f64(
@@ -1672,29 +1703,34 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                         AxialReference::Outlet => "middle of the outlet",
                     })
                 };
-                ComboBox::from_id_salt("axial_reference")
-                    .selected_text(name(m.axial_reference))
-                    .show_ui(ui, |ui| {
-                        for (reference, point) in [
-                            (
-                                AxialReference::Inlet,
-                                contour.hub.start().lerp(contour.shroud.start(), 0.5),
-                            ),
-                            (
-                                AxialReference::Outlet,
-                                contour.hub.end().lerp(contour.shroud.end(), 0.5),
-                            ),
-                        ] {
-                            // The meridian stays where it is: the position follows.
-                            if ui
-                                .selectable_label(m.axial_reference == reference, name(reference))
-                                .clicked()
-                            {
-                                m.axial_reference = reference;
-                                m.axial_position = point.x;
+                widgets::list(ui, |ui| {
+                    ComboBox::from_id_salt("axial_reference")
+                        .selected_text(name(m.axial_reference))
+                        .show_ui(ui, |ui| {
+                            for (reference, point) in [
+                                (
+                                    AxialReference::Inlet,
+                                    contour.hub.start().lerp(contour.shroud.start(), 0.5),
+                                ),
+                                (
+                                    AxialReference::Outlet,
+                                    contour.hub.end().lerp(contour.shroud.end(), 0.5),
+                                ),
+                            ] {
+                                // The meridian stays where it is: the position follows.
+                                if ui
+                                    .selectable_label(
+                                        m.axial_reference == reference,
+                                        name(reference),
+                                    )
+                                    .clicked()
+                                {
+                                    m.axial_reference = reference;
+                                    m.axial_position = point.x;
+                                }
                             }
-                        }
-                    });
+                        })
+                });
                 ui.end_row();
                 label(
                     ui,
@@ -1728,21 +1764,24 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                         InletTilt::Angle(_) => "angle",
                     })
                 };
-                ComboBox::from_id_salt("inlet_tilt")
-                    .selected_text(tilt_name(&tilt))
-                    .show_ui(ui, |ui| {
-                        for option in [
-                            InletTilt::Normal,
-                            InletTilt::Axial(offset),
-                            InletTilt::Angle((offset / height).atan()),
-                        ] {
-                            let same =
-                                std::mem::discriminant(&option) == std::mem::discriminant(&tilt);
-                            if ui.selectable_label(same, tilt_name(&option)).clicked() && !same {
-                                m.inlet_tilt = option;
+                widgets::list(ui, |ui| {
+                    ComboBox::from_id_salt("inlet_tilt")
+                        .selected_text(tilt_name(&tilt))
+                        .show_ui(ui, |ui| {
+                            for option in [
+                                InletTilt::Normal,
+                                InletTilt::Axial(offset),
+                                InletTilt::Angle((offset / height).atan()),
+                            ] {
+                                let same = std::mem::discriminant(&option)
+                                    == std::mem::discriminant(&tilt);
+                                if ui.selectable_label(same, tilt_name(&option)).clicked() && !same
+                                {
+                                    m.inlet_tilt = option;
+                                }
                             }
-                        }
-                    });
+                        })
+                });
                 ui.end_row();
                 match &mut m.inlet_tilt {
                     InletTilt::Normal => {}
@@ -1886,20 +1925,23 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                 ),
             );
             let before = std::mem::discriminant(&m.leading_edge_shape);
-            ComboBox::from_id_salt("leading_edge_shape")
-                .selected_text(name(&m.leading_edge_shape))
-                .show_ui(ui, |ui| {
-                    for shape in [LeadingEdgeShape::Channel, LeadingEdgeShape::Line] {
-                        let text = name(&shape);
-                        ui.selectable_value(&mut m.leading_edge_shape, shape, text);
-                    }
-                    let bezier = matches!(m.leading_edge_shape, LeadingEdgeShape::Bezier { .. });
-                    if ui.selectable_label(bezier, tr("Bézier")).clicked() && !bezier {
-                        m.leading_edge_shape = g.map_or(LeadingEdgeShape::Line, |g| {
-                            crate::views::meridional::bezier_along_edge(g)
-                        });
-                    }
-                });
+            widgets::list(ui, |ui| {
+                ComboBox::from_id_salt("leading_edge_shape")
+                    .selected_text(name(&m.leading_edge_shape))
+                    .show_ui(ui, |ui| {
+                        for shape in [LeadingEdgeShape::Channel, LeadingEdgeShape::Line] {
+                            let text = name(&shape);
+                            ui.selectable_value(&mut m.leading_edge_shape, shape, text);
+                        }
+                        let bezier =
+                            matches!(m.leading_edge_shape, LeadingEdgeShape::Bezier { .. });
+                        if ui.selectable_label(bezier, tr("Bézier")).clicked() && !bezier {
+                            m.leading_edge_shape = g.map_or(LeadingEdgeShape::Line, |g| {
+                                crate::views::meridional::bezier_along_edge(g)
+                            });
+                        }
+                    })
+            });
             ui.end_row();
             changed |= std::mem::discriminant(&m.leading_edge_shape) != before;
             changed |= param_f64(
@@ -1933,20 +1975,23 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                 ),
             );
             let before = m.leading_edge_extent;
-            ComboBox::from_id_salt("leading_edge_extent")
-                .selected_text(extent_name(before))
-                .show_ui(ui, |ui| {
-                    for kind in [
-                        EdgeExtent::Independent,
-                        EdgeExtent::Axial(0.0),
-                        EdgeExtent::Radial(0.0),
-                    ] {
-                        let same = std::mem::discriminant(&kind) == std::mem::discriminant(&before);
-                        if ui.selectable_label(same, extent_name(kind)).clicked() && !same {
-                            m.leading_edge_extent = g.map_or(kind, |g| extent_like(kind, g));
+            widgets::list(ui, |ui| {
+                ComboBox::from_id_salt("leading_edge_extent")
+                    .selected_text(extent_name(before))
+                    .show_ui(ui, |ui| {
+                        for kind in [
+                            EdgeExtent::Independent,
+                            EdgeExtent::Axial(0.0),
+                            EdgeExtent::Radial(0.0),
+                        ] {
+                            let same =
+                                std::mem::discriminant(&kind) == std::mem::discriminant(&before);
+                            if ui.selectable_label(same, extent_name(kind)).clicked() && !same {
+                                m.leading_edge_extent = g.map_or(kind, |g| extent_like(kind, g));
+                            }
                         }
-                    }
-                });
+                    })
+            });
             ui.end_row();
             changed |= m.leading_edge_extent != before;
             let offset = match &mut m.leading_edge_extent {
@@ -2336,21 +2381,23 @@ fn blade_properties(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Co
                     "Stream surfaces and c_m the sections are built on. The potential flow is faster on the shroud and slower at the hub in the bend, which sets the inlet angle of each section; the quasi-1D flow keeps c_m uniform across the channel",
                 ),
             );
-            ComboBox::from_id_salt("meridional_flow")
-                .selected_text(match input.properties.meridional_flow {
-                    MeridionalFlow::Potential => tr("potential (2D)"),
-                    MeridionalFlow::QuasiOneDimensional => tr("quasi-1D"),
-                })
-                .show_ui(ui, |ui| {
-                    for (flow, text) in [
-                        (MeridionalFlow::Potential, tr("potential (2D)")),
-                        (MeridionalFlow::QuasiOneDimensional, tr("quasi-1D")),
-                    ] {
-                        changed |= ui
-                            .selectable_value(&mut input.properties.meridional_flow, flow, text)
-                            .changed();
-                    }
-                });
+            widgets::list(ui, |ui| {
+                ComboBox::from_id_salt("meridional_flow")
+                    .selected_text(match input.properties.meridional_flow {
+                        MeridionalFlow::Potential => tr("potential (2D)"),
+                        MeridionalFlow::QuasiOneDimensional => tr("quasi-1D"),
+                    })
+                    .show_ui(ui, |ui| {
+                        for (flow, text) in [
+                            (MeridionalFlow::Potential, tr("potential (2D)")),
+                            (MeridionalFlow::QuasiOneDimensional, tr("quasi-1D")),
+                        ] {
+                            changed |= ui
+                                .selectable_value(&mut input.properties.meridional_flow, flow, text)
+                                .changed();
+                        }
+                    })
+            });
             ui.end_row();
             label(
                 ui,
@@ -2359,21 +2406,27 @@ fn blade_properties(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Co
                     "The c_m the leading-edge angles are designed with. Local: each section's own, from the meridional flow. Uniform: the eye value c1m = Q_La/A1 at every section, as Gülich designs the inlet angles (eq. T7.1.7)",
                 ),
             );
-            ComboBox::from_id_salt("inlet_velocity")
-                .selected_text(match input.properties.inlet_velocity {
-                    InletVelocity::Local => tr("local"),
-                    InletVelocity::Uniform => tr("uniform c1m"),
-                })
-                .show_ui(ui, |ui| {
-                    for (velocity, text) in [
-                        (InletVelocity::Local, tr("local")),
-                        (InletVelocity::Uniform, tr("uniform c1m")),
-                    ] {
-                        changed |= ui
-                            .selectable_value(&mut input.properties.inlet_velocity, velocity, text)
-                            .changed();
-                    }
-                });
+            widgets::list(ui, |ui| {
+                ComboBox::from_id_salt("inlet_velocity")
+                    .selected_text(match input.properties.inlet_velocity {
+                        InletVelocity::Local => tr("local"),
+                        InletVelocity::Uniform => tr("uniform c1m"),
+                    })
+                    .show_ui(ui, |ui| {
+                        for (velocity, text) in [
+                            (InletVelocity::Local, tr("local")),
+                            (InletVelocity::Uniform, tr("uniform c1m")),
+                        ] {
+                            changed |= ui
+                                .selectable_value(
+                                    &mut input.properties.inlet_velocity,
+                                    velocity,
+                                    text,
+                                )
+                                .changed();
+                        }
+                    })
+            });
             ui.end_row();
             label(
                 ui,
@@ -2382,24 +2435,26 @@ fn blade_properties(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Co
                     "Cylindrical (2D) blades share one plan view swept along the axis: no lean, a one-piece core, the leading edge parallel to the axis. They suit nq below about 20 (Lobanoff & Ross ch. 3; Gülich Chap. 7.3)",
                 ),
             );
-            ComboBox::from_id_salt("blade_shape")
-                .selected_text(blade_shape_name(input.properties.shape))
-                .show_ui(ui, |ui| {
-                    for shape in [
-                        BladeShape::FreeForm,
-                        BladeShape::Cylindrical,
-                        BladeShape::CircularArc,
-                        BladeShape::Straight,
-                    ] {
-                        changed |= ui
-                            .selectable_value(
-                                &mut input.properties.shape,
-                                shape,
-                                blade_shape_name(shape),
-                            )
-                            .changed();
-                    }
-                });
+            widgets::list(ui, |ui| {
+                ComboBox::from_id_salt("blade_shape")
+                    .selected_text(blade_shape_name(input.properties.shape))
+                    .show_ui(ui, |ui| {
+                        for shape in [
+                            BladeShape::FreeForm,
+                            BladeShape::Cylindrical,
+                            BladeShape::CircularArc,
+                            BladeShape::Straight,
+                        ] {
+                            changed |= ui
+                                .selectable_value(
+                                    &mut input.properties.shape,
+                                    shape,
+                                    blade_shape_name(shape),
+                                )
+                                .changed();
+                        }
+                    })
+            });
             ui.end_row();
         });
     }
@@ -2464,21 +2519,24 @@ fn mean_lines(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
             }
             label(ui, tr("Distribution"), "");
             let smooth = matches!(input.mean_lines.beta, BetaDistribution::Smooth { .. });
-            ComboBox::from_id_salt("beta_kind")
-                .selected_text(tr(if smooth { "smooth (Bézier)" } else { "linear" }))
-                .show_ui(ui, |ui| {
-                    if ui.selectable_label(!smooth, tr("linear")).clicked() && smooth {
-                        input.mean_lines.beta = BetaDistribution::Linear;
-                        changed = true;
-                    }
-                    if ui.selectable_label(smooth, tr("smooth (Bézier)")).clicked() && !smooth {
-                        input.mean_lines.beta = BetaDistribution::Smooth {
-                            inlet: 0.3,
-                            outlet: 0.3,
-                        };
-                        changed = true;
-                    }
-                });
+            widgets::list(ui, |ui| {
+                ComboBox::from_id_salt("beta_kind")
+                    .selected_text(tr(if smooth { "smooth (Bézier)" } else { "linear" }))
+                    .show_ui(ui, |ui| {
+                        if ui.selectable_label(!smooth, tr("linear")).clicked() && smooth {
+                            input.mean_lines.beta = BetaDistribution::Linear;
+                            changed = true;
+                        }
+                        if ui.selectable_label(smooth, tr("smooth (Bézier)")).clicked() && !smooth
+                        {
+                            input.mean_lines.beta = BetaDistribution::Smooth {
+                                inlet: 0.3,
+                                outlet: 0.3,
+                            };
+                            changed = true;
+                        }
+                    })
+            });
             ui.end_row();
             if let BetaDistribution::Smooth { inlet, outlet } = &mut input.mean_lines.beta {
                 label(
@@ -2510,23 +2568,25 @@ fn mean_lines(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                         "Common: every section wraps the same angle, so the leading edge has no tangential sweep; each keeps its edge angles and a bump in its β distribution takes it there. Linear: from the hub wrap to the shroud wrap with the flow fraction. Free: each wraps what its β distribution gives",
                     ),
                 );
-                ComboBox::from_id_salt("wrap_mode")
-                    .selected_text(match input.mean_lines.wrap {
-                        WrapMode::Common => tr("common wrap"),
-                        WrapMode::Linear => tr("linear hub to shroud"),
-                        WrapMode::Free => tr("each its own"),
-                    })
-                    .show_ui(ui, |ui| {
-                        for (mode, text) in [
-                            (WrapMode::Common, tr("common wrap")),
-                            (WrapMode::Linear, tr("linear hub to shroud")),
-                            (WrapMode::Free, tr("each its own")),
-                        ] {
-                            changed |= ui
-                                .selectable_value(&mut input.mean_lines.wrap, mode, text)
-                                .changed();
-                        }
-                    });
+                widgets::list(ui, |ui| {
+                    ComboBox::from_id_salt("wrap_mode")
+                        .selected_text(match input.mean_lines.wrap {
+                            WrapMode::Common => tr("common wrap"),
+                            WrapMode::Linear => tr("linear hub to shroud"),
+                            WrapMode::Free => tr("each its own"),
+                        })
+                        .show_ui(ui, |ui| {
+                            for (mode, text) in [
+                                (WrapMode::Common, tr("common wrap")),
+                                (WrapMode::Linear, tr("linear hub to shroud")),
+                                (WrapMode::Free, tr("each its own")),
+                            ] {
+                                changed |= ui
+                                    .selectable_value(&mut input.mean_lines.wrap, mode, text)
+                                    .changed();
+                            }
+                        })
+                });
                 ui.end_row();
                 if input.mean_lines.wrap == WrapMode::Common {
                     changed |= param_f64(
@@ -2661,41 +2721,43 @@ fn edge_value(
     suffix: &str,
 ) -> bool {
     label(ui, name, hint);
-    let changed = ui
-        .add(
+    let changed = widgets::with_unit(ui, suffix.trim(), |ui| {
+        ui.add(
             DragValue::new(value)
                 .range(range)
                 .speed(0.01)
-                .max_decimals(3)
-                .suffix(suffix),
+                .max_decimals(3),
         )
-        .changed();
+    })
+    .changed();
     ui.end_row();
     changed
 }
 
 fn edge_shape(ui: &mut Ui, salt: &str, shape: &mut EdgeShape) -> bool {
     let mut changed = false;
-    ComboBox::from_id_salt(salt)
-        .selected_text(edge_shape_name(shape))
-        .show_ui(ui, |ui| {
-            for option in [
-                EdgeShape::Ellipse { ratio: 4.0 },
-                EdgeShape::TAPER,
-                EdgeShape::BEZIER,
-                EdgeShape::Cut,
-            ] {
-                let selected = shape.same_kind(&option);
-                if ui
-                    .selectable_label(selected, edge_shape_name(&option))
-                    .clicked()
-                    && !selected
-                {
-                    *shape = option;
-                    changed = true;
+    widgets::list(ui, |ui| {
+        ComboBox::from_id_salt(salt)
+            .selected_text(edge_shape_name(shape))
+            .show_ui(ui, |ui| {
+                for option in [
+                    EdgeShape::Ellipse { ratio: 4.0 },
+                    EdgeShape::TAPER,
+                    EdgeShape::BEZIER,
+                    EdgeShape::Cut,
+                ] {
+                    let selected = shape.same_kind(&option);
+                    if ui
+                        .selectable_label(selected, edge_shape_name(&option))
+                        .clicked()
+                        && !selected
+                    {
+                        *shape = option;
+                        changed = true;
+                    }
                 }
-            }
-        });
+            })
+    });
     ui.end_row();
     let thick = tr(" e");
     match shape {
@@ -2844,16 +2906,18 @@ fn edge_rows(ui: &mut Ui, salt: &str, hub: &mut EdgeShape, shroud: &mut Option<E
         ),
     );
     let mut linear = shroud.is_some();
-    ComboBox::from_id_salt((salt, "mode"))
-        .selected_text(tr(if linear { "linear" } else { "uniform" }))
-        .show_ui(ui, |ui| {
-            changed |= ui
-                .selectable_value(&mut linear, false, tr("uniform"))
-                .changed();
-            changed |= ui
-                .selectable_value(&mut linear, true, tr("linear"))
-                .changed();
-        });
+    widgets::list(ui, |ui| {
+        ComboBox::from_id_salt((salt, "mode"))
+            .selected_text(tr(if linear { "linear" } else { "uniform" }))
+            .show_ui(ui, |ui| {
+                changed |= ui
+                    .selectable_value(&mut linear, false, tr("uniform"))
+                    .changed();
+                changed |= ui
+                    .selectable_value(&mut linear, true, tr("linear"))
+                    .changed();
+            })
+    });
     ui.end_row();
     if linear != shroud.is_some() {
         *shroud = linear.then_some(*hub);
