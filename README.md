@@ -79,7 +79,7 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
     potencial y las curvas de referencia), el encuadre, los imanes y los dibujos;
   - *Blade*: las páginas de gráficas y de bordes, y la exportación de puntos y malla;
   - *Front* y *Section*: sus dibujos y exportaciones, y cómo se edita una sección;
-  - *3D*: cámara, estilo (sombreado, con aristas o alambre), todos los álabes o uno, y
+  - *3D*: cámara, estilo (sombreado, con aristas o alambre), y
     sólidos CAD y mallas;
   - *Curves*: los ajustes de la predicción y el resto de resultados.
 
@@ -94,23 +94,21 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
   Gülich, tabla 15.2, y se cambia en *Design point and fluid › Acceptance* sin desactualizar
   ningún paso. Un clic en el objetivo abre el punto de diseño; en lo previsto, las
   curvas.
-- **Flujo de diseño** (izquierda), con dos pestañas:
-  - *Design*: el recorrido del diseño de arriba abajo:
-    - el punto de diseño y el fluido, con su resumen;
-    - los componentes en el orden en que los atraviesa el fluido, de la entrada a la
-      salida, unidos por una línea del color de cada uno. Cada componente muestra sus
-      pasos agrupados en fases, el estado de cada paso (pendiente, hecho o
-      desactualizado porque cambió un dato anterior), una cifra clave de los pasos
-      hechos (d₂ y b₂, L, z y β₂B, b₃, el área de la garganta o d_z), la marca del
-      siguiente paso, y en la cabecera su avance, los avisos y los pasos por revisar;
-    - los resultados: curvas, informe, sólidos CAD (con candado mientras falten
-      pasos) y dibujos y mallas.
+- **Flujo de diseño** (izquierda): el recorrido del diseño de arriba abajo:
+  - el punto de diseño y el fluido, con su resumen;
+  - los componentes en el orden en que los atraviesa el fluido, de la entrada a la
+    salida, unidos por una línea del color de cada uno. Cada componente muestra sus
+    pasos agrupados en fases, el estado de cada paso (pendiente, hecho o
+    desactualizado porque cambió un dato anterior), una cifra clave de los pasos
+    hechos (d₂ y b₂, L, z y β₂B, b₃, el área de la garganta o d_z), la marca del
+    siguiente paso, y en la cabecera su avance, los avisos y los pasos por revisar;
+  - los resultados: curvas, informe, sólidos CAD (con candado mientras falten
+    pasos) y dibujos y mallas.
 
-    Funciona como un acordeón: solo queda abierto el componente activo, salvo los que
-    se fijan con la chincheta, que se recuerdan por proyecto. Pasando el ratón entre
-    dos componentes aparece «Insertar aquí», que ofrece solo lo que admiten las reglas
-    de composición. Alt+↑ y Alt+↓ recorren los pasos de todos los componentes.
-  - *3D model*: muestra u oculta cada pieza de la vista 3D o la vuelve translúcida.
+  Funciona como un acordeón: solo queda abierto el componente activo, salvo los que
+  se fijan con la chincheta, que se recuerdan por proyecto. Pasando el ratón entre
+  dos componentes aparece «Insertar aquí», que ofrece solo lo que admiten las reglas
+  de composición. Alt+↑ y Alt+↓ recorren los pasos de todos los componentes.
 
   Plegado, el flujo deja un riel con el punto de diseño, un icono por componente con un
   anillo de avance (naranja si hay pasos por revisar) y sus pasos al pasar el ratón,
@@ -151,6 +149,13 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
 
   Al abrir un paso, la vista cambia a la que mejor lo muestra, y en *Meridian* también
   el ámbito (se puede desactivar en los ajustes, *Behavior*).
+- **Escena** (flota sobre la vista 3D): las piezas del modelo por componente, en el
+  orden del flujo. Cada pieza tiene un ojo que la muestra u oculta (Alt+clic la aísla),
+  su color, un botón de transparencia y otro que la aísla; los álabes, además, uno o
+  todos. El menú muestra u oculta todo, restablece la escena o la acopla a otra
+  esquina; también se acopla arrastrando su cabecera a la esquina más cercana, y se
+  pliega a una píldora. El modelo se centra en lo que dejan libre la Escena y el panel
+  de propiedades. La esquina y el plegado se recuerdan.
 - **Panel de propiedades** (derecha): al elegir un paso o el punto de diseño se
   abre con sus datos. Cada valor es automático (propuesto por una correlación) o
   manual. *Accept step* marca el paso como hecho y pasa al siguiente, y los errores y
