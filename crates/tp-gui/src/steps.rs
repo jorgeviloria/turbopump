@@ -185,8 +185,11 @@ pub(crate) fn heading(project: &Project, selection: Selection) -> (&'static str,
 
 /// The inputs and results of the selected step, or of the global setup.
 pub(crate) fn show(ui: &mut Ui, cx: &mut EditCtx<'_>) {
-    // Rows above the first section belong to none.
-    ui.data_mut(|d| d.remove::<egui::Id>(current_section_id()));
+    // Rows above the first section belong to none; the design point has no status.
+    ui.data_mut(|d| {
+        d.remove::<egui::Id>(current_section_id());
+        d.remove::<StepStatus>(status_id());
+    });
     match *cx.selection {
         Selection::Setup => setup(ui, cx),
         Selection::Step(id, step) => step_panel(ui, cx, id, step),
@@ -408,6 +411,32 @@ pub(crate) fn sections_folded(ctx: &egui::Context) -> bool {
         .unwrap_or(egui::Id::NULL);
     ctx.data(|d| d.get_temp::<bool>(step.with("folded")))
         .unwrap_or(false)
+}
+
+fn status_id() -> egui::Id {
+    egui::Id::new("properties_status")
+}
+
+/// Keeps what a row of the shown step showed when the step was last accepted. While
+/// the step is done, `value` is what was accepted; once outdated, returns what was
+/// accepted when the row shows something else now.
+pub(crate) fn changed_since_accepted(ui: &Ui, label: &str, value: &str) -> Option<String> {
+    let step = sections_id(ui);
+    let status = ui.data(|d| d.get_temp::<StepStatus>(status_id()))?;
+    let row = current_section(ui).unwrap_or(step).with(label);
+    ui.data_mut(|d| {
+        let accepted = d.get_temp_mut_or_default::<std::collections::HashMap<egui::Id, String>>(
+            step.with("accepted"),
+        );
+        match status {
+            StepStatus::Done => {
+                accepted.insert(row, value.to_owned());
+                None
+            }
+            StepStatus::Stale => accepted.get(&row).filter(|was| *was != value).cloned(),
+            StepStatus::Pending => None,
+        }
+    })
 }
 
 fn current_section_id() -> egui::Id {
@@ -1028,11 +1057,14 @@ fn step_panel(ui: &mut Ui, cx: &mut EditCtx<'_>, id: ComponentId, step: DesignSt
     let p = Palette::of(ui);
     let status = component.status(step);
     let (glyph, color) = status_icon(&p, status);
+    let step_id = egui::Id::new(("properties", *cx.selection));
     ui.data_mut(|d| {
-        d.insert_temp(
-            egui::Id::new("properties_step"),
-            egui::Id::new(("properties", *cx.selection)),
-        );
+        d.insert_temp(egui::Id::new("properties_step"), step_id);
+        d.insert_temp(status_id(), status);
+        // A step never accepted has nothing to compare with.
+        if status == StepStatus::Pending {
+            d.remove::<std::collections::HashMap<egui::Id, String>>(step_id.with("accepted"));
+        }
     });
     // Status, the place of the step among those of its component, and what it does.
     ui.horizontal(|ui| {

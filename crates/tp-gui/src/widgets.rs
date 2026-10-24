@@ -12,7 +12,7 @@
 use std::hash::Hash;
 use std::ops::RangeInclusive;
 
-use crate::i18n::tr;
+use crate::i18n::{tf, tr};
 use crate::theme::{Palette, icon};
 use eframe::egui::{self, Align, DragValue, Layout, RichText, Sense, Ui, vec2};
 use tp_design::Param;
@@ -100,7 +100,7 @@ pub fn info(ui: &mut Ui, text: &str) {
 /// The label cell of a property row, with an ⓘ for `hint` when there is one, and the
 /// empty "automatic" cell after it: the input or value comes next.
 pub fn label(ui: &mut Ui, text: &str, hint: &str) {
-    label_cell(ui, text, hint, None);
+    label_cell(ui, text, hint, None, None);
 }
 
 /// The automatic/manual mark of a parameter: a hollow dot while automatic, a filled
@@ -127,15 +127,18 @@ pub(crate) fn auto_dot(ui: &mut Ui, auto: &mut bool) -> egui::Response {
 }
 
 /// The label cell; with `auto`, the automatic/manual dot at its right end, just
-/// before the input. Returns the dot's response.
+/// before the input. With `shown`, what the row shows: a bar in the margin marks it
+/// when it changed since the step was accepted. Returns the dot's response.
 fn label_cell(
     ui: &mut Ui,
     text: &str,
     hint: &str,
     auto: Option<&mut bool>,
+    shown: Option<&str>,
 ) -> Option<egui::Response> {
     let width = Columns::of(ui).label;
-    ui.allocate_ui_with_layout(
+    let was = shown.and_then(|v| crate::steps::changed_since_accepted(ui, text, v));
+    let cell = ui.allocate_ui_with_layout(
         vec2(width, ROW_HEIGHT),
         Layout::left_to_right(Align::Center),
         |ui| {
@@ -156,8 +159,28 @@ fn label_cell(
                 .inner
             })
         },
-    )
-    .inner
+    );
+    if let Some(was) = was {
+        let p = Palette::of(ui);
+        let r = cell.response.rect;
+        let bar = egui::Rect::from_min_max(
+            egui::pos2(r.left() - 8.0, r.top() + 3.0),
+            egui::pos2(r.left() - 5.0, r.bottom() - 3.0),
+        );
+        ui.painter().rect_filled(bar, 1, p.stale);
+        let label = tf("{} changed since the step was accepted", &[&text]);
+        let mark = ui.interact(
+            bar.expand(3.0),
+            ui.id().with(("changed", text)),
+            Sense::hover(),
+        );
+        mark.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &label));
+        mark.on_hover_text(tf(
+            "Changed since the step was accepted, when it was {}",
+            &[&was],
+        ));
+    }
+    cell.inner
 }
 
 /// A one-line text field as wide as the value column, or as the half of it that
@@ -310,7 +333,12 @@ pub fn param_f64(
     units: &DisplayUnits,
     range: RangeInclusive<f64>,
 ) -> bool {
-    let mut changed = auto_toggle(ui, label, hint, param, || {
+    let shown = match param {
+        Param::Auto => effective,
+        Param::Manual(v) => Some(*v),
+    }
+    .map(|v| units.show(kind, v));
+    let mut changed = auto_toggle(ui, label, hint, param, shown, || {
         effective
             .unwrap_or(*range.start())
             .clamp(*range.start(), *range.end())
@@ -352,7 +380,12 @@ pub fn param_u32(
     effective: Option<u32>,
     range: RangeInclusive<u32>,
 ) -> bool {
-    let mut changed = auto_toggle(ui, label, hint, param, || {
+    let shown = match param {
+        Param::Auto => effective,
+        Param::Manual(v) => Some(*v),
+    }
+    .map(|v| v.to_string());
+    let mut changed = auto_toggle(ui, label, hint, param, shown, || {
         effective
             .unwrap_or(*range.start())
             .clamp(*range.start(), *range.end())
@@ -404,7 +437,12 @@ pub fn param_percent(
     effective: Option<f64>,
     range: RangeInclusive<f64>,
 ) -> bool {
-    let mut changed = auto_toggle(ui, label, hint, param, || {
+    let shown = match param {
+        Param::Auto => effective,
+        Param::Manual(v) => Some(*v),
+    }
+    .map(|v| format!("± {:.2} %", v * 100.0));
+    let mut changed = auto_toggle(ui, label, hint, param, shown, || {
         effective
             .unwrap_or(*range.start())
             .clamp(*range.start(), *range.end())
@@ -456,7 +494,12 @@ pub fn param_choice<T: Copy + PartialEq>(
     let Some(&first) = options.first() else {
         return false;
     };
-    let mut changed = auto_toggle(ui, label, hint, param, || effective.unwrap_or(first));
+    let shown = match param {
+        Param::Auto => effective,
+        Param::Manual(v) => Some(*v),
+    }
+    .map(&name);
+    let mut changed = auto_toggle(ui, label, hint, param, shown, || effective.unwrap_or(first));
     match param {
         Param::Auto => match effective {
             Some(value) => {
@@ -499,10 +542,19 @@ fn auto_toggle<T: Copy>(
     label: &str,
     hint: &str,
     param: &mut Param<T>,
+    shown: Option<String>,
     manual_start: impl FnOnce() -> T,
 ) -> bool {
     let mut auto = param.is_auto();
-    let Some(response) = label_cell(ui, label, hint, Some(&mut auto)) else {
+    // Automatic or by hand is part of what the row shows.
+    let shown = shown.map(|v| {
+        if auto {
+            format!("{v} ({})", tr("automatic"))
+        } else {
+            v
+        }
+    });
+    let Some(response) = label_cell(ui, label, hint, Some(&mut auto), shown.as_deref()) else {
         return false;
     };
     response.widget_info(|| {

@@ -159,6 +159,22 @@ fn complete_all() {
     save(&mut harness, "complete-all");
 }
 
+/// The main dimensions accepted, then a value set by hand: its row marked in the margin.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn changed_since_accepted() {
+    let mut harness = harness(egui::Theme::Light);
+    harness.get_by_label_contains("Accept step").click();
+    harness.run();
+    harness.key_press_modifiers(egui::Modifiers::ALT, egui::Key::ArrowUp);
+    harness.run();
+    harness.run();
+    harness.get_all_by_label("auto").nth(1).unwrap().click();
+    harness.run();
+    harness.run();
+    save(&mut harness, "changed-since-accepted");
+}
+
 /// A primary click at `pos`, with the pointer left there.
 fn click_at(harness: &mut Harness<'_, TurbopumpApp>, pos: egui::Pos2) {
     harness.hover_at(pos);

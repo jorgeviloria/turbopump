@@ -3308,6 +3308,14 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Opacity of {}", "Opacidad: {}"),
     ("Click for {}", "Con un clic: {}"),
     ("Color of {}", "Color: {}"),
+    (
+        "{} changed since the step was accepted",
+        "{} cambió desde que se aceptó el paso",
+    ),
+    (
+        "Changed since the step was accepted, when it was {}",
+        "Cambió desde que se aceptó el paso; entonces era {}",
+    ),
     ("All {} to automatic", "Los {} a automático"),
     ("{} by hand", "{} a mano"),
     (

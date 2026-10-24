@@ -938,3 +938,37 @@ fn a_section_counts_its_values_by_hand_and_makes_them_automatic() {
     harness.run();
     assert_eq!(manual(&harness), [true, true]);
 }
+
+#[test]
+fn rows_changed_since_the_step_was_accepted_are_marked() {
+    let mut harness = harness();
+    let marks = |h: &Harness<'_, TurbopumpApp>| {
+        h.query_all_by_label_contains("changed since the step was accepted")
+            .count()
+    };
+    accept(&mut harness);
+    // Back on the accepted step: nothing changed yet.
+    harness.key_press_modifiers(Modifiers::ALT, Key::ArrowUp);
+    harness.run();
+    harness.run();
+    assert_eq!(
+        status(&harness, DesignStep::MainDimensions),
+        StepStatus::Done
+    );
+    assert_eq!(marks(&harness), 0);
+    // A value set by hand outdates the step and marks its row.
+    harness.get_all_by_label("auto").next().unwrap().click();
+    harness.run();
+    harness.run();
+    assert_eq!(
+        status(&harness, DesignStep::MainDimensions),
+        StepStatus::Stale
+    );
+    assert_eq!(marks(&harness), 1);
+    // Accepted again, the mark goes.
+    accept(&mut harness);
+    harness.key_press_modifiers(Modifiers::ALT, Key::ArrowUp);
+    harness.run();
+    harness.run();
+    assert_eq!(marks(&harness), 0);
+}
