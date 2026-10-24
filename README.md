@@ -147,7 +147,8 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
     ni la escala. La pieza bajo el ratón se tiñe y dice su nombre; un clic la
     selecciona (también en la Escena) y el botón derecho la oculta, la aísla o cambia
     su opacidad. El corte meridional quita la mitad del modelo que mira a la cámara
-    (o la otra). Medir da la distancia entre dos puntos del modelo y sus partes radial
+    (o la otra); se desplaza paralelo a sí mismo con su posición, en porcentaje del
+    radio, y su plano se puede dibujar sobre el modelo. Medir da la distancia entre dos puntos del modelo y sus partes radial
     y axial, Δr y Δz; cerca de un vértice de la malla el punto se ajusta a él;
 
     ![Corte meridional y medida en la vista 3D](docs/img/medida-corte-3d.jpg)
