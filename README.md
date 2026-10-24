@@ -211,7 +211,8 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
     arriba), y su ayuda dice cuánto valían. Lo que mostraba cada fila al aceptarse se
     guarda con el proyecto: las marcas siguen ahí tras cerrar y volver a abrir, y no
     las cambian otras unidades ni otro idioma. Con el ratón sobre una fila que es una
-    cota del dibujo (L, b₂, d_n, d₁ o d₂ en el meridiano; d₂, d₁, d_n o d_z en la
+    cota del dibujo (L, b₂, d_n, d₁ o d₂ en el meridiano, y L_t y d_t de la tubería
+    de entrada; d₂, d₁, d_n o d_z en la
     vista frontal; b₃, o la altura de la garganta, en la de sección), esa cota se
     resalta en el dibujo,
     aunque las cotas estén ocultas; y con el ratón sobre el valor de una cota, su fila
@@ -292,8 +293,9 @@ mientras se edite el rodete.
   cambio en el contorno del rodete la deja por revisar. Con las cámaras laterales
   diseñadas, termina a una holgura axial Δz (la misma s_ax) de la punta del cuello: la
   fuga del anillo de cierre sale a ese hueco (la ranura junto a la boca) y vuelve a
-  ella dentro del mismo dominio. Se dibuja en el ámbito Cámaras laterales y aparece en la Escena del 3D como
-  un componente más. Un proyecto anterior que la tenía activada en el contorno del
+  ella dentro del mismo dominio. Se dibuja en el Meridiano con sus cotas L_t y d_t,
+  que se escriben encima como las del rodete, y aparece en la Escena del 3D como un
+  componente más. Un proyecto anterior que la tenía activada en el contorno del
   rodete la convierte en componente al abrirse.
 
   | Meridiano | 3D, con el corte meridional |
