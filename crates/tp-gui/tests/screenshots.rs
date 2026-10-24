@@ -205,6 +205,35 @@ fn row_and_dimension() {
     save_hovering(&mut harness, "dimension-and-row");
 }
 
+/// The same link in the front view: the row of d₂ lights its diameter, and the text of
+/// the diameter shades its row.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn front_dimensions() {
+    let mut harness = harness(egui::Theme::Light);
+    harness.state_mut().focus_view(View::FrontView);
+    harness.run();
+    let row = harness
+        .get_all_by_label("Outlet diameter d₂")
+        .next()
+        .unwrap()
+        .rect()
+        .center();
+    harness.hover_at(row);
+    harness.run_steps(4);
+    save_hovering(&mut harness, "front-row-and-dimension");
+    // The drawing comes before the properties, whose summary also names d₂.
+    let text = harness
+        .get_all_by_label_contains("d₂ ")
+        .next()
+        .unwrap()
+        .rect()
+        .center();
+    harness.hover_at(text);
+    harness.run_steps(4);
+    save_hovering(&mut harness, "front-dimension-and-row");
+}
+
 /// The Views menu of the 3D tab, a view saved from the side and brought back.
 #[test]
 #[ignore = "needs a GPU; run with --ignored"]

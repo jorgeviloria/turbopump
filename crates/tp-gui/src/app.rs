@@ -747,7 +747,7 @@ impl TurbopumpApp {
                     View::CrossSection => self.cross_section.show(ui, &mut cx, volute, cover),
                     View::Blade => self.blade.show(ui, &mut cx, id, &units, cover),
                     View::FrontView => {
-                        front::show(ui, cx.derived, id, stator, volute, &units);
+                        front::show(ui, cx.derived, id, stator, volute, &units, cover);
                     }
                     View::View3d => {
                         scene_area = Some(target);
@@ -2232,6 +2232,30 @@ mod tests {
         );
         let g = harness.state().derived.geometry(id).unwrap();
         assert!((g.basis.outlet_diameter - 0.18).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_dimensions_of_the_front_and_section_views_point_at_their_rows() {
+        let mut harness = editor();
+        for (view, symbol, row) in [
+            (View::FrontView, "d₂ ", "Outlet diameter d₂"),
+            (View::FrontView, "d_z ", "Cutwater diameter d_z"),
+            (View::CrossSection, "b₃ ", "Inlet width b₃"),
+        ] {
+            harness.state_mut().focus_view(view);
+            harness.run();
+            let at = harness.get_by_label_contains(symbol).rect().center();
+            harness.hover_at(at);
+            harness.run();
+            assert!(
+                crate::widgets::drawing_hovers(&harness.ctx, row),
+                "{view:?}: {row}"
+            );
+            harness.hover_at(egui::pos2(5.0, 5.0));
+            harness.run();
+            harness.run();
+            assert!(!crate::widgets::drawing_hovers(&harness.ctx, row));
+        }
     }
 
     /// Screen position of `p` ((z, r) in m) in the last frame of the diagram.

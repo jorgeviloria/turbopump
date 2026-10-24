@@ -34,6 +34,7 @@ pub(crate) fn show(
     stator: Option<ComponentId>,
     volute: Option<ComponentId>,
     units: &DisplayUnits,
+    cover: f32,
 ) {
     let stator = stator.and_then(|s| derived.diffuser(s));
     let volute = volute.and_then(|v| derived.volute(v));
@@ -72,7 +73,9 @@ pub(crate) fn show(
         ),
     ];
 
+    // Clear of the `cover` px the floating properties panel hides on the right.
     let response = Plot::new(("front", id.0))
+        .width((ui.available_width() - cover).max(200.0))
         .data_aspect(1.0)
         .x_axis_label(format!("x [{unit}]"))
         .y_axis_label(format!("y [{unit}]"))
@@ -246,4 +249,43 @@ pub(crate) fn show(
             }
         });
     super::settle(ui, ("front", id.0), &response.transform);
+
+    // The diameters, spread round the view so that their texts stay apart, linked to
+    // their rows in the properties: the row under the pointer stands out here, and the
+    // value under the pointer here shades its row. Angles in the plot, degrees.
+    let b = &g.basis;
+    let mut diameters = vec![
+        ("Outlet diameter d₂", "d₂", b.outlet_diameter, 125f64),
+        ("Eye diameter d₁", "d₁", b.inlet_diameter, 40.0),
+        ("Hub diameter d_n", "d_n", b.hub_diameter, -35.0),
+    ];
+    if let Some(v) = volute {
+        diameters.push((
+            "Cutwater diameter d_z",
+            "d_z",
+            v.design.cutwater_diameter,
+            160.0,
+        ));
+    }
+    let row = crate::widgets::hovered_row(ui.ctx());
+    let mut under = None;
+    for (label, symbol, diameter, degrees) in diameters {
+        let label = tr(label);
+        let text = format!("{symbol} {}", units.show(QuantityKind::Length, diameter));
+        let angle = degrees.to_radians();
+        let hot = row.as_deref() == Some(label);
+        let response = super::paint_diameter(
+            ui,
+            &response.transform,
+            [0.0, 0.0],
+            diameter / 2.0 * scale,
+            angle,
+            &text,
+            hot,
+        );
+        if response.hovered() {
+            under = Some(label.to_owned());
+        }
+    }
+    crate::widgets::set_drawing_hover(ui.ctx(), under);
 }
