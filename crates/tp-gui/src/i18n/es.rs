@@ -3309,6 +3309,39 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Click for {}", "Con un clic: {}"),
     ("Color of {}", "Color: {}"),
     (
+        "Complete every step of the component",
+        "Completar todos los pasos del componente",
+    ),
+    (
+        "Accept the {} steps left with the suggested values (⇧ {})",
+        "Acepta los {} pasos que faltan con los valores sugeridos (⇧ {})",
+    ),
+    (
+        "complete every step of {}",
+        "completar todos los pasos de {}",
+    ),
+    (
+        "{}: {} steps done with the suggested values",
+        "{}: {} pasos hechos con los valores sugeridos",
+    ),
+    (
+        "Every step of {} is done already",
+        "Todos los pasos de {} ya están hechos",
+    ),
+    (
+        "{} steps done; {} could not be done: {}",
+        "{} pasos hechos; {} no se pudo hacer: {}",
+    ),
+    ("Every step is done", "Todos los pasos están hechos"),
+    (
+        "Complete every step with the suggested values",
+        "Completar todos los pasos con los valores sugeridos",
+    ),
+    (
+        "Complete every step of {}",
+        "Completar todos los pasos de {}",
+    ),
+    (
         "Click the second point; Esc clears",
         "Clic en el segundo punto; Esc borra",
     ),

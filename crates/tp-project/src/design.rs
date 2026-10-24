@@ -14,7 +14,7 @@ use tp_units::STANDARD_GRAVITY;
 
 use crate::{
     ComponentId, ComponentKind, DesignStep, EnergyTransfer, FlowRate, MachineType, Project,
-    ProjectError, Rotation,
+    ProjectError, Rotation, StepStatus,
 };
 
 /// Design steps completed by [`Project::design_impeller_geometry`], in order.
@@ -49,6 +49,28 @@ pub const VOLUTE_STEPS: [DesignStep; 6] = [
     DesignStep::CutWater,
     DesignStep::WallThickness,
 ];
+
+/// What [`Project::design_remaining`] did.
+#[derive(Debug)]
+pub struct Designed {
+    /// The steps done, in order.
+    pub done: Vec<DesignStep>,
+    /// The step that could not be done, and why.
+    pub failed: Option<(DesignStep, ProjectError)>,
+}
+
+/// Whether the program computes step `step` of a component of `kind`; the others
+/// are planned for later phases.
+pub fn can_design(kind: ComponentKind, step: DesignStep) -> bool {
+    match kind {
+        ComponentKind::Impeller => {
+            step == DesignStep::MainDimensions || GEOMETRY_STEPS.contains(&step)
+        }
+        ComponentKind::Volute => VOLUTE_STEPS.contains(&step),
+        ComponentKind::Stator { vaned: true } => VANED_STEPS.contains(&step),
+        ComponentKind::Stator { vaned: false } => VANELESS_STEPS.contains(&step),
+    }
+}
 
 impl Project {
     /// Properties of the working fluid at the inlet total state.
@@ -313,6 +335,33 @@ impl Project {
         };
         let basis = ImpellerBasis::from_pump(&main, &main_input, sign);
         Ok(impeller::build(&basis, &self.impeller_geometry_input(id)?)?)
+    }
+
+    /// Every step of component `id` that is not done yet, computed in order with the
+    /// current inputs (automatic values where nothing was set by hand). Stops at the
+    /// first step that fails: the steps before it stay done.
+    pub fn design_remaining(&mut self, id: ComponentId) -> Result<Designed, ProjectError> {
+        let component = self
+            .component(id)
+            .ok_or(ProjectError::UnknownComponent(id))?;
+        let kind = component.kind();
+        let remaining: Vec<DesignStep> = kind
+            .steps()
+            .iter()
+            .copied()
+            .filter(|&s| can_design(kind, s) && component.status(s) != StepStatus::Done)
+            .collect();
+        let mut done = Vec::new();
+        for step in remaining {
+            if let Err(e) = self.design_step(id, step) {
+                return Ok(Designed {
+                    done,
+                    failed: Some((step, e)),
+                });
+            }
+            done.push(step);
+        }
+        Ok(Designed { done, failed: None })
     }
 
     /// Computes step `step` of component `id` with the current inputs and marks it
@@ -657,6 +706,41 @@ mod tests {
             assert_eq!(c.status(step), StepStatus::Done);
         }
         assert_eq!(c.next_step(), Some(DesignStep::CfdSetup));
+    }
+
+    #[test]
+    fn the_remaining_steps_are_designed_in_one_go() {
+        let mut p = pump();
+        let id = p.add_component(ComponentKind::Impeller, None).unwrap();
+        let volute = p.add_component(ComponentKind::Volute, None).unwrap();
+        let Designed { done, failed } = p.design_remaining(id).unwrap();
+        assert!(failed.is_none());
+        assert_eq!(done[0], DesignStep::MainDimensions);
+        assert_eq!(done[1..], GEOMETRY_STEPS);
+        // Nothing left: the planned steps are not attempted.
+        let Designed { done, failed } = p.design_remaining(id).unwrap();
+        assert!(done.is_empty() && failed.is_none());
+        let Designed { done, failed } = p.design_remaining(volute).unwrap();
+        assert!(failed.is_none());
+        assert_eq!(done, VOLUTE_STEPS);
+    }
+
+    #[test]
+    fn designing_the_remaining_steps_stops_at_the_first_failure() {
+        let mut p = pump();
+        let id = p.add_component(ComponentKind::Impeller, None).unwrap();
+        p.design_step(id, DesignStep::MainDimensions).unwrap();
+        let mut input = p.impeller_geometry_input(id).unwrap();
+        input.properties.spans = Param::Manual(1);
+        p.component_mut(id).unwrap().set_geometry(input).unwrap();
+        let Designed { done, failed } = p.design_remaining(id).unwrap();
+        assert!(done.is_empty());
+        assert_eq!(failed.unwrap().0, DesignStep::MeridionalContour);
+        assert_eq!(
+            p.component(id).unwrap().status(DesignStep::MainDimensions),
+            StepStatus::Done,
+            "what was done stays done"
+        );
     }
 
     #[test]

@@ -856,3 +856,55 @@ fn command_enter_accepts_the_step_and_goes_on() {
         Selection::Step(_, DesignStep::MeridionalContour)
     ));
 }
+
+#[test]
+fn every_step_of_a_component_completes_at_once() {
+    use tp_project::{GEOMETRY_STEPS, VOLUTE_STEPS};
+    let mut harness = harness();
+    let component = |h: &Harness<'_, TurbopumpApp>, i: usize| {
+        h.state().document().project().components()[i].clone()
+    };
+    // The button beside the pin of the impeller accepts its six steps.
+    harness
+        .get_by_label("Complete every step of Impeller 1")
+        .click();
+    harness.run();
+    let impeller = component(&harness, 0);
+    assert_eq!(
+        impeller.status(DesignStep::MainDimensions),
+        StepStatus::Done
+    );
+    for step in GEOMETRY_STEPS {
+        assert_eq!(impeller.status(step), StepStatus::Done, "{step}");
+    }
+    assert_eq!(
+        harness.state().selection(),
+        Selection::Step(impeller.id(), DesignStep::BladeEdges)
+    );
+    // One undo takes them all back.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run();
+    assert_eq!(
+        status(&harness, DesignStep::MainDimensions),
+        StepStatus::Pending
+    );
+    harness.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z);
+    harness.run();
+    // Done, the button has nothing left to do.
+    use egui_kittest::kittest::NodeT;
+    assert!(
+        harness
+            .get_by_label("Complete every step of Impeller 1")
+            .accesskit_node()
+            .is_disabled()
+    );
+    // ⌘⇧↩ completes the component of the selected step: the volute.
+    harness.get_by_label("Volute 1").click();
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::Enter);
+    harness.run();
+    let volute = component(&harness, 1);
+    for step in VOLUTE_STEPS {
+        assert_eq!(volute.status(step), StepStatus::Done, "{step}");
+    }
+}

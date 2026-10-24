@@ -857,6 +857,7 @@ impl TurbopumpApp {
                                 steps::heading(self.doc.project(), self.selection);
                             ui.label(RichText::new(crumb).size(11.5).color(p.weak));
                             let mut reset = false;
+                            let mut complete_all = false;
                             let mut fold_sections = None;
                             let resettable = match self.selection {
                                 Selection::Step(id, step) => {
@@ -908,10 +909,37 @@ impl TurbopumpApp {
                                     if ui.button(format!("{glyph}  {text}")).clicked() {
                                         fold_sections = Some(!folded);
                                     }
+                                    ui.separator();
+                                    let left = match self.selection {
+                                        Selection::Step(id, _) => {
+                                            steps::remaining(self.doc.project(), id)
+                                        }
+                                        Selection::Setup => 0,
+                                    };
+                                    if ui
+                                        .add_enabled(
+                                            left > 0,
+                                            Button::new(format!(
+                                                "{}  {}",
+                                                icon::CHECKS,
+                                                tr("Complete every step of the component")
+                                            )),
+                                        )
+                                        .on_hover_text(tf(
+                                            "Accept the {} steps left with the suggested values (⇧ {})",
+                                            &[&left, &steps::ACCEPT_SHORTCUT],
+                                        ))
+                                        .clicked()
+                                    {
+                                        complete_all = true;
+                                    }
                                 });
                             });
                             if let Some(fold) = fold_sections {
                                 steps::fold_sections(ui.ctx(), fold);
+                            }
+                            if complete_all && let Selection::Step(id, _) = self.selection {
+                                steps::complete_all(&mut self.edit_ctx(), id);
                             }
                             if reset && let Selection::Step(id, step) = self.selection {
                                 let project = self.doc.project().clone();
@@ -1166,6 +1194,7 @@ impl TurbopumpApp {
         let editing = ctx.text_edit_focused();
         let mut step = 0;
         let mut accept = false;
+        let mut complete = false;
         ctx.input_mut(|i| {
             if i.consume_shortcut(&shortcut(command_shift, Key::S)) {
                 self.save_as();
@@ -1181,7 +1210,9 @@ impl TurbopumpApp {
             if i.consume_shortcut(&shortcut(Modifiers::COMMAND, Key::Comma)) {
                 self.dialog = Some(Dialog::Settings(Section::default()));
             }
-            if i.consume_shortcut(&shortcut(Modifiers::COMMAND, Key::Enter)) {
+            if i.consume_shortcut(&shortcut(command_shift, Key::Enter)) {
+                complete = true;
+            } else if i.consume_shortcut(&shortcut(Modifiers::COMMAND, Key::Enter)) {
                 accept = true;
             }
             if !editing {
@@ -1204,6 +1235,9 @@ impl TurbopumpApp {
         }
         if accept {
             steps::accept_and_continue(&mut self.edit_ctx());
+        }
+        if complete && let Selection::Step(id, _) = self.selection {
+            steps::complete_all(&mut self.edit_ctx(), id);
         }
     }
 

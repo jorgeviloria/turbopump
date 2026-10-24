@@ -222,7 +222,35 @@ impl FlowPanel {
             WidgetInfo::selected(WidgetType::Checkbox, true, pinned, tr("Pin open"))
         });
         let pin = pin.on_hover_text(pin_tip);
-        if response.hovered() || caret.hovered() || pin.hovered() {
+        // Beside the pin: accept every step left with the suggested values.
+        let left = steps::remaining(cx.doc.project(), id);
+        let all_rect = pin_rect.translate(vec2(-22.0, 0.0));
+        let complete = ui.interact(
+            all_rect,
+            ui.id().with(("flow_complete", id.0)),
+            if left > 0 {
+                Sense::click()
+            } else {
+                Sense::hover()
+            },
+        );
+        complete.widget_info(|| {
+            WidgetInfo::labeled(
+                WidgetType::Button,
+                left > 0,
+                tf("Complete every step of {}", &[&name]),
+            )
+        });
+        let complete = complete.on_hover_text(if left > 0 {
+            tf(
+                "Accept the {} steps left with the suggested values (⇧ {})",
+                &[&left, &crate::steps::ACCEPT_SHORTCUT],
+            )
+        } else {
+            tr("Every step is done").to_owned()
+        });
+        let hovered = response.hovered() || caret.hovered() || pin.hovered() || complete.hovered();
+        if hovered {
             ui.painter().rect_filled(rect, 4, p.hover);
         }
         let painter = ui.painter();
@@ -244,9 +272,18 @@ impl FlowPanel {
             kind,
             color,
         );
-        // Right to left: pin, progress, counters.
-        let mut x = pin_rect.left();
-        if pinned || response.hovered() || pin.hovered() || caret.hovered() {
+        // Right to left: pin, complete all, progress, counters.
+        let mut x = all_rect.left();
+        if hovered && left > 0 {
+            painter.text(
+                all_rect.center(),
+                Align2::CENTER_CENTER,
+                icon::CHECKS,
+                FontId::proportional(13.0),
+                if complete.hovered() { p.accent } else { p.weak },
+            );
+        }
+        if pinned || hovered {
             painter.text(
                 pin_rect.center(),
                 Align2::CENTER_CENTER,
@@ -305,6 +342,8 @@ impl FlowPanel {
             }
         } else if pin.clicked() {
             self.toggle_pin(file, id);
+        } else if complete.clicked() {
+            steps::complete_all(cx, id);
         } else if response.clicked()
             && let Some(step) = component.next_step().or(kind.steps().first().copied())
         {
@@ -315,7 +354,21 @@ impl FlowPanel {
             .find(|(_, s)| *s == StepStatus::Stale)
             .map(|(step, _)| step);
         let mut remove = false;
+        let mut complete_all = false;
         response.context_menu(|ui| {
+            if ui
+                .add_enabled(
+                    left > 0,
+                    egui::Button::new(format!(
+                        "{}  {}",
+                        icon::CHECKS,
+                        tr("Complete every step with the suggested values")
+                    )),
+                )
+                .clicked()
+            {
+                complete_all = true;
+            }
             if let Some(step) = first_stale
                 && ui
                     .button(format!(
@@ -417,6 +470,8 @@ impl FlowPanel {
         );
         if remove {
             remove_component(cx, id);
+        } else if complete_all {
+            steps::complete_all(cx, id);
         }
     }
 

@@ -153,14 +153,7 @@ fn intro(kind: ComponentKind, step: DesignStep) -> Option<&'static str> {
 
 /// Steps that can be accepted (marked done) from the editor.
 fn can_accept(kind: ComponentKind, step: DesignStep) -> bool {
-    match kind {
-        ComponentKind::Impeller => {
-            step == DesignStep::MainDimensions || tp_project::GEOMETRY_STEPS.contains(&step)
-        }
-        ComponentKind::Volute => VOLUTE_STEPS.contains(&step),
-        ComponentKind::Stator { vaned: true } => VANED_STEPS.contains(&step),
-        ComponentKind::Stator { vaned: false } => VANELESS_STEPS.contains(&step),
-    }
+    tp_project::can_design(kind, step)
 }
 
 /// Title of the dialog for `selection`: icon, component and step.
@@ -218,6 +211,14 @@ pub(crate) fn step_from(project: &Project, selection: Selection, by: i32) -> Opt
     let at = order.iter().position(|&s| s == selection)? as i32 + by;
     usize::try_from(at).ok().and_then(|i| order.get(i).copied())
 }
+
+/// The shortcut that accepts the step and goes on; with Shift, it completes every step
+/// of the component.
+pub(crate) const ACCEPT_SHORTCUT: &str = if cfg!(target_os = "macos") {
+    "⌘↩"
+} else {
+    "Ctrl+Enter"
+};
 
 /// What the main button under the step does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -297,11 +298,7 @@ pub(crate) fn footer(ui: &mut Ui, cx: &mut EditCtx<'_>) {
     let back = step_from(&project, *cx.selection, -1);
     let next = step_from(&project, *cx.selection, 1);
     let primary = primary(cx);
-    let shortcut = if cfg!(target_os = "macos") {
-        "⌘↩"
-    } else {
-        "Ctrl+Enter"
-    };
+    let shortcut = ACCEPT_SHORTCUT;
     ui.horizontal(|ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let (text, enabled, tip) = match primary {
@@ -540,6 +537,60 @@ pub(crate) fn neighbours(
         index.checked_sub(1).map(|i| steps[i]),
         steps.get(index + 1).copied(),
     )
+}
+
+/// How many steps of component `id` are left to accept.
+pub(crate) fn remaining(project: &Project, id: ComponentId) -> usize {
+    project.component(id).map_or(0, |c| {
+        c.kind()
+            .steps()
+            .iter()
+            .filter(|&&s| can_accept(c.kind(), s) && c.status(s) != StepStatus::Done)
+            .count()
+    })
+}
+
+/// Accepts every step of component `id` not done yet with the values in use, the
+/// suggested ones where nothing was set by hand, as one edit that undoes at once.
+/// Opens the last step done, or the one that could not be done.
+pub(crate) fn complete_all(cx: &mut EditCtx<'_>, id: ComponentId) {
+    cx.doc.end_gesture();
+    let Some(name) = cx
+        .doc
+        .project()
+        .component(id)
+        .map(|c| component_name(&c.name))
+    else {
+        return;
+    };
+    let label = tf("complete every step of {}", &[&name]);
+    match cx.doc.edit(&label, |p| p.design_remaining(id)) {
+        Ok(tp_project::Designed { done, failed: None }) => match done.last() {
+            Some(&last) => {
+                *cx.selection = Selection::Step(id, last);
+                cx.info(tf(
+                    "{}: {} steps done with the suggested values",
+                    &[&name, &done.len()],
+                ));
+            }
+            None => cx.info(tf("Every step of {} is done already", &[&name])),
+        },
+        Ok(tp_project::Designed {
+            done,
+            failed: Some((step, e)),
+        }) => {
+            *cx.selection = Selection::Step(id, step);
+            cx.error(tf(
+                "{} steps done; {} could not be done: {}",
+                &[
+                    &done.len(),
+                    &step_title(step),
+                    &crate::i18n::message(&e.to_string()),
+                ],
+            ));
+        }
+        Err(e) => cx.error(e.to_string()),
+    }
 }
 
 /// Marks `step` as done and moves on to the next step.

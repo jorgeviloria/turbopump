@@ -142,6 +142,23 @@ fn scene_colors_and_picture() {
     println!("wrote {}", path.display());
 }
 
+/// The button that completes every step, shown on the impeller's header, and the
+/// impeller completed with it.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn complete_all() {
+    let mut harness = harness(egui::Theme::Light);
+    let button = harness
+        .get_by_label("Complete every step of Impeller 1")
+        .rect()
+        .center();
+    harness.hover_at(button);
+    harness.run_steps(40);
+    save_hovering(&mut harness, "complete-all-hover");
+    click_at(&mut harness, button);
+    save(&mut harness, "complete-all");
+}
+
 /// A primary click at `pos`, with the pointer left there.
 fn click_at(harness: &mut Harness<'_, TurbopumpApp>, pos: egui::Pos2) {
     harness.hover_at(pos);
