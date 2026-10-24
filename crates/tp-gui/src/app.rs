@@ -16,6 +16,7 @@ use crate::export::{self, Exports};
 use crate::i18n::{self, Language, message, project_name, tf, tr};
 use crate::messages::{self, Message};
 use crate::new_project::{NewProjectForm, Outcome};
+use crate::objective;
 use crate::ribbon::{Command, Ribbon, RibbonCx};
 use crate::settings::{self, Section, SettingsCx};
 use crate::steps::AcceptState;
@@ -493,6 +494,31 @@ impl TurbopumpApp {
                 };
                 command = self.ribbon.show(ui, &mut cx);
             });
+        let mut objective = None;
+        Panel::top("objective")
+            .frame(
+                Frame::new()
+                    .fill(ui.visuals().panel_fill)
+                    .inner_margin(Margin::symmetric(8, 2)),
+            )
+            .show(ui, |ui| {
+                let units = self.doc.project().display_units.clone();
+                objective = objective::show(
+                    ui,
+                    self.doc.project(),
+                    &self.derived,
+                    self.active_impeller(),
+                    &units,
+                );
+            });
+        match objective {
+            Some(objective::Action::Setup) => self.edit_ctx().open(Selection::Setup),
+            Some(objective::Action::Curves) => self.view = View::Performance,
+            Some(objective::Action::Step(id, step)) => {
+                self.edit_ctx().open(Selection::Step(id, step));
+            }
+            None => {}
+        }
         Panel::bottom("status_bar")
             .frame(
                 Frame::new()
@@ -1262,18 +1288,6 @@ impl TurbopumpApp {
                 {
                     self.dialog = Some(Dialog::Settings(Section::Units));
                 }
-                ui.separator();
-                let source = match &self.derived.liquid {
-                    Some(Ok(l)) => match l.source {
-                        tp_fluids::PropertySource::CoolProp => tr("fluid properties: CoolProp"),
-                        tp_fluids::PropertySource::BuiltinWater => {
-                            tr("fluid properties: built-in water model")
-                        }
-                    },
-                    Some(Err(_)) => tr("fluid properties: unavailable"),
-                    None => "",
-                };
-                ui.label(RichText::new(source).color(p.weak));
                 if self.exports.cad_running() {
                     ui.separator();
                     ui.spinner();

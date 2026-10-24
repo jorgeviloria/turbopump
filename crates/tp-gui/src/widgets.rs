@@ -296,6 +296,92 @@ pub fn param_u32(
     changed
 }
 
+/// A drag value for a ± percentage.
+fn percent(value: &mut f64) -> DragValue<'_> {
+    DragValue::new(value)
+        .speed(0.05)
+        .max_decimals(2)
+        .prefix("± ")
+        .suffix(" %")
+}
+
+/// One grid row for a fraction shown in percent, like [`param_f64`]. `range` is in
+/// fractions.
+pub fn param_percent(
+    ui: &mut Ui,
+    label: &str,
+    hint: &str,
+    param: &mut Param<f64>,
+    effective: Option<f64>,
+    range: RangeInclusive<f64>,
+) -> bool {
+    let mut changed = auto_toggle(ui, label, hint, param, || {
+        effective
+            .unwrap_or(*range.start())
+            .clamp(*range.start(), *range.end())
+    });
+    match param {
+        Param::Auto => match effective {
+            Some(value) => {
+                let mut shown = value * 100.0;
+                ui.add_enabled(false, percent(&mut shown));
+            }
+            None => self::value(ui, "—"),
+        },
+        Param::Manual(value) => {
+            let mut shown = *value * 100.0;
+            let response =
+                ui.add(percent(&mut shown).range(range.start() * 100.0..=range.end() * 100.0));
+            if response.changed() {
+                *value = shown / 100.0;
+                changed = true;
+            }
+        }
+    }
+    ui.end_row();
+    changed
+}
+
+/// One grid row for a parameter chosen from `options`, like [`param_f64`]; `name`
+/// writes an option.
+pub fn param_choice<T: Copy + PartialEq>(
+    ui: &mut Ui,
+    label: &str,
+    hint: &str,
+    param: &mut Param<T>,
+    effective: Option<T>,
+    options: &[T],
+    name: impl Fn(T) -> String,
+) -> bool {
+    let Some(&first) = options.first() else {
+        return false;
+    };
+    let mut changed = auto_toggle(ui, label, hint, param, || effective.unwrap_or(first));
+    match param {
+        Param::Auto => match effective {
+            Some(value) => {
+                ui.add_enabled_ui(false, |ui| {
+                    egui::ComboBox::from_id_salt(("param_choice", label))
+                        .selected_text(name(value))
+                        .show_ui(ui, |_| {});
+                });
+            }
+            None => self::value(ui, "—"),
+        },
+        Param::Manual(value) => {
+            egui::ComboBox::from_id_salt(("param_choice", label))
+                .selected_text(name(*value))
+                .show_ui(ui, |ui| {
+                    for &option in options {
+                        changed |= ui.selectable_value(value, option, name(option)).changed();
+                    }
+                });
+        }
+    }
+    ui.end_row();
+    changed
+}
+
 /// The label cell of a parameter, with its "automatic" check box. Returns whether
 /// the parameter changed.
 fn auto_toggle<T: Copy>(

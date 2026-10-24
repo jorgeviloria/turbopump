@@ -1,7 +1,7 @@
 //! Graphical editor of Turbopump.
 //!
 //! The editor walks the user through the design steps of each component: a toolbar on
-//! top, the components and the project tree on the left, the inputs of the selected
+//! top with the objective strip under it, the components and the project tree on the left, the inputs of the selected
 //! step on the right, and dockable views (meridional contour, blade plots, front view,
 //! 3D view and report) in the middle.
 //! Every edit goes through [`tp_project::Document`], so it can be undone, and every
@@ -16,6 +16,7 @@ mod i18n;
 mod icons;
 mod messages;
 mod new_project;
+mod objective;
 mod ribbon;
 mod section_editor;
 mod settings;

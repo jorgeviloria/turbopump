@@ -26,6 +26,7 @@ use crate::messages::{self, Severity};
 use crate::theme::{Palette, bold, icon};
 use crate::tree::{status_icon, status_text, step_title};
 use crate::widgets::{self, label, param_f64, param_u32, props, value_info, value_row};
+use tp_design::acceptance::{ClassCriteria, QualityClass};
 
 /// Steps the editor can work on today.
 pub(crate) fn is_available(kind: ComponentKind, step: DesignStep) -> bool {
@@ -192,7 +193,7 @@ pub(crate) fn footer(ui: &mut Ui, cx: &mut EditCtx<'_>) {
     let Selection::Step(id, step) = *cx.selection else {
         ui.label(
             RichText::new(tr(
-                "Shared by every component. Changing it makes every step outdated.",
+                "Shared by every component. Changing the design point or the fluid makes every step outdated; the acceptance does not.",
             ))
             .color(p.weak),
         );
@@ -620,7 +621,90 @@ fn setup(ui: &mut Ui, cx: &mut EditCtx<'_>) {
                 }
                 None => {}
             }
+
+            acceptance(ui, cx, &project);
         });
+}
+
+/// How the objective strip judges the predicted head. Not a design input, so it is
+/// edited apart from the global setup and makes no step stale.
+fn acceptance(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project) {
+    let units = cx.units();
+    section_info(
+        ui,
+        tr("Acceptance"),
+        tr(
+            "How the objective strip judges the predicted head against the design point. It is not a design input: changing it leaves every step as it is.",
+        ),
+    );
+    let criteria = project
+        .components()
+        .iter()
+        .find(|c| c.kind() == ComponentKind::Impeller)
+        .and_then(|c| cx.derived.impeller(c.id()))
+        .and_then(|r| {
+            let main = r.main.as_ref().ok()?;
+            Some(ClassCriteria::of(main, r.performance.as_ref().ok()))
+        });
+    let mut input = project.acceptance;
+    let resolved = input.resolve(criteria.as_ref());
+    let mut changed = false;
+    props(ui, "acceptance", |ui| {
+        changed |= widgets::param_choice(
+            ui,
+            tr("Quality class"),
+            tr(
+                "Gülich, Centrifugal Pumps, Table 15.2, after ISO 9906. Automatic: the most stringent of the outlet and inlet tip speeds, the head per stage at the best efficiency point and the power decides.",
+            ),
+            &mut input.class,
+            resolved.map(|a| a.class),
+            &QualityClass::ALL,
+            |c| c.name().to_owned(),
+        );
+        changed |= widgets::param_percent(
+            ui,
+            tr("Head tolerance t_H"),
+            tr(
+                "G1 ±3 %, G2 ±5 %, G3 ±7 %. ISO 9906 sets them for acceptance tests, a measured pump against its guarantee; the objective strip uses them by analogy for the predicted head.",
+            ),
+            &mut input.head_tolerance,
+            resolved.map(|a| a.head_tolerance),
+            0.001..=0.5,
+        );
+        if let Some(c) = criteria {
+            let [u2, u1, head, power] = c.classes().map(QualityClass::name);
+            let hint = tf(
+                "u₂ {} ({}), u₁ {} ({}), head per stage {} ({}), power {} ({}). Table 15.2: u₂ above 90 m/s G1, 40 to 90 G2; u₁ above 50 m/s G1, 15 to 50 G2; head above 400 m G1, 80 to 400 G2; power above 3000 kW G1, 300 to 3000 G2.",
+                &[
+                    &units.show(QuantityKind::Velocity, c.outlet_tip_speed),
+                    &u2,
+                    &units.show(QuantityKind::Velocity, c.inlet_tip_speed),
+                    &u1,
+                    &units.show(QuantityKind::Head, c.head_per_stage),
+                    &head,
+                    &units.show(QuantityKind::Power, c.power),
+                    &power,
+                ],
+            );
+            value_info(
+                ui,
+                tr("Criteria"),
+                &hint,
+                format!(
+                    "u₂ {} · H {} → {}",
+                    units.show(QuantityKind::Velocity, c.outlet_tip_speed),
+                    units.show(QuantityKind::Head, c.head_per_stage),
+                    c.class().name()
+                ),
+            );
+        }
+    });
+    if changed {
+        cx.edit("edit acceptance", |p| {
+            p.acceptance = input;
+            Ok(())
+        });
+    }
 }
 
 // ---------------------------------------------------------------------------------------

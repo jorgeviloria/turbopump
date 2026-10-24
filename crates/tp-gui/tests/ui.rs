@@ -558,3 +558,46 @@ fn the_new_project_assistant_builds_the_chosen_components() {
         ]
     );
 }
+
+#[test]
+fn the_objective_strip_shows_the_target_and_the_prediction() {
+    let mut harness = harness();
+    harness.get_by_label_contains("TARGET");
+    harness.get_by_label_contains("PREDICTED · IMPELLER 1");
+    // The default pump is predicted within the head tolerance of its class (G3).
+    let head = format!("% {}", egui_phosphor::regular::CHECK_CIRCLE);
+    harness.get_by_label_contains(&head).click();
+    harness.run();
+    assert_eq!(harness.state().view(), View::Performance);
+}
+
+#[test]
+fn a_tight_head_tolerance_flags_the_prediction() {
+    let mut project = tp_gui::default_project();
+    project.acceptance.head_tolerance = tp_design::Param::Manual(0.001);
+    let mut harness = Harness::builder()
+        .with_size([1440.0, 900.0])
+        .build_eframe(move |_| TurbopumpApp::with_document(tp_project::Document::new(project)));
+    harness.run();
+    harness.get_by_label_contains(&format!("% {}", egui_phosphor::regular::WARNING));
+}
+
+#[test]
+fn the_acceptance_settings_leave_the_steps_as_they_are() {
+    let mut harness = harness();
+    accept(&mut harness);
+    harness.get_by_label_contains("TARGET").click();
+    harness.run();
+    assert_eq!(harness.state().selection(), Selection::Setup);
+    // The quality class is the first automatic parameter of the page.
+    harness.get_all_by_label("auto").next().unwrap().click();
+    harness.run();
+    assert_eq!(
+        harness.state().document().project().acceptance.class,
+        tp_design::Param::Manual(tp_design::acceptance::QualityClass::G3)
+    );
+    assert_eq!(
+        status(&harness, DesignStep::MainDimensions),
+        StepStatus::Done
+    );
+}

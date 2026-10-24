@@ -1365,8 +1365,8 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "El acabado del modelo llega en la fase 9.",
     ),
     (
-        "Shared by every component. Changing it makes every step outdated.",
-        "Común a todos los componentes. Cambiarla deja desactualizados todos los pasos.",
+        "Shared by every component. Changing the design point or the fluid makes every step outdated; the acceptance does not.",
+        "Común a todos los componentes. Cambiar el punto de diseño o el fluido deja desactualizados todos los pasos; la aceptación, no.",
     ),
     ("Next", "Siguiente"),
     ("Back", "Atrás"),
@@ -3038,6 +3038,79 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Trailing edge at the shroud",
         "Borde de salida en la carcasa",
     ),
+    (
+        "The design point, the fluid and the inlet conditions: click to edit them",
+        "El punto de diseño, el fluido y las condiciones de entrada: clic para editarlos",
+    ),
+    ("TARGET", "OBJETIVO"),
+    (
+        "Add an impeller to see the prediction.",
+        "Añade un rodete para ver lo previsto.",
+    ),
+    ("PREDICTED · {}", "PREVISTO · {}"),
+    ("PER STAGE", "POR ETAPA"),
+    (
+        "One-dimensional model of the performance prediction: main dimensions and collector. Editing the mean lines or the profiles does not change it, and it is not a CFD result.",
+        "Modelo unidimensional de la predicción de prestaciones: dimensiones principales y colector. Editar las líneas medias o los perfiles no lo cambia, y no es un resultado de CFD.",
+    ),
+    ("no prediction", "sin predicción"),
+    (
+        "Predicted head at the design flow.",
+        "Altura prevista en el caudal de diseño.",
+    ),
+    (
+        "Predicted head at the design flow, {}, against the target {}: {} %. Tolerance ±{} % of class {} (Gülich Table 15.2, after ISO 9906), used here by analogy with an acceptance test. Change it under Design point › Acceptance.",
+        "Altura prevista en el caudal de diseño, {}, frente a la objetivo {}: {} %. Tolerancia ±{} % de la clase {} (Gülich, tabla 15.2, según ISO 9906), usada aquí por analogía con un ensayo de recepción. Se cambia en Punto de diseño › Aceptación.",
+    ),
+    ("stat.", "est."),
+    (
+        "Efficiency predicted from the losses at the design flow: {} %. The statistics of the main dimensions expect {} ± {} %.",
+        "Rendimiento previsto por las pérdidas en el caudal de diseño: {} %. La estadística de las dimensiones principales espera {} ± {} %.",
+    ),
+    (
+        "Shaft power at the design flow",
+        "Potencia en el eje en el caudal de diseño",
+    ),
+    (
+        "The NPSH₃ at the design flow is below the NPSH available of the inlet conditions.",
+        "El NPSH₃ en el caudal de diseño queda por debajo del NPSH disponible de las condiciones de entrada.",
+    ),
+    (
+        "The NPSH₃ at the design flow reaches the NPSH available of the inlet conditions: the pump cavitates.",
+        "El NPSH₃ en el caudal de diseño alcanza el NPSH disponible de las condiciones de entrada: la bomba cavita.",
+    ),
+    ("best at", "óptimo a"),
+    (
+        "Flow of the best efficiency over the design flow",
+        "Caudal del mejor rendimiento sobre el caudal de diseño",
+    ),
+    ("1 step to review", "1 paso sin revisar"),
+    ("{} steps to review", "{} pasos sin revisar"),
+    (
+        "An earlier change left these steps outdated: click to open the first",
+        "Un cambio anterior dejó estos pasos desactualizados: clic para abrir el primero",
+    ),
+    ("Acceptance", "Aceptación"),
+    (
+        "How the objective strip judges the predicted head against the design point. It is not a design input: changing it leaves every step as it is.",
+        "Cómo juzga la franja de objetivo la altura prevista frente al punto de diseño. No es una entrada del diseño: cambiarla deja todos los pasos como están.",
+    ),
+    ("Quality class", "Clase de calidad"),
+    (
+        "Gülich, Centrifugal Pumps, Table 15.2, after ISO 9906. Automatic: the most stringent of the outlet and inlet tip speeds, the head per stage at the best efficiency point and the power decides.",
+        "Gülich, Centrifugal Pumps, tabla 15.2, según ISO 9906. Automática: decide el criterio más exigente entre las velocidades periféricas de salida y de entrada, la altura por etapa en el punto óptimo y la potencia.",
+    ),
+    ("Head tolerance t_H", "Tolerancia de altura t_H"),
+    (
+        "G1 ±3 %, G2 ±5 %, G3 ±7 %. ISO 9906 sets them for acceptance tests, a measured pump against its guarantee; the objective strip uses them by analogy for the predicted head.",
+        "G1 ±3 %, G2 ±5 %, G3 ±7 %. ISO 9906 las fija para ensayos de recepción, una bomba medida frente a su garantía; la franja de objetivo las usa por analogía para la altura prevista.",
+    ),
+    (
+        "u₂ {} ({}), u₁ {} ({}), head per stage {} ({}), power {} ({}). Table 15.2: u₂ above 90 m/s G1, 40 to 90 G2; u₁ above 50 m/s G1, 15 to 50 G2; head above 400 m G1, 80 to 400 G2; power above 3000 kW G1, 300 to 3000 G2.",
+        "u₂ {} ({}), u₁ {} ({}), altura por etapa {} ({}), potencia {} ({}). Tabla 15.2: u₂ por encima de 90 m/s G1, de 40 a 90 G2; u₁ por encima de 50 m/s G1, de 15 a 50 G2; altura por encima de 400 m G1, de 80 a 400 G2; potencia por encima de 3000 kW G1, de 300 a 3000 G2.",
+    ),
+    ("Criteria", "Criterios"),
+    ("edit acceptance", "editar la aceptación"),
 ];
 
 /// Messages of the design code, most specific first.

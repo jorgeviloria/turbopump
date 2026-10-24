@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use tp_design::acceptance::AcceptanceInput;
 use tp_units::DisplayUnits;
 
 use crate::{
@@ -42,6 +43,10 @@ pub struct Project {
     setup: GlobalSetup,
     #[serde(default)]
     pub display_units: DisplayUnits,
+    /// How the predicted performance is judged against the design point. Not a design
+    /// input: changing it makes no step stale.
+    #[serde(default)]
+    pub acceptance: AcceptanceInput,
     components: Vec<Component>,
     next_id: u32,
 }
@@ -62,6 +67,7 @@ impl Project {
             machine,
             setup,
             display_units: DisplayUnits::default(),
+            acceptance: AcceptanceInput::default(),
             components: Vec::new(),
             next_id: 1,
         })

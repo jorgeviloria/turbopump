@@ -3,6 +3,7 @@
 //! Calculations take plain SI inputs and return SI results; they know nothing about
 //! projects or files, so the same code serves the editor, the command line and tests.
 
+pub mod acceptance;
 pub mod axial_thrust;
 pub mod diffuser;
 mod error;
