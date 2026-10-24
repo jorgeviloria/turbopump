@@ -298,9 +298,15 @@ impl PerformanceView {
         let s = |kind, si| units.show(kind, si);
         use QuantityKind::{Force, Head, VolumeFlow};
         ui.horizontal_wrapped(|ui| {
+            // Each figure whole: a line too short moves it down, never splits it.
             let item = |ui: &mut Ui, title: &str, text: String| {
-                ui.label(theme::bold(title));
-                ui.label(text);
+                let width = super::text_width(ui, title, true)
+                    + ui.spacing().item_spacing.x
+                    + super::text_width(ui, &text, false);
+                super::whole(ui, width, |ui| {
+                    ui.add(egui::Label::new(theme::bold(title)).extend());
+                    ui.add(egui::Label::new(text).extend());
+                });
                 ui.add_space(14.0);
             };
             item(
