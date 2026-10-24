@@ -80,8 +80,8 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
   - *Blade*: las páginas de gráficas y de bordes, y la exportación de puntos y malla;
   - *Front* y *Section*: sus dibujos y exportaciones, y cómo se edita una sección;
   - *3D*: cámara (encuadrar, vista inicial y proyección ortográfica), estilo
-    (sombreado, con aristas o alambre), y sólidos CAD, mallas y una imagen PNG de la
-    vista;
+    (sombreado, con aristas o alambre), inspección (corte meridional y medir), y
+    sólidos CAD, mallas y una imagen PNG de la vista;
   - *Curves*: los ajustes de la predicción y el resto de resultados.
 
   A la izquierda de las pestañas están el menú *File* (abre, guarda, exporta y da los
@@ -132,7 +132,11 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
   - vista 3D, con aristas de las piezas, secciones de la voluta, cubo de vistas (un clic
     en una cara gira la cámara), ejes y barra de escala, en perspectiva o en proyección
     ortográfica; la imagen PNG sale con el doble de resolución y sin el cubo, los ejes
-    ni la escala;
+    ni la escala. La pieza bajo el ratón se tiñe y dice su nombre; un clic la
+    selecciona (también en la Escena) y el botón derecho la oculta, la aísla o cambia
+    su opacidad. El corte meridional quita la mitad del modelo que mira a la cámara
+    (o la otra). Medir da la distancia entre dos puntos del modelo y sus partes radial
+    y axial, Δr y Δz; cerca de un vértice de la malla el punto se ajusta a él;
   - curvas: altura, rendimiento, potencia y NPSH₃ previstos frente al caudal (la altura
     a carga parcial según Gülich, cap. 4.3, y el NPSH₃ como banda de cinco métodos
     publicados), con la zona de recirculación estimada a trazos, el NPSH disponible y la pérdida en la
