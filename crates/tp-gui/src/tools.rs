@@ -12,6 +12,7 @@ use crate::ribbon::{Command, Icon, big_button, export_items, group, small_button
 use crate::theme::icon;
 use crate::viewer::{CameraView, NamedView, Viewer};
 use crate::views::blade::{BladePage, BladeView};
+use crate::views::front::{FrontPage, FrontView};
 use crate::views::meridian_editor::references_panel;
 use crate::views::meridional::{Fit, MeridionalView, Scope};
 use crate::views::performance::PerformanceView;
@@ -348,9 +349,51 @@ pub(crate) fn blade(ui: &mut Ui, view: &mut BladeView, cx: ToolsCx) -> Option<Co
     command
 }
 
-/// The Front tab: the drawings of the front view.
-pub(crate) fn front(ui: &mut Ui, cx: ToolsCx) -> Option<Command> {
-    drawings(ui, DrawingView::Front, cx.has_geometry)
+/// The Front tab: the plan or the cutwater, and the drawings of the front view.
+pub(crate) fn front(ui: &mut Ui, view: &mut FrontView, cx: ToolsCx) -> Option<Command> {
+    group(ui, tr("Page"), |ui| {
+        for (page, glyph, label, hint, enabled) in [
+            (
+                FrontPage::Plan,
+                icon::FAN,
+                tr("Plan"),
+                tr("The stage seen from the inlet"),
+                true,
+            ),
+            (
+                FrontPage::Cutwater,
+                icon::PENCIL_RULER,
+                tr("Cutwater"),
+                tr("The cutwater of the volute in planes across its width, to shape it by hand"),
+                cx.has_volute,
+            ),
+        ] {
+            if big_button(
+                ui,
+                Icon::Glyph(glyph),
+                label,
+                enabled,
+                view.page == page,
+                None,
+            )
+            .on_hover_text(hint)
+            .clicked()
+            {
+                view.page = page;
+            }
+        }
+    });
+    let command = drawings(ui, DrawingView::Front, cx.has_geometry);
+    if view.page == FrontPage::Cutwater {
+        help(
+            ui,
+            tr("How to edit"),
+            tr(
+                "Drag the green points: the innermost point of the nose sets the cutwater circle d_z, its leading point the nose radius, the point on the dashed camber line the incidence. The slider picks the plane across the width; drag the 3D view to turn it.",
+            ),
+        );
+    }
+    command
 }
 
 /// The Section tab: the exports of the volute and how to edit a section.

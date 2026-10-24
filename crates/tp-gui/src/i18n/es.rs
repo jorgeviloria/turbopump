@@ -3455,6 +3455,93 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Click two points of the model for the distance between them and its radial and axial parts; near a corner of the mesh the point snaps to it",
         "Clic en dos puntos del modelo: da la distancia entre ellos y sus partes radial y axial; cerca de un vértice de la malla el punto se ajusta a él",
     ),
+    ("No volute yet.", "Todavía no hay voluta."),
+    (
+        "This cutwater does not cut the diffuser wall: choose a sharp or rounded one to shape it here.",
+        "Este corte de agua no corta la pared del difusor: elige uno afilado o redondeado para darle forma aquí.",
+    ),
+    ("Plane", "Plano"),
+    ("Midplane", "Plano medio"),
+    ("All planes", "Todos los planos"),
+    ("spiral share", "reparto en la espiral"),
+    (
+        "Share of the missing thickness the spiral side of the body takes past the tip; the diffuser side takes the rest",
+        "Parte del espesor que falta pasada la punta que toma el lado de la espiral del cuerpo; el lado del difusor toma el resto",
+    ),
+    ("spiral wall", "pared de la espiral"),
+    ("diffuser wall", "pared del difusor"),
+    ("cutwater circle d_z", "círculo del corte de agua d_z"),
+    ("impeller outlet", "salida del rodete"),
+    ("tip of the wedge", "punta de la cuña"),
+    (
+        "Innermost point of the nose: drag outward or inward to set the cutwater circle d_z",
+        "Punto más interior de la nariz: arrástralo hacia fuera o hacia dentro para fijar el círculo del corte de agua d_z",
+    ),
+    (
+        "Leading point of the nose: drag to set its radius ρ",
+        "Punto delantero de la nariz: arrástralo para fijar su radio ρ",
+    ),
+    (
+        "Camber line: turn it to set the incidence i₃ against the flow",
+        "Línea de curvatura: gírala para fijar la incidencia i₃ frente al flujo",
+    ),
+    (
+        "Across the width: drag to turn",
+        "A lo ancho: arrastra para girar",
+    ),
+    ("Gap d_z/d₂ − 1", "Holgura d_z/d₂ − 1"),
+    ("Thickness e/d_z", "Espesor e/d_z"),
+    (
+        "up to 0.04 hardly affects the best efficiency (Gülich p. 421)",
+        "hasta 0,04 apenas afecta al rendimiento óptimo (Gülich p. 421)",
+    ),
+    ("Incidence i₃ at design", "Incidencia i₃ en el diseño"),
+    ("Wedge across the width", "Cuña a lo ancho"),
+    (
+        "angle between the spiral and the diffuser wall where they cross",
+        "ángulo entre la pared de la espiral y la del difusor donde se cruzan",
+    ),
+    (
+        "the throat enlarged for the blockage of the cutwater (eq. 7.28)",
+        "la garganta agrandada por el bloqueo del corte de agua (ec. 7.28)",
+    ),
+    (
+        "The incidence over the flow range needs the predicted characteristic.",
+        "La incidencia en todo el rango de caudal necesita la característica prevista.",
+    ),
+    (
+        "incidence i₃ on the cutwater",
+        "incidencia i₃ sobre el corte de agua",
+    ),
+    ("q* = Q/Q_design", "q* = Q/Q_diseño"),
+    ("designed d_z {}", "d_z de diseño {}"),
+    ("the nose {}: no neck", "la nariz {}: sin cuello"),
+    (
+        "α₃B {} against α₃′ {}; ±3° (eq. T7.7.6)",
+        "α₃B {} frente a α₃′ {}; ±3° (ec. T7.7.6)",
+    ),
+    ("Spiral share", "Reparto en la espiral"),
+    (
+        "Share of the thickness the wedge lacks past its tip that the spiral side of the body takes; the diffuser side takes the rest. Automatic: ½",
+        "Parte del espesor que le falta a la cuña pasada su punta que toma el lado de la espiral del cuerpo; el lado del difusor toma el resto. Automático: ½",
+    ),
+    ("Plan", "Planta"),
+    (
+        "The stage seen from the inlet",
+        "La etapa vista desde la entrada",
+    ),
+    (
+        "The cutwater of the volute in planes across its width, to shape it by hand",
+        "El corte de agua de la voluta en planos a lo ancho, para darle forma a mano",
+    ),
+    (
+        "Drag the green points: the innermost point of the nose sets the cutwater circle d_z, its leading point the nose radius, the point on the dashed camber line the incidence. The slider picks the plane across the width; drag the 3D view to turn it.",
+        "Arrastra los puntos verdes: el punto más interior de la nariz fija el círculo del corte de agua d_z, su punto delantero el radio de la nariz y el punto sobre la línea de curvatura discontinua la incidencia. El deslizador elige el plano a lo ancho; arrastra la vista 3D para girarla.",
+    ),
+    (
+        "at least {} against pulsations (Gülich Table 10.2); past 10 % it costs about 1 % of efficiency (p. 421)",
+        "al menos {} contra las pulsaciones (Gülich tabla 10.2); por encima del 10 % cuesta alrededor de un 1 % de rendimiento (p. 421)",
+    ),
 ];
 
 /// Messages of the design code, most specific first.

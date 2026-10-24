@@ -1106,6 +1106,18 @@ fn cutwater(
                     &units,
                     0.0001..=0.1,
                 );
+                param_f64(
+                    ui,
+                    tr("Spiral share"),
+                    tr(
+                        "Share of the thickness the wedge lacks past its tip that the spiral side of the body takes; the diffuser side takes the rest. Automatic: ½",
+                    ),
+                    &mut input.cutwater.share,
+                    Dimensionless,
+                    g.map(|g| g.design.cutwater_share),
+                    &units,
+                    0.0..=1.0,
+                );
             }
             let incidence = input.cutwater.incidence.resolve(|| 0.0);
             param_f64(

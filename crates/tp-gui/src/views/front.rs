@@ -1,17 +1,80 @@
 //! Front view seen from the inlet looking downstream: blade outlines at hub and shroud,
-//! and the outlet, eye and hub circles.
+//! and the outlet, eye and hub circles. A second page shapes the cutwater of the volute
+//! (see [`super::cutwater`]).
 
 use std::f64::consts::PI;
 
-use eframe::egui::Ui;
+use eframe::egui::{self, Ui};
 use egui_plot::{Corner, Legend, Line, LineStyle, Plot, PlotPoints, Points};
 use tp_math::DVec3;
 use tp_project::ComponentId;
 use tp_units::{DisplayUnits, QuantityKind};
 
+use super::cutwater::CutwaterPage;
 use super::{Palette, unavailable};
+use crate::app::{EditCtx, Selection};
 use crate::derived::Derived;
 use crate::i18n::tr;
+use tp_project::DesignStep;
+
+/// The pages of the front view.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum FrontPage {
+    /// The whole stage from the inlet.
+    #[default]
+    Plan,
+    /// The cutwater of the volute, plane by plane.
+    Cutwater,
+}
+
+/// The front view between frames.
+#[derive(Debug, Default)]
+pub(crate) struct FrontView {
+    pub page: FrontPage,
+    pub cutwater: CutwaterPage,
+    /// The step the page last followed.
+    followed: Option<Selection>,
+}
+
+impl FrontView {
+    /// The view, clear of the `cover` px the floating properties panel hides on the
+    /// right. The cutwater step opens the cutwater page, the other steps the plan.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn show(
+        &mut self,
+        ui: &mut Ui,
+        cx: &mut EditCtx<'_>,
+        id: ComponentId,
+        stator: Option<ComponentId>,
+        volute: Option<ComponentId>,
+        units: &DisplayUnits,
+        cover: f32,
+    ) {
+        let selection = *cx.selection;
+        if self.followed != Some(selection) {
+            self.followed = Some(selection);
+            if let Selection::Step(_, step) = selection {
+                self.page = if step == DesignStep::CutWater {
+                    self.cutwater.frame = true;
+                    FrontPage::Cutwater
+                } else {
+                    FrontPage::Plan
+                };
+            }
+        }
+        match (self.page, volute) {
+            (FrontPage::Cutwater, Some(v)) => {
+                let area = ui.available_rect_before_wrap();
+                let right = (area.max.x - cover).max(area.min.x + 480.0);
+                let clear = egui::Rect::from_min_max(area.min, egui::pos2(right, area.max.y));
+                ui.scope_builder(egui::UiBuilder::new().max_rect(clear), |ui| {
+                    self.cutwater.show(ui, cx, id, v, units);
+                });
+            }
+            _ => plan(ui, cx.derived, id, stator, volute, units),
+        }
+    }
+}
 
 /// Looking along +z the x axis points left, as in the SVG drawing.
 fn view(x: f64, y: f64, scale: f64) -> [f64; 2] {
@@ -27,7 +90,8 @@ fn circle(r: f64, scale: f64) -> PlotPoints<'static> {
         .collect()
 }
 
-pub(crate) fn show(
+/// The stage from the inlet.
+pub(crate) fn plan(
     ui: &mut Ui,
     derived: &Derived,
     id: ComponentId,

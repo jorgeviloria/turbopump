@@ -359,6 +359,31 @@ fn volute() {
     save(&mut harness, "volute-front");
 }
 
+/// The cutwater step opens the cutwater page of the front view: the plane by plane
+/// drawing with its points to drag, the measures, the body in 3D and the incidence over
+/// the flow range.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn cutwater() {
+    for (theme, suffix) in [(egui::Theme::Dark, "dark"), (egui::Theme::Light, "light")] {
+        let mut harness = harness(theme);
+        for _ in 0..6 {
+            harness.get_by_label_contains("Accept step").click();
+            harness.run();
+        }
+        harness.get_by_label("Volute 1").click();
+        harness.run();
+        // Setup, cross section, spiral and diffuser: the cutwater step is next.
+        for _ in 0..4 {
+            harness.get_by_label_contains("Accept step").click();
+            harness.run();
+        }
+        harness.remove_cursor();
+        harness.run();
+        save(&mut harness, &format!("cutwater-{suffix}"));
+    }
+}
+
 /// The cross-section step: the default trapezoid, then a radius-based section with a
 /// second definition of line segments, its corners ready to drag.
 #[test]
