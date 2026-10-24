@@ -3308,6 +3308,22 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Opacity of {}", "Opacidad: {}"),
     ("Click for {}", "Con un clic: {}"),
     ("Color of {}", "Color: {}"),
+    ("Views", "Vistas"),
+    (
+        "Views named after the pump, and the ones you save",
+        "Vistas con nombre de bomba, y las que guardes",
+    ),
+    ("From the inlet", "Desde la entrada"),
+    ("From behind", "Desde atrás"),
+    ("From the side", "De lado"),
+    ("From the other side", "Del otro lado"),
+    ("View {}", "Vista {}"),
+    ("Forget {}", "Olvidar {}"),
+    ("Save this view", "Guardar esta vista"),
+    (
+        "Keeps the direction, the zoom, the centre and the projection; remembered between sessions",
+        "Guarda la dirección, el zoom, el centro y la proyección; se recuerda entre sesiones",
+    ),
     (
         "{} changed since the step was accepted",
         "{} cambió desde que se aceptó el paso",

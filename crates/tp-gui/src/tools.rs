@@ -7,10 +7,10 @@ use tp_units::{DisplayUnits, QuantityKind};
 use crate::export::{
     CAD_AVAILABLE, DrawingExport, DrawingFormat, DrawingView, TextExport, VoluteExport,
 };
-use crate::i18n::tr;
+use crate::i18n::{tf, tr};
 use crate::ribbon::{Command, Icon, big_button, export_items, group, small_button, stack};
 use crate::theme::icon;
-use crate::viewer::{CameraView, Viewer};
+use crate::viewer::{CameraView, NamedView, Viewer};
 use crate::views::blade::{BladePage, BladeView};
 use crate::views::meridian_editor::references_panel;
 use crate::views::meridional::{Fit, MeridionalView, Scope};
@@ -420,6 +420,58 @@ pub(crate) fn view3d(ui: &mut Ui, viewer: &mut Viewer, cx: ToolsCx) -> Option<Co
         {
             command = Some(Command::Camera(CameraView::Iso));
         }
+        menu_button(
+            ui,
+            icon::CAMERA_ROTATE,
+            tr("Views"),
+            true,
+            tr("Views named after the pump, and the ones you save"),
+            |ui| {
+                for view in NamedView::ALL {
+                    if ui.button(view.name()).clicked() {
+                        viewer.apply(CameraView::Named(view));
+                    }
+                }
+                ui.separator();
+                let mut remove = None;
+                for index in 0..viewer.saved.len() {
+                    ui.horizontal(|ui| {
+                        let name = tf("View {}", &[&(index + 1)]);
+                        if ui.button(&name).clicked() {
+                            viewer.apply(CameraView::Saved(index));
+                        }
+                        let delete = ui
+                            .small_button(icon::TRASH)
+                            .on_hover_text(tf("Forget {}", &[&name]));
+                        delete.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::Button,
+                                true,
+                                tf("Forget {}", &[&name]),
+                            )
+                        });
+                        if delete.clicked() {
+                            remove = Some(index);
+                        }
+                    });
+                }
+                if let Some(index) = remove {
+                    viewer.saved.remove(index);
+                }
+                if ui
+                    .add_enabled(
+                        viewer.has_camera(),
+                        egui::Button::new(format!("{}  {}", icon::PLUS, tr("Save this view"))),
+                    )
+                    .on_hover_text(tr(
+                        "Keeps the direction, the zoom, the centre and the projection; remembered between sessions",
+                    ))
+                    .clicked()
+                {
+                    viewer.save_view();
+                }
+            },
+        );
         if big_button(
             ui,
             Icon::Glyph(icon::PERSPECTIVE),

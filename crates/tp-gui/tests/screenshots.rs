@@ -205,6 +205,37 @@ fn row_and_dimension() {
     save_hovering(&mut harness, "dimension-and-row");
 }
 
+/// The Views menu of the 3D tab, a view saved from the side and brought back.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn views_menu() {
+    let mut harness = stage_in_3d();
+    let open = |h: &mut Harness<'_, TurbopumpApp>| {
+        h.get_by_label("Views").click();
+        h.run();
+    };
+    open(&mut harness);
+    harness.get_by_label("From the side").click();
+    harness.run_steps(40);
+    open(&mut harness);
+    harness.get_by_label_contains("Save this view").click();
+    harness.run();
+    open(&mut harness);
+    harness.get_by_label("View 1");
+    save(&mut harness, "views-menu");
+    harness.get_by_label("From the inlet").click();
+    harness.run_steps(40);
+    open(&mut harness);
+    harness.get_by_label("View 1").click();
+    harness.run_steps(40);
+    save(&mut harness, "view-1");
+    open(&mut harness);
+    harness.get_by_label("Forget View 1").click();
+    harness.run();
+    open(&mut harness);
+    assert!(harness.query_by_label("View 1").is_none());
+}
+
 /// A primary click at `pos`, with the pointer left there.
 fn click_at(harness: &mut Harness<'_, TurbopumpApp>, pos: egui::Pos2) {
     harness.hover_at(pos);

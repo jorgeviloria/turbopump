@@ -972,3 +972,28 @@ fn rows_changed_since_the_step_was_accepted_are_marked() {
     harness.run();
     assert_eq!(marks(&harness), 0);
 }
+
+#[test]
+fn the_views_menu_names_the_views_of_a_pump() {
+    use egui_kittest::kittest::NodeT;
+    let mut harness = harness();
+    harness.get_by_label("3D tab").click();
+    harness.run();
+    harness.get_by_label("Views").click();
+    harness.run();
+    for name in [
+        "From the inlet",
+        "From behind",
+        "From the side",
+        "From the other side",
+    ] {
+        harness.get_by_label(name);
+    }
+    // Without a drawn view (no GPU here) there is no camera to save.
+    assert!(
+        harness
+            .get_by_label_contains("Save this view")
+            .accesskit_node()
+            .is_disabled()
+    );
+}

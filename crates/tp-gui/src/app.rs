@@ -176,6 +176,8 @@ const SCENE_CORNER_KEY: &str = "scene_corner";
 const SCENE_FOLDED_KEY: &str = "scene_folded";
 /// Key of the parallel projection of the 3D view.
 const ORTHOGRAPHIC_KEY: &str = "orthographic";
+/// Key of the saved views of the 3D view, one code each, separated by semicolons.
+const SAVED_VIEWS_KEY: &str = "saved_views";
 
 /// Code of a theme in the stored preferences.
 fn theme_code(theme: ThemePreference) -> &'static str {
@@ -399,6 +401,12 @@ impl TurbopumpApp {
                 .and_then(|o| o.parse().ok())
             {
                 app.viewer.orthographic = orthographic;
+            }
+            if let Some(views) = storage.get_string(SAVED_VIEWS_KEY) {
+                app.viewer.saved = views
+                    .split(';')
+                    .filter_map(crate::viewer::SavedView::from_code)
+                    .collect();
             }
         }
         i18n::set(app.language);
@@ -1529,6 +1537,8 @@ impl eframe::App for TurbopumpApp {
         storage.set_string(SCENE_CORNER_KEY, self.scene.corner.code().to_owned());
         storage.set_string(SCENE_FOLDED_KEY, self.scene.folded.to_string());
         storage.set_string(ORTHOGRAPHIC_KEY, self.viewer.orthographic.to_string());
+        let views: Vec<String> = self.viewer.saved.iter().map(|v| v.code()).collect();
+        storage.set_string(SAVED_VIEWS_KEY, views.join(";"));
     }
 }
 

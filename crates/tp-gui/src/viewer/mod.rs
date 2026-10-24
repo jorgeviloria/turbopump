@@ -45,6 +45,97 @@ pub(crate) enum CameraView {
     Fit,
     /// Oblique, from the inlet side.
     Iso,
+    /// Looking along a direction named after the pump.
+    Named(NamedView),
+    /// A view the user saved, by its place in the list.
+    Saved(usize),
+}
+
+/// The views of the Views menu, named after the pump.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NamedView {
+    /// Down the axis from the suction side, into the eye.
+    Inlet,
+    /// Down the axis from behind the hub disk.
+    Rear,
+    /// Square to the axis: the meridional outline.
+    Side,
+    /// Square to the axis, from the other side.
+    OtherSide,
+}
+
+impl NamedView {
+    pub(crate) const ALL: [NamedView; 4] = [
+        NamedView::Inlet,
+        NamedView::Rear,
+        NamedView::Side,
+        NamedView::OtherSide,
+    ];
+
+    pub(crate) fn name(self) -> &'static str {
+        tr(match self {
+            NamedView::Inlet => "From the inlet",
+            NamedView::Rear => "From behind",
+            NamedView::Side => "From the side",
+            NamedView::OtherSide => "From the other side",
+        })
+    }
+
+    /// From the target toward the eye; the inlet is upstream, at −z.
+    fn direction(self) -> Vec3 {
+        match self {
+            NamedView::Inlet => Vec3::NEG_Z,
+            NamedView::Rear => Vec3::Z,
+            NamedView::Side => Vec3::NEG_Y,
+            NamedView::OtherSide => Vec3::Y,
+        }
+    }
+}
+
+/// A camera the user saved, with its projection.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct SavedView {
+    pub yaw: f32,
+    pub pitch: f32,
+    pub distance: f32,
+    pub target: Vec3,
+    pub orthographic: bool,
+}
+
+impl SavedView {
+    /// One line of text: the numbers, separated by spaces.
+    pub(crate) fn code(&self) -> String {
+        let t = self.target;
+        format!(
+            "{} {} {} {} {} {} {}",
+            self.yaw,
+            self.pitch,
+            self.distance,
+            t.x,
+            t.y,
+            t.z,
+            u8::from(self.orthographic)
+        )
+    }
+
+    pub(crate) fn from_code(code: &str) -> Option<Self> {
+        let v: Vec<f32> = code
+            .split_whitespace()
+            .map(|n| n.parse().ok())
+            .collect::<Option<_>>()?;
+        let [yaw, pitch, distance, x, y, z, o] = v[..] else {
+            return None;
+        };
+        (distance > 0.0 && [yaw, pitch, x, y, z].iter().all(|n| n.is_finite())).then_some(
+            SavedView {
+                yaw,
+                pitch,
+                distance,
+                target: Vec3::new(x, y, z),
+                orthographic: o != 0.0,
+            },
+        )
+    }
 }
 
 /// A camera turn in progress, from one yaw and pitch to another.
@@ -98,6 +189,8 @@ pub(crate) struct Viewer {
     menu_part: Option<PartId>,
     /// The mesh last uploaded, for picking.
     mesh: Option<MeshData>,
+    /// Views the user saved, in order.
+    pub saved: Vec<SavedView>,
 }
 
 /// What a right-click on the model asks of the scene.
@@ -182,6 +275,39 @@ impl Viewer {
                 }
             }
             CameraView::Iso => self.turn_to((-0.9, 0.55)),
+            CameraView::Named(view) => {
+                if let Some(target) = camera.orientation_along(view.direction()) {
+                    self.turn_to(target);
+                }
+            }
+            CameraView::Saved(index) => {
+                if let Some(saved) = self.saved.get(index).copied() {
+                    camera.target = saved.target;
+                    camera.distance = saved.distance;
+                    self.orthographic = saved.orthographic;
+                    // Kept as saved, whatever the panels do to the free part of the view.
+                    self.moved = true;
+                    self.turn_to((saved.yaw, saved.pitch));
+                }
+            }
+        }
+    }
+
+    /// Whether there is a camera to save: the view has been drawn.
+    pub(crate) fn has_camera(&self) -> bool {
+        self.camera.is_some()
+    }
+
+    /// Adds the camera as it is to the saved views.
+    pub(crate) fn save_view(&mut self) {
+        if let Some(c) = self.camera {
+            self.saved.push(SavedView {
+                yaw: c.yaw,
+                pitch: c.pitch,
+                distance: c.distance,
+                target: c.target,
+                orthographic: self.orthographic,
+            });
         }
     }
 
@@ -1258,6 +1384,43 @@ mod tests {
         let ray = Ray::through(matrix, ndc);
         let closest = ray.direction.normalize().cross(point - ray.origin).length();
         assert!(closest < 1e-5, "{closest}");
+    }
+
+    /// A named view turns the camera to look from its side; a saved one comes back as
+    /// it was, through its code too.
+    #[test]
+    fn named_and_saved_views() {
+        let mut viewer = Viewer {
+            camera: Some(Camera::fit(Vec3::ZERO, 1.0, 1.0)),
+            ..Viewer::default()
+        };
+        let settle = |v: &mut Viewer| {
+            let mut turn = v.turn;
+            step_turn(&mut turn, v.camera.as_mut().unwrap(), 1.0);
+            v.turn = turn;
+        };
+        viewer.apply(CameraView::Named(NamedView::Side));
+        settle(&mut viewer);
+        let c = viewer.camera.unwrap();
+        let eye = (c.eye() - c.target).normalize();
+        assert!(eye.distance(Vec3::NEG_Y) < 1e-4, "{eye}");
+
+        viewer.orthographic = true;
+        viewer.camera.as_mut().unwrap().distance = 3.0;
+        viewer.save_view();
+        let saved = viewer.saved[0];
+        assert_eq!(SavedView::from_code(&saved.code()), Some(saved));
+        assert!(SavedView::from_code("1 2 nonsense").is_none());
+
+        viewer.orthographic = false;
+        viewer.apply(CameraView::Named(NamedView::Inlet));
+        settle(&mut viewer);
+        viewer.camera.as_mut().unwrap().distance = 9.0;
+        viewer.apply(CameraView::Saved(0));
+        settle(&mut viewer);
+        let c = viewer.camera.unwrap();
+        assert!(viewer.orthographic && (c.distance - 3.0).abs() < 1e-6);
+        assert!((c.eye() - c.target).normalize().distance(Vec3::NEG_Y) < 1e-4);
     }
 
     #[test]
