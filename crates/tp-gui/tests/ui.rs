@@ -1286,3 +1286,43 @@ fn the_footer_buttons_keep_their_place() {
     assert_eq!(pending, done, "Back moved between Accept and Next");
     assert_eq!(pending, blocked, "Back moved for a blocked step");
 }
+
+/// The right edge of the properties panel's content: its header actions end there.
+fn panel_right(h: &Harness<'_, TurbopumpApp>) -> f32 {
+    h.get_by_label("More actions of the step").rect().right()
+}
+
+#[test]
+fn the_fields_reach_the_right_edge_of_the_panel() {
+    let mut harness = harness();
+    let check = |h: &Harness<'_, TurbopumpApp>| {
+        let right = panel_right(h);
+        // The units follow the fields, and the unit column ends at the panel's edge.
+        for (name, r) in panel_inputs(h) {
+            assert!(
+                right - r.right() < 42.0 && right - r.right() > 15.0,
+                "{name} ends at {} but the panel at {right}",
+                r.right()
+            );
+        }
+    };
+    check(&harness);
+    // Wider by dragging its left edge: the fields follow.
+    let edge = harness.get_by_label("More actions of the step").rect();
+    let left = harness
+        .get_all_by_label_contains("›")
+        .find(|n| n.rect().left() > 700.0)
+        .unwrap()
+        .rect()
+        .left()
+        - 14.0;
+    let from = egui::pos2(left, edge.center().y + 300.0);
+    harness.drag_at(from);
+    harness.run();
+    harness.hover_at(from - egui::vec2(120.0, 0.0));
+    harness.run();
+    harness.drop_at(from - egui::vec2(120.0, 0.0));
+    harness.run();
+    harness.run();
+    check(&harness);
+}

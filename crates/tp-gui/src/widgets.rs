@@ -35,10 +35,10 @@ struct Columns {
 impl Columns {
     /// The columns for a panel `width` points wide.
     fn for_width(width: f32) -> Self {
-        // A little slack: rows exactly as wide as the panel would nudge its width
-        // through rounding, and the columns would take frames to settle.
-        let free = (width - GAP - 12.0).max(160.0);
-        let label = (free * 0.52).clamp(100.0, 260.0);
+        // The value column reaches the right edge; a hair of slack keeps rounding from
+        // nudging the panel.
+        let free = (width - GAP - 2.0).max(160.0);
+        let label = (free * 0.52).clamp(100.0, 360.0);
         Self {
             label,
             value: free - label,
@@ -90,8 +90,8 @@ pub fn props(ui: &mut Ui, id: impl Hash + std::fmt::Debug, add: impl FnOnce(&mut
 /// width of `ui`: labels, fields, lists and units line up down the whole panel, whatever
 /// frames or indents a group sits in.
 pub fn shared_columns<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
-    // Room for the scroll bar the panel may show.
-    let columns = Columns::for_width(ui.available_width() - 8.0);
+    // The scroll bar floats over the content: a little room under it.
+    let columns = Columns::for_width(ui.available_width() - 4.0);
     ui.data_mut(|d| d.insert_temp(Columns::panel_id(), columns));
     let inner = add(ui);
     ui.data_mut(|d| d.remove::<Columns>(Columns::panel_id()));
@@ -323,7 +323,7 @@ fn value_box(ui: &mut Ui, text: egui::WidgetText) -> egui::Response {
 }
 
 /// Width of the unit after a numeric field.
-const UNIT_WIDTH: f32 = 42.0;
+const UNIT_WIDTH: f32 = 34.0;
 
 /// A numeric field and, after it and outside it, its `unit` in the weak color, as
 /// engineering programs show them. The field leaves room for a unit even when there is
