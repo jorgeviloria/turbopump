@@ -283,13 +283,18 @@ mientras se edite el rodete.
   anillo de cierre (holgura según Gülich, ec. 3.12), y la trasera hasta el sello del
   eje. Sus sellos pasan al empuje axial y al análisis de pérdidas cuando estos están en
   automático.
-- **Tubería de entrada:** un tramo axial delante de la boca, para la entrada de un
-  dominio de CFD: un anillo entre el cubo prolongado y la pared de la tubería, de
-  longitud L = d₁ y tan ancho como la tapa en la entrada (valores nuestros, editables).
-  Con las cámaras laterales diseñadas, termina a una holgura axial Δz (la misma s_ax)
-  de la punta del cuello: la fuga del anillo de cierre sale a ese hueco y vuelve a la
-  boca dentro del mismo dominio. Se dibuja en el ámbito Cámaras laterales y aparece en
-  la Escena del 3D.
+- **Tubería de entrada:** un componente propio, el primero del flujo y delante del
+  primer rodete (*Add component › Inlet duct*), con un paso, *Duct dimensions*. Es un
+  tramo axial para la entrada de un dominio de CFD, lleno hasta el eje, donde el cubo
+  acaba en una nariz semiesférica de su radio, de longitud L = d₁ y tan ancho como la
+  tapa en la entrada (valores nuestros, editables), construido sobre la entrada del
+  rodete, así que un
+  cambio en el contorno del rodete la deja por revisar. Con las cámaras laterales
+  diseñadas, termina a una holgura axial Δz (la misma s_ax) de la punta del cuello: la
+  fuga del anillo de cierre sale a ese hueco (la ranura junto a la boca) y vuelve a
+  ella dentro del mismo dominio. Se dibuja en el ámbito Cámaras laterales y aparece en la Escena del 3D como
+  un componente más. Un proyecto anterior que la tenía activada en el contorno del
+  rodete la convierte en componente al abrirse.
 
   | Meridiano | 3D, con el corte meridional |
   |---|---|
@@ -406,14 +411,15 @@ cargo run -p tp-cli -- cad bomba.tpj --format step,iges,stl --balance-holes
 |---|---|
 | ![rodete](docs/img/rodete-referencia-cad.jpg) | ![fluido](docs/img/fluido-referencia-cad.jpg) |
 
-Una bomba completa se crea con sus componentes de la entrada a la salida: rodete,
-estator con álabes (`stator`) o sin ellos (`vaneless-stator`) y voluta. Cada uno se
+Una bomba completa se crea con sus componentes de la entrada a la salida: tubería de
+entrada (`inlet-duct`), rodete, estator con álabes (`stator`) o sin ellos
+(`vaneless-stator`) y voluta. Cada uno se
 diseña con su orden, y `cad` construye los sólidos de todos; de la voluta salen el
 dominio fluido (`volute.step`) y la carcasa con su espesor de pared y la brida de
 salida (`volute-casing.step`). Con las cámaras laterales diseñadas salen también su
 fluido (`side-chambers.step`) y, si a continuación del rodete viene una voluta, un único
 fluido para CFD con rodete, cámaras y voluta (`fluid-joined.step`), unido por un anillo
-en la salida del rodete. Con la tubería de entrada modelada sale su fluido
+en la salida del rodete. Con una tubería de entrada delante del rodete sale su fluido
 (`inlet-duct.step`), y el fluido unido empieza en ella: comparte la cara de entrada del
 rodete y la salida del sello. Ese fluido necesita un borde de salida paralelo al eje
 (d₂i = d₂). La altura de la cara de salida se puede fijar con
