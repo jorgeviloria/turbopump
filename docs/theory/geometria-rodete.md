@@ -130,7 +130,7 @@ semiaxial, la recta de $d_{2i}$ a $d_{2a}$. En el semiaxial cada sección termin
 $\beta_{2B}$ del vórtice libre ([dimensiones-principales.md](dimensiones-principales.md)).
 Los álabes cilíndricos (2D) solo se admiten con salida radial.
 
-**Editor del meridiano.** Es una vista propia para trabajar el meridiano con medidas:
+**Vista Meridian.** Desde el 2026-10-23 la vista meridional y el antiguo editor son una sola vista, con cuatro ámbitos: etapa, canal del rodete, materiales y cámaras laterales. Sirve para trabajar el meridiano con medidas:
 
 - **Comprobación con Gülich** (cap. 7.2.2.1, Fig. 7.4 y ec. 7.2), punto por punto:
   - $z_E = (d_{2a} - d_1)(n_q/74)^{1{,}07}$, la extensión axial hasta el extremo de la
@@ -429,7 +429,7 @@ Valores automáticos, con $d_1 = 77{,}2$ mm por el factor $f_{d1}$ de la tabla 7
 - **Longitud axial:** 46,4 mm hasta el cubo. La $z_E$ de la ecuación 7.2 (46 mm) se mide,
   según la Fig. 7.4 de Gülich, desde el plano de entrada hasta el extremo de la carcasa en
   $d_2$. Con nuestra $L$ por defecto la carcasa termina en $L - b_2 = 29$ mm, un 37 % más
-  corta de lo recomendado. El editor del meridiano lo señala.
+  corta de lo recomendado. La vista *Meridian* lo señala.
 - **Velocidad meridional:** $c_m$ baja de 6,53 a 3,04 m/s sin repuntes.
 - **Carga del álabe:** $\xi_{ef}/\xi_{adm} = 1{,}21/1{,}09 = 1{,}11$, dentro de la banda
   pero algo por encima del 0,9 recomendado. Con 5 álabes la carga sale de la banda y el

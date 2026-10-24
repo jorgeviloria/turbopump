@@ -71,16 +71,22 @@ cargo run --release -p tp-gui -- bomba.tpj
 Arranca con una bomba de 100 m³/h, 32 m y 2900 rpm, con un rodete y una voluta, en tema
 claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada componente:
 
-- **Barra de herramientas** (arriba), por pestañas:
-  - *Home*: proyecto, deshacer, configuración global, unidades, añadir componentes y
-    exportar;
-  - la pestaña del componente seleccionado, con sus pasos de diseño, el estado de cada
-    uno y los botones para aceptar o restablecer el paso;
-  - *View*: vistas, cámara, modo de dibujo, paneles (árbol, propiedades y mensajes),
-    tema e idioma;
-  - *Help*.
+- **Barra de herramientas** (arriba). Sus pestañas son las vistas: *Meridian*,
+  *Blade*, *Front*, *Section*, *3D*, *Curves* y *Report*. Elegir una muestra esa vista
+  y, debajo, solo sus herramientas:
+  - *Meridian*: el ámbito (etapa, canal del rodete, materiales o cámaras laterales),
+    qué se dibuja (cotas, componentes vecinos, leyenda, el menú *Analysis* con el flujo
+    potencial y las curvas de referencia), el encuadre, los imanes y los dibujos;
+  - *Blade*: las páginas de gráficas y de bordes, y la exportación de puntos y malla;
+  - *Front* y *Section*: sus dibujos y exportaciones, y cómo se edita una sección;
+  - *3D*: cámara, estilo (sombreado, con aristas o alambre), todos los álabes o uno, y
+    sólidos CAD y mallas;
+  - *Curves*: los ajustes de la predicción y el resto de resultados.
 
-  El menú *File* abre, guarda y exporta.
+  A la izquierda de las pestañas están el menú *File* (abre, guarda, exporta y da los
+  ajustes) y el acceso rápido al árbol, guardar, deshacer y rehacer; a la derecha, los
+  ajustes, la ayuda y el botón que pliega las herramientas (las pestañas siguen
+  eligiendo la vista).
 - **Franja de objetivo** (bajo la barra): el punto de diseño pedido (Q, H, n, fluido y
   nq) frente a lo previsto para el rodete (altura con su desviación y tolerancia,
   rendimiento, potencia, NPSH₃ frente al NPSH disponible y caudal óptimo), siempre a la
@@ -101,12 +107,10 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
   - *Design*: los pasos de cada componente, con su estado (pendiente, hecho o
     desactualizado porque cambió un dato anterior) y sus avisos;
   - *3D model*: muestra u oculta cada pieza de la vista 3D o la vuelve translúcida.
-- **Vista principal**, una a la vez y a pantalla completa, elegida en la barra de
-  encima:
-  - vista meridional, con el contorno del rodete, las paredes del difusor y las
-    secciones de la voluta;
-  - *Editor* del meridiano, donde el contorno se dibuja sobre la vista (ver
-    [Editor del meridiano](#editor-del-meridiano));
+- **Vista principal**, una a la vez y a pantalla completa, elegida en las pestañas:
+  - sección meridional (ver [La vista Meridian](#la-vista-meridian)): la etapa
+    completa con el difusor y la voluta, o el rodete solo para dibujar su canal, sus
+    materiales o sus cámaras laterales;
   - secciones de la voluta: la definición en edición sobre la familia de secciones a lo
     largo de la espiral, con los puntos de control de los lados Bézier y de segmentos
     para arrastrar y esquinas que se añaden o quitan con el botón derecho;
@@ -132,30 +136,37 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
   meridional en cubo y carcasa. La del álabe añade la velocidad relativa en sus dos
   caras.
 
-  Al abrir un paso, la vista cambia a la que mejor lo muestra (se puede desactivar en
-  la pestaña *View*).
+  Al abrir un paso, la vista cambia a la que mejor lo muestra, y en *Meridian* también
+  el ámbito (se puede desactivar en los ajustes, *Behavior*).
 - **Panel de propiedades** (derecha): al elegir un paso o la configuración global se
   abre con sus datos. Cada valor es automático (propuesto por una correlación) o
   manual. *Accept step* marca el paso como hecho y pasa al siguiente, y los errores y
   avisos salen en tarjetas. El panel flota sobre la vista sin reducirla: se pliega a una
-  franja estrecha (con su flecha, con Esc o con el botón *Properties*), se ensancha
+  franja estrecha (con su flecha o con Esc), se ensancha
   arrastrando su borde izquierdo y no bloquea las vistas, así que con él abierto se
   siguen arrastrando los puntos del contorno. La vista 3D centra la pieza en la parte
   que queda libre.
 - **Barra de estado** (abajo): el último mensaje, las unidades y el contador de errores
   y avisos, que abre el panel de mensajes de todo el proyecto.
-- **Idioma:** inglés o español, en la pestaña *View*. La elección se guarda, y la
+- **Idioma:** inglés o español, en los ajustes (el engranaje de la barra). La elección se guarda, y la
   primera vez se toma la del sistema. Los avisos del diseño también se traducen.
 - **Edición:** todo se puede deshacer y rehacer (Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z). Un
   arrastre completo cuenta como un solo paso.
 - **Exportación:** puntos, malla STL, dibujos en SVG, DXF o DWG, y sólidos CAD STEP, IGES
   o STL, que se construyen en segundo plano.
 
-### Editor del meridiano
+### La vista Meridian
 
-La vista *Editor* edita el corte meridional del rodete sobre el propio dibujo, sin
-tablas. Tiene tres páginas: *Flow path* (el canal), *Materials* (el disco del cubo y la
-tapa) y *Side chambers* (las cámaras entre el rodete y la carcasa).
+La vista *Meridian* edita el corte meridional del rodete sobre el propio dibujo, sin
+tablas. Tiene cuatro ámbitos, elegidos en su pestaña de la barra:
+- *Stage*: la etapa completa, con el difusor y la voluta;
+- *Impeller channel*: el canal del rodete;
+- *Materials*: el disco del cubo y la tapa;
+- *Side chambers*: las cámaras entre el rodete y la carcasa.
+
+El ámbito sigue al paso abierto: el contorno meridional abre el canal, y el espesor de
+pared de la voluta o el difusor abren la etapa. Un ámbito elegido a mano se respeta
+mientras se edite el rodete.
 
 ![Editor del meridiano](docs/img/editor-meridiano.jpg)
 
@@ -200,7 +211,7 @@ tapa) y *Side chambers* (las cámaras entre el rodete y la carcasa).
 - **Comprobación:** el panel de propiedades compara el contorno con las
   recomendaciones de Gülich.
 
-![Cámaras laterales en el editor](docs/img/editor-camaras.jpg)
+![Cámaras laterales en la vista Meridian](docs/img/editor-camaras.jpg)
 
 ### Bordes del álabe
 
