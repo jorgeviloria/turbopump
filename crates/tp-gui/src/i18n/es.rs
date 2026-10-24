@@ -1492,19 +1492,16 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Between blade and inflow at the leading edge (0°–4°)",
         "Entre el álabe y el flujo en el borde de ataque (0°–4°)",
     ),
-    (
-        "Suction specific speed nss",
-        "Velocidad específica de aspiración nss",
-    ),
+    ("Suction specific speed nss", "Vel. esp. de aspiración nss"),
     ("rpm, m³/s, m; sets NPSH3", "rpm, m³/s, m; fija el NPSH3"),
     ("edit main dimensions", "editar dimensiones principales"),
     ("Results", "Resultados"),
     ("Specific speed nq", "Velocidad específica nq"),
     ("Shaft power", "Potencia en el eje"),
-    ("Outlet blade angle β₂B", "Ángulo de salida del álabe β₂B"),
+    ("Outlet blade angle β₂B", "Ángulo de salida β₂B"),
     (
         "Inlet blade angle β₁B (mean)",
-        "Ángulo de entrada del álabe β₁B (medio)",
+        "Ángulo de entrada β₁B (medio)",
     ),
     ("Slip factor γ", "Factor de deslizamiento γ"),
     ("NPSH3", "NPSH3"),
@@ -1994,10 +1991,7 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "From the component after the impeller; it sets the shut-off head",
         "Del componente tras el rodete; fija la altura a válvula cerrada",
     ),
-    (
-        "Recirculation below Q/Q_opt",
-        "Recirculación por debajo de Q/Q_opt",
-    ),
+    ("Recirculation below Q/Q_opt", "Recirculación bajo Q/Q_opt"),
     (
         "Flow ratio where recirculation sets in at the impeller inlet; below it \
                  the curve is an estimate",
@@ -2104,7 +2098,7 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "momento angular (ecs. 7.24–7.25)",
     ),
     ("Design flow Q_Le", "Caudal de diseño Q_Le"),
-    ("Cutwater diameter d_z", "Diámetro del corte de agua d_z"),
+    ("Cutwater diameter d_z", "Diám. del corte de agua d_z"),
     ("{} (minimum {}, Table 10.2)", "{} (mínimo {}, tabla 10.2)"),
     ("Cutwater thickness e₃", "Espesor del corte de agua e₃"),
     ("Cross sections", "Secciones transversales"),
@@ -2214,7 +2208,7 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Cada sección lleva el caudal que el rodete entrega hasta su ángulo. Las reglas de velocidad la dimensionan para una velocidad en la espiral; las geométricas fijan su tamaño directamente.",
     ),
     ("Design rule", "Regla de diseño"),
-    ("Wrap angle φ_wrap", "Ángulo de envolvimiento φ_wrap"),
+    ("Wrap angle φ_wrap", "Ángulo de envolv. φ_wrap"),
     (
         "From the start of the spiral to the throat. A shorter spiral starts past the cutwater, which becomes the casing between the throat and that start. Automatic: 360°",
         "Del inicio de la espiral a la garganta. Una espiral más corta empieza después del corte de agua, que pasa a ser la carcasa entre la garganta y ese inicio. Automático: 360°",
@@ -2404,7 +2398,7 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ),
     (
         "Outlet face from the pump axis",
-        "Brida de salida desde el eje de la bomba",
+        "Brida de salida desde el eje",
     ),
     ("Outlet diameter", "Diámetro de salida"),
     (
@@ -2415,7 +2409,7 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Opening angle ϑ_eq", "Ángulo de apertura ϑ_eq"),
     (
         "Ideal pressure recovery c_p,id",
-        "Recuperación ideal de presión c_p,id",
+        "Recuperación ideal c_p,id",
     ),
     ("edit volute diffuser", "editar difusor de la voluta"),
     (
@@ -2849,10 +2843,7 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Pfleiderer: 5 to 7 for nq 10–120 (Gülich), 3 to 12 otherwise; the head rise picks 3 to 8 (Lobanoff & Ross Fig. 3-2)",
         "Pfleiderer: 5 a 7 para nq 10–120 (Gülich), 3 a 12 fuera de ese rango; la subida de altura elige de 3 a 8 (Lobanoff y Ross, fig. 3-2)",
     ),
-    (
-        "Head rise to shut-off",
-        "Subida de altura hasta caudal cero",
-    ),
+    ("Head rise to shut-off", "Subida de altura a Q = 0"),
     (
         "(H₀ − H)/H. Manual: sets the blades and β₂B (Lobanoff & Ross Figs. 3-2 and 3-13); fewer blades give a steeper curve",
         "(H₀ − H)/H. Manual: fija el número de álabes y β₂B (Lobanoff y Ross, figs. 3-2 y 3-13); con menos álabes la curva es más empinada",
@@ -2861,10 +2852,7 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Manual: d₂ follows from the head, or b₂ when d₂ is manual; 90° gives radial blades",
         "Manual: d₂ sale de la altura, o b₂ si d₂ es manual; 90° da álabes radiales",
     ),
-    (
-        "Inlet area ratio A_v/A_e",
-        "Relación de áreas de entrada A_v/A_e",
-    ),
+    ("Inlet area ratio A_v/A_e", "Relación de áreas A_v/A_e"),
     (
         "Area between the blades at the inlet over the eye area. Lobanoff & Ross (Fig. 3-12) give {}–{} at this nq for large eyes (β₁B ≈ 15–20°); the eye of minimum w₁ gives more",
         "Área entre álabes a la entrada sobre el área del ojo. Lobanoff y Ross (fig. 3-12) dan {}–{} a este nq para ojos grandes (β₁B ≈ 15–20°); el ojo de w₁ mínima da más",
@@ -2899,10 +2887,7 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("automatic: semi-axial", "automático: semiaxial"),
     ("automatic: radial", "automático: radial"),
     ("semi-axial (mixed flow)", "semiaxial (flujo mixto)"),
-    (
-        "Outlet hub diameter d₂i",
-        "Diámetro de salida en el cubo d₂i",
-    ),
+    ("Outlet hub diameter d₂i", "Diámetro en el cubo d₂i"),
     ("Outlet inclination ε_s", "Inclinación de la salida ε_s"),
     (
         "Angle of the outer streamline at the outlet to a normal to the axis: 0° radial, 90° axial (Gülich eq. 7.12, ±5° in executed pumps)",

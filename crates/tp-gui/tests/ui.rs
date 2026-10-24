@@ -309,6 +309,70 @@ fn the_panel_accepts_steps_and_the_column_adds_components() {
     harness.get_by_label("Casing");
 }
 
+/// The labels of the property rows in sight that are cut short: their text, wider than
+/// their cell. Row labels are one line of body text in the label column of the panel,
+/// at the right of the 1440 px window.
+fn cut_labels(h: &Harness<'_, TurbopumpApp>) -> Vec<String> {
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::NodeT;
+    let font = egui::TextStyle::Body.resolve(&h.ctx.style_of(h.ctx.theme()));
+    let line = h.ctx.fonts_mut(|f| f.row_height(&font));
+    h.query_all_by_role(Role::Label)
+        .filter(|n| (960.0..1030.0).contains(&n.rect().left()))
+        .filter(|n| (n.rect().height() - line).abs() < 1.0)
+        .filter_map(|n| {
+            let text = n.accesskit_node().label().or(n.accesskit_node().value())?;
+            let natural = h.ctx.fonts_mut(|f| {
+                f.layout_no_wrap(text.clone(), font.clone(), egui::Color32::WHITE)
+                    .size()
+                    .x
+            });
+            (natural > n.rect().width() + 1.0).then_some(text)
+        })
+        .collect()
+}
+
+/// The row labels cut short anywhere in the design, and in the settings of the curves.
+fn cut_labels_everywhere(harness: &mut Harness<'_, TurbopumpApp>) -> Vec<String> {
+    let mut cut = std::collections::BTreeSet::new();
+    harness.state_mut().focus_view(View::Meridian);
+    harness.run();
+    for _ in 0..16 {
+        harness.key_press_modifiers(Modifiers::ALT, Key::ArrowUp);
+    }
+    harness.run();
+    for _ in 0..16 {
+        harness.run();
+        cut.extend(cut_labels(harness));
+        harness.key_press_modifiers(Modifiers::ALT, Key::ArrowDown);
+        harness.run();
+    }
+    harness.state_mut().focus_view(View::Performance);
+    harness.run();
+    harness.run();
+    cut.extend(cut_labels(harness));
+    cut.into_iter().collect()
+}
+
+#[test]
+fn no_row_label_of_the_properties_is_cut_short() {
+    let mut harness = harness();
+    let english = cut_labels_everywhere(&mut harness);
+    choose_language(&mut harness, "Language", "Español", "Cerrar");
+    let spanish = cut_labels_everywhere(&mut harness);
+    choose_language(&mut harness, "Idioma", "English", "Close");
+    assert!(
+        english.is_empty(),
+        "cut short in English:\n{}",
+        english.join("\n")
+    );
+    assert!(
+        spanish.is_empty(),
+        "cut short in Spanish:\n{}",
+        spanish.join("\n")
+    );
+}
+
 #[test]
 fn the_report_shows_its_values_whole_and_clear_of_the_panel() {
     let mut harness = harness();

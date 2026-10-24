@@ -237,13 +237,15 @@ fn label_cell(
         let pass = ui.ctx().cumulative_pass_nr();
         ui.data_mut(|d| d.insert_temp(hover_id("row"), (pass, text.to_owned())));
     }
+    // Room for the ⓘ of the hint and the automatic/manual dot, only where they are.
+    let room =
+        if hint.is_empty() { 0.0 } else { 18.0 } + if auto.is_some() { AUTO_WIDTH } else { 0.0 };
     let cell = ui.allocate_ui_with_layout(
         vec2(width, ROW_HEIGHT),
         Layout::left_to_right(Align::Center),
         |ui| {
             ui.set_min_width(width);
             ui.spacing_mut().item_spacing.x = 4.0;
-            let room = if hint.is_empty() { 0.0 } else { 18.0 } + AUTO_WIDTH;
             ui.scope(|ui| {
                 ui.set_max_width(width - room);
                 ui.add(egui::Label::new(text).truncate());
