@@ -1057,7 +1057,20 @@ fn nothing_moves_when_the_pointer_rests_on_the_objective() {
 fn nothing_moves_on_hover(harness: &mut Harness<'_, TurbopumpApp>) {
     harness.remove_cursor();
     harness.run();
+    let settled = layout(harness);
+    harness.run_steps(20);
     let baseline = layout(harness);
+    let settling = moved(&settled, &baseline);
+    assert!(
+        settling.is_empty(),
+        "still moving with nothing touched:\n{}",
+        settling
+            .iter()
+            .take(6)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
     let mut problems = Vec::new();
     for (label, rect) in &baseline {
         harness.hover_at(rect.center());
@@ -1325,4 +1338,66 @@ fn the_fields_reach_the_right_edge_of_the_panel() {
     harness.run();
     harness.run();
     check(&harness);
+}
+
+#[test]
+fn nothing_moves_on_hover_in_the_other_views() {
+    let mut harness = harness();
+    for tab in ["Blade tab", "Front tab", "Section tab", "Report tab"] {
+        harness.get_by_label(tab).click();
+        harness.run();
+        nothing_moves_on_hover(&mut harness);
+    }
+}
+
+#[test]
+fn nothing_moves_on_hover_in_the_dialogs() {
+    let mut harness = harness();
+    // Every page of the settings.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Comma);
+    harness.run();
+    for page in ["Appearance", "Language", "Units", "Behavior"] {
+        harness
+            .get_all_by_label_contains(page)
+            .next()
+            .unwrap()
+            .click();
+        harness.run();
+        nothing_moves_on_hover(&mut harness);
+    }
+    harness.get_by_label("Close").click();
+    harness.run();
+    // About.
+    harness.get_all_by_label("Help").next().unwrap().click();
+    harness.run();
+    harness.get_by_label_contains("About").click();
+    harness.run();
+    nothing_moves_on_hover(&mut harness);
+    harness.get_by_label("Close").click();
+    harness.run();
+    // The export of CAD solids, once the stage is designed.
+    harness
+        .get_by_label("Complete every step of Impeller 1")
+        .click();
+    harness.run();
+    harness.get_by_label("Volute 1").click();
+    harness.run();
+    harness
+        .get_by_label("Complete every step of Volute 1")
+        .click();
+    harness.run();
+    harness
+        .get_all_by_label_contains("CAD solids")
+        .find(|n| n.rect().left() < 400.0)
+        .unwrap()
+        .click();
+    harness.run();
+    harness.get_by_label_contains("Export CAD solids");
+    nothing_moves_on_hover(&mut harness);
+    harness.key_press(Key::Escape);
+    harness.run();
+    // A new project.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::N);
+    harness.run();
+    nothing_moves_on_hover(&mut harness);
 }
