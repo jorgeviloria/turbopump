@@ -181,7 +181,7 @@ fn target(
     line.dot(p).text(
         &format!(
             "{} {}",
-            setup.fluid,
+            crate::i18n::fluid_name(&setup.fluid),
             units.show(QuantityKind::Temperature, setup.inlet.total_temperature)
         ),
         p.text,

@@ -349,16 +349,25 @@ pub fn then_unit(
 /// Keeps a list to the width of its column however long its text, which a combo box
 /// would otherwise stretch to the edge of the panel.
 pub fn list<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    list_with_tip(ui, "", add)
+}
+
+/// [`list`], with the whole of `tip` on hover: the text of the choice, which a
+/// narrow list cuts.
+pub fn list_with_tip<R>(ui: &mut Ui, tip: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
     let width = ui.spacing().combo_width;
-    ui.allocate_ui_with_layout(
+    let inner = ui.allocate_ui_with_layout(
         vec2(width, ROW_HEIGHT - 2.0),
         Layout::left_to_right(Align::Center),
         |ui| {
             ui.set_max_width(width);
             add(ui)
         },
-    )
-    .inner
+    );
+    if !tip.is_empty() {
+        inner.response.on_hover_text(tip);
+    }
+    inner.inner
 }
 
 /// The unit of `kind` to show after a field: none for a plain number.
@@ -651,7 +660,7 @@ pub fn param_choice<T: Copy + PartialEq>(
             Some(value) => {
                 let weak = Palette::of(ui).weak;
                 let mut chosen = None;
-                list(ui, |ui| {
+                list_with_tip(ui, &name(value), |ui| {
                     egui::ComboBox::from_id_salt(("param_choice", label))
                         .selected_text(egui::RichText::new(name(value)).color(weak))
                         .show_ui(ui, |ui| {
@@ -670,7 +679,8 @@ pub fn param_choice<T: Copy + PartialEq>(
             None => self::value(ui, "—"),
         },
         Param::Manual(value) => {
-            list(ui, |ui| {
+            let tip = name(*value);
+            list_with_tip(ui, &tip, |ui| {
                 egui::ComboBox::from_id_salt(("param_choice", label))
                     .selected_text(name(*value))
                     .show_ui(ui, |ui| {

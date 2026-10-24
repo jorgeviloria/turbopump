@@ -323,7 +323,7 @@ fn spiral(
                 (AreaLaw::Auto, Some(law)) => tf("automatic: {}", &[&law_name(law)]),
                 (law, _) => law_name(law).to_owned(),
             };
-            crate::widgets::list(ui, |ui| {
+            crate::widgets::list_with_tip(ui, &selected.clone(), |ui| {
                 ComboBox::from_id_salt("volute_law")
                     .selected_text(selected)
                     .height(400.0)
@@ -593,7 +593,7 @@ fn spiral(
         props(ui, "volute_arcs", |ui| {
             label(
                 ui,
-                tr("Approximate by circular arcs"),
+                tr("Use circular arcs"),
                 tr(
                     "For rectangular and trapezoidal sections: tangent circular arcs take the place of the outer contour, as volutes are laid out on the drawing board. They start at the start of the spiral and end at the throat.",
                 ),

@@ -922,7 +922,11 @@ fn setup(ui: &mut Ui, cx: &mut EditCtx<'_>) {
                                 .show_ui(ui, |ui| {
                                     for name in COMMON_FLUIDS {
                                         if ui
-                                            .selectable_label(setup.fluid == *name, *name)
+                                            .selectable_label(
+                                                setup.fluid == *name,
+                                                crate::i18n::fluid_name(name),
+                                            )
+                                            .on_hover_text(tf("CoolProp name: {}", &[name]))
                                             .clicked()
                                         {
                                             setup.fluid = (*name).to_owned();
