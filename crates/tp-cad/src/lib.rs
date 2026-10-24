@@ -1,5 +1,5 @@
-//! CAD solids of Turbopump designs with Open CASCADE (OCCT 7.8.1, built statically by
-//! `occt-sys`), through a small C++ bridge (`cpp/tp_cad.cpp`) that turns every OCCT
+//! CAD solids of Turbopump designs with Open CASCADE (OCCT 8.0.1, built statically by
+//! `tp-occt-sys`), through a small C++ bridge (`cpp/tp_cad.cpp`) that turns every OCCT
 //! exception into an error.
 //!
 //! The CAD model is built in **millimetres**, the default unit of the OCCT STEP and

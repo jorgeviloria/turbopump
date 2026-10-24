@@ -1,0 +1,17 @@
+[package]
+name = "tp-occt-sys"
+description = "Static build of Open CASCADE Technology 8.0.1 from source, for the OCCT bridge of tp-cad"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+# The crate builds OCCT, whose licence it carries; the build script itself is trivial.
+license = "LGPL-2.1-only WITH OCCT-exception-1.0"
+authors.workspace = true
+publish = false
+build = "build.rs"
+
+[dependencies]
+cmake.workspace = true
+
+[lints]
+workspace = true

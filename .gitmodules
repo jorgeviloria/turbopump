@@ -1,0 +1,4 @@
+[submodule "crates/tp-occt-sys/OCCT"]
+	path = crates/tp-occt-sys/OCCT
+	url = https://github.com/Open-Cascade-SAS/OCCT.git
+	shallow = true
