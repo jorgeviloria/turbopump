@@ -45,6 +45,16 @@ pub enum Selection {
 pub(crate) struct Status {
     pub text: String,
     pub error: bool,
+    /// More than the line holds, such as the whole path of a file: shown on hover.
+    pub detail: Option<String>,
+}
+
+/// The name of a file without its folders, for a status line that has room for it.
+pub(crate) fn file_name(path: &Path) -> String {
+    path.file_name().map_or_else(
+        || path.display().to_string(),
+        |n| n.to_string_lossy().into_owned(),
+    )
 }
 
 /// What the panels may change while they are drawn.
@@ -79,6 +89,7 @@ impl EditCtx<'_> {
         *self.status = Some(Status {
             text: text.into(),
             error: false,
+            detail: None,
         });
     }
 
@@ -86,6 +97,7 @@ impl EditCtx<'_> {
         *self.status = Some(Status {
             text: text.into(),
             error: true,
+            detail: None,
         });
     }
 
@@ -1065,7 +1077,10 @@ impl TurbopumpApp {
 
     fn report_export(&mut self, result: Result<Option<PathBuf>, String>) {
         match result {
-            Ok(Some(path)) => self.info(tf("Wrote {}", &[&path.display()])),
+            Ok(Some(path)) => {
+                let text = tf("Wrote {}", &[&file_name(&path)]);
+                self.about_file(false, text, &path);
+            }
             Ok(None) => {}
             Err(e) => self.error(e),
         }
@@ -1288,6 +1303,7 @@ impl TurbopumpApp {
         self.status = Some(Status {
             text: text.into(),
             error: false,
+            detail: None,
         });
     }
 
@@ -1295,6 +1311,17 @@ impl TurbopumpApp {
         self.status = Some(Status {
             text: text.into(),
             error: true,
+            detail: None,
+        });
+    }
+
+    /// A message about the file at `path`: its name in the line, the whole path on
+    /// hover.
+    fn about_file(&mut self, error: bool, text: String, path: &Path) {
+        self.status = Some(Status {
+            text,
+            error,
+            detail: Some(path.display().to_string()),
         });
     }
 
@@ -1324,12 +1351,15 @@ impl TurbopumpApp {
             Ok(doc) => {
                 self.doc = doc;
                 self.select_first_step();
-                self.info(tf("Opened {}", &[&path.display()]));
+                self.about_file(false, tf("Opened {}", &[&file_name(path)]), path);
             }
-            Err(e) => self.error(tf(
-                "Could not open {}: {}",
-                &[&path.display(), &message(&e.to_string())],
-            )),
+            Err(e) => {
+                let text = tf(
+                    "Could not open {}: {}",
+                    &[&file_name(path), &message(&e.to_string())],
+                );
+                self.about_file(true, text, path);
+            }
         }
     }
 
@@ -1350,8 +1380,9 @@ impl TurbopumpApp {
         }
         match self.doc.save() {
             Ok(()) => {
-                let path = self.doc.path().map(|p| p.display().to_string());
-                self.info(tf("Saved {}", &[&path.unwrap_or_default()]));
+                if let Some(path) = self.doc.path().map(Path::to_path_buf) {
+                    self.about_file(false, tf("Saved {}", &[&file_name(&path)]), &path);
+                }
                 true
             }
             Err(e) => {
@@ -1376,7 +1407,7 @@ impl TurbopumpApp {
         };
         match self.doc.save_as(&path) {
             Ok(()) => {
-                self.info(tf("Saved {}", &[&path.display()]));
+                self.about_file(false, tf("Saved {}", &[&file_name(&path)]), &path);
                 true
             }
             Err(e) => {
@@ -1390,14 +1421,18 @@ impl TurbopumpApp {
         let p = Palette::of(ui);
         ui.horizontal(|ui| {
             match &self.status {
-                Some(Status { text, error: true }) => {
-                    ui.colored_label(
-                        ui.visuals().error_fg_color,
-                        format!("{}  {}", icon::X_CIRCLE, message(text)),
-                    );
-                }
-                Some(Status { text, .. }) => {
-                    ui.label(format!("{}  {}", icon::INFO, message(text)));
+                Some(status) => {
+                    let line = if status.error {
+                        ui.colored_label(
+                            ui.visuals().error_fg_color,
+                            format!("{}  {}", icon::X_CIRCLE, message(&status.text)),
+                        )
+                    } else {
+                        ui.label(format!("{}  {}", icon::INFO, message(&status.text)))
+                    };
+                    if let Some(detail) = &status.detail {
+                        line.on_hover_text(detail);
+                    }
                 }
                 None => {
                     ui.label(RichText::new(tr("Ready")).color(p.weak));
@@ -2507,6 +2542,13 @@ mod tests {
             "{}",
             gap(moved)
         );
+    }
+
+    #[test]
+    fn status_lines_name_files_without_their_folders() {
+        let path = Path::new("/var/folders/tw/T/turbopump-meridian-kinds.tpj");
+        assert_eq!(file_name(path), "turbopump-meridian-kinds.tpj");
+        assert_eq!(file_name(Path::new("/")), "/");
     }
 
     #[test]

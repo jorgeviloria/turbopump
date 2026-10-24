@@ -636,6 +636,24 @@ pub(crate) fn neighbours(
     )
 }
 
+/// "1 segment" or "n segments".
+fn segments_count(count: usize) -> String {
+    if count == 1 {
+        tr("1 segment").to_owned()
+    } else {
+        tf("{} segments", &[&count])
+    }
+}
+
+/// "1 step" or "n steps".
+fn steps_count(count: usize) -> String {
+    if count == 1 {
+        tr("1 step").to_owned()
+    } else {
+        tf("{} steps", &[&count])
+    }
+}
+
 /// How many steps of component `id` are left to accept.
 pub(crate) fn remaining(project: &Project, id: ComponentId) -> usize {
     project.component(id).map_or(0, |c| {
@@ -666,8 +684,8 @@ pub(crate) fn complete_all(cx: &mut EditCtx<'_>, id: ComponentId) {
             Some(&last) => {
                 *cx.selection = Selection::Step(id, last);
                 cx.info(tf(
-                    "{}: {} steps done with the suggested values",
-                    &[&name, &done.len()],
+                    "{}: {} done with the suggested values",
+                    &[&name, &steps_count(done.len())],
                 ));
             }
             None => cx.info(tf("Every step of {} is done already", &[&name])),
@@ -678,9 +696,9 @@ pub(crate) fn complete_all(cx: &mut EditCtx<'_>, id: ComponentId) {
         }) => {
             *cx.selection = Selection::Step(id, step);
             cx.error(tf(
-                "{} steps done; {} could not be done: {}",
+                "{} done; {} could not be done: {}",
                 &[
-                    &done.len(),
+                    &steps_count(done.len()),
                     &step_title(step),
                     &crate::i18n::message(&e.to_string()),
                 ],
@@ -1832,7 +1850,7 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                     );
                     let automatic = ui
                         .horizontal(|ui| {
-                            ui.label(tf("{} segments", &[&count]));
+                            ui.label(segments_count(count));
                             ui.button(tr("Automatic")).clicked()
                         })
                         .inner;
@@ -1875,7 +1893,7 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                     );
                     let automatic = ui
                         .horizontal(|ui| {
-                            ui.label(tf("{} segments", &[&count]));
+                            ui.label(segments_count(count));
                             ui.button(tr("Automatic")).clicked()
                         })
                         .inner;
@@ -2076,7 +2094,7 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                 );
                 let automatic = ui
                     .horizontal(|ui| {
-                        ui.label(tf("{} segments", &[&count]));
+                        ui.label(segments_count(count));
                         ui.button(tr("Automatic")).clicked()
                     })
                     .inner;
@@ -2180,7 +2198,7 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                 );
                 let automatic = ui
                     .horizontal(|ui| {
-                        ui.label(tf("{} segments", &[&count]));
+                        ui.label(segments_count(count));
                         ui.button(tr("Automatic")).clicked()
                     })
                     .inner;

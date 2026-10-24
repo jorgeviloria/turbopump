@@ -3308,6 +3308,17 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Opacity of {}", "Opacidad: {}"),
     ("Click for {}", "Con un clic: {}"),
     ("Color of {}", "Color: {}"),
+    (
+        "{}: {} done with the suggested values",
+        "{}: {} con los valores sugeridos",
+    ),
+    (
+        "{} done; {} could not be done: {}",
+        "Hechos: {}; {} no se pudo hacer: {}",
+    ),
+    ("1 step", "1 paso"),
+    ("{} steps", "{} pasos"),
+    ("1 segment", "1 tramo"),
     ("Views", "Vistas"),
     (
         "Views named after the pump, and the ones you save",
@@ -3380,16 +3391,8 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "completar todos los pasos de {}",
     ),
     (
-        "{}: {} steps done with the suggested values",
-        "{}: {} pasos hechos con los valores sugeridos",
-    ),
-    (
         "Every step of {} is done already",
         "Todos los pasos de {} ya están hechos",
-    ),
-    (
-        "{} steps done; {} could not be done: {}",
-        "{} pasos hechos; {} no se pudo hacer: {}",
     ),
     ("Every step is done", "Todos los pasos están hechos"),
     (
