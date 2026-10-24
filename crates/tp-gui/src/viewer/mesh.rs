@@ -10,7 +10,8 @@ use tp_design::impeller::ImpellerGeometry;
 use tp_design::impeller::duct::InletDuct;
 use tp_design::volute::VoluteGeometry;
 use tp_io::mesh::{
-    Triangle, blade_solids, diffuser_parts, impeller_parts, volute_solids, volute_triangles,
+    Triangle, blade_solids, diffuser_parts, impeller_parts, vane_solids, volute_solids,
+    volute_triangles,
 };
 use tp_math::{DVec2, DVec3};
 
@@ -464,6 +465,8 @@ pub(crate) fn build(
                     vec![solids.into_iter().take(count).flatten().collect()]
                 }
                 PartId::Volute => volute.map(volute_solids).unwrap_or_default(),
+                // Apart from each other: one volume.
+                PartId::Vanes => stator.map(|d| vec![vane_solids(d)]).unwrap_or_default(),
                 PartId::Duct => vec![duct.clone()],
                 _ => Vec::new(),
             };
@@ -715,6 +718,29 @@ mod tests {
         }
         options.wireframe = true;
         assert!(build(&g, None, None, Some(v), &options).caps.is_empty());
+    }
+
+    #[test]
+    fn double_volutes_and_diffuser_vanes_are_capped_too() {
+        let mut project = default_project();
+        let volute = project.components()[1].id();
+        let mut input = project.volute_input(volute).unwrap();
+        input.setup.kind = tp_design::volute::VoluteKind::Double;
+        project.set_volute(volute, input).unwrap();
+        let stator = project
+            .add_component(tp_project::ComponentKind::Stator { vaned: true }, Some(1))
+            .unwrap();
+        let mut derived = Derived::default();
+        derived.update(&project);
+        let id = project.components()[0].id();
+        let g = derived.geometry(id).unwrap();
+        let (d, v) = (derived.diffuser(stator), derived.volute(volute).unwrap());
+        assert!(d.is_some_and(|d| d.vanes.is_some()));
+        let mut options = ViewOptions::default();
+        options.volute.opacity = Opacity::Opaque;
+        let mesh = build(g, None, d, Some(v), &options);
+        // The blades, the vanes and each channel of the double volute.
+        assert_eq!(mesh.caps.len(), 2 + v.channels().len());
     }
 
     #[test]

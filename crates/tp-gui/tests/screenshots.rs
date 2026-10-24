@@ -260,6 +260,78 @@ fn cut_caps() {
     save(&mut harness, "cut-caps-facing");
 }
 
+/// The caps of the cut on a double volute, an internal volute and the vanes of a
+/// diffuser: each closed volume shows its cut face, the casing opaque.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn cut_caps_of_every_volume() {
+    use tp_design::volute::{CrossSectionInput, InternalRound, SectionShape, VoluteKind};
+    use tp_project::ComponentKind;
+    // How each variant changes the default project.
+    type Variant = fn(&mut tp_project::Project);
+    let variants: [(&str, Variant); 3] = [
+        ("cut-caps-double", |p| {
+            let id = p.components()[1].id();
+            let mut input = p.volute_input(id).unwrap();
+            input.setup.kind = VoluteKind::Double;
+            p.set_volute(id, input).unwrap();
+        }),
+        ("cut-caps-internal", |p| {
+            let id = p.components()[1].id();
+            let mut input = p.volute_input(id).unwrap();
+            input.cross_section =
+                CrossSectionInput::single(SectionShape::RoundInternal(InternalRound::default()));
+            p.set_volute(id, input).unwrap();
+        }),
+        ("cut-caps-vanes", |p| {
+            p.add_component(ComponentKind::Stator { vaned: true }, Some(1))
+                .unwrap();
+        }),
+    ];
+    for (name, change) in variants {
+        let mut project = tp_gui::default_project();
+        change(&mut project);
+        let ids: Vec<_> = project.components().iter().map(|c| c.id()).collect();
+        for id in ids {
+            assert!(
+                project.design_remaining(id).unwrap().failed.is_none(),
+                "{name}"
+            );
+        }
+        let path = std::env::temp_dir().join(format!("turbopump-{name}.tpj"));
+        project.save(&path).unwrap();
+        let mut harness = Harness::builder()
+            .with_size([1440.0, 900.0])
+            .with_pixels_per_point(1.5)
+            .with_theme(egui::Theme::Light)
+            .wgpu()
+            .build_eframe(|cc| TurbopumpApp::new(cc, Some(&path)));
+        harness.run();
+        harness.state_mut().set_sidebar_open(false);
+        harness.get_by_label("3D tab").click();
+        harness.run();
+        harness.get_by_label("Opacity of Casing").click();
+        harness.run();
+        harness.get_by_label("Meridional cut").click();
+        harness.remove_cursor();
+        harness.run_steps(4);
+        save(&mut harness, name);
+        // The vanes are thin: face on, their cut faces show.
+        if name == "cut-caps-vanes" {
+            harness.get_by_label("Views").click();
+            harness.run();
+            harness.get_by_label("From the side").click();
+            harness.run_steps(40);
+            harness
+                .get_by_label_contains("Open toward the view")
+                .click();
+            harness.remove_cursor();
+            harness.run_steps(4);
+            save(&mut harness, "cut-caps-vanes-facing");
+        }
+    }
+}
+
 /// The Views menu of the 3D tab, a view saved from the side and brought back.
 #[test]
 #[ignore = "needs a GPU; run with --ignored"]

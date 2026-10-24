@@ -277,6 +277,31 @@ pub fn diffuser_parts(d: &DiffuserDesign) -> DiffuserMesh {
     DiffuserMesh { walls, vanes }
 }
 
+/// The vanes of a vaned diffuser as closed solids: their sides, closed also where they
+/// stand on the walls, by a fan over each end. For viewers that need closed volumes,
+/// such as the caps of a cut; the ends lie on the walls and are not drawn. A fan over a
+/// vane outline that is not convex covers some points more than once, but always an
+/// odd number of times inside and an even number outside, which is all a parity count
+/// needs. Empty for a vaneless diffuser.
+pub fn vane_solids(d: &DiffuserDesign) -> Vec<Triangle> {
+    let mut out = diffuser_parts(d).vanes;
+    let Some(v) = &d.vanes else {
+        return out;
+    };
+    let zm = d.midplane;
+    for k in 0..v.count {
+        let outline = v.geometry.outline(k, d.rotation_sign);
+        for side in [-1.0, 1.0] {
+            let ring: Vec<DVec3> = outline
+                .iter()
+                .map(|p| DVec3::new(p.x, p.y, zm + side * d.half_width(p.length())))
+                .collect();
+            cap(&mut out, &ring);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -372,11 +397,13 @@ pub(crate) mod tests {
             )),
             ..VoluteInput::default()
         };
-        for input in [VoluteInput::default(), internal] {
+        let mut double = VoluteInput::default();
+        double.setup.kind = tp_design::volute::VoluteKind::Double;
+        for input in [VoluteInput::default(), internal, double] {
             let v = VoluteGeometry::build(&basis, &input).unwrap();
             let solids = volute_solids(&v);
             assert_eq!(solids.len(), v.channels().len());
-            assert!(solids.iter().all(|s| closed(s)));
+            assert!(solids.iter().all(|s| closed(s)), "{:?}", input.setup.kind);
         }
     }
 
@@ -464,6 +491,11 @@ pub(crate) mod tests {
         }
         let vaneless = DiffuserDesign::new(&outlet, &DiffuserInput::default(), false).unwrap();
         assert!(diffuser_parts(&vaneless).vanes.is_empty());
+        // Closed at the walls, the vanes are solids: every edge shared by an even
+        // number of triangles.
+        assert!(!closed(&mesh.vanes));
+        assert!(closed(&vane_solids(&vaned)));
+        assert!(vane_solids(&vaneless).is_empty());
     }
 
     #[test]
