@@ -968,8 +968,16 @@ fn inlet_duct() {
     let id = project.components()[0].id();
     let mut input = project.impeller_geometry_input(id).unwrap();
     input.meridional.chambers.enabled = true;
-    input.meridional.inlet_duct.enabled = true;
     project.set_impeller_geometry(id, input).unwrap();
+    // The duct ahead of the impeller, and every step of the stage done.
+    project
+        .add_component(tp_project::ComponentKind::InletDuct, Some(0))
+        .unwrap();
+    let ids: Vec<_> = project.components().iter().map(|c| c.id()).collect();
+    // The impeller first: the duct is built on it.
+    for c in [ids[1], ids[0], ids[2]] {
+        assert!(project.design_remaining(c).unwrap().failed.is_none());
+    }
     let path = std::env::temp_dir().join("turbopump-inlet-duct.tpj");
     project.save(&path).unwrap();
     let mut harness = Harness::builder()
@@ -979,26 +987,15 @@ fn inlet_duct() {
         .wgpu()
         .build_eframe(|cc| TurbopumpApp::new(cc, Some(&path)));
     harness.run();
-    for _ in 0..2 {
-        harness.get_by_label_contains("Accept step").click();
-        harness.run();
-    }
+    // Its own step in the flow, under the inlet.
+    harness.get_by_label("Inlet duct 1").click();
+    harness.run();
     harness.state_mut().focus_view(View::Meridian);
     harness.state_mut().set_meridian_scope(Scope::Chambers);
     harness.run();
     harness.get_by_label("Fit all").click();
     harness.run();
     save(&mut harness, "inlet-duct-meridian");
-    harness
-        .get_by_label("Complete every step of Impeller 1")
-        .click();
-    harness.run();
-    harness.get_by_label("Volute 1").click();
-    harness.run();
-    harness
-        .get_by_label("Complete every step of Volute 1")
-        .click();
-    harness.run();
     harness.state_mut().set_sidebar_open(false);
     harness.get_by_label("3D tab").click();
     harness.run();

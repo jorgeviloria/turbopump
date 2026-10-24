@@ -654,6 +654,7 @@ pub(crate) fn phase(kind: ComponentKind, step: DesignStep) -> &'static str {
         (ComponentKind::Volute, CrossSection | SpiralDevelopment | Diffuser | CutWater) => {
             "GEOMETRY"
         }
+        (_, DuctDimensions) => "SIZING",
         (_, MainDimensions) => "SIZING",
         (_, MeridionalContour) => "MERIDIAN",
         (_, BladeProperties | BladeMeanLines | BladeProfiles | BladeEdges) => "BLADING",
@@ -781,6 +782,14 @@ pub(crate) fn key_value(
     use DesignStep::*;
     let length = units.get(QuantityKind::Length).symbol;
     match (kind, step) {
+        (ComponentKind::InletDuct, DuctDimensions) => {
+            let d = cx.derived.duct(id)?;
+            Some(format!(
+                "L {} · d {} {length}",
+                short(units, QuantityKind::Length, d.values.length),
+                short(units, QuantityKind::Length, d.values.diameter)
+            ))
+        }
         (ComponentKind::Impeller, MainDimensions) => {
             let m = cx.derived.main(id)?;
             Some(format!(

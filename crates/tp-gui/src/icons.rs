@@ -12,6 +12,7 @@ use crate::theme::icon;
 pub(crate) fn step(step: DesignStep) -> &'static str {
     use DesignStep::*;
     match step {
+        DuctDimensions => icon::PIPE,
         MainDimensions => icon::RULER,
         MeridionalContour => icon::BEZIER_CURVE,
         BladeProperties => icon::SLIDERS_HORIZONTAL,
@@ -90,6 +91,22 @@ pub(crate) fn component(painter: &Painter, rect: Rect, kind: ComponentKind, colo
                 [cutwater, pos2(cutwater.x + r * 0.1, rect.top() + r * 0.05)],
                 stroke,
             );
+        }
+        ComponentKind::InletDuct => {
+            // A pipe seen from the side, open at both ends, with the flow along it.
+            let (left, right) = (c.x - r * 0.9, c.x + r * 0.9);
+            let half = r * 0.48;
+            for y in [c.y - half, c.y + half] {
+                painter.line_segment([pos2(left, y), pos2(right, y)], stroke);
+            }
+            for x in [left, right] {
+                painter.line_segment([pos2(x, c.y - half), pos2(x, c.y + half)], stroke);
+            }
+            let tip = pos2(c.x + r * 0.42, c.y);
+            painter.line_segment([pos2(c.x - r * 0.42, c.y), tip], stroke);
+            for dy in [-1.0, 1.0] {
+                painter.line_segment([tip, pos2(tip.x - r * 0.22, c.y + dy * r * 0.2)], stroke);
+            }
         }
     }
 }

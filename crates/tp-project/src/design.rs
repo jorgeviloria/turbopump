@@ -2,6 +2,7 @@
 
 use tp_design::MainDimensionsInput;
 use tp_design::diffuser::{DiffuserDesign, DiffuserInput};
+use tp_design::impeller::duct::{self, DuctInput, InletDuct};
 use tp_design::impeller::{self, ImpellerBasis, ImpellerGeometry, ImpellerGeometryInput};
 use tp_design::npsh::CollectorThroat;
 use tp_design::outlet::ImpellerOutlet;
@@ -69,6 +70,7 @@ pub fn can_design(kind: ComponentKind, step: DesignStep) -> bool {
         ComponentKind::Volute => VOLUTE_STEPS.contains(&step),
         ComponentKind::Stator { vaned: true } => VANED_STEPS.contains(&step),
         ComponentKind::Stator { vaned: false } => VANELESS_STEPS.contains(&step),
+        ComponentKind::InletDuct => step == DesignStep::DuctDimensions,
     }
 }
 
@@ -392,6 +394,13 @@ impl Project {
                 self.compute_diffuser(id)?;
                 self.component_mut(id)?.complete(step)?;
             }
+            ComponentKind::InletDuct if step == DesignStep::DuctDimensions => {
+                let built = self.compute_duct(id)?;
+                if let Some(w) = built.warnings.first() {
+                    return Err(ProjectError::Unsupported(w.clone()));
+                }
+                self.component_mut(id)?.complete(step)?;
+            }
             _ => {
                 return Err(ProjectError::Unsupported(format!(
                     "the {step} step of a {} (planned for a later phase)",
@@ -400,6 +409,52 @@ impl Project {
             }
         }
         Ok(())
+    }
+
+    /// Marks the inlet duct ahead of impeller `id` stale: it is built on the inlet of
+    /// the impeller.
+    fn invalidate_duct_before(&mut self, id: ComponentId) -> Result<(), ProjectError> {
+        let index = self.index_of(id)?;
+        if let Some(i) = index.checked_sub(1)
+            && self.components()[i].kind() == ComponentKind::InletDuct
+        {
+            let duct = self.components()[i].id();
+            self.component_mut(duct)?.invalidate_all();
+        }
+        Ok(())
+    }
+
+    /// The inputs of inlet duct `id`, all automatic if never set.
+    pub fn duct_input(&self, id: ComponentId) -> Result<DuctInput, ProjectError> {
+        let component = self
+            .component(id)
+            .ok_or(ProjectError::UnknownComponent(id))?;
+        if component.kind() != ComponentKind::InletDuct {
+            return Err(ProjectError::NotAnInletDuct(id));
+        }
+        Ok(component.duct().copied().unwrap_or_default())
+    }
+
+    /// The impeller after inlet duct `id`, whose inlet the duct is built on.
+    pub fn impeller_after_duct(&self, id: ComponentId) -> Result<ComponentId, ProjectError> {
+        let index = self.index_of(id)?;
+        match self.components().get(index + 1) {
+            Some(c) if c.kind() == ComponentKind::Impeller => Ok(c.id()),
+            _ => Err(ProjectError::DuctNotBeforeImpeller),
+        }
+    }
+
+    /// Builds inlet duct `id` on the inlet of the impeller after it, without changing
+    /// the project. What cannot be built as asked is in its warnings.
+    pub fn compute_duct(&self, id: ComponentId) -> Result<InletDuct, ProjectError> {
+        let input = self.duct_input(id)?;
+        let g = self.compute_impeller_geometry(self.impeller_after_duct(id)?)?;
+        Ok(duct::build(&g.contour, &g.basis, &input))
+    }
+
+    /// Replaces the inputs of inlet duct `id`.
+    pub fn set_duct(&mut self, id: ComponentId, input: DuctInput) -> Result<(), ProjectError> {
+        self.component_mut(id)?.set_duct(input)
     }
 
     /// Marks every component after `id` stale: they are coupled to its outlet.
@@ -430,6 +485,7 @@ impl Project {
         self.component_mut(id)?.set_main_dimensions(input)?;
         if changed {
             self.invalidate_downstream(id)?;
+            self.invalidate_duct_before(id)?;
         }
         Ok(())
     }
@@ -446,6 +502,8 @@ impl Project {
         self.component_mut(id)?.set_geometry(input)?;
         if outlet_moved {
             self.invalidate_downstream(id)?;
+            // The inlet moves too.
+            self.invalidate_duct_before(id)?;
         }
         Ok(())
     }
@@ -527,6 +585,11 @@ impl Project {
             ComponentKind::Volute => {
                 return Err(ProjectError::Unsupported(format!(
                     "a {what} after a volute (planned for a later phase)"
+                )));
+            }
+            ComponentKind::InletDuct => {
+                return Err(ProjectError::Unsupported(format!(
+                    "a {what} right after an inlet duct"
                 )));
             }
         }
@@ -825,6 +888,98 @@ mod tests {
         let impeller = p.add_component(ComponentKind::Impeller, None).unwrap();
         let volute = p.add_component(ComponentKind::Volute, None).unwrap();
         (p, impeller, volute)
+    }
+
+    #[test]
+    fn an_inlet_duct_comes_first_and_follows_the_impeller_inlet() {
+        let (mut p, impeller, volute) = pump_with_volute();
+        // Only first, and only before an impeller.
+        assert!(matches!(
+            p.add_component(ComponentKind::InletDuct, Some(1)),
+            Err(ProjectError::DuctNotBeforeImpeller)
+        ));
+        let duct = p.add_component(ComponentKind::InletDuct, Some(0)).unwrap();
+        assert_eq!(p.components()[0].name, "Inlet duct 1");
+        assert!(matches!(
+            p.add_component(ComponentKind::InletDuct, Some(0)),
+            Err(ProjectError::DuctNotBeforeImpeller)
+        ));
+        assert!(matches!(
+            p.remove_component(impeller),
+            Err(ProjectError::DuctNotBeforeImpeller)
+        ));
+        // Built on the inlet of the impeller after it, with its eye as run-up.
+        let built = p.compute_duct(duct).unwrap();
+        let g = p.compute_impeller_geometry(impeller).unwrap();
+        assert!(built.warnings.is_empty(), "{:?}", built.warnings);
+        assert_eq!(built.values.length, g.basis.inlet_diameter);
+        p.design_step(duct, DesignStep::DuctDimensions).unwrap();
+        assert!(p.component(duct).unwrap().is_complete());
+        // A new contour moves the inlet: the duct is outdated, the volute too.
+        p.design_step(volute, DesignStep::VoluteSetup).unwrap();
+        let mut input = p.impeller_geometry_input(impeller).unwrap();
+        input.meridional.axial_length = Param::Manual(0.05);
+        p.set_impeller_geometry(impeller, input).unwrap();
+        for id in [duct, volute] {
+            assert!(
+                p.component(id)
+                    .unwrap()
+                    .steps()
+                    .any(|(_, s)| s == StepStatus::Stale)
+            );
+        }
+        // Its own inputs outdate it, and a value it cannot build fails the step.
+        p.design_step(duct, DesignStep::DuctDimensions).unwrap();
+        let bad = DuctInput {
+            length: Param::Manual(-0.1),
+            ..DuctInput::default()
+        };
+        p.set_duct(duct, bad).unwrap();
+        assert_eq!(
+            p.component(duct)
+                .unwrap()
+                .status(DesignStep::DuctDimensions),
+            StepStatus::Stale
+        );
+        assert!(p.design_step(duct, DesignStep::DuctDimensions).is_err());
+        assert!(matches!(
+            p.set_duct(impeller, DuctInput::default()),
+            Err(ProjectError::NotAnInletDuct(_))
+        ));
+    }
+
+    #[test]
+    fn older_files_turn_a_modelled_duct_into_a_component() {
+        let (mut p, impeller, _) = pump_with_volute();
+        let mut input = p.impeller_geometry_input(impeller).unwrap();
+        input.meridional.axial_length = Param::Manual(0.05);
+        p.set_impeller_geometry(impeller, input).unwrap();
+        // As older versions wrote it: the duct inside the contour, with its switch.
+        let mut json: serde_json::Value = serde_json::from_str(&p.to_json().unwrap()).unwrap();
+        json["project"]["components"][0]["geometry"]["meridional"]["inlet_duct"] =
+            serde_json::json!({ "enabled": true, "length": { "mode": "manual", "value": 0.12 } });
+        let old = Project::from_json(&json.to_string()).unwrap();
+        let kinds: Vec<ComponentKind> = old.components().iter().map(|c| c.kind()).collect();
+        assert_eq!(
+            kinds,
+            [
+                ComponentKind::InletDuct,
+                ComponentKind::Impeller,
+                ComponentKind::Volute
+            ]
+        );
+        let duct = old.components()[0].id();
+        assert_eq!(old.duct_input(duct).unwrap().length, Param::Manual(0.12));
+        assert!(duct.0 > impeller.0);
+        // The rest of the contour stays, the switch goes.
+        let contour = old.impeller_geometry_input(impeller).unwrap().meridional;
+        assert_eq!(contour.axial_length, Param::Manual(0.05));
+        assert_eq!(contour.inlet_duct, Default::default());
+        // A duct that was off leaves no component.
+        json["project"]["components"][0]["geometry"]["meridional"]["inlet_duct"] =
+            serde_json::json!({ "enabled": false });
+        let off = Project::from_json(&json.to_string()).unwrap();
+        assert_eq!(off.components().len(), 2);
     }
 
     #[test]

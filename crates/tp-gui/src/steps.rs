@@ -49,6 +49,7 @@ pub(crate) fn is_available(kind: ComponentKind, step: DesignStep) -> bool {
         ComponentKind::Stator { vaned: false } => {
             VANELESS_STEPS.contains(&step) || step == ModelSettings
         }
+        ComponentKind::InletDuct => step == DuctDimensions,
     }
 }
 
@@ -71,10 +72,19 @@ pub(crate) fn planned_phase(kind: ComponentKind, step: DesignStep) -> String {
 
 /// What a step does and where its method comes from, for the ⓘ beside its status.
 fn intro(kind: ComponentKind, step: DesignStep) -> Option<&'static str> {
-    use ComponentKind::{Impeller, Stator, Volute};
+    use ComponentKind::{Impeller, InletDuct, Stator, Volute};
     use DesignStep::*;
     let text = match (kind, step) {
+        (InletDuct, DuctDimensions) => {
+            "An axial duct ahead of the first impeller, for the inlet of a CFD domain: its \
+             outlet follows the inlet of the impeller, whose hub ends in a round nose. With the \
+             side chambers designed it ends an axial gap short of the neck tip, the notch \
+             beside the eye in the Meridian: the leakage through the annular seal returns into \
+             the eye there, inside the same domain. Drawn in the Side chambers scope of the \
+             Meridian view and in the 3D view, and exported with the CAD model."
+        }
         (_, ModelSettings) => match kind {
+            InletDuct => return None,
             Volute => {
                 "CAD solid of the volute flow domain, built with Open CASCADE. CFD setup and \
                  model finishing arrive in phases 8 and 9."
@@ -705,6 +715,7 @@ pub(crate) fn accept_state(
     let computed = match (kind, step) {
         (ComponentKind::Volute, _) => derived.volute(id).is_some(),
         (ComponentKind::Stator { .. }, _) => derived.diffuser(id).is_some(),
+        (ComponentKind::InletDuct, _) => derived.duct(id).is_some_and(|d| d.warnings.is_empty()),
         (_, DesignStep::MainDimensions) => derived.main(id).is_some(),
         _ => derived.geometry(id).is_some(),
     };
@@ -1287,6 +1298,10 @@ fn step_panel(ui: &mut Ui, cx: &mut EditCtx<'_>, id: ComponentId, step: DesignSt
                         crate::diffuser_steps::show(ui, cx, &project, id, step);
                         return;
                     }
+                    ComponentKind::InletDuct => {
+                        duct_dimensions(ui, cx, &project, id);
+                        return;
+                    }
                     ComponentKind::Impeller => {}
                 }
             }
@@ -1344,6 +1359,12 @@ pub(crate) fn reset(cx: &mut EditCtx<'_>, project: &Project, id: ComponentId, st
 
 /// The error and the warnings of the computation behind `step`.
 fn problems(cx: &EditCtx<'_>, id: ComponentId, step: DesignStep) -> (Option<String>, Vec<String>) {
+    if let Some(result) = cx.derived.duct_result(id) {
+        return match result {
+            Ok(d) => (None, d.warnings.clone()),
+            Err(e) => (Some(e.clone()), Vec::new()),
+        };
+    }
     if let Some(result) = cx.derived.diffuser_result(id) {
         return match result {
             Ok(d) => (None, d.warnings.clone()),
@@ -2341,76 +2362,6 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
             }
         });
     }
-    if section_info(
-        ui,
-        tr("Inlet duct"),
-        tr(
-            "An axial duct ahead of the eye, for the inlet of a CFD domain. With the side chambers designed, it ends an axial gap short of the neck tip, so the leakage through the annular seal returns into the eye inside the same domain",
-        ),
-    ) {
-        props(ui, "inlet_duct", |ui| {
-            let built = g.map(|g| g.contour.inlet_duct.values);
-            let duct = &mut m.inlet_duct;
-            label(
-                ui,
-                tr("Model the inlet duct"),
-                tr(
-                    "Export its fluid with the CAD model, alone and inside the joined flow domain; it is drawn in the Side chambers scope of the Meridian view",
-                ),
-            );
-            let enabled = duct.enabled;
-            let response = ui.checkbox(&mut duct.enabled, "");
-            response.widget_info(|| {
-                egui::WidgetInfo::selected(
-                    egui::WidgetType::Checkbox,
-                    true,
-                    enabled,
-                    tr("Model the inlet duct"),
-                )
-            });
-            changed |= response.changed();
-            ui.end_row();
-            changed |= param_f64(
-                ui,
-                tr("Length L"),
-                tr("Upstream of the eye; automatic: the eye diameter d₁ (our choice)"),
-                &mut duct.length,
-                Length,
-                built.map(|v| v.length),
-                &units,
-                0.001..=5.0,
-            );
-            changed |= param_f64(
-                ui,
-                tr("Duct diameter"),
-                tr("Automatic: the shroud diameter at the inlet, so the wall carries straight on"),
-                &mut duct.diameter,
-                Length,
-                built.map(|v| v.diameter),
-                &units,
-                0.001..=5.0,
-            );
-            changed |= param_f64(
-                ui,
-                tr("Axial gap Δz"),
-                tr(
-                    "Between the suction cover at the end of the duct and the tip of the neck, where the leakage comes out; automatic: the axial gap of the side chambers",
-                ),
-                &mut duct.axial_gap,
-                Length,
-                built.map(|v| v.axial_gap),
-                &units,
-                0.00001..=0.2,
-            );
-            if let Some(v) = built {
-                value_row(
-                    ui,
-                    tr("Hub diameter through the duct"),
-                    units.show(Length, v.hub_diameter),
-                );
-            }
-        });
-    }
     if changed {
         edit_geometry(cx, id, "edit meridional contour", input);
     }
@@ -3175,6 +3126,86 @@ pub(crate) fn ready_for_cad(component: &tp_project::Component) -> bool {
         ComponentKind::Stator { vaned: true } => done(&VANED_STEPS),
         ComponentKind::Stator { vaned: false } => done(&VANELESS_STEPS),
         ComponentKind::Impeller => component.status(DesignStep::BladeEdges) == StepStatus::Done,
+        ComponentKind::InletDuct => {
+            component.status(DesignStep::DuctDimensions) == StepStatus::Done
+        }
+    }
+}
+
+/// The inlet duct ahead of the first impeller: its length, diameter and axial gap, built
+/// on the inlet of the impeller.
+fn duct_dimensions(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: ComponentId) {
+    use QuantityKind::Length;
+    let units = project.display_units.clone();
+    let Ok(mut input) = project.duct_input(id) else {
+        return;
+    };
+    let built = cx.derived.duct(id).map(|d| (d.values, d.joins_seal));
+    let mut changed = false;
+    if section(ui, tr("Duct")) {
+        props(ui, "inlet_duct", |ui| {
+            changed |= param_f64(
+                ui,
+                tr("Length L"),
+                tr("Upstream of the eye; automatic: the eye diameter d₁ (our choice)"),
+                &mut input.length,
+                Length,
+                built.map(|(v, _)| v.length),
+                &units,
+                0.001..=5.0,
+            );
+            changed |= param_f64(
+                ui,
+                tr("Duct diameter"),
+                tr("Automatic: the shroud diameter at the inlet, so the wall carries straight on"),
+                &mut input.diameter,
+                Length,
+                built.map(|(v, _)| v.diameter),
+                &units,
+                0.001..=5.0,
+            );
+            changed |= param_f64(
+                ui,
+                tr("Axial gap Δz"),
+                tr(
+                    "Between the suction cover at the end of the duct and the tip of the neck, where the leakage comes out; automatic: the axial gap of the side chambers",
+                ),
+                &mut input.axial_gap,
+                Length,
+                built.map(|(v, _)| v.axial_gap),
+                &units,
+                0.00001..=0.2,
+            );
+        });
+    }
+    if let Some((v, joins_seal)) = built
+        && section_kind(ui, tr("Built"), "", Kind::Results)
+    {
+        props(ui, "inlet_duct_results", |ui| {
+            value_info(
+                ui,
+                tr("Hub nose"),
+                tr(
+                    "A half sphere of the hub radius at the inlet, tangent to the hub: how far it reaches upstream",
+                ),
+                units.show(Length, v.nose_length),
+            );
+            value_info(
+                ui,
+                tr("Ends at"),
+                tr(
+                    "With the side chambers designed, an axial gap before the neck tip; without them, at the tip",
+                ),
+                tr(if joins_seal {
+                    "the seal exit"
+                } else {
+                    "the neck tip"
+                }),
+            );
+        });
+    }
+    if changed {
+        cx.edit(tr("edit inlet duct"), |p| p.set_duct(id, input));
     }
 }
 

@@ -3389,14 +3389,20 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ),
     ("Inlet duct", "Tubería de entrada"),
     (
-        "An axial duct ahead of the eye, for the inlet of a CFD domain. With the side chambers designed, it ends an axial gap short of the neck tip, so the leakage through the annular seal returns into the eye inside the same domain",
-        "Una tubería axial delante de la boca, para la entrada de un dominio de CFD. Con las cámaras laterales diseñadas, termina a una holgura axial de la punta del cuello, de modo que la fuga del anillo de cierre vuelve a la boca dentro del mismo dominio",
+        "An axial duct ahead of the first impeller, for the inlet of a CFD domain: its outlet follows the inlet of the impeller, whose hub ends in a round nose. With the side chambers designed it ends an axial gap short of the neck tip, the notch beside the eye in the Meridian: the leakage through the annular seal returns into the eye there, inside the same domain. Drawn in the Side chambers scope of the Meridian view and in the 3D view, and exported with the CAD model.",
+        "Una tubería axial delante del primer rodete, para la entrada de un dominio CFD: su salida sigue a la entrada del rodete, cuyo cubo acaba en una nariz redondeada. Con las cámaras laterales diseñadas termina a una holgura axial de la punta del cuello, la ranura junto a la boca en el Meridiano: por ahí la fuga del anillo de cierre vuelve a la boca, dentro del mismo dominio. Se dibuja en el ámbito Cámaras laterales de la vista Meridiano y en la vista 3D, y se exporta con el modelo CAD.",
     ),
-    ("Model the inlet duct", "Modelar la tubería de entrada"),
+    ("Duct dimensions", "Dimensiones de la tubería"),
+    ("Duct", "Tubería"),
+    ("Built", "Construida"),
+    ("Ends at", "Termina en"),
     (
-        "Export its fluid with the CAD model, alone and inside the joined flow domain; it is drawn in the Side chambers scope of the Meridian view",
-        "Exporta su fluido con el modelo CAD, solo y dentro del dominio fluido unido; se dibuja en el ámbito Cámaras laterales de la vista Meridiano",
+        "With the side chambers designed, an axial gap before the neck tip; without them, at the tip",
+        "Con las cámaras laterales diseñadas, a una holgura axial antes de la punta del cuello; sin ellas, en la punta",
     ),
+    ("the seal exit", "la salida del anillo"),
+    ("the neck tip", "la punta del cuello"),
+    ("edit inlet duct", "editar la tubería de entrada"),
     ("Length L", "Longitud L"),
     (
         "Upstream of the eye; automatic: the eye diameter d₁ (our choice)",
@@ -3412,9 +3418,10 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Between the suction cover at the end of the duct and the tip of the neck, where the leakage comes out; automatic: the axial gap of the side chambers",
         "Entre la tapa de aspiración al final de la tubería y la punta del cuello, por donde sale la fuga; automático: la holgura axial de las cámaras laterales",
     ),
+    ("Hub nose", "Nariz del cubo"),
     (
-        "Hub diameter through the duct",
-        "Diámetro del cubo en la tubería",
+        "A half sphere of the hub radius at the inlet, tangent to the hub: how far it reaches upstream",
+        "Media esfera del radio del cubo en la entrada, tangente al cubo: cuánto se adelanta",
     ),
     (
         "Complete every step of the component",

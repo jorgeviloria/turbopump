@@ -17,7 +17,7 @@ use super::center;
 pub use super::center::DesignMode;
 use super::chambers::{self, ChamberSettings, Chambers};
 use super::crossings::{Crossing, crossings};
-use super::duct::{self, DuctSettings, InletDuct};
+use super::duct::LegacyDuct;
 use super::material::{self, Material, MaterialSettings};
 use super::wall::{SegmentInput, Wall};
 use crate::{DesignError, Param};
@@ -63,8 +63,10 @@ pub struct MeridionalInput {
     pub shroud_material: Option<Vec<SegmentInput>>,
     /// The side chambers between the impeller and the casing.
     pub chambers: ChamberSettings,
-    /// The axial inlet duct ahead of the impeller.
-    pub inlet_duct: DuctSettings,
+    /// The inlet duct as older files keep it here; the project moves it to a component
+    /// of its own as it loads them.
+    #[serde(skip_serializing)]
+    pub inlet_duct: LegacyDuct,
     /// Hub and shroud drawn, or following a center line.
     pub design_mode: DesignMode,
     /// Center line drawn segment by segment, from the middle of the inlet to the middle
@@ -438,8 +440,6 @@ pub struct MeridionalContour {
     pub material_warnings: Vec<String>,
     /// The side chambers beside the material, built whether designed or not.
     pub chambers: Chambers,
-    /// The inlet duct ahead of the eye, built whether modelled or not.
-    pub inlet_duct: InletDuct,
     /// Where walls cross each other or themselves; the casing walls only when the
     /// chambers are designed.
     pub crossings: Vec<Crossing>,
@@ -621,14 +621,6 @@ impl MeridionalContour {
             .lerp(shroud_line.point_at_fraction(0.5), 0.5);
         let side_chambers =
             chambers::build(&wires.shroud, &wires.hub, inside, basis, &input.chambers)?;
-        let inlet_duct = duct::build(
-            &hub,
-            &shroud,
-            &wires.shroud,
-            &side_chambers,
-            basis,
-            &input.inlet_duct,
-        );
         // Walls dragged across each other.
         let mut walls: Vec<(&'static str, &Wall)> = vec![
             ("hub", &hub),
@@ -648,7 +640,6 @@ impl MeridionalContour {
             shroud_line,
             crossings: found,
             chambers: side_chambers,
-            inlet_duct,
             center_line,
             axial_reference: input.axial_reference,
             hub,

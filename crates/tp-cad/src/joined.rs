@@ -60,13 +60,15 @@ pub fn joining_ring(g: &ImpellerGeometry, volute: &VoluteGeometry) -> Result<[DV
     ])
 }
 
-/// The joined flow domain of `impeller` (with designed side chambers) and `volute`, and
-/// what to warn about: separate solids when the faces did not join.
+/// The joined flow domain of `impeller` (with designed side chambers), `volute` and,
+/// when there is one, the inlet `duct` ahead of the impeller, and what to warn about:
+/// separate solids when the faces did not join.
 pub fn join_fluid(
     impeller: &ImpellerCad,
     g: &ImpellerGeometry,
     volute: &VoluteCad,
     volute_geometry: &VoluteGeometry,
+    duct: Option<&Shape>,
 ) -> Result<(Shape, Vec<String>), CadError> {
     let chambers = impeller.side_chambers.as_ref().ok_or_else(|| {
         CadError::Input("the joined fluid needs the side chambers to be designed".into())
@@ -82,7 +84,7 @@ pub fn join_fluid(
         .fuse_fuzzy(&ring, JOIN_TOLERANCE)?
         .fuse_fuzzy(chambers, JOIN_TOLERANCE)?
         .fuse_fuzzy(&volute.fluid, JOIN_TOLERANCE)?;
-    if let Some(duct) = &impeller.inlet_duct {
+    if let Some(duct) = duct {
         joined = joined.fuse_fuzzy(duct, JOIN_TOLERANCE)?;
     }
     let mut warnings = Vec::new();
@@ -128,7 +130,7 @@ mod tests {
         };
         let cad = build_impeller(&g, &sharp).unwrap();
         let volute = build_volute(&vg).unwrap();
-        let (joined, warnings) = join_fluid(&cad, &g, &volute, &vg).unwrap();
+        let (joined, warnings) = join_fluid(&cad, &g, &volute, &vg, None).unwrap();
         assert!(warnings.is_empty(), "{warnings:?}");
         assert_eq!(joined.solid_count(), 1);
         assert!(joined.is_valid());
@@ -138,15 +140,14 @@ mod tests {
         assert!(joined.volume() < parts + volute.fluid.volume() * 1.1);
 
         // With the inlet duct, still one solid, larger by the duct.
-        let mut with_duct = input.clone();
-        with_duct.meridional.inlet_duct.enabled = true;
-        let (gd, _, _) = reference_with(&with_duct);
-        let cad_duct = build_impeller(&gd, &sharp).unwrap();
-        let (joined_duct, warnings) = join_fluid(&cad_duct, &gd, &volute, &vg).unwrap();
+        use tp_design::impeller::duct::{self, DuctInput};
+        let built = duct::build(&g.contour, &g.basis, &DuctInput::default());
+        let shape = crate::build_inlet_duct(&built).unwrap();
+        let (joined_duct, warnings) = join_fluid(&cad, &g, &volute, &vg, Some(&shape)).unwrap();
         assert!(warnings.is_empty(), "{warnings:?}");
         assert_eq!(joined_duct.solid_count(), 1);
         assert!(joined_duct.is_valid());
-        let duct = cad_duct.inlet_duct.as_ref().unwrap().volume();
+        let duct = shape.volume();
         assert!((joined_duct.volume() - joined.volume() - duct).abs() < 0.01 * duct);
 
         // A slanted outlet edge does not open the chambers at one radius.

@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use tp_design::MainDimensionsInput;
 use tp_design::diffuser::DiffuserInput;
 use tp_design::impeller::ImpellerGeometryInput;
+use tp_design::impeller::duct::DuctInput;
 use tp_design::volute::VoluteInput;
 use tp_units::QuantityKind;
 
@@ -31,6 +32,8 @@ pub enum ComponentKind {
     Stator { vaned: bool },
     /// Spiral casing at the inlet or outlet of the machine.
     Volute,
+    /// Axial pipe ahead of the first impeller, part of the flow domain for CFD.
+    InletDuct,
 }
 
 impl ComponentKind {
@@ -52,6 +55,7 @@ impl ComponentKind {
             ComponentKind::Stator { vaned: false } => {
                 &[MainDimensions, MeridionalContour, CfdSetup, ModelSettings]
             }
+            ComponentKind::InletDuct => &[DuctDimensions],
             ComponentKind::Volute => &[
                 VoluteSetup,
                 CrossSection,
@@ -71,6 +75,7 @@ impl ComponentKind {
             ComponentKind::Stator { vaned: true } => "Stator",
             ComponentKind::Stator { vaned: false } => "Vaneless stator",
             ComponentKind::Volute => "Volute",
+            ComponentKind::InletDuct => "Inlet duct",
         }
     }
 }
@@ -79,6 +84,8 @@ impl ComponentKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DesignStep {
+    /// Length, diameter and gap of an inlet duct.
+    DuctDimensions,
     MainDimensions,
     MeridionalContour,
     BladeProperties,
@@ -99,6 +106,7 @@ pub enum DesignStep {
 impl fmt::Display for DesignStep {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
+            DesignStep::DuctDimensions => "duct dimensions",
             DesignStep::MainDimensions => "main dimensions",
             DesignStep::MeridionalContour => "meridional contour",
             DesignStep::BladeProperties => "blade properties",
@@ -188,6 +196,9 @@ pub struct Component {
     /// Inputs of the diffuser steps of a stator.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     diffuser: Option<DiffuserInput>,
+    /// Inputs of an inlet duct.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    duct: Option<DuctInput>,
 }
 
 impl Component {
@@ -203,7 +214,25 @@ impl Component {
             geometry: None,
             volute: None,
             diffuser: None,
+            duct: None,
         }
+    }
+
+    /// Inputs of an inlet duct, if any were set.
+    pub fn duct(&self) -> Option<&DuctInput> {
+        self.duct.as_ref()
+    }
+
+    /// Replaces the inputs of an inlet duct; a change makes its step stale.
+    pub fn set_duct(&mut self, input: DuctInput) -> Result<(), ProjectError> {
+        if self.kind != ComponentKind::InletDuct {
+            return Err(ProjectError::NotAnInletDuct(self.id));
+        }
+        if self.duct.unwrap_or_default() != input {
+            self.duct = Some(input);
+            self.invalidate_all();
+        }
+        Ok(())
     }
 
     /// Inputs of the diffuser steps, if any were set.
@@ -283,6 +312,12 @@ impl Component {
     /// Inputs of the geometry steps, if any were set.
     pub fn geometry(&self) -> Option<&ImpellerGeometryInput> {
         self.geometry.as_ref()
+    }
+
+    /// Replaces the geometry inputs without touching any step, for repairs that change
+    /// nothing the design uses.
+    pub(crate) fn set_geometry_unchecked(&mut self, input: ImpellerGeometryInput) {
+        self.geometry = Some(input);
     }
 
     /// Replaces the geometry inputs. Each step whose inputs changed, and every step

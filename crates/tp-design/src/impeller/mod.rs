@@ -248,7 +248,6 @@ pub fn build(
     }
     let mut warnings = contour.material_warnings.clone();
     warnings.extend(contour.chambers.warnings.iter().cloned());
-    warnings.extend(contour.inlet_duct.warnings.iter().cloned());
     for c in &contour.crossings {
         let (z, r) = (c.at.x * 1e3, c.at.y * 1e3);
         warnings.push(if c.walls.0 == c.walls.1 {

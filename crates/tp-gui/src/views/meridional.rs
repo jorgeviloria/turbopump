@@ -1823,6 +1823,8 @@ impl MeridionalView {
         let unit = units.get(QuantityKind::Length).symbol;
         let scale = units.to_display(QuantityKind::Length, 1.0);
         let palette = Palette::of(ui);
+        // The inlet duct ahead of the impeller, a component of its own.
+        let inlet_duct = cx.derived.duct_before(id).cloned();
         let main = cx.doc.project().pump_impeller_input(id).ok();
         let inputs = Inputs {
             geometry: current,
@@ -2045,10 +2047,9 @@ impl MeridionalView {
                     );
                 }
             }
-            // The inlet duct, when modelled: its fluid shaded, as it goes into the
+            // The inlet duct, when there is one: its fluid shaded, as it goes into the
             // joined domain.
-            let duct = &g.contour.inlet_duct;
-            if duct.enabled && !duct.outline.is_empty() {
+            if let Some(duct) = &inlet_duct {
                 // A plot polygon fills as if convex: fill the duct triangle by triangle.
                 for t in triangulate(&duct.outline) {
                     plot.polygon(

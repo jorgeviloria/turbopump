@@ -153,8 +153,8 @@ pub(crate) struct Stage {
     pub impeller: String,
     /// Blades of the impeller, when its geometry is built.
     pub blades: Option<u32>,
-    /// Whether the inlet duct ahead of the impeller is modelled.
-    pub duct: bool,
+    /// The inlet duct ahead of the impeller, by name, when it is built.
+    pub duct: Option<String>,
     /// The stator after the impeller: its name and whether it has vanes.
     pub stator: Option<(String, bool)>,
     pub volute: Option<String>,
@@ -163,11 +163,15 @@ pub(crate) struct Stage {
 impl Stage {
     /// The parts it has, by component.
     fn groups(&self) -> Vec<(ComponentKind, String, Vec<Key>)> {
-        let mut impeller = vec![Key::Blades, Key::Hub, Key::Shroud];
-        if self.duct {
-            impeller.insert(0, Key::Duct);
+        let mut groups = Vec::new();
+        if let Some(name) = &self.duct {
+            groups.push((ComponentKind::InletDuct, name.clone(), vec![Key::Duct]));
         }
-        let mut groups = vec![(ComponentKind::Impeller, self.impeller.clone(), impeller)];
+        groups.push((
+            ComponentKind::Impeller,
+            self.impeller.clone(),
+            vec![Key::Blades, Key::Hub, Key::Shroud],
+        ));
         if let Some((name, vaned)) = &self.stator {
             let keys = if *vaned {
                 vec![Key::Vanes, Key::Walls]

@@ -1,9 +1,9 @@
 //! The axial inlet duct ahead of the impeller, the stationary part of the flow domain
-//! upstream of the eye, for CFD:
+//! upstream of the eye, for CFD; a component of its own before the first impeller:
 //!
-//! - an annulus between the hub radius at the inlet (a cylinder carrying the hub on, our
-//!   simplification of the hub nose) and the duct radius, from a length L upstream of
-//!   the eye down to the impeller inlet;
+//! - fluid from the axis out to the duct radius, from a length L upstream of the eye
+//!   down to the impeller inlet, where the hub ends in its nose: a half sphere of the
+//!   hub radius at the inlet, tangent to the hub there;
 //! - when the side chambers are designed, the duct stops an axial gap Δz short of the
 //!   tip of the shroud neck: the suction cover faces the neck across the gap, and the
 //!   leakage leaving the annular seal at the tip turns into the eye through it, so the
@@ -11,15 +11,19 @@
 //!
 //! The values are our choices: L = d₁, one eye diameter of run-up; the duct as wide as
 //! the shroud at the inlet, so the wall carries straight on; Δz the axial gap of the
-//! side chambers, s_ax.
+//! side chambers, s_ax; the round nose, which turns the flow onto the hub without a
+//! flat face against it.
 
 use serde::{Deserialize, Serialize};
 use tp_math::DVec2;
 
 use super::ImpellerBasis;
-use super::chambers::Chambers;
+use super::meridian::MeridionalContour;
 use super::wall::Wall;
 use crate::Param;
+
+/// Steps round the quarter circle of the hub nose.
+const NOSE_STEPS: usize = 12;
 
 /// Points of the shroud cover sampled to find its neck.
 const COVER_SAMPLES: usize = 600;
@@ -27,9 +31,7 @@ const COVER_SAMPLES: usize = 600;
 /// Inputs of the inlet duct.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
-pub struct DuctSettings {
-    /// Model the inlet duct: shown on the chambers page and exported with the CAD model.
-    pub enabled: bool,
+pub struct DuctInput {
     /// Length L of the duct upstream of the eye, m; automatic: the eye diameter d₁.
     pub length: Param<f64>,
     /// Diameter of the duct, m; automatic: the shroud diameter at the inlet.
@@ -39,13 +41,37 @@ pub struct DuctSettings {
     pub axial_gap: Param<f64>,
 }
 
+/// The inlet duct as older files keep it, inside the meridional contour of the impeller,
+/// with a switch. Only read: the project turns it into a component of its own.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LegacyDuct {
+    /// The duct was modelled.
+    pub enabled: bool,
+    pub length: Param<f64>,
+    pub diameter: Param<f64>,
+    pub axial_gap: Param<f64>,
+}
+
+impl LegacyDuct {
+    /// Its inputs, when the duct was modelled.
+    pub fn input(&self) -> Option<DuctInput> {
+        self.enabled.then_some(DuctInput {
+            length: self.length,
+            diameter: self.diameter,
+            axial_gap: self.axial_gap,
+        })
+    }
+}
+
 /// The values the duct was built with, m.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DuctValues {
     pub length: f64,
     pub diameter: f64,
     /// Diameter of the hub cylinder through the duct: the hub at the inlet.
-    pub hub_diameter: f64,
+    /// How far the hub nose reaches upstream of the hub at the inlet: its radius.
+    pub nose_length: f64,
     pub axial_gap: f64,
 }
 
@@ -61,9 +87,7 @@ pub struct InletDuct {
     /// Whether it reaches the seal exit across the axial gap: the side chambers are
     /// designed.
     pub joins_seal: bool,
-    /// Whether it is modelled: exported with the CAD model.
-    pub enabled: bool,
-    /// What could not be built as asked; only when the duct is modelled.
+    /// What could not be built as asked.
     pub warnings: Vec<String>,
 }
 
@@ -86,25 +110,26 @@ fn neck_inside(cover: &Wall) -> Vec<DVec2> {
     points[tip..].to_vec()
 }
 
-/// Builds the duct ahead of the channel walls `hub` and `shroud`, the shroud `cover`
-/// with its neck, and the side `chambers`.
-pub fn build(
-    hub: &Wall,
-    shroud: &Wall,
-    cover: &Wall,
-    chambers: &Chambers,
-    basis: &ImpellerBasis,
-    settings: &DuctSettings,
-) -> InletDuct {
-    let (hub_in, shroud_in) = (hub.start(), shroud.start());
+/// Builds the duct ahead of the impeller of meridional `contour`: its channel walls,
+/// its shroud cover with the neck and its side chambers.
+pub fn build(contour: &MeridionalContour, basis: &ImpellerBasis, input: &DuctInput) -> InletDuct {
+    let chambers = &contour.chambers;
+    let (hub_in, shroud_in) = (contour.hub.start(), contour.shroud.start());
     let values = DuctValues {
-        length: settings.length.resolve(|| basis.inlet_diameter),
-        diameter: settings.diameter.resolve(|| 2.0 * shroud_in.y),
-        hub_diameter: 2.0 * hub_in.y,
-        axial_gap: settings.axial_gap.resolve(|| chambers.values.axial_gap),
+        length: input.length.resolve(|| basis.inlet_diameter),
+        diameter: input.diameter.resolve(|| 2.0 * shroud_in.y),
+        nose_length: hub_in.y,
+        axial_gap: input.axial_gap.resolve(|| chambers.values.axial_gap),
     };
     let joins_seal = chambers.enabled;
-    let built = outline(hub_in, shroud_in, cover, chambers, &values, joins_seal);
+    let built = outline(
+        hub_in,
+        shroud_in,
+        &contour.shroud_material,
+        chambers,
+        &values,
+        joins_seal,
+    );
     let (outline, warnings) = match built {
         Ok(points) => (points, Vec::new()),
         Err(reason) => (
@@ -116,12 +141,7 @@ pub fn build(
         outline,
         values,
         joins_seal,
-        enabled: settings.enabled,
-        warnings: if settings.enabled {
-            warnings
-        } else {
-            Vec::new()
-        },
+        warnings,
     }
 }
 
@@ -129,7 +149,7 @@ fn outline(
     hub_in: DVec2,
     shroud_in: DVec2,
     cover: &Wall,
-    chambers: &Chambers,
+    chambers: &super::chambers::Chambers,
     v: &DuctValues,
     joins_seal: bool,
 ) -> Result<Vec<DVec2>, String> {
@@ -147,7 +167,16 @@ fn outline(
         return Err("the shroud cover does not reach upstream of the inlet".into());
     }
     let upstream = tip.x.min(hub_in.x).min(shroud_in.x) - v.length;
-    let mut points = vec![DVec2::new(upstream, r_hub), hub_in, shroud_in];
+    if upstream >= hub_in.x - v.nose_length {
+        return Err("its length must reach upstream of the hub nose".into());
+    }
+    // Along the axis to the nose, round the nose onto the hub, across the inlet.
+    let mut points = vec![DVec2::new(upstream, 0.0)];
+    points.extend((0..=NOSE_STEPS).map(|i| {
+        let a = std::f64::consts::FRAC_PI_2 * i as f64 / NOSE_STEPS as f64;
+        DVec2::new(hub_in.x - r_hub * a.cos(), r_hub * a.sin())
+    }));
+    points.push(shroud_in);
     // Back along the inside of the neck to the inner corner of its tip.
     let inner = inside
         .iter()
@@ -212,20 +241,12 @@ mod tests {
 
     use super::*;
 
-    fn contour(chambers: bool, duct: DuctSettings) -> MeridionalContour {
-        let mut input = MeridionalInput {
-            inlet_duct: duct,
-            ..MeridionalInput::default()
-        };
-        input.chambers.enabled = chambers;
-        MeridionalContour::build(&basis(), &input).unwrap()
-    }
-
-    fn on(settings: DuctSettings) -> DuctSettings {
-        DuctSettings {
-            enabled: true,
-            ..settings
-        }
+    fn duct(chambers: bool, input: DuctInput) -> (MeridionalContour, InletDuct) {
+        let mut meridional = MeridionalInput::default();
+        meridional.chambers.enabled = chambers;
+        let contour = MeridionalContour::build(&basis(), &meridional).unwrap();
+        let duct = build(&contour, &basis(), &input);
+        (contour, duct)
     }
 
     /// Twice the area of a closed outline, positive counter-clockwise in (z, r).
@@ -241,8 +262,7 @@ mod tests {
     #[test]
     fn the_duct_reaches_the_seal_exit_across_the_gap() {
         let b = basis();
-        let c = contour(true, on(DuctSettings::default()));
-        let d = &c.inlet_duct;
+        let (c, d) = duct(true, DuctInput::default());
         let v = d.values;
         assert!(d.warnings.is_empty(), "{:?}", d.warnings);
         assert!(d.joins_seal);
@@ -260,14 +280,19 @@ mod tests {
         let upstream = d.inlet_z().unwrap();
         assert!((tip.min(c.shroud.start().x) - upstream - v.length).abs() < 1e-12);
         assert!(area(&d.outline).abs() > 0.0);
-        // The straight runs keep only their ends: a handful of corners.
-        assert!(d.outline.len() < 20, "{}", d.outline.len());
+        // Full to the axis, with the round nose of the hub reaching r_h upstream.
+        let r_hub = c.hub.start().y;
+        assert!(has(DVec2::new(upstream, 0.0)));
+        assert!(has(DVec2::new(c.hub.start().x - r_hub, 0.0)));
+        assert_eq!(v.nose_length, r_hub);
+        assert!(d.outline.iter().all(|p| p.y >= 0.0));
+        // The straight runs keep only their ends: the nose and a handful of corners.
+        assert!(d.outline.len() < 20 + NOSE_STEPS, "{}", d.outline.len());
     }
 
     #[test]
     fn without_the_chambers_the_duct_runs_straight_to_the_neck() {
-        let c = contour(false, on(DuctSettings::default()));
-        let d = &c.inlet_duct;
+        let (_, d) = duct(false, DuctInput::default());
         assert!(!d.joins_seal);
         assert!(d.warnings.is_empty(), "{:?}", d.warnings);
         let r = d.values.diameter / 2.0;
@@ -276,23 +301,28 @@ mod tests {
 
     #[test]
     fn bad_values_leave_a_warning_not_an_error() {
-        let c = contour(
+        let (_, d) = duct(
             true,
-            on(DuctSettings {
+            DuctInput {
                 axial_gap: Param::Manual(0.0),
-                ..DuctSettings::default()
-            }),
-        );
-        assert!(c.inlet_duct.outline.is_empty());
-        assert!(c.inlet_duct.warnings[0].contains("gap"));
-        // Not modelled: quiet.
-        let quiet = contour(
-            true,
-            DuctSettings {
-                axial_gap: Param::Manual(0.0),
-                ..DuctSettings::default()
+                ..DuctInput::default()
             },
         );
-        assert!(quiet.inlet_duct.warnings.is_empty());
+        assert!(d.outline.is_empty());
+        assert!(d.warnings[0].contains("gap"));
+    }
+
+    #[test]
+    fn older_files_keep_the_duct_only_when_modelled() {
+        let legacy = LegacyDuct {
+            length: Param::Manual(0.1),
+            ..LegacyDuct::default()
+        };
+        assert_eq!(legacy.input(), None);
+        let on = LegacyDuct {
+            enabled: true,
+            ..legacy
+        };
+        assert_eq!(on.input().unwrap().length, Param::Manual(0.1));
     }
 }

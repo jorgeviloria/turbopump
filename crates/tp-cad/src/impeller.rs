@@ -19,6 +19,7 @@ use std::f64::consts::PI;
 
 use tp_design::impeller::ImpellerGeometry;
 use tp_design::impeller::blade::BladeSection;
+use tp_design::impeller::duct::InletDuct;
 use tp_design::impeller::wall::{SegmentKind, Wall};
 use tp_math::{DVec2, DVec3};
 
@@ -89,8 +90,6 @@ pub struct ImpellerCad {
     pub impeller: Shape,
     /// Fluid of the side chambers between the impeller and the casing, when designed.
     pub side_chambers: Option<Shape>,
-    /// Fluid of the axial inlet duct ahead of the eye, when modelled and built.
-    pub inlet_duct: Option<Shape>,
     /// Wall thickness used, m.
     pub wall_thickness: f64,
     /// Bore and boss diameters, m.
@@ -288,6 +287,20 @@ fn outline_chains(outline: &[DVec2]) -> Vec<Vec<DVec3>> {
 /// Fractions of the requested fillet radius tried in turn.
 const FILLET_RETRIES: [f64; 4] = [1.0, 0.75, 0.5, 0.25];
 
+/// The fluid of inlet `duct`, revolved from its outline; an error that says why when the
+/// duct could not be built.
+pub fn build_inlet_duct(duct: &InletDuct) -> Result<Shape, CadError> {
+    if duct.outline.is_empty() {
+        return Err(CadError::Input(
+            duct.warnings
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "the inlet duct was not built".into()),
+        ));
+    }
+    occ::revolve_z(&profile_face(&outline_chains(&duct.outline))?)
+}
+
 /// Builds blade, channel, flow domain and impeller solids from the geometry.
 pub fn build_impeller(g: &ImpellerGeometry, options: &CadOptions) -> Result<ImpellerCad, CadError> {
     let b = &g.basis;
@@ -344,15 +357,6 @@ pub fn build_impeller(g: &ImpellerGeometry, options: &CadOptions) -> Result<Impe
             .map(|outline| occ::revolve_z(&profile_face(&outline_chains(outline))?))
             .collect::<Result<Vec<_>, _>>()?;
         Some(occ::compound(&solids)?)
-    } else {
-        None
-    };
-    // The inlet duct, revolved from its outline.
-    let duct = &g.contour.inlet_duct;
-    let inlet_duct = if duct.enabled && !duct.outline.is_empty() {
-        Some(occ::revolve_z(&profile_face(&outline_chains(
-            &duct.outline,
-        ))?)?)
     } else {
         None
     };
@@ -450,7 +454,6 @@ pub fn build_impeller(g: &ImpellerGeometry, options: &CadOptions) -> Result<Impe
         blades,
         impeller,
         side_chambers,
-        inlet_duct,
         wall_thickness: t,
         bore_diameter: 2.0 * rb,
         boss_diameter: 2.0 * rboss,
@@ -783,22 +786,29 @@ mod tests {
     }
 
     #[test]
-    fn a_modelled_inlet_duct_is_revolved_into_its_fluid() {
+    fn the_inlet_duct_is_revolved_into_its_fluid() {
+        use tp_design::impeller::duct::{self, DuctInput};
         let mut input = tp_design::impeller::ImpellerGeometryInput::default();
         input.meridional.chambers.enabled = true;
-        input.meridional.inlet_duct.enabled = true;
         let g = reference();
         let with = tp_design::impeller::build(&g.basis, &input).unwrap();
-        let sharp = CadOptions {
-            fillet_radius: Some(0.0),
-            ..CadOptions::default()
-        };
-        let cad = build_impeller(&with, &sharp).unwrap();
-        let duct = cad.inlet_duct.unwrap();
-        assert!(duct.is_valid());
-        assert_eq!(duct.solid_count(), 1);
-        let pappus = revolved_volume(&with.contour.inlet_duct.outline);
-        assert_relative_eq!(duct.volume() * 1e-9, pappus, max_relative = 5e-3);
+        let built = duct::build(&with.contour, &with.basis, &DuctInput::default());
+        let shape = build_inlet_duct(&built).unwrap();
+        assert!(shape.is_valid());
+        assert_eq!(shape.solid_count(), 1);
+        let pappus = revolved_volume(&built.outline);
+        assert_relative_eq!(shape.volume() * 1e-9, pappus, max_relative = 5e-3);
+        // One that could not be built says why.
+        let broken = duct::build(
+            &with.contour,
+            &with.basis,
+            &DuctInput {
+                length: tp_design::Param::Manual(-1.0),
+                ..DuctInput::default()
+            },
+        );
+        let e = build_inlet_duct(&broken).unwrap_err().to_string();
+        assert!(e.contains("length"), "{e}");
     }
 
     #[test]

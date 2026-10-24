@@ -7,6 +7,7 @@ use bytemuck::{Pod, Zeroable};
 use glam::Vec3;
 use tp_design::diffuser::DiffuserDesign;
 use tp_design::impeller::ImpellerGeometry;
+use tp_design::impeller::duct::InletDuct;
 use tp_design::volute::VoluteGeometry;
 use tp_io::mesh::{
     Triangle, blade_solids, diffuser_parts, impeller_parts, volute_solids, volute_triangles,
@@ -397,6 +398,7 @@ fn revolved(outline: &[DVec2]) -> Vec<Triangle> {
 /// Builds the vertices of the stage as `options` ask.
 pub(crate) fn build(
     g: &ImpellerGeometry,
+    inlet_duct: Option<&InletDuct>,
     stator: Option<&DiffuserDesign>,
     volute: Option<&VoluteGeometry>,
     options: &ViewOptions,
@@ -409,12 +411,7 @@ pub(crate) fn build(
     };
     let diffuser = stator.map(diffuser_parts).unwrap_or_default();
     let casing = volute.map(volute_triangles).unwrap_or_default();
-    let duct = &g.contour.inlet_duct;
-    let duct = if duct.enabled {
-        revolved(&duct.outline)
-    } else {
-        Vec::new()
-    };
+    let duct = inlet_duct.map(|d| revolved(&d.outline)).unwrap_or_default();
     let shown: [(&[Triangle], PartId); 7] = [
         (&blades, PartId::Blades),
         (&parts.hub, PartId::Hub),
@@ -560,7 +557,7 @@ mod tests {
     #[test]
     fn normals_are_unit_vectors() {
         let g = geometry();
-        let mesh = build(&g, None, None, &ViewOptions::default());
+        let mesh = build(&g, None, None, None, &ViewOptions::default());
         assert!(mesh.vertices.len() > 3000);
         for v in &mesh.vertices {
             let n = Vec3::from(v.normal);
@@ -573,7 +570,7 @@ mod tests {
     #[test]
     fn transparent_shroud_comes_last() {
         let g = geometry();
-        let mesh = build(&g, None, None, &ViewOptions::default());
+        let mesh = build(&g, None, None, None, &ViewOptions::default());
         assert!(mesh.opaque > 0 && (mesh.opaque as usize) < mesh.vertices.len());
         assert!(
             mesh.vertices[mesh.opaque as usize..]
@@ -582,6 +579,7 @@ mod tests {
         );
         let solid = build(
             &g,
+            None,
             None,
             None,
             &ViewOptions {
@@ -605,7 +603,7 @@ mod tests {
             },
             ..ViewOptions::default()
         };
-        let mesh = build(&g, None, None, &options);
+        let mesh = build(&g, None, None, None, &options);
         let blended = &mesh.vertices[mesh.opaque as usize..];
         let near = |a: [f32; 4], b: [f32; 4]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-6);
         assert!(blended.iter().any(|v| near(v.color, [1.0, 0.0, 0.0, 0.5])));
@@ -648,6 +646,7 @@ mod tests {
             &g,
             None,
             None,
+            None,
             &ViewOptions {
                 wireframe: true,
                 ..ViewOptions::default()
@@ -677,7 +676,7 @@ mod tests {
     #[test]
     fn parts_know_their_vertices() {
         let g = geometry();
-        let mesh = build(&g, None, None, &ViewOptions::default());
+        let mesh = build(&g, None, None, None, &ViewOptions::default());
         let ids: Vec<PartId> = mesh.parts.iter().map(|p| p.id).collect();
         assert_eq!(ids, [PartId::Blades, PartId::Hub, PartId::Shroud]);
         assert_eq!(mesh.parts[1].range.end, mesh.opaque);
@@ -697,11 +696,11 @@ mod tests {
             .find_map(|c| derived.volute(c.id()))
             .unwrap();
         // The casing is glass by default: only the blades are capped.
-        let glass = build(&g, None, Some(v), &ViewOptions::default());
+        let glass = build(&g, None, None, Some(v), &ViewOptions::default());
         assert_eq!(glass.caps.len(), 1);
         let mut options = ViewOptions::default();
         options.volute.opacity = Opacity::Opaque;
-        let opaque = build(&g, None, Some(v), &options);
+        let opaque = build(&g, None, None, Some(v), &options);
         // One cap for each channel: they overlap where the spiral meets the diffuser.
         assert_eq!(opaque.caps.len(), 1 + v.channels().len());
         for cap in &opaque.caps {
@@ -715,21 +714,22 @@ mod tests {
             assert!(is_closed(&triangles));
         }
         options.wireframe = true;
-        assert!(build(&g, None, Some(v), &options).caps.is_empty());
+        assert!(build(&g, None, None, Some(v), &options).caps.is_empty());
     }
 
     #[test]
-    fn a_modelled_inlet_duct_is_a_part_of_its_own() {
+    fn an_inlet_duct_is_a_part_of_its_own() {
+        use tp_design::impeller::duct::{self, DuctInput};
         let mut g = geometry();
-        let without = build(&g, None, None, &ViewOptions::default());
+        let without = build(&g, None, None, None, &ViewOptions::default());
         assert!(without.parts.iter().all(|p| p.id != PartId::Duct));
         let mut input = tp_design::impeller::ImpellerGeometryInput::default();
         input.meridional.chambers.enabled = true;
-        input.meridional.inlet_duct.enabled = true;
         g = tp_design::impeller::build(&g.basis, &input).unwrap();
-        let with = build(&g, None, None, &ViewOptions::default());
-        let duct = with.parts.iter().find(|p| p.id == PartId::Duct).unwrap();
-        assert_eq!(duct.opacity, Opacity::Glass);
+        let built = duct::build(&g.contour, &g.basis, &DuctInput::default());
+        let with = build(&g, Some(&built), None, None, &ViewOptions::default());
+        let part = with.parts.iter().find(|p| p.id == PartId::Duct).unwrap();
+        assert_eq!(part.opacity, Opacity::Glass);
         // The duct reaches upstream of the eye: the bounds grow that way.
         assert!(with.radius > without.radius);
     }
@@ -743,6 +743,7 @@ mod tests {
         };
         let mesh = build(
             &g,
+            None,
             None,
             None,
             &ViewOptions {

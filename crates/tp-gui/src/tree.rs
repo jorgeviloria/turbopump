@@ -12,6 +12,7 @@ use crate::theme::{Palette, icon};
 pub(crate) fn step_title(step: DesignStep) -> String {
     use DesignStep::*;
     tr(match step {
+        DuctDimensions => "Duct dimensions",
         MainDimensions => "Main dimensions",
         MeridionalContour => "Meridional contour",
         BladeProperties => "Blade properties",
@@ -69,7 +70,12 @@ pub(crate) struct AddEntry {
     pub at_inlet: bool,
 }
 
-pub(crate) const ADD_ENTRIES: [AddEntry; 5] = [
+pub(crate) const ADD_ENTRIES: [AddEntry; 6] = [
+    AddEntry {
+        label: "Inlet duct",
+        kind: ComponentKind::InletDuct,
+        at_inlet: true,
+    },
     AddEntry {
         label: "Impeller",
         kind: ComponentKind::Impeller,
@@ -97,24 +103,29 @@ pub(crate) const ADD_ENTRIES: [AddEntry; 5] = [
     },
 ];
 
-/// Adds the component of `ADD_ENTRIES[index]` where it usually goes and selects its
-/// first step.
-pub(crate) fn add_component(cx: &mut EditCtx<'_>, index: usize) {
-    let Some(entry) = ADD_ENTRIES.get(index) else {
-        return;
-    };
-    let components = cx.doc.project().components();
+/// Where the component of `entry` usually goes in `project`.
+fn usual_place(project: &tp_project::Project, entry: &AddEntry) -> usize {
+    let components = project.components();
     let len = components.len();
     // An outlet volute stays last: new components go before it.
     let end = match components.last() {
         Some(c) if c.kind() == ComponentKind::Volute && len > 1 => len - 1,
         _ => len,
     };
-    let at = match (entry.kind, entry.at_inlet) {
+    match (entry.kind, entry.at_inlet) {
         (_, true) => 0,
         (ComponentKind::Volute, false) => len,
         _ => end,
+    }
+}
+
+/// Adds the component of `ADD_ENTRIES[index]` where it usually goes and selects its
+/// first step.
+pub(crate) fn add_component(cx: &mut EditCtx<'_>, index: usize) {
+    let Some(entry) = ADD_ENTRIES.get(index) else {
+        return;
     };
+    let at = usual_place(cx.doc.project(), entry);
     add_component_at(cx, index, at);
 }
 
@@ -137,9 +148,17 @@ pub(crate) fn add_component_at(cx: &mut EditCtx<'_>, index: usize, at: usize) {
     }
 }
 
-/// Entries that add a component to the project.
+/// Entries that add a component to the project, those the composition rules allow
+/// where each usually goes.
 pub(crate) fn add_component_menu(ui: &mut Ui, cx: &mut EditCtx<'_>) {
-    for (index, entry) in ADD_ENTRIES.iter().enumerate() {
+    let project = cx.doc.project().clone();
+    let allowed = ADD_ENTRIES.iter().enumerate().filter(|(_, e)| {
+        project
+            .clone()
+            .add_component(e.kind, Some(usual_place(&project, e)))
+            .is_ok()
+    });
+    for (index, entry) in allowed {
         let text = format!("{}  {}", icon::PLUS, tr(entry.label));
         if ui.add(egui::Button::new(text)).clicked() {
             add_component(cx, index);

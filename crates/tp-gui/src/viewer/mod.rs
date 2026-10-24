@@ -430,7 +430,13 @@ impl Viewer {
             self.options,
         );
         if self.mesh_key != Some(key) {
-            let mesh = mesh::build(g, stator.map(|s| s.1), volute.map(|v| v.1), &self.options);
+            let mesh = mesh::build(
+                g,
+                derived.duct_before(id),
+                stator.map(|s| s.1),
+                volute.map(|v| v.1),
+                &self.options,
+            );
             gpu.upload(&state.device, &mesh);
             self.bounds = Some((mesh.center, mesh.radius));
             let content = (id, stator.is_some(), volute.is_some());

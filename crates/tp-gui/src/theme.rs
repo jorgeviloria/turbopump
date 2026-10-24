@@ -149,6 +149,8 @@ pub(crate) fn component_color(kind: ComponentKind) -> Color32 {
         ComponentKind::Impeller => Color32::from_rgb(196, 122, 44),
         ComponentKind::Stator { .. } => Color32::from_rgb(31, 158, 137),
         ComponentKind::Volute => Color32::from_rgb(47, 109, 181),
+        // A cool grey: a fluid passage rather than a part of the pump.
+        ComponentKind::InletDuct => Color32::from_rgb(110, 138, 158),
     }
 }
 

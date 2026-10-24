@@ -187,6 +187,30 @@ pub(crate) fn run(args: CadArgs) -> CliResult {
         println!("{name} ({id}): building CAD solids…");
         let cad = tp_cad::build_impeller(&geometry, &options).map_err(|e| e.to_string())?;
         warned |= !report(&cad, density, &units);
+        // The inlet duct ahead of the impeller, built on the same contour.
+        let duct_before = project
+            .components()
+            .iter()
+            .take_while(|c| c.id() != *id)
+            .last()
+            .filter(|c| c.kind() == ComponentKind::InletDuct)
+            .map(|c| c.id());
+        let duct = match duct_before {
+            Some(duct) => {
+                let input = project.duct_input(duct).map_err(err)?;
+                let built =
+                    tp_design::impeller::duct::build(&geometry.contour, &geometry.basis, &input);
+                match tp_cad::build_inlet_duct(&built) {
+                    Ok(shape) => Some(shape),
+                    Err(e) => {
+                        eprintln!("warning: {e}");
+                        warned = true;
+                        None
+                    }
+                }
+            }
+            None => None,
+        };
 
         let dir = if impellers.len() > 1 {
             base.join(format!("impeller-{}", id.0))
@@ -198,7 +222,7 @@ pub(crate) fn run(args: CadArgs) -> CliResult {
         let deflection = geometry.basis.outlet_diameter * 1e3 / 2000.0;
         for &format in &args.format {
             let chambers = cad.side_chambers.as_ref().map(|s| ("side-chambers", s));
-            let duct = cad.inlet_duct.as_ref().map(|s| ("inlet-duct", s));
+            let duct = duct.as_ref().map(|s| ("inlet-duct", s));
             for (stem, shape) in [("impeller", &cad.impeller), ("fluid", &cad.fluid)]
                 .into_iter()
                 .chain(chambers)
@@ -219,7 +243,8 @@ pub(crate) fn run(args: CadArgs) -> CliResult {
         if let (Some(_), Some(volute)) = (&cad.side_chambers, next) {
             let joined = project.compute_volute(volute).map_err(err).and_then(|vg| {
                 let v = tp_cad::build_volute(&vg).map_err(|e| e.to_string())?;
-                tp_cad::join_fluid(&cad, &geometry, &v, &vg).map_err(|e| e.to_string())
+                tp_cad::join_fluid(&cad, &geometry, &v, &vg, duct.as_ref())
+                    .map_err(|e| e.to_string())
             });
             match joined {
                 Ok((shape, warnings)) => {

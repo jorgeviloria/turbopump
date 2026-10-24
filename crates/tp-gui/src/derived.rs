@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 
 use tp_design::diffuser::DiffuserDesign;
 use tp_design::impeller::ImpellerGeometry;
+use tp_design::impeller::duct::{self, InletDuct};
 use tp_design::performance::PumpPerformance;
 use tp_design::pump::CentrifugalPumpDesign;
 use tp_design::volute::VoluteGeometry;
@@ -30,6 +31,8 @@ pub struct Derived {
     pub impellers: BTreeMap<ComponentId, ImpellerResults>,
     pub volutes: BTreeMap<ComponentId, Result<VoluteGeometry, String>>,
     pub diffusers: BTreeMap<ComponentId, Result<DiffuserDesign, String>>,
+    /// Inlet ducts, with the impeller after each.
+    pub ducts: BTreeMap<ComponentId, (ComponentId, Result<InletDuct, String>)>,
 }
 
 impl Derived {
@@ -92,9 +95,44 @@ impl Derived {
                 (c.id(), result)
             })
             .collect();
+        // Each duct on the geometry of the impeller after it, as just built.
+        self.ducts = project
+            .components()
+            .iter()
+            .filter(|c| c.kind() == ComponentKind::InletDuct)
+            .filter_map(|c| {
+                let impeller = project.impeller_after_duct(c.id()).ok()?;
+                let built = match (
+                    project.duct_input(c.id()),
+                    self.impellers.get(&impeller).map(|r| &r.geometry),
+                ) {
+                    (Ok(input), Some(Ok(g))) => Ok(duct::build(&g.contour, &g.basis, &input)),
+                    (Err(e), _) => Err(e.to_string()),
+                    _ => Err("the impeller after the duct could not be built".into()),
+                };
+                Some((c.id(), (impeller, built)))
+            })
+            .collect();
         self.source = Some(project.clone());
         self.revision += 1;
         true
+    }
+
+    pub fn duct_result(&self, id: ComponentId) -> Option<&Result<InletDuct, String>> {
+        self.ducts.get(&id).map(|(_, r)| r)
+    }
+
+    pub fn duct(&self, id: ComponentId) -> Option<&InletDuct> {
+        self.duct_result(id).and_then(|r| r.as_ref().ok())
+    }
+
+    /// The inlet duct ahead of impeller `impeller`, when it was built.
+    pub fn duct_before(&self, impeller: ComponentId) -> Option<&InletDuct> {
+        self.ducts
+            .values()
+            .find(|(after, _)| *after == impeller)
+            .and_then(|(_, r)| r.as_ref().ok())
+            .filter(|d| !d.outline.is_empty())
     }
 
     /// Changes whenever the results change; views use it to rebuild cached data.

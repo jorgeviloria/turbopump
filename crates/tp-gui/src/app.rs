@@ -279,6 +279,8 @@ fn view_for(kind: ComponentKind, step: DesignStep) -> Option<(View, Option<Scope
     let view = |v| Some((v, None));
     match (kind, step) {
         (_, ModelSettings) => view(View::View3d),
+        // Drawn with the side chambers, which it reaches.
+        (ComponentKind::InletDuct, DuctDimensions) => Some((View::Meridian, Some(Scope::Chambers))),
         (ComponentKind::Impeller, MeridionalContour) => {
             Some((View::Meridian, Some(Scope::Channel)))
         }
@@ -707,10 +709,21 @@ impl TurbopumpApp {
             let cover = self.sidebar_extent(ui.ctx(), main_area) + SIDEBAR_MARGIN;
             let active = self.active_impeller();
             // The Meridian view opens framed. Outside the stage scope it edits the
-            // impeller channel, so the contour step comes into the panel.
+            // impeller channel, so the contour step comes into the panel, unless the
+            // step in it belongs to the Meridian already (the inlet duct).
             if self.view == View::Meridian && self.shown != Some(View::Meridian) {
                 self.meridional.framed = false;
+                let suits = match self.selection {
+                    Selection::Step(id, step) => self
+                        .doc
+                        .project()
+                        .component(id)
+                        .and_then(|c| view_for(c.kind(), step))
+                        .is_some_and(|(view, _)| view == View::Meridian),
+                    Selection::Setup => false,
+                };
                 if self.meridional.scope != Scope::Stage
+                    && !suits
                     && let Some(id) = active
                 {
                     self.selection = Selection::Step(id, DesignStep::MeridionalContour);
@@ -1251,9 +1264,11 @@ impl TurbopumpApp {
                 .and_then(|id| self.derived.geometry(id))
                 .map(|g| g.blade.count),
             duct: impeller
-                .and_then(|id| self.derived.geometry(id))
-                .is_some_and(|g| {
-                    g.contour.inlet_duct.enabled && !g.contour.inlet_duct.outline.is_empty()
+                .filter(|&id| self.derived.duct_before(id).is_some())
+                .and_then(|id| {
+                    let components = project.components();
+                    let index = components.iter().position(|c| c.id() == id)?;
+                    name(Some(components[index.checked_sub(1)?].id()))
                 }),
             stator: self.active_stator().and_then(|id| {
                 let c = project.component(id)?;
@@ -2695,45 +2710,40 @@ mod tests {
     }
 
     #[test]
-    fn the_inlet_duct_is_modelled_from_the_contour_step() {
+    fn the_inlet_duct_is_a_component_ahead_of_the_impeller() {
         let mut harness = editor();
         let id = harness.state().active_impeller().unwrap();
-        harness.state_mut().meridional.set_scope(Scope::Chambers);
-        harness.run();
+        // Added from the flow, it goes first and opens its step on the side chambers.
         harness
-            .get_all_by_label("Design the side chambers")
+            .get_all_by_label("Add component")
             .next()
             .unwrap()
             .click();
         harness.run();
-        // Every section folded but the duct's, so it is in sight.
-        steps::fold_sections(&harness.ctx, true);
+        harness.get_by_label_contains("Inlet duct").click();
         harness.run();
-        harness
-            .get_all_by_label("Inlet duct")
-            .last()
-            .unwrap()
-            .click();
-        harness.run();
-        {
-            use egui_kittest::kittest::NodeT;
-            harness
-                .get_all_by_label("Model the inlet duct")
-                .find(|n| n.accesskit_node().role() == egui::accesskit::Role::CheckBox)
-                .unwrap()
-                .click();
-        }
-        harness.run();
-        assert!(meridional(harness.state()).inlet_duct.enabled);
-        let g = harness.state().derived.geometry(id).unwrap();
-        let duct = &g.contour.inlet_duct;
-        assert!(
-            duct.joins_seal && !duct.outline.is_empty(),
-            "{:?}",
-            duct.warnings
+        let project = harness.state().doc.project();
+        let duct = project.components()[0].id();
+        assert_eq!(project.components()[0].kind(), ComponentKind::InletDuct);
+        assert_eq!(
+            harness.state().selection,
+            Selection::Step(duct, DesignStep::DuctDimensions)
         );
-        // The 3D scene lists it under the impeller.
-        assert!(harness.state().scene_stage().duct);
+        assert_eq!(harness.state().view(), View::Meridian);
+        // Built on the impeller after it, which stays the active one.
+        assert_eq!(harness.state().active_impeller(), Some(id));
+        let built = harness.state().derived.duct(duct).unwrap();
+        assert!(built.warnings.is_empty(), "{:?}", built.warnings);
+        assert!(!built.outline.is_empty());
+        // The 3D scene lists it as a component of its own.
+        assert_eq!(
+            harness.state().scene_stage().duct.as_deref(),
+            Some("Inlet duct 1")
+        );
+        // Its step is accepted like any other.
+        harness.get_by_label_contains("Accept step").click();
+        harness.run();
+        assert!(harness.state().doc.project().components()[0].is_complete());
     }
 
     #[test]

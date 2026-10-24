@@ -309,6 +309,7 @@ mod cad {
     use tp_design::Param;
     use tp_design::diffuser::DiffuserDesign;
     use tp_design::impeller::ImpellerGeometry;
+    use tp_design::impeller::duct::InletDuct;
     use tp_design::volute::VoluteGeometry;
     use tp_project::{
         ComponentId, ComponentKind, DesignStep, Project, StepStatus, VANED_STEPS, VANELESS_STEPS,
@@ -375,8 +376,10 @@ mod cad {
         .map_err(|e| format!("{}: {e}", path.display()))
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn run(
         g: &ImpellerGeometry,
+        duct: Option<&InletDuct>,
         stator: Option<&DiffuserDesign>,
         volute: Option<&VoluteGeometry>,
         options: &CadOptions,
@@ -384,6 +387,14 @@ mod cad {
         formats: &[&str],
     ) -> Result<CadReport, String> {
         let cad = tp_cad::build_impeller(g, options).map_err(|e| e.to_string())?;
+        let mut problems_of_duct = Vec::new();
+        let duct = duct.and_then(|d| match tp_cad::build_inlet_duct(d) {
+            Ok(shape) => Some(shape),
+            Err(e) => {
+                problems_of_duct.push(e.to_string());
+                None
+            }
+        });
         let volute_geometry = volute;
         let volute = volute
             .map(|g| {
@@ -403,7 +414,7 @@ mod cad {
         let mut files = Vec::new();
         for format in formats {
             let chambers = cad.side_chambers.as_ref().map(|s| ("side-chambers", s));
-            let duct = cad.inlet_duct.as_ref().map(|s| ("inlet-duct", s));
+            let duct = duct.as_ref().map(|s| ("inlet-duct", s));
             for (stem, shape) in [("impeller", &cad.impeller), ("fluid", &cad.fluid)]
                 .into_iter()
                 .chain(chambers)
@@ -418,7 +429,7 @@ mod cad {
         let mut joined_warnings = Vec::new();
         if let (Some((v, _, _)), Some(vg), Some(_)) = (&volute, volute_geometry, &cad.side_chambers)
         {
-            match tp_cad::join_fluid(&cad, g, v, vg) {
+            match tp_cad::join_fluid(&cad, g, v, vg, duct.as_ref()) {
                 Ok((joined, warnings)) => {
                     joined_warnings = warnings;
                     for format in formats {
@@ -453,6 +464,7 @@ mod cad {
             }
         }
         let mut problems: Vec<String> = cad.warnings.clone();
+        problems.extend(problems_of_duct);
         problems.extend(joined_warnings);
         if let Some((_, casing, _)) = &volute {
             problems.extend(casing.warnings.iter().cloned());
@@ -516,10 +528,12 @@ mod cad {
             }
         }
 
+        #[allow(clippy::too_many_arguments)]
         fn start(
             &mut self,
             ctx: &egui::Context,
             g: ImpellerGeometry,
+            duct: Option<InletDuct>,
             stator: Option<DiffuserDesign>,
             volute: Option<VoluteGeometry>,
             holes: Option<BalanceHoleOptions>,
@@ -542,6 +556,7 @@ mod cad {
                 .spawn(move || {
                     let result = run(
                         &g,
+                        duct.as_ref(),
                         stator.as_ref(),
                         volute.as_ref(),
                         &options,
@@ -713,6 +728,7 @@ mod cad {
                                 self.start(
                                     ui.ctx(),
                                     g.clone(),
+                                    derived.duct_before(id).cloned(),
                                     stator_design.cloned(),
                                     volute_geometry.cloned(),
                                     holes,
@@ -853,7 +869,16 @@ mod cad {
             let folder = std::env::temp_dir().join(format!("tp-gui-cad-{}", std::process::id()));
             let volute = derived.volute(project.components()[1].id());
             assert!(volute.is_some());
-            let report = run(g, None, volute, &CadOptions::default(), &folder, &["step"]).unwrap();
+            let report = run(
+                g,
+                None,
+                None,
+                volute,
+                &CadOptions::default(),
+                &folder,
+                &["step"],
+            )
+            .unwrap();
             assert_eq!(report.files.len(), 4);
             assert!(report.volute_volume.is_some_and(|v| v > 0.0));
             assert!(report.casing.is_some_and(|(v, t)| v > 0.0 && t > 0.0));
