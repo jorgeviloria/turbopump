@@ -182,7 +182,10 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
     automáticos de una vez, y un solo Cmd/Ctrl+Z los recupera. Cuando un paso ya
     aceptado queda por revisar, una barra naranja en el margen marca las filas que
     cambiaron desde que se aceptó (también las automáticas que movió un cambio aguas
-    arriba), y su ayuda dice cuánto valían;
+    arriba), y su ayuda dice cuánto valían. Con el ratón sobre una fila que es una
+    cota del meridiano (L, b₂, d_n, d₁ o d₂), esa cota se resalta en el dibujo,
+    aunque las cotas estén ocultas; y con el ratón sobre el valor de una cota, su fila
+    se sombrea en el panel;
   - **abajo**, la cifra clave del paso, *Back* y *Accept step and continue*
     (Cmd/Ctrl+Intro), que marca el paso como hecho y abre el siguiente, también en
     el componente siguiente. Con Mayús (o desde el menú ⋯), se completan todos los
