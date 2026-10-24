@@ -91,7 +91,8 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
     sesiones, y proyección ortográfica), estilo
     (sombreado, con aristas o alambre), inspección (corte meridional y medir), y
     sólidos CAD, mallas y una imagen PNG de la vista;
-  - *Curves*: los ajustes de la predicción y el resto de resultados.
+  - *Curves*: los ajustes de la predicción (en el panel de propiedades) y el resto de
+    resultados.
 
   A la izquierda de las pestañas están el menú *File* (abre, guarda, exporta y da los
   ajustes) y el acceso rápido al flujo de diseño, guardar, deshacer y rehacer; a la derecha, los
@@ -170,7 +171,10 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
     η = η_h·η_v·η_RR·η_m), el caudal en que la garganta de la voluta pone el punto
     óptimo, la corrección
     para líquidos viscosos y el punto de trabajo en la instalación, con otra velocidad
-    o el rodete recortado y el rango de funcionamiento continuo;
+    o el rodete recortado y el rango de funcionamiento continuo. Sus ajustes (el
+    rango de la curva, las pérdidas y fuerzas, el líquido y la instalación) van en el
+    panel de propiedades, con filas como las de un paso; dos botones arriba del panel
+    pasan de los ajustes al paso, para cambiar el diseño mirando la curva;
   - informe con las mismas cifras que la línea de comandos.
 
   La vista meridional muestra también, si se pide, el flujo potencial y la velocidad
