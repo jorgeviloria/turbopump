@@ -86,7 +86,9 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
     potencial y las curvas de referencia), el encuadre, los imanes y los dibujos;
   - *Blade*: las páginas de gráficas y de bordes, y la exportación de puntos y malla;
   - *Front* y *Section*: sus dibujos y exportaciones, y cómo se edita una sección;
-  - *3D*: cámara (encuadrar, vista inicial y proyección ortográfica), estilo
+  - *3D*: cámara (encuadrar, vista inicial, el menú *Views* con las vistas desde la
+    entrada, desde atrás y de lado y las que se guardan, que se recuerdan entre
+    sesiones, y proyección ortográfica), estilo
     (sombreado, con aristas o alambre), inspección (corte meridional y medir), y
     sólidos CAD, mallas y una imagen PNG de la vista;
   - *Curves*: los ajustes de la predicción y el resto de resultados.
