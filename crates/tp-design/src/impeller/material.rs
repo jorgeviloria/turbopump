@@ -209,8 +209,8 @@ pub fn automatic_shroud(
     // The face runs from the rim down to the eye. The shoulder stands where it comes
     // down to the seal radius, the seat goes upstream from there. The seat must stay
     // clear of the flow: the shoulder is no further downstream than where the shroud
-    // rises to within a tenth of a wall of the seat.
-    let clear = seal.impeller_seat - 0.1 * m.wall_thickness;
+    // rises to within a twentieth of a wall of the seat (that margin is our own choice).
+    let clear = seal.impeller_seat - 0.05 * m.wall_thickness;
     let x_limit = shroud
         .sample(OFFSET_SAMPLES)
         .windows(2)
@@ -242,24 +242,28 @@ pub fn automatic_shroud(
             (back, eye)
         }
     };
-    if face[0].y < seal.radius * (1.0 - 1e-9) {
+    if corner.y < seal.radius * (1.0 - 1e-9) {
         warnings.push(format!(
-            "the shroud face stays below the front seal radius of {:.1} mm: the shoulder is made on the face",
+            "the front seal shoulder reaches only {:.1} mm on the shroud, below the seal radius of {:.1} mm: the shoulder is made on the face",
+            corner.y * 1e3,
             seal.radius * 1e3
         ));
     }
     let mut wire = vec![line(face[0]), curve(&face)?];
     // The shoulder down to the seat, the seat upstream and in to the shroud start.
-    let top = DVec2::new(corner.x, seal.impeller_seat);
+    // Never a rising shoulder: a face below the seat takes the seat at its own radius.
+    let seat = seal.impeller_seat.min(corner.y);
+    let top = DVec2::new(corner.x, seat);
     let tip = top - DVec2::new(seal.length, 0.0);
     let mut from = corner;
     // A shoulder held back by the flow can leave the seat's tip downstream of the
-    // shroud start; the cover then goes on at the seat radius up to it.
+    // shroud start; the cover then goes on at the seat radius up to it (our own
+    // choice, not from a source).
     let foot = tip.x.min(shroud.start().x);
     for next in [
         top,
         tip,
-        DVec2::new(foot, seal.impeller_seat),
+        DVec2::new(foot, seat),
         DVec2::new(foot, shroud.start().y),
         shroud.start(),
     ] {
@@ -451,6 +455,13 @@ mod tests {
         input.seals.front.enabled = false;
         let c = MeridionalContour::build(&b, &input, 1.0).unwrap();
         assert!(c.seals.front.is_none());
+        // No line at the seat radius the default front seal would have.
+        let seat = contour().1.seals.front.unwrap().impeller_seat;
+        assert!(c.shroud_material.segments().iter().all(|s| {
+            s.kind() != SegmentKind::Line
+                || (s.start().y - seat).abs() > 1e-9
+                || (s.end().y - seat).abs() > 1e-9
+        }));
         let upstream = c
             .shroud_material
             .points()
@@ -463,6 +474,25 @@ mod tests {
         assert!(
             upstream >= start - t && upstream < start + 1e-9,
             "{upstream}"
+        );
+    }
+
+    #[test]
+    fn a_shoulder_held_back_by_the_flow_warns() {
+        // A semi-axial impeller: the shroud rises so fast that the seat would cut the
+        // flow path at the seal radius, so the shoulder stays upstream, below it.
+        let mut b = basis();
+        b.outlet_inclination = 30f64.to_radians();
+        b.outlet_hub_diameter = 0.8 * b.outlet_diameter;
+        let c = MeridionalContour::build(&b, &MeridionalInput::default(), 1.0).unwrap();
+        let seal = c.seals.front.expect("front seal");
+        assert!(c.shroud.end().y > seal.radius);
+        assert!(
+            c.material_warnings
+                .iter()
+                .any(|w| w.contains("shoulder reaches only")),
+            "{:?}",
+            c.material_warnings
         );
     }
 
