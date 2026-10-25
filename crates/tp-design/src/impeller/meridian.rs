@@ -19,6 +19,7 @@ use super::chambers::{self, ChamberSettings, Chambers};
 use super::crossings::{Crossing, crossings};
 use super::duct::LegacyDuct;
 use super::material::{self, Material, MaterialSettings};
+use super::seals::{ResolvedSeals, Seals};
 use super::wall::{SegmentInput, Wall};
 use crate::{DesignError, Param};
 
@@ -53,6 +54,8 @@ pub struct MeridionalInput {
     pub shroud_segments: Option<Vec<SegmentInput>>,
     /// Thickness, bore and boss of the automatic material.
     pub material: MaterialSettings,
+    /// The annular seals at the eye and on the hub side.
+    pub seals: Seals,
     /// Wire of the hub disk drawn segment by segment, from the hub end at the outlet
     /// back to the hub start; `None` keeps the automatic one.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -436,6 +439,8 @@ pub struct MeridionalContour {
     pub shroud_material: Wall,
     /// Thickness, bore and boss as used for the material.
     pub material: Material,
+    /// The seals as used.
+    pub seals: ResolvedSeals,
     /// What of the material could not be built as asked.
     pub material_warnings: Vec<String>,
     /// The side chambers beside the material, built whether designed or not.
@@ -489,7 +494,11 @@ impl MeridionalContour {
         }
     }
 
-    pub fn build(basis: &ImpellerBasis, input: &MeridionalInput) -> Result<Self, DesignError> {
+    pub fn build(
+        basis: &ImpellerBasis,
+        input: &MeridionalInput,
+        eyes: f64,
+    ) -> Result<Self, DesignError> {
         let rn = basis.hub_diameter / 2.0;
         let r1 = basis.inlet_diameter / 2.0;
         let r2 = basis.outlet_diameter / 2.0;
@@ -606,16 +615,19 @@ impl MeridionalContour {
             ));
         }
         let settings = input.material.resolve(basis);
-        let wires = material::wires(
+        let seals = input.seals.resolve(basis, settings.wall_thickness, eyes);
+        let mut wires = material::wires(
             &hub,
             &shroud,
             basis,
             &settings,
+            &seals,
             (
                 input.hub_material.as_deref(),
                 input.shroud_material.as_deref(),
             ),
         )?;
+        wires.warnings.extend(seals.warnings.iter().cloned());
         let inside = hub_line
             .point_at_fraction(0.5)
             .lerp(shroud_line.point_at_fraction(0.5), 0.5);
@@ -647,6 +659,7 @@ impl MeridionalContour {
             hub_material: wires.hub,
             shroud_material: wires.shroud,
             material: settings,
+            seals,
             material_warnings: wires.warnings,
             axial_length: length,
             leading_edge,
@@ -939,7 +952,7 @@ pub(crate) mod tests {
     #[test]
     fn contour_end_points_and_tangents() {
         let b = basis();
-        let c = MeridionalContour::build(&b, &MeridionalInput::default()).unwrap();
+        let c = MeridionalContour::build(&b, &MeridionalInput::default(), 1.0).unwrap();
         let l = default_axial_length(&b);
         assert_eq!(c.hub.start(), DVec2::new(0.0, b.hub_diameter / 2.0));
         assert_eq!(c.hub.end(), DVec2::new(l, b.outlet_diameter / 2.0));
@@ -958,7 +971,7 @@ pub(crate) mod tests {
     #[test]
     fn inlet_and_outlet_areas_are_exact() {
         let b = basis();
-        let c = MeridionalContour::build(&b, &MeridionalInput::default()).unwrap();
+        let c = MeridionalContour::build(&b, &MeridionalInput::default(), 1.0).unwrap();
         let ch = Channel::build(&c, b.flow, 41, 5);
         let inlet = ch.quasi_orthogonals.first().unwrap();
         let outlet = ch.quasi_orthogonals.last().unwrap();
@@ -986,7 +999,7 @@ pub(crate) mod tests {
             }
         }
         let b = basis();
-        let c = MeridionalContour::build(&b, &MeridionalInput::default()).unwrap();
+        let c = MeridionalContour::build(&b, &MeridionalInput::default(), 1.0).unwrap();
         let ch = Channel::build(&c, b.flow, 21, 5);
         assert_eq!(
             ch.spans.first().unwrap().points[10],
@@ -1001,7 +1014,7 @@ pub(crate) mod tests {
     #[test]
     fn reference_channel_decelerates_smoothly() {
         let b = basis();
-        let c = MeridionalContour::build(&b, &MeridionalInput::default()).unwrap();
+        let c = MeridionalContour::build(&b, &MeridionalInput::default(), 1.0).unwrap();
         let ch = Channel::build(&c, b.flow, 61, 5);
         let first = ch.quasi_orthogonals.first().unwrap().cm;
         let last = ch.quasi_orthogonals.last().unwrap().cm;
@@ -1013,20 +1026,20 @@ pub(crate) mod tests {
     #[test]
     fn drawn_walls_reproduce_the_automatic_contour_and_survive_a_round_trip() {
         let b = basis();
-        let automatic = MeridionalContour::build(&b, &MeridionalInput::default()).unwrap();
+        let automatic = MeridionalContour::build(&b, &MeridionalInput::default(), 1.0).unwrap();
         let input = MeridionalInput {
             hub_segments: Some(super::super::wall::split(&automatic.hub, 0, 0.4)),
             shroud_segments: Some(automatic.shroud.to_input()),
             ..MeridionalInput::default()
         };
-        let drawn = MeridionalContour::build(&b, &input).unwrap();
+        let drawn = MeridionalContour::build(&b, &input, 1.0).unwrap();
         for t in [0.0, 0.3, 0.7, 1.0] {
             assert!(drawn.hub_at(t).distance(automatic.hub_at(t)) < 1e-6);
             assert!(drawn.shroud_at(t).distance(automatic.shroud_at(t)) < 1e-12);
         }
         let json = serde_json::to_string(&input).unwrap();
         let back: MeridionalInput = serde_json::from_str(&json).unwrap();
-        let read = MeridionalContour::build(&b, &back).unwrap();
+        let read = MeridionalContour::build(&b, &back, 1.0).unwrap();
         assert_eq!(read.hub.segments().len(), 2);
         assert_eq!(read.hub.smooth(), [true]);
         for t in [0.2, 0.5, 0.9] {
@@ -1049,7 +1062,7 @@ pub(crate) mod tests {
             leading_edge_shape: LeadingEdgeShape::Line,
             ..MeridionalInput::default()
         };
-        let contour = MeridionalContour::build(&b, &input).unwrap();
+        let contour = MeridionalContour::build(&b, &input, 1.0).unwrap();
         let channel = Channel::build(&contour, b.flow, 41, 7);
         let (hub, shroud) = (
             contour.hub_at(contour.leading_edge.0),
@@ -1066,7 +1079,7 @@ pub(crate) mod tests {
             assert!(line.length() > 0.0);
         }
         // Following the channel keeps the old interpolation.
-        let channel_edge = MeridionalContour::build(&b, &MeridionalInput::default()).unwrap();
+        let channel_edge = MeridionalContour::build(&b, &MeridionalInput::default(), 1.0).unwrap();
         let (h, s) = channel_edge.leading_edge;
         assert_relative_eq!(
             channel_edge.leading_edge_on(0.5, &channel.spans[3].points),
@@ -1114,8 +1127,8 @@ pub(crate) mod tests {
     #[test]
     fn the_meridian_moves_with_its_axial_position_and_reference() {
         let b = basis();
-        let base = MeridionalContour::build(&b, &MeridionalInput::default()).unwrap();
-        let moved = |input: MeridionalInput| MeridionalContour::build(&b, &input).unwrap();
+        let base = MeridionalContour::build(&b, &MeridionalInput::default(), 1.0).unwrap();
+        let moved = |input: MeridionalInput| MeridionalContour::build(&b, &input, 1.0).unwrap();
         let dz = 0.05;
         let at_inlet = moved(MeridionalInput {
             axial_position: dz,
@@ -1176,6 +1189,7 @@ pub(crate) mod tests {
                     inlet_tilt: tilt,
                     ..MeridionalInput::default()
                 },
+                1.0,
             )
             .unwrap();
             assert!((c.shroud.start().x - c.hub.start().x - dz).abs() < 1e-12);
@@ -1196,11 +1210,11 @@ pub(crate) mod tests {
                 leading_edge_extent: EdgeExtent::Radial(0.0),
                 ..MeridionalInput::default()
             };
-            let c = MeridionalContour::build(&b, &input).unwrap();
+            let c = MeridionalContour::build(&b, &input, 1.0).unwrap();
             // Parallel to the axis: the same radius on both walls.
             assert!((hub_at(&c).y - shroud_at(&c).y).abs() < 1e-6);
             input.leading_edge_extent = EdgeExtent::Axial(0.004);
-            let c = MeridionalContour::build(&b, &input).unwrap();
+            let c = MeridionalContour::build(&b, &input, 1.0).unwrap();
             assert!((hub_at(&c).x - shroud_at(&c).x - 0.004).abs() < 1e-6);
         }
         // An offset the hub cannot reach is an error, not a wrong edge.
@@ -1208,7 +1222,7 @@ pub(crate) mod tests {
             leading_edge_extent: EdgeExtent::Radial(1.0),
             ..MeridionalInput::default()
         };
-        assert!(MeridionalContour::build(&b, &input).is_err());
+        assert!(MeridionalContour::build(&b, &input, 1.0).is_err());
     }
 
     fn edge_curve(shape: LeadingEdgeShape, hub: DVec2, shroud: DVec2) -> Bezier<DVec2> {
@@ -1284,7 +1298,7 @@ pub(crate) mod tests {
     #[test]
     fn leading_edge_points_set_the_wall_fractions() {
         let b = basis();
-        let contour = MeridionalContour::build(&b, &MeridionalInput::default()).unwrap();
+        let contour = MeridionalContour::build(&b, &MeridionalInput::default(), 1.0).unwrap();
         let (hub, shroud) = (contour.hub_at(0.3), contour.shroud_at(0.1));
         let mid = (hub + shroud) * 0.5 + DVec2::new(0.002, 0.0);
         let mut input = MeridionalInput::default();
@@ -1310,7 +1324,7 @@ pub(crate) mod tests {
             0.1,
             epsilon = 2e-3
         );
-        let built = MeridionalContour::build(&b, &input).unwrap();
+        let built = MeridionalContour::build(&b, &input, 1.0).unwrap();
         let curve = built.leading_edge_curve().unwrap();
         assert!(distance_to(&curve, mid) < 1e-5);
         assert!(input.set_leading_edge_points(&contour, &[hub]).is_err());
@@ -1323,11 +1337,11 @@ pub(crate) mod tests {
             axial_length: Param::Manual(0.01),
             ..Default::default()
         };
-        assert!(MeridionalContour::build(&b, &short).is_err());
+        assert!(MeridionalContour::build(&b, &short, 1.0).is_err());
         let bad_le = MeridionalInput {
             leading_edge_hub: Param::Manual(1.2),
             ..Default::default()
         };
-        assert!(MeridionalContour::build(&b, &bad_le).is_err());
+        assert!(MeridionalContour::build(&b, &bad_le, 1.0).is_err());
     }
 }

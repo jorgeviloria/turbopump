@@ -3428,7 +3428,7 @@ mod tests {
         let g = geometry();
         let mut input = tp_design::impeller::ImpellerGeometryInput::default();
         input.meridional.hub_segments = Some(wall::split(&g.contour.hub, 0, 0.5));
-        let drawn = tp_design::impeller::build(&g.basis, &input).unwrap();
+        let drawn = tp_design::impeller::build(&g.basis, &input, 1.0).unwrap();
         let points: Vec<Handle> = handles(&drawn.contour, &input.meridional)
             .into_iter()
             .filter(|h| matches!(h, Handle::Point(Side::Hub, _)))
@@ -3444,7 +3444,7 @@ mod tests {
         let mut moved = input.meridional.clone();
         apply_drag(joint, to, &drawn.contour, &drawn.basis, &mut moved);
         input.meridional = moved;
-        let after = tp_design::impeller::build(&drawn.basis, &input).unwrap();
+        let after = tp_design::impeller::build(&drawn.basis, &input, 1.0).unwrap();
         assert!(handle_position(joint, &after.contour).distance(to) < 1e-12);
     }
 
@@ -3497,14 +3497,14 @@ mod tests {
             semi_axial: false,
             duct: None,
         };
-        let drawn = tp_design::impeller::build(&g.basis, &input).unwrap();
+        let drawn = tp_design::impeller::build(&g.basis, &input, 1.0).unwrap();
         let joint = Handle::Point(Side::Hub, WallPoint::Joint { segment: 0 });
         let Some(Change::Geometry(moved)) =
             set_dimension(Dimension::R(joint), 0.03, &drawn, inputs)
         else {
             panic!("a geometry change");
         };
-        let after = tp_design::impeller::build(&drawn.basis, &moved).unwrap();
+        let after = tp_design::impeller::build(&drawn.basis, &moved, 1.0).unwrap();
         let p = handle_position(joint, &after.contour);
         assert!((p.y - 0.03).abs() < 1e-12);
         assert!((p.x - handle_position(joint, &drawn.contour).x).abs() < 1e-12);
@@ -3618,7 +3618,7 @@ mod tests {
         basis.outlet_inclination = 25f64.to_radians();
         basis.outlet_hub_diameter = basis.outlet_diameter * 0.8;
         let input = MeridionalInput::default();
-        let contour = MeridionalContour::build(&basis, &input).unwrap();
+        let contour = MeridionalContour::build(&basis, &input, 1.0).unwrap();
         let lines = dimension_lines(&contour, &basis, true, None);
         let b2 = lines
             .iter()

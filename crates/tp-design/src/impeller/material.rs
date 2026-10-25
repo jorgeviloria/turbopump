@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use tp_math::{BSpline, DVec2};
 
 use super::ImpellerBasis;
+use super::seals::{ResolvedSeals, Seal};
 pub use super::wall::offset_points;
 use super::wall::{SegmentInput, SegmentKind, Wall};
 use crate::{DesignError, Param};
@@ -39,10 +40,6 @@ pub struct MaterialSettings {
     /// Outer diameter of the boss around the bore, m; automatic: the bore plus a wall
     /// of a quarter of the bore, and no less than the wall thickness.
     pub boss_diameter: Param<f64>,
-    /// Length of the neck of the shroud upstream of the inlet, where the annular seal
-    /// runs, m; automatic: the seal length 0.12·d_sp (Gülich Chap. 3.6.2) with
-    /// d_sp = d₁ + 2·wall; 0 leaves no neck.
-    pub neck_length: Param<f64>,
 }
 
 /// Thickness of the hub disk and the shroud unless given: 0.02·d₂, at least 3 mm (our
@@ -57,13 +54,6 @@ pub struct Material {
     pub wall_thickness: f64,
     pub bore_diameter: f64,
     pub boss_diameter: f64,
-    pub neck_length: f64,
-}
-
-/// Diameter of the annular seal on the neck unless given: the eye d₁ plus the wall on
-/// both sides, as the axial thrust takes it.
-pub fn default_seal_diameter(basis: &ImpellerBasis, wall_thickness: f64) -> f64 {
-    basis.inlet_diameter + 2.0 * wall_thickness
 }
 
 impl MaterialSettings {
@@ -77,14 +67,10 @@ impl MaterialSettings {
             let rb = bore_diameter / 2.0;
             2.0 * (rb + (0.5 * rb).max(wall_thickness))
         });
-        let neck_length = self.neck_length.resolve(|| {
-            crate::losses::SEAL_LENGTH_RATIO * default_seal_diameter(basis, wall_thickness)
-        });
         Material {
             wall_thickness,
             bore_diameter,
             boss_diameter,
-            neck_length: neck_length.max(0.0),
         }
     }
 }
@@ -125,6 +111,7 @@ pub fn automatic_hub(
     shroud: &Wall,
     basis: &ImpellerBasis,
     m: &Material,
+    _rear: Option<&Seal>,
 ) -> Result<Vec<SegmentInput>, DesignError> {
     let t = m.wall_thickness;
     let (rb, rboss) = (m.bore_diameter / 2.0, m.boss_diameter / 2.0);
@@ -202,6 +189,7 @@ pub fn automatic_shroud(
     hub: &Wall,
     shroud: &Wall,
     m: &Material,
+    front: Option<&Seal>,
 ) -> Result<Vec<SegmentInput>, DesignError> {
     let points = shroud.sample(OFFSET_SAMPLES);
     let outer = offset_points(
@@ -214,9 +202,9 @@ pub fn automatic_shroud(
     back[0].y = shroud.end().y;
     let mut wire = vec![line(back[0]), curve(&back)?];
     let eye = *back.last().expect("points");
-    if m.neck_length > 0.0 {
+    if let Some(seal) = front {
         // The neck: upstream along its outer radius, then in to the eye radius.
-        let tip = eye - DVec2::new(m.neck_length, 0.0);
+        let tip = eye - DVec2::new(seal.length, 0.0);
         wire.push(line(tip));
         wire.push(line(DVec2::new(tip.x, shroud.start().y)));
     }
@@ -248,6 +236,7 @@ pub fn wires(
     shroud: &Wall,
     basis: &ImpellerBasis,
     m: &Material,
+    seals: &ResolvedSeals,
     drawn: (Option<&[SegmentInput]>, Option<&[SegmentInput]>),
 ) -> Result<MaterialWires, DesignError> {
     let mut warnings = Vec::new();
@@ -276,14 +265,14 @@ pub fn wires(
         hub,
         middle(shroud),
         drawn.0,
-        automatic_hub(hub, shroud, basis, m),
+        automatic_hub(hub, shroud, basis, m, seals.rear.as_ref()),
     )?;
     let shroud_wire = pick(
         "shroud",
         shroud,
         middle(hub),
         drawn.1,
-        automatic_shroud(hub, shroud, m),
+        automatic_shroud(hub, shroud, m, seals.front.as_ref()),
     )?;
     Ok(MaterialWires {
         hub: hub_wire,
@@ -299,7 +288,7 @@ mod tests {
 
     fn contour() -> (ImpellerBasis, MeridionalContour) {
         let b = basis();
-        let c = MeridionalContour::build(&b, &MeridionalInput::default()).unwrap();
+        let c = MeridionalContour::build(&b, &MeridionalInput::default(), 1.0).unwrap();
         (b, c)
     }
 
@@ -348,16 +337,15 @@ mod tests {
         // Outwards: towards the inlet side, away from the hub.
         assert!(first.x < c.shroud.end().x);
         // The neck runs upstream of the inlet as long as the seal.
-        let m = MaterialSettings::default().resolve(&b);
+        let seal = c.seals.front.expect("the default has a front seal");
         let neck = &s.segments()[2];
         assert_eq!(neck.kind(), SegmentKind::Line);
-        assert!((neck.start().x - neck.end().x - m.neck_length).abs() < 1e-12);
+        assert!((neck.start().x - neck.end().x - seal.length).abs() < 1e-12);
         assert!(
             (neck.start().y - neck.end().y).abs() < 1e-12,
             "along the axis"
         );
-        let d_sp = default_seal_diameter(&b, t);
-        assert!((m.neck_length - 0.12 * d_sp).abs() < 1e-12);
+        assert!((seal.length - 0.12 * 2.0 * seal.radius).abs() < 1e-12);
     }
 
     #[test]
@@ -370,7 +358,7 @@ mod tests {
             },
             ..MeridionalInput::default()
         };
-        let c = MeridionalContour::build(&b, &input).unwrap();
+        let c = MeridionalContour::build(&b, &input, 1.0).unwrap();
         assert!(!c.material_warnings.is_empty());
         assert_eq!(c.hub_material.segments().len(), 3);
     }
@@ -383,7 +371,7 @@ mod tests {
             ..MeridionalInput::default()
         };
         input.axial_length = Param::Manual(c.axial_length * 1.1);
-        let longer = MeridionalContour::build(&b, &input).unwrap();
+        let longer = MeridionalContour::build(&b, &input, 1.0).unwrap();
         assert_eq!(longer.hub_material.start(), longer.hub.end());
         assert_eq!(longer.hub_material.end(), longer.hub.start());
     }

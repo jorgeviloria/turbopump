@@ -338,7 +338,11 @@ impl Project {
             Rotation::CounterClockwise => -1.0,
         };
         let basis = ImpellerBasis::from_pump(&main, &main_input, sign);
-        Ok(impeller::build(&basis, &self.impeller_geometry_input(id)?)?)
+        Ok(impeller::build(
+            &basis,
+            &self.impeller_geometry_input(id)?,
+            main_input.suction.eyes(),
+        )?)
     }
 
     /// Every step of component `id` that is not done yet, computed in order with the

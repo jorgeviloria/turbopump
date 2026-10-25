@@ -20,7 +20,7 @@ fn main() {
     let input = CentrifugalPumpInput::default();
     let main = design(&duty, &input).expect("feasible main dimensions");
     let basis = ImpellerBasis::from_pump(&main, &input, 1.0);
-    let g = impeller::build(&basis, &ImpellerGeometryInput::default()).expect("geometry");
+    let g = impeller::build(&basis, &ImpellerGeometryInput::default(), 1.0).expect("geometry");
 
     println!("axial length {:.1} mm", g.contour.axial_length * 1e3);
     let qos = &g.channel.quasi_orthogonals;

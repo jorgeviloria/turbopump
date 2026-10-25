@@ -768,7 +768,7 @@ mod tests {
         assert!(without.parts.iter().all(|p| p.id != PartId::Duct));
         let mut input = tp_design::impeller::ImpellerGeometryInput::default();
         input.meridional.chambers.enabled = true;
-        g = tp_design::impeller::build(&g.basis, &input).unwrap();
+        g = tp_design::impeller::build(&g.basis, &input, 1.0).unwrap();
         let built = duct::build(&g.contour, &g.basis, &DuctInput::default());
         let with = build(&g, Some(&built), None, None, &ViewOptions::default());
         let part = with.parts.iter().find(|p| p.id == PartId::Duct).unwrap();

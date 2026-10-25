@@ -2297,18 +2297,6 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                 &units,
                 0.0..=1.0,
             );
-            changed |= param_f64(
-                ui,
-                tr("Neck length"),
-                tr(
-                    "Of the shroud upstream of the inlet, where the annular seal runs; automatic: 0.12·d_sp (Gülich Chap. 3.6.2); 0 for none",
-                ),
-                &mut settings.neck_length,
-                Length,
-                used.map(|u| u.neck_length),
-                &units,
-                0.0..=0.5,
-            );
             for (name, wire) in [
                 (tr("Hub disk drawn by segments"), &mut m.hub_material),
                 (tr("Shroud cover drawn by segments"), &mut m.shroud_material),

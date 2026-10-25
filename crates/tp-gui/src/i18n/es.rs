@@ -242,11 +242,6 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "The casing walls beside the impeller: the front chamber down to the annular seal, the rear one down to the shaft seal",
         "Las paredes de carcasa junto al rodete: la cámara delantera hasta el sello anular y la trasera hasta el sello del eje",
     ),
-    ("Neck length", "Longitud del cuello"),
-    (
-        "Of the shroud upstream of the inlet, where the annular seal runs; automatic: 0.12·d_sp (Gülich Chap. 3.6.2); 0 for none",
-        "De la tapa aguas arriba de la entrada, donde va el sello anular; automático: 0,12·d_sp (Gülich, cap. 3.6.2); 0 para ninguno",
-    ),
     ("Design the side chambers", "Diseñar las cámaras laterales"),
     ("Axial gap s_ax", "Holgura axial s_ax"),
     (
@@ -3653,10 +3648,7 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "de Haller criterion: not below 0.7 on the outer streamline, or the flow stalls early and loses efficiency (Gülich, Chap. 7.2.1)",
         "Criterio de de Haller: no menos de 0.7 en la línea de corriente exterior, o el flujo se desprende antes y pierde rendimiento (Gülich, cap. 7.2.1)",
     ),
-    (
-        "Suction-face peak / outlet w",
-        "Pico de succión / w₂",
-    ),
+    ("Suction-face peak / outlet w", "Pico de succión / w₂"),
     (
         "Highest suction-face velocity over the mean outlet velocity: how much the suction face decelerates to the trailing edge. Lower is better",
         "Mayor velocidad en la cara de succión entre la velocidad media de salida: cuánto desacelera la cara de succión hasta el borde de salida. Cuanto menor, mejor",
@@ -3682,10 +3674,7 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Below zero the relative flow on the pressure face turns back and may separate (the last 5 % of the blade, where the flow slips, is left out)",
         "Por debajo de cero el flujo relativo en la cara de presión retrocede y puede desprenderse (se deja fuera el último 5 % del álabe, donde el flujo resbala)",
     ),
-    (
-        "Secondary-flow drive ΔC_p",
-        "Flujo secundario ΔC_p",
-    ),
+    ("Secondary-flow drive ΔC_p", "Flujo secundario ΔC_p"),
     (
         "Largest difference of reduced static pressure on the suction face between hub and shroud, over ½ρu₂². Above 0 it draws low-energy fluid to the shroud corner, where the wake forms; loading the hub further back than the shroud lowers it (Zangeneh, Goto & Harada 1998; Gülich, Chap. 8.9.4)",
         "Mayor diferencia de presión estática reducida en la cara de succión entre el cubo y la carcasa, entre ½ρu₂². Por encima de 0 arrastra fluido de baja energía a la esquina de la carcasa, donde se forma la estela; cargar el cubo más atrás que la carcasa la reduce (Zangeneh, Goto y Harada 1998; Gülich, cap. 8.9.4)",

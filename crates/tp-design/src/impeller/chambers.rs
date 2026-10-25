@@ -180,9 +180,7 @@ pub fn build(
     let neck_start = neck_start.min(face.len() - 1);
     let seal_length = (face[neck_start].x - tip.x).max(0.0);
     if seal_length < 0.01 * 2.0 * neck_radius {
-        warnings.push(
-            "the shroud has no neck for the annular seal: give the material a neck length".into(),
-        );
+        warnings.push("the shroud has no neck for the annular seal: turn the front seal on".into());
     }
     let seal_diameter = 2.0 * neck_radius;
     let clearance = settings
@@ -277,7 +275,7 @@ mod tests {
             chambers,
             ..MeridionalInput::default()
         };
-        MeridionalContour::build(&basis(), &input).unwrap()
+        MeridionalContour::build(&basis(), &input, 1.0).unwrap()
     }
 
     #[test]
@@ -289,7 +287,7 @@ mod tests {
         assert!((v.axial_gap - 0.05 * b.outlet_diameter / 2.0).abs() < 1e-12);
         // The seal sits on the neck, of the material's neck length, with the clearance
         // of eq. 3.12 on its diameter.
-        assert!((v.seal_length - c.material.neck_length).abs() < 1e-3 * v.seal_length);
+        assert!((v.seal_length - c.seals.front.unwrap().length).abs() < 1e-3 * v.seal_length);
         assert!((v.seal_clearance - seal_clearance(v.seal_diameter)).abs() < 1e-15);
         let end = ch.front_casing.end();
         assert!((end.y - (v.seal_diameter / 2.0 + v.seal_clearance)).abs() < 1e-12);
@@ -333,11 +331,11 @@ mod tests {
     fn warnings_only_when_the_chambers_are_designed() {
         let b = basis();
         let mut input = MeridionalInput::default();
-        input.material.neck_length = Param::Manual(0.0);
-        let quiet = MeridionalContour::build(&b, &input).unwrap();
+        input.seals.front.enabled = false;
+        let quiet = MeridionalContour::build(&b, &input, 1.0).unwrap();
         assert!(quiet.chambers.warnings.is_empty());
         input.chambers.enabled = true;
-        let loud = MeridionalContour::build(&b, &input).unwrap();
+        let loud = MeridionalContour::build(&b, &input, 1.0).unwrap();
         assert!(loud.chambers.warnings.iter().any(|w| w.contains("neck")));
     }
 }

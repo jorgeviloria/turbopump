@@ -22,7 +22,7 @@ fn point_list_round_trip() {
     let input = CentrifugalPumpInput::default();
     let main = design(&duty, &input).unwrap();
     let basis = ImpellerBasis::from_pump(&main, &input, 1.0);
-    let g = impeller::build(&basis, &ImpellerGeometryInput::default()).unwrap();
+    let g = impeller::build(&basis, &ImpellerGeometryInput::default(), 1.0).unwrap();
     let text = geometry_txt(&g);
 
     let mut section = String::new();

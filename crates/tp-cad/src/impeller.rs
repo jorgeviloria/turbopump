@@ -592,7 +592,7 @@ pub(crate) mod tests_support {
         let input = CentrifugalPumpInput::default();
         let main = design(&duty, &input).unwrap();
         let basis = ImpellerBasis::from_pump(&main, &input, 1.0);
-        (impeller::build(&basis, geometry).unwrap(), main, duty)
+        (impeller::build(&basis, geometry, 1.0).unwrap(), main, duty)
     }
 }
 
@@ -752,7 +752,7 @@ mod tests {
         // Thicker walls, set in the meridional design, make a heavier impeller.
         let mut input = tp_design::impeller::ImpellerGeometryInput::default();
         input.meridional.material.wall_thickness = tp_design::Param::Manual(0.006);
-        let thick = tp_design::impeller::build(&g.basis, &input).unwrap();
+        let thick = tp_design::impeller::build(&g.basis, &input, 1.0).unwrap();
         let heavy = build_impeller(&thick, &sharp).unwrap();
         assert_relative_eq!(heavy.wall_thickness, 0.006);
         let walls = heavy.impeller_volume() - heavy.blades.volume() * 1e-9;
@@ -771,7 +771,7 @@ mod tests {
         );
         let mut input = tp_design::impeller::ImpellerGeometryInput::default();
         input.meridional.chambers.enabled = true;
-        let with = tp_design::impeller::build(&g.basis, &input).unwrap();
+        let with = tp_design::impeller::build(&g.basis, &input, 1.0).unwrap();
         let sharp = CadOptions {
             fillet_radius: Some(0.0),
             ..CadOptions::default()
@@ -791,7 +791,7 @@ mod tests {
         let mut input = tp_design::impeller::ImpellerGeometryInput::default();
         input.meridional.chambers.enabled = true;
         let g = reference();
-        let with = tp_design::impeller::build(&g.basis, &input).unwrap();
+        let with = tp_design::impeller::build(&g.basis, &input, 1.0).unwrap();
         let built = duct::build(&with.contour, &with.basis, &DuctInput::default());
         let shape = build_inlet_duct(&built).unwrap();
         assert!(shape.is_valid());
