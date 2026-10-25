@@ -40,7 +40,7 @@ use crate::{DesignError, Param};
 use tp_units::STANDARD_GRAVITY;
 
 pub use cutwater::CutwaterSlice;
-pub use geometry::{NozzleSection, VoluteGeometry, VoluteSection};
+pub use geometry::{NozzleSection, RibPlane, VoluteGeometry, VoluteSection};
 pub use section::{
     BendWall, BezierBase, BezierSide, CrossSectionInput, CrossSections, DEFAULT_CONE_ANGLE_DEG,
     ExternalRound, InnerPosition, InternalRound, Measure, RadiusSide, SectionDefinition,
@@ -360,6 +360,10 @@ impl Default for CutwaterShape {
     }
 }
 
+/// Largest obliquity of the cutwater, rad: past it the edge runs nearly round the
+/// circumference.
+pub const MAX_OBLIQUITY: f64 = 60.0 * std::f64::consts::PI / 180.0;
+
 /// Inputs of the cutwater step.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -371,6 +375,11 @@ pub struct CutwaterInput {
     /// Share of the thickness a rounded cutwater lacks past the tip of the wedge that
     /// its spiral side takes, 0 to 1; the diffuser side takes the rest. Automatic: ½.
     pub share: Param<f64>,
+    /// Obliquity ε of a rounded cutwater and of the rib nose, rad: the angle between
+    /// the edge and the pump axis, unrolled onto the cutwater circle (Gülich Table 10.2
+    /// asks for ε > 35° against pressure pulsations). For ε > 0 the edge lies further
+    /// downstream toward +z. Automatic: 0, an edge parallel to the axis.
+    pub obliquity: Param<f64>,
 }
 
 /// Inputs of the wall-thickness step.
@@ -631,6 +640,8 @@ pub struct VoluteDesign {
     pub nose_radius: f64,
     /// Share of the missing thickness on the spiral side of a rounded cutwater.
     pub cutwater_share: f64,
+    /// Obliquity ε of a rounded cutwater and of the rib nose, rad.
+    pub cutwater_obliquity: f64,
     pub diffuser: DischargeDiffuser,
     pub wall_thickness: f64,
     /// The flange at the outlet, if drawn.
@@ -1245,6 +1256,14 @@ impl VoluteDesign {
         require((0.0..=1.0).contains(&cutwater_share), || {
             "the share of the spiral side of the cutwater must lie between 0 and 1".into()
         })?;
+        let cutwater_obliquity = input.cutwater.obliquity.resolve(|| 0.0);
+        require(cutwater_obliquity.abs() <= MAX_OBLIQUITY, || {
+            format!(
+                "the obliquity of the cutwater must lie within ±{:.0}°, got {:.1}°",
+                MAX_OBLIQUITY.to_degrees(),
+                cutwater_obliquity.to_degrees()
+            )
+        })?;
 
         let rib = match rib_wrap {
             None => None,
@@ -1441,6 +1460,7 @@ impl VoluteDesign {
             cutwater_shape,
             nose_radius,
             cutwater_share,
+            cutwater_obliquity,
             diffuser,
             wall_thickness,
             flange,
@@ -1543,6 +1563,17 @@ impl VoluteDesign {
     /// `flow_ratio` is Q/Q_design and `head_ratio` H_th/H_th,design.
     pub fn cutwater_flow_angle_at(&self, flow_ratio: f64, head_ratio: f64) -> f64 {
         (self.cutwater_flow_angle.tan() * flow_ratio).atan2(head_ratio)
+    }
+
+    /// Incidence i₃ = α₃B − α₃′ on the cutwater at another operating point, rad
+    /// ([`crate::performance::cutwater_incidence`]).
+    pub fn cutwater_incidence_at(&self, flow_ratio: f64, head_ratio: f64) -> f64 {
+        crate::performance::cutwater_incidence(
+            self.cutwater_flow_angle,
+            self.cutwater_angle,
+            flow_ratio,
+            head_ratio,
+        )
     }
 
     /// The cross section at wrap angle `angle` (rad) from the cutwater; 2π is the throat.

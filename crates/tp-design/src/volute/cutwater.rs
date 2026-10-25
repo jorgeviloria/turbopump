@@ -20,9 +20,11 @@
 //! needs (our construction: Gülich asks for a short, thick profile, except the nose
 //! radius, against cracks).
 //!
-//! The nose stays on the same line parallel to the pump axis in every plane; the faces
-//! follow the walls of each plane, which differ when the sections are not straight
-//! sided.
+//! The faces follow the walls of each plane, which differ when the sections are not
+//! straight sided. The nose stays on the same line parallel to the pump axis in every
+//! plane, or, for an oblique cutwater, turns about the axis from plane to plane so that
+//! its edge makes the angle ε with the axis unrolled onto its circle (Gülich Table 10.2:
+//! ε > 35° against pressure pulsations).
 
 use tp_math::{Bezier, DVec2, DVec3};
 
@@ -98,10 +100,36 @@ pub(super) fn slices(
         .into_iter()
         .filter_map(|z| {
             let walls = Walls::at(outlines, nozzle, sign, z)?;
-            walls.slice(design, sign, z, centre)
+            let turned = centre.map(|c| oblique(c, design.cutwater_obliquity, sign, z - midplane));
+            walls.slice(design, sign, z, turned)
         })
         .collect();
     (slices, centre)
+}
+
+/// How much thinner than its nose a rounded cutwater may get in a plane, as a share of
+/// the nose thickness: an oblique cutwater squeezes between the cutwater circle and
+/// the walls.
+pub const THINNING: f64 = 0.05;
+
+/// Whether a rounded cutwater reaches the walls in all `SLICES` planes, nowhere thinner
+/// than its nose `e` (within [`THINNING`]).
+pub fn sound(slices: &[CutwaterSlice], e: f64) -> bool {
+    slices.len() == SLICES
+        && slices
+            .iter()
+            .all(|s| !s.outline.is_empty() && s.min_thickness >= e * (1.0 - THINNING))
+}
+
+/// The point `point` of the midplane turned about the pump axis to the plane `dz` from
+/// it, so that the line through the turned points makes the angle `obliquity` with the
+/// axis unrolled onto their circle: downstream toward +z for a positive angle.
+pub fn oblique(point: DVec2, obliquity: f64, sign: f64, dz: f64) -> DVec2 {
+    let r = point.length();
+    if r <= 0.0 {
+        return point;
+    }
+    DVec2::from_angle(sign * dz * obliquity.tan() / r).rotate(point)
 }
 
 /// The two walls in one plane, as polylines (x, y) downstream.
@@ -345,10 +373,20 @@ impl Walls {
                     (p - n * (0.5 * e), p + n * (0.5 * e))
                 })
                 .unzip();
+            // Nothing of the body comes nearer the axis than the cutwater circle: where
+            // a turned nose (an oblique cutwater) leads the spiral face along a wall
+            // close to it, the face follows the circle.
+            let rz = design.cutwater_diameter / 2.0;
             let inner: Vec<DVec2> = inner_lead
                 .iter()
                 .chain(inner_wall.iter().skip(1))
-                .copied()
+                .map(|p| {
+                    if p.length() < rz {
+                        *p * (rz / p.length())
+                    } else {
+                        *p
+                    }
+                })
                 .collect();
             let outer: Vec<DVec2> = outer_lead
                 .iter()
@@ -866,6 +904,68 @@ mod tests {
                 .fold(0.0, f64::max);
             assert!(bend < 0.25 * step, "{i}: {bend} vs {step}");
         }
+    }
+
+    #[test]
+    fn an_oblique_cutwater_turns_its_nose_across_the_width() {
+        let obliquity = 35f64.to_radians();
+        let g = build(|v| v.cutwater.obliquity = Param::Manual(obliquity));
+        let e = 2.0 * g.design.nose_radius;
+        let rz = g.design.cutwater_diameter / 2.0;
+        let sign = g.basis.rotation_sign;
+        assert_eq!(g.cutwater_slices.len(), SLICES);
+        // The innermost point of the nose, on d_z in every plane, and its wrap angle.
+        let nose = |s: &CutwaterSlice| {
+            let p = s
+                .outline
+                .iter()
+                .min_by(|a, b| a.truncate().length().total_cmp(&b.truncate().length()))
+                .copied()
+                .unwrap();
+            sign * p.y.atan2(p.x)
+        };
+        for s in &g.cutwater_slices {
+            assert!((s.nose_distance - rz).abs() < 1e-6, "{}", s.nose_distance);
+            assert!(s.min_thickness > e * (1.0 - 1e-3), "{}", s.min_thickness);
+        }
+        // Unrolled on d_z, the edge leans by ε, downstream toward +z.
+        let (first, last) = (&g.cutwater_slices[0], &g.cutwater_slices[SLICES - 1]);
+        let arc = (nose(last) - nose(first)) * rz;
+        let expected = (last.z - first.z) * obliquity.tan();
+        assert!((arc / expected - 1.0).abs() < 0.02, "{arc} vs {expected}");
+        // The midplane stays where it was.
+        let straight = build(|_| {});
+        let mid = SLICES / 2;
+        assert!(
+            (nose(&g.cutwater_slices[mid]) - nose(&straight.cutwater_slices[mid])).abs() < 1e-9
+        );
+    }
+
+    #[test]
+    fn a_cutwater_leans_only_as_far_as_the_walls_leave_it_room() {
+        // Round sections squeeze an oblique cutwater between d_z and the diffuser wall
+        // near the side walls.
+        let mut input = VoluteInput {
+            cross_section: CrossSectionInput::single(SectionShape::round()),
+            ..VoluteInput::default()
+        };
+        input.cutwater.obliquity = Param::Manual(35f64.to_radians());
+        let err = VoluteGeometry::build(&reference_basis(), &input)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("past about"), "{err}");
+        // Within that limit it builds, nowhere inside d_z.
+        let g = build(|v| {
+            v.cross_section = CrossSectionInput::single(SectionShape::round());
+            v.cutwater.obliquity = Param::Manual(15f64.to_radians());
+        });
+        let rz = g.design.cutwater_diameter / 2.0;
+        assert!(sound(&g.cutwater_slices, 2.0 * g.design.nose_radius));
+        assert!(
+            g.cutwater_slices
+                .iter()
+                .all(|s| s.nose_distance > rz - 1e-9)
+        );
     }
 
     #[test]
