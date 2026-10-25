@@ -69,6 +69,10 @@ jobs:
       # one test at a time), with the parallel booleans still faster than one thread.
       # The heaviest CAD tests, which Linux and macOS run with the same OCCT code, stay
       # out there; the rest of the CAD tests check that OCCT builds and works on Windows.
+      # With OCCT 8.0.1 and the cutwater in 3D, six more passed the 75 minutes there,
+      # side by side: the joined fluid 45 min, the volute options 41 min, the cutwater
+      # and discharge shapes 22 min, and the double volute (over 70 min), the spiral
+      # development options and the rounded groove over the cutwater unfinished.
       - name: Tests (sin las pruebas de CAD más pesadas)
         if: runner.os == 'Windows'
         timeout-minutes: 75
@@ -80,6 +84,12 @@ jobs:
           --skip volute_channel_and_fluid_domain_are_valid_solids
           --skip cad_exports_impeller_and_flow_domain
           --skip cad_export_writes_both_solids
+          --skip the_chambers_join_the_impeller_and_the_volute_in_one_fluid
+          --skip common_volute_options_give_one_valid_flow_domain
+          --skip cutwater_and_discharge_shapes_give_valid_solids
+          --skip a_double_volute_is_one_valid_solid
+          --skip spiral_development_options_give_one_valid_flow_domain
+          --skip the_casing_fills_and_rounds_the_groove_over_the_cutwater
       - name: Tests sin CoolProp
         run: cargo test -p tp-fluids --no-default-features
       - name: CLI sin CAD
