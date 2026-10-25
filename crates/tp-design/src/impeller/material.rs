@@ -7,8 +7,9 @@
 //! - hub: across the wall at the outlet, the hub contour offset by the thickness down
 //!   to the boss, the rear face of the boss, the bore, and up to the hub at the inlet;
 //! - shroud: across the wall at the outlet, the shroud contour offset outwards by the
-//!   thickness, a cylindrical neck reaching upstream of the inlet for the annular seal,
-//!   and down to the shroud at the inlet.
+//!   thickness up to the front seal radius, the shoulder down to the impeller seat,
+//!   the seat upstream of the inlet for the annular seal, and down to the shroud at the
+//!   inlet (without a front seal, the offset face runs straight to the eye).
 //!
 //! A drawn wire is edited segment by segment like the walls (see [`super::wall`]).
 
@@ -190,7 +191,7 @@ pub fn automatic_shroud(
     shroud: &Wall,
     m: &Material,
     front: Option<&Seal>,
-) -> Result<Vec<SegmentInput>, DesignError> {
+) -> Result<(Vec<SegmentInput>, Vec<String>), DesignError> {
     let points = shroud.sample(OFFSET_SAMPLES);
     let outer = offset_points(
         &points,
@@ -200,16 +201,74 @@ pub fn automatic_shroud(
     let mut back: Vec<DVec2> = outer.iter().rev().copied().collect();
     // The rim on the outlet radius, as on the hub disk.
     back[0].y = shroud.end().y;
-    let mut wire = vec![line(back[0]), curve(&back)?];
-    let eye = *back.last().expect("points");
-    if let Some(seal) = front {
-        // The neck: upstream along its outer radius, then in to the eye radius.
-        let tip = eye - DVec2::new(seal.length, 0.0);
-        wire.push(line(tip));
-        wire.push(line(DVec2::new(tip.x, shroud.start().y)));
+    let mut warnings = Vec::new();
+    let Some(seal) = front else {
+        let wire = vec![line(back[0]), curve(&back)?, line(shroud.start())];
+        return Ok((wire, warnings));
+    };
+    // The face runs from the rim down to the eye. The shoulder stands where it comes
+    // down to the seal radius, the seat goes upstream from there. The seat must stay
+    // clear of the flow: the shoulder is no further downstream than where the shroud
+    // rises to within a tenth of a wall of the seat.
+    let clear = seal.impeller_seat - 0.1 * m.wall_thickness;
+    let x_limit = shroud
+        .sample(OFFSET_SAMPLES)
+        .windows(2)
+        .find(|w| w[1].y >= clear)
+        .map_or(f64::NEG_INFINITY, |w| {
+            let f = ((clear - w[0].y) / (w[1].y - w[0].y)).clamp(0.0, 1.0);
+            w[0].x + (w[1].x - w[0].x) * f
+        });
+    // The shoulder stands at the later of the two along the face from the rim.
+    let kept = back
+        .iter()
+        .position(|p| p.y <= seal.radius && p.x <= x_limit)
+        .filter(|&i| i > 0)
+        .map(|i| {
+            let (p, q) = (back[i - 1], back[i]);
+            let f_radius = ((p.y - seal.radius) / (p.y - q.y)).clamp(0.0, 1.0);
+            let f_limit = ((p.x - x_limit) / (p.x - q.x)).clamp(0.0, 1.0);
+            let mut kept = back[..i].to_vec();
+            kept.push(p + (q - p) * f_radius.max(f_limit));
+            kept
+        });
+    let (face, corner) = match kept {
+        Some(kept) if kept.len() >= 4 => {
+            let corner = *kept.last().expect("not empty");
+            (kept, corner)
+        }
+        _ => {
+            let eye = *back.last().expect("points");
+            (back, eye)
+        }
+    };
+    if face[0].y < seal.radius * (1.0 - 1e-9) {
+        warnings.push(format!(
+            "the shroud face stays below the front seal radius of {:.1} mm: the shoulder is made on the face",
+            seal.radius * 1e3
+        ));
     }
-    wire.push(line(shroud.start()));
-    Ok(wire)
+    let mut wire = vec![line(face[0]), curve(&face)?];
+    // The shoulder down to the seat, the seat upstream and in to the shroud start.
+    let top = DVec2::new(corner.x, seal.impeller_seat);
+    let tip = top - DVec2::new(seal.length, 0.0);
+    let mut from = corner;
+    // A shoulder held back by the flow can leave the seat's tip downstream of the
+    // shroud start; the cover then goes on at the seat radius up to it.
+    let foot = tip.x.min(shroud.start().x);
+    for next in [
+        top,
+        tip,
+        DVec2::new(foot, seal.impeller_seat),
+        DVec2::new(foot, shroud.start().y),
+        shroud.start(),
+    ] {
+        if next.distance(from) > 1e-9 {
+            wire.push(line(next));
+            from = next;
+        }
+    }
+    Ok((wire, warnings))
 }
 
 /// A plain wire when the automatic one cannot be built: `thickness` along the axis
@@ -244,19 +303,25 @@ pub fn wires(
                     wall: &Wall,
                     away_from: DVec2,
                     drawn: Option<&[SegmentInput]>,
-                    automatic: Result<Vec<SegmentInput>, DesignError>|
+                    automatic: Result<(Vec<SegmentInput>, Vec<String>), DesignError>|
      -> Result<Wall, DesignError> {
         // The wire runs from the outlet end of the wall back to its inlet end.
         let (from, to) = (wall.end(), wall.start());
         if let Some(segments) = drawn {
             return Wall::build(from, to, segments);
         }
-        let segments = automatic.unwrap_or_else(|e| {
-            warnings.push(format!(
-                "the automatic {name} material could not be built ({e}); a plain one is used"
-            ));
-            fallback(wall, m.wall_thickness, away_from)
-        });
+        let segments = match automatic {
+            Ok((segments, notes)) => {
+                warnings.extend(notes);
+                segments
+            }
+            Err(e) => {
+                warnings.push(format!(
+                    "the automatic {name} material could not be built ({e}); a plain one is used"
+                ));
+                fallback(wall, m.wall_thickness, away_from)
+            }
+        };
         Wall::build(from, to, &segments)
     };
     let middle = |w: &Wall| w.sample(OFFSET_SAMPLES)[OFFSET_SAMPLES / 2];
@@ -265,7 +330,7 @@ pub fn wires(
         hub,
         middle(shroud),
         drawn.0,
-        automatic_hub(hub, shroud, basis, m, seals.rear.as_ref()),
+        automatic_hub(hub, shroud, basis, m, seals.rear.as_ref()).map(|wire| (wire, Vec::new())),
     )?;
     let shroud_wire = pick(
         "shroud",
@@ -336,16 +401,82 @@ mod tests {
         assert!((first.distance(c.shroud.end()) - t).abs() < 1e-3 * t);
         // Outwards: towards the inlet side, away from the hub.
         assert!(first.x < c.shroud.end().x);
-        // The neck runs upstream of the inlet as long as the seal.
+        // The seat runs upstream as long as the seal, on the seat radius.
         let seal = c.seals.front.expect("the default has a front seal");
-        let neck = &s.segments()[2];
-        assert_eq!(neck.kind(), SegmentKind::Line);
-        assert!((neck.start().x - neck.end().x - seal.length).abs() < 1e-12);
-        assert!(
-            (neck.start().y - neck.end().y).abs() < 1e-12,
-            "along the axis"
-        );
+        let seat = seat_segment(s, &seal);
+        assert!((seat.start().x - seat.end().x - seal.length).abs() < 1e-12);
         assert!((seal.length - 0.12 * 2.0 * seal.radius).abs() < 1e-12);
+    }
+
+    fn seat_segment<'a>(w: &'a Wall, seal: &Seal) -> &'a crate::impeller::wall::Segment {
+        w.segments()
+            .iter()
+            .find(|s| {
+                s.kind() == SegmentKind::Line
+                    && (s.start().y - seal.impeller_seat).abs() < 1e-12
+                    && (s.end().y - seal.impeller_seat).abs() < 1e-12
+                    && (s.start().x - s.end().x - seal.length).abs() < 1e-12
+            })
+            .expect("a line of the seal length on the seat radius")
+    }
+
+    #[test]
+    fn the_front_seat_runs_on_the_seat_radius() {
+        let (_, c) = contour();
+        let seal = c.seals.front.expect("front seal");
+        assert!(seal.impeller_ring.is_some());
+        seat_segment(&c.shroud_material, &seal);
+    }
+
+    #[test]
+    fn the_front_shoulder_reaches_the_seal_radius() {
+        let (_, c) = contour();
+        let seal = c.seals.front.expect("front seal");
+        let seat = seat_segment(&c.shroud_material, &seal);
+        assert!(seal.radius > seal.impeller_seat);
+        assert!(
+            c.shroud_material
+                .points()
+                .iter()
+                .any(|(_, p)| (p.x - seat.start().x).abs() < 1e-12
+                    && (p.y - seal.radius).abs() < 1e-12)
+        );
+        assert!(c.material_warnings.is_empty(), "{:?}", c.material_warnings);
+    }
+
+    #[test]
+    fn without_a_front_seal_the_shroud_has_no_neck() {
+        let b = basis();
+        let mut input = MeridionalInput::default();
+        input.seals.front.enabled = false;
+        let c = MeridionalContour::build(&b, &input, 1.0).unwrap();
+        assert!(c.seals.front.is_none());
+        let upstream = c
+            .shroud_material
+            .points()
+            .iter()
+            .map(|(_, p)| p.x)
+            .fold(f64::INFINITY, f64::min);
+        // Only the offset face reaches upstream of the shroud start, by under a wall.
+        let t = MaterialSettings::default().resolve(&b).wall_thickness;
+        let start = c.shroud_material.end().x;
+        assert!(
+            upstream >= start - t && upstream < start + 1e-9,
+            "{upstream}"
+        );
+    }
+
+    #[test]
+    fn a_low_shoulder_warns() {
+        let b = basis();
+        let mut input = MeridionalInput::default();
+        input.seals.front.diameter = Param::Manual(2.0 * b.outlet_diameter);
+        let c = MeridionalContour::build(&b, &input, 1.0).unwrap();
+        assert!(
+            c.material_warnings.iter().any(|w| w.contains("shoulder")),
+            "{:?}",
+            c.material_warnings
+        );
     }
 
     #[test]

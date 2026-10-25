@@ -187,7 +187,13 @@ pub fn build(
         .seal_clearance
         .resolve(|| seal_clearance(seal_diameter))
         .max(1e-6);
-    let outer_face = &face[..=neck_start];
+    // The casing follows the face down to the foot of the shoulder, not the radial
+    // step of the shoulder itself, whose offset would fold on its corner.
+    let mut shoulder = neck_start;
+    while shoulder > 0 && (face[shoulder - 1].x - face[neck_start].x).abs() <= 1e-9 * neck_radius {
+        shoulder -= 1;
+    }
+    let outer_face = &face[..=shoulder];
     let casing_face = offset_points(outer_face, axial_gap, inside).unwrap_or_else(|_| {
         warnings.push(format!(
             "the front casing wall {:.1} mm from the shroud does not fit its curvature; a \
