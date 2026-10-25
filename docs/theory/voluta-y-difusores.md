@@ -503,7 +503,31 @@ $$\tan\alpha'_3(Q) = \tan\alpha'_{3,d}\;\frac{Q/Q_d}{H_{th}(Q)/H_{th,d}}, \qquad
 i_3(Q) = \alpha_{3B} - \alpha'_3(Q)$$
 
 con $H_{th}(Q)$ de la característica prevista. A carga parcial el flujo llega más
-plano e $i_3 > 0$, como en la Fig. 9.20 de Gülich (pág. 539).
+plano e $i_3 > 0$, como en la Fig. 9.20 de Gülich (pág. 539). La predicción da el rango
+de caudal en que $|i_3| \le 3°$, donde la curva cruza +3° y −3°. Sale en la página del
+corte de agua y en `turbopump performance`; en la bomba de referencia va de
+$q^*$ = 0,74 a 1,21.
+
+**Oblicuidad** (`--set obliquity=…`). La tabla 10.2 de Gülich (pág. 567) pide un corte de
+agua oblicuo contra las pulsaciones de presión, con $\varepsilon > 35°$, y la tabla 10.10
+(pág. 632) lo repite. En la figura, las paredes laterales van en vertical y
+$\varepsilon$ es el ángulo entre el borde y la dirección del eje, en el desarrollo. Aquí
+la nariz gira alrededor del eje de un plano al siguiente:
+
+$$\Delta\theta(z) = \frac{(z - z_m)\tan\varepsilon}{r}$$
+
+con $r$ el radio del centro de la nariz. El plano medio queda donde estaba, y con
+$\varepsilon > 0$ el lado de +z va aguas abajo. Al girar alrededor del eje, la nariz
+conserva $d_{min} = d_z$. Las caras, en cambio, siguen las paredes de cada plano. Con la
+nariz girada, la cara de la espiral puede ir junto a una pared muy cerca del eje, y ahí
+sigue el círculo $d_z$ en lugar de meterse dentro (elección propia).
+
+Cuánto puede inclinarse lo deciden las paredes. Pasado cierto ángulo, en los planos de los
+lados el cuerpo queda apretado entre $d_z$ y la pared del difusor, y ya no tiene el
+espesor de la nariz. Se admite un 5 % menos; más allá, el diseño da error y dice hasta
+dónde llega, buscado por bisección. En la bomba de referencia el límite es de unos 53°
+con la sección trapecial por defecto, 38° con la rectangular y 21° con la redonda. La
+página del corte de agua no deja pasar del límite y lo muestra junto al deslizador.
 
 **Por cortes a lo ancho.** El corte de agua se calcula en 9 planos $z$ = cte entre las
 paredes laterales de la entrada (a un 5 % de ellas). En cada plano, la pared exterior de
@@ -708,6 +732,14 @@ el empuje radial (cap. 9.3.4 y tabla 9.4). Se elige en el paso de datos de parti
 - **Perfil:** Gülich aconseja perfilar el corte de agua de forma elíptica para que acepte
   cambios de dirección del flujo, y definir su espesor por un círculo (mismo punto).
   Por defecto la nariz es un semicírculo; una relación mayor la alarga.
+- **A lo alto, como el corte de agua:** el nervio se calcula en 9 planos $z$ = cte,
+  desde la cota más baja de las secciones hasta la más alta. Con la oblicuidad del
+  corte de agua, la nariz gira de plano a plano en la misma medida, sobre el círculo de
+  su línea media, $r'_z + e/2$, y la cola se queda. El CAD lo talla con un loft suave
+  por esos planos, como el cuerpo del corte de agua, en lugar de extruirlo. El corte se
+  acepta si deja sobre la superficie la punta de la nariz de cada plano dentro de la
+  anchura de entrada. La vista 3D lo dibuja como cuerpo cerrado, en la pieza del corte
+  de agua.
 
 **Compensación del nervio** (`--set rib_comp=on`, `rib_comp_start=…`; construcción
 propia, como la compensación del corte de agua):
