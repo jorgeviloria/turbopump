@@ -2698,6 +2698,10 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ),
     ("Balance holes", "Agujeros de equilibrado"),
     (
+        "The impeller has no rear seal: turn it on in the meridional contour",
+        "El rodete no tiene sello trasero: actívalo en el contorno meridional",
+    ),
+    (
         "Holes in the rear shroud with an annular seal there: most of the axial force on the shrouds cancels (Gülich eq. T9.2.14)",
         "Agujeros en el disco trasero con un anillo de desgaste allí: se anula la mayor parte del empuje axial sobre los discos (Gülich ec. T9.2.14)",
     ),

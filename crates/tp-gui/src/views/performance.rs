@@ -18,6 +18,13 @@ use crate::i18n::{tf, tr};
 use crate::messages::{self, Severity};
 use crate::theme;
 
+/// Whether the contour of impeller `id` has a rear seal, where the balance holes go.
+fn has_rear_seal(derived: &Derived, id: ComponentId) -> bool {
+    derived
+        .geometry(id)
+        .is_some_and(|g| g.contour.seals.rear.is_some())
+}
+
 /// What the cached curve was computed from.
 type Key = (u64, ComponentId, PerformanceInput);
 
@@ -79,7 +86,8 @@ impl PerformanceView {
         input.recirculation_onset = self.onset;
         input.shutoff_coefficient = self.shutoff;
         input.max_flow_ratio = self.max_flow;
-        input.axial.balance_holes = self.balance_holes;
+        // The holes need the rear seal of the contour.
+        input.axial.balance_holes = self.balance_holes && has_rear_seal(derived, id);
         input.losses.statistics = self.statistics;
         input.viscosity = self.viscosity;
         input.operation = self.operation.clone();
@@ -236,7 +244,11 @@ impl PerformanceView {
                                      force on the shrouds cancels (Gülich eq. T9.2.14)",
                                 ),
                             );
-                            ui.checkbox(&mut self.balance_holes, "");
+                            let rear = has_rear_seal(derived, id);
+                            ui.add_enabled(rear, egui::Checkbox::new(&mut self.balance_holes, ""))
+                                .on_disabled_hover_text(tr(
+                                    "The impeller has no rear seal: turn it on in the meridional contour",
+                                ));
                             ui.end_row();
                         });
                     }

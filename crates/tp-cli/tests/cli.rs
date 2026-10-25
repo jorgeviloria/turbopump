@@ -757,21 +757,21 @@ fn performance_predicts_the_characteristic() {
     // The seals leak less than the statistics assume, so the impeller gives a little
     // more head; the loss analysis puts η above the statistics.
     assert!(
-        text.contains("Design     Q 100.0 m³/h   H 32.32 m"),
+        text.contains("Design     Q 100.0 m³/h   H 32.27 m"),
         "{text}"
     );
     assert!(
-        text.contains("Losses     η 0.856 by losses (statistics 0.814"),
+        text.contains("Losses     η 0.854 by losses (statistics 0.814"),
         "{text}"
     );
     // The hydraulic losses summed by Gülich Table 3.8 land near the statistical η_h.
-    assert!(text.contains("η_h 0.909 (statistics 0.907)"), "{text}");
+    assert!(text.contains("η_h 0.908 (statistics 0.907)"), "{text}");
     assert!(text.contains("Shut-off   H"), "{text}");
     assert!(
         text.contains("Axial      ") && text.contains("at design toward the suction side"),
         "{text}"
     );
-    assert!(text.contains("operating point Q 100.4 m³/h"), "{text}");
+    assert!(text.contains("operating point Q 100.3 m³/h"), "{text}");
     // An oil shifts the water curve (Gülich Chap. 13.1).
     let oil = stdout(&turbopump(&[
         "performance",
