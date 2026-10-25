@@ -587,6 +587,27 @@ la pared interior de la tobera. Entonces empieza donde la deja libre, como en el
 corte de agua tangente, y la punta de la cuña está ahí. Lo mismo ocurre cuando las dos
 paredes solo se rozan (cuña de menos de 4°).
 
+**Inicio de la espiral con todos los planos** (`--set spiral_start=…`; elección propia
+sobre el punto 7 del cap. 7.8.1). Con un corte de agua afilado o redondeado, la espiral
+empieza por defecto 3° después del corte de agua. Ese inicio vale si va antes de que su
+pared cruce la del difusor en los 9 planos a lo ancho de la entrada. Las secciones de
+la espiral no dependen de dónde empieza, así que los cruces se buscan una sola vez,
+con la espiral desde 1°. De ahí sale el rango válido: desde 1° hasta medio grado antes
+del primer cruce. En la bomba de referencia, con la sección trapecial, va de 1° a 11°
+(descarga radial) o a 40° (tangencial con la pared exterior recta).
+
+- Se puede fijar a mano dentro del rango; fuera de él, el diseño da error y dice el
+  rango.
+- Con el automático, si 3° no cabe, se toma el inicio más tardío que cabe.
+- El plano medio necesita una cuña de verdad (4°).
+- Un corte de agua afilado también la necesita en cada plano donde las paredes se
+  cruzan. Si no la hay, quedaría un filo, y la espiral empieza donde deja libre el
+  difusor. Le pasa a la sección redonda con la pared interior recta. El redondeado no
+  tiene ese límite, porque su cuerpo rellena la cuña.
+- Cerca de las paredes laterales de las secciones redondas, las paredes pueden no
+  cruzarse con ningún inicio. Esos planos no limitan el inicio, y en ellos el corte de
+  agua queda sin cuña, como uno tangente.
+
 El informe da la posición de la punta, el ángulo de la cuña y el **diámetro efectivo del
 corte de agua**: el doble de la distancia del eje al punto más cercano del corte de agua.
 También da, a lo ancho, entre qué radios queda la punta y entre qué ángulos la cuña, y
