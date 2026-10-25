@@ -214,6 +214,13 @@ pub fn build(
         ));
         inner = seal.casing_seat;
     }
+    if f64::from(count) * thickness > 2.0 * std::f64::consts::PI * inner {
+        warnings.push(format!(
+            "the {count} back vanes {:.1} mm wide overlap at their inner radius ({:.1} mm)",
+            thickness * 1e3,
+            inner * 1e3
+        ));
+    }
     let vanes = |band: Vec<DVec2>, warnings: Vec<String>| BackVanes {
         count,
         shape: settings.shape,
@@ -413,5 +420,69 @@ mod tests {
             .x
         };
         assert!((wall(0.003) - wall(0.001) - 0.002).abs() < 1e-12);
+    }
+
+    #[test]
+    fn the_collar_of_the_rear_seal_keeps_the_plate_back_with_a_warning() {
+        let mut input = with_vanes(true, BackVaneSettings::default());
+        input.chambers.enabled = true;
+        let c = contour(&input);
+        let v = c.back_vanes.as_ref().expect("vanes");
+        let ch = &c.chambers;
+        let wall = ch.rear_casing.start().x;
+        let rear = c.seals.rear.expect("rear seal");
+        let collar_tip = c
+            .hub_material
+            .sample(4000)
+            .iter()
+            .filter(|p| (p.y - rear.impeller_seat).abs() < 1e-9)
+            .map(|p| p.x)
+            .fold(f64::NEG_INFINITY, f64::max);
+        assert!(wall >= collar_tip + ch.values.axial_gap - 1e-9);
+        let gap = ch.values.rear_vane_gap.expect("gap");
+        assert!((gap - (wall - v.tip_z().unwrap())).abs() < 1e-12);
+        assert!(gap > v.tip_clearance);
+        assert!(
+            ch.warnings.iter().any(|w| w.contains("collar")),
+            "{:?}",
+            ch.warnings
+        );
+        // Without the rear seal the gap is the clearance, and without vanes there is none.
+        let c = contour(&with_vanes(false, BackVaneSettings::default()));
+        let v = c.back_vanes.as_ref().unwrap();
+        assert!((c.chambers.values.rear_vane_gap.unwrap() - v.tip_clearance).abs() < 1e-12);
+        assert!(
+            contour(&MeridionalInput::default())
+                .chambers
+                .values
+                .rear_vane_gap
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn six_vanes_from_exactly_200_mm_and_overlap_warns() {
+        let b = ImpellerBasis {
+            outlet_diameter: 0.200,
+            ..basis()
+        };
+        let c = MeridionalContour::build(&b, &with_vanes(false, BackVaneSettings::default()), 1.0)
+            .unwrap();
+        assert_eq!(c.back_vanes.unwrap().count, 6);
+        let crowded = contour(&with_vanes(
+            false,
+            BackVaneSettings {
+                count: Param::Manual(40),
+                ..BackVaneSettings::default()
+            },
+        ));
+        assert!(
+            crowded
+                .back_vanes
+                .unwrap()
+                .warnings
+                .iter()
+                .any(|w| w.contains("overlap"))
+        );
     }
 }

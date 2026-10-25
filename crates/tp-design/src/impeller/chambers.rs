@@ -15,7 +15,10 @@
 //!   not in the outline. With back vanes on the disk (our choice: still one plain
 //!   plate) its gap to the disk is the vane height h plus their tip clearance s_v
 //!   instead of s_ax: the clearance of the vanes governs, moving the plate forward or
-//!   back as needed, because the thrust prediction uses that clearance.
+//!   back as needed, because the thrust prediction uses that clearance. The one
+//!   exception is the rear seal collar, which sticks out further than the tips: the
+//!   plate then stays s_ax behind the collar tip, a warning says so and
+//!   [`ChamberValues::rear_vane_gap`] holds the gap as built.
 //!
 //! The casing walls are wires like the walls of the flow path: automatic from the
 //! values here, or drawn segment by segment (see [`super::wall`]). The values follow the
@@ -81,6 +84,10 @@ pub struct ChamberValues {
     pub rear_seal_diameter: Option<f64>,
     /// Radial clearance of the rear seal, `None` without a rear seal.
     pub rear_seal_clearance: Option<f64>,
+    /// Gap from the rear casing wall to the back vane tips as built, `None` without
+    /// vanes: their tip clearance, or more where the rear seal collar or a drawn wall
+    /// keeps the wall further back.
+    pub rear_vane_gap: Option<f64>,
 }
 
 /// The two side chambers.
@@ -392,8 +399,24 @@ pub fn build(
     // exactly the tip clearance behind the true maximum tip z (the tips are a height
     // from the face along its normal, so where the face leans their axial distance
     // from it is slightly under h), moving forward or back from the plain s_ax place.
-    if let Some(tips) = vanes.and_then(|v| v.tip_z().map(|z| z + v.tip_clearance)) {
-        rear_z = tips;
+    // The collar of the rear seal sticks out further behind the disk than the tips can:
+    // the plate then stays s_ax behind the collar tip and the tip gap is larger.
+    let tip = vanes.and_then(|v| v.tip_z().map(|z| (z, v.tip_clearance)));
+    if let Some((z, clearance)) = tip {
+        let collar = seals.rear.map_or(f64::NEG_INFINITY, |seal| {
+            back.iter()
+                .filter(|p| p.y >= seal.impeller_seat - 1e-9 && p.y <= seal.radius + 1e-9)
+                .map(|p| p.x)
+                .fold(f64::NEG_INFINITY, f64::max)
+        });
+        rear_z = (z + clearance).max(collar + axial_gap);
+        if rear_z > z + clearance + 1e-9 && settings.enabled {
+            warnings.push(format!(
+                "the rear seal collar keeps the rear casing wall {:.2} mm from the back vane tips, more than their {:.2} mm clearance",
+                (rear_z - z) * 1e3,
+                clearance * 1e3
+            ));
+        }
     }
     let seal_end = *back.last().expect("a face has points");
     let rear_start = DVec2::new(rear_z, back[0].y);
@@ -403,14 +426,15 @@ pub fn build(
         None => Wall::build(rear_start, rear_end, &[line(rear_end)])?,
     };
     if settings.rear.is_some()
-        && let Some(tips) = vanes.and_then(|v| v.tip_z().map(|z| z + v.tip_clearance))
-        && rear_casing.start().x < tips - 1e-9
+        && let Some((z, clearance)) = tip
+        && rear_casing.start().x < z + clearance - 1e-9
     {
         warnings.push(format!(
             "the rear casing wall drawn is closer to the back vanes than their tip clearance ({:.1} mm)",
-            vanes.map_or(0.0, |v| v.tip_clearance) * 1e3
+            clearance * 1e3
         ));
     }
+    let rear_vane_gap = tip.map(|(z, _)| rear_casing.start().x - z);
     let mut rear = rear_casing.sample(FACE_SAMPLES / 2);
     rear.extend(back.iter().rev());
 
@@ -427,6 +451,7 @@ pub fn build(
             shaft_seal_diameter: 2.0 * seal_end.y,
             rear_seal_diameter: seals.rear.map(|s| 2.0 * s.radius),
             rear_seal_clearance: seals.rear.map(|s| s.clearance),
+            rear_vane_gap,
         },
         enabled: settings.enabled,
         warnings: if settings.enabled {
