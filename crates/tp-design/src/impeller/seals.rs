@@ -5,6 +5,9 @@
 //! Radii, from the axis outwards, for a seal of radius r and clearance s:
 //! - impeller seat: r − e_r (the ring sits on it), or r with no impeller ring;
 //! - impeller ring: from the seat to r, its outer face being the wall of the gap;
+//!   The neck wall t of the shroud stays under the ring, so the seat is never below
+//!   d₁/2 + t: the automatic diameter is d_sp = d₁ + 2(t + e_r) with a wear ring and
+//!   d₁ + 2t without it;
 //! - casing ring: from r + s to the casing seat r + s + e_c; with no ring the casing
 //!   itself bounds the gap and the seat is r + s.
 
@@ -18,10 +21,6 @@ use crate::losses::{SEAL_LENGTH_RATIO, seal_clearance};
 pub const RING_THICKNESS_RATIO: f64 = 0.03;
 /// Least automatic radial thickness of a wear ring, m (our choice for a cast ring).
 pub const MIN_RING_THICKNESS: f64 = 0.004;
-
-/// Share of the wall thickness that must remain between the eye and the seat of the
-/// impeller ring (our choice; a ring cannot take the neck down to the flow path).
-const MIN_REMAINING_WALL_SHARE: f64 = 0.5;
 
 /// Thickness of a wear ring unless given: 0.03·d, at least 4 mm.
 pub fn default_ring_thickness(d: f64) -> f64 {
@@ -51,8 +50,8 @@ impl Default for RingSettings {
 #[serde(default)]
 pub struct SealSettings {
     pub enabled: bool,
-    /// Diameter of the gap on the impeller side d_sp, m; automatic: d₁ + 2·wall (the
-    /// rear seal takes the same).
+    /// Diameter of the gap on the impeller side d_sp, m; automatic: d₁ + 2(t + e_r) with an
+    /// impeller ring, d₁ + 2t without it (t the wall); the rear seal takes the front's.
     pub diameter: Param<f64>,
     /// Length L, m; automatic: 0.12·d_sp (Gülich Chap. 3.6.2).
     pub length: Param<f64>,
@@ -113,12 +112,23 @@ impl Seals {
     /// ([`ImpellerBasis`] does not carry it); a double-entry impeller has no rear seal.
     pub fn resolve(&self, basis: &ImpellerBasis, wall_thickness: f64, eyes: f64) -> ResolvedSeals {
         let mut warnings = Vec::new();
-        let d_auto = basis.inlet_diameter + 2.0 * wall_thickness;
+        let d_base = basis.inlet_diameter + 2.0 * wall_thickness;
+        let ring = default_ring_thickness(d_base);
+        let front_d = self.front.diameter.resolve(|| {
+            d_base
+                + if self.front.impeller_ring.enabled {
+                    2.0 * ring
+                } else {
+                    0.0
+                }
+        });
+        let rear_d = self.rear.diameter.resolve(|| front_d);
         let front = resolve_seal(
             "front",
             &self.front,
             basis,
-            d_auto,
+            front_d,
+            ring,
             wall_thickness,
             &mut warnings,
         );
@@ -132,7 +142,8 @@ impl Seals {
                 "rear",
                 &self.rear,
                 basis,
-                d_auto,
+                rear_d,
+                ring,
                 wall_thickness,
                 &mut warnings,
             )
@@ -149,14 +160,14 @@ fn resolve_seal(
     name: &str,
     s: &SealSettings,
     basis: &ImpellerBasis,
-    d_auto: f64,
+    d: f64,
+    ring: f64,
     wall_thickness: f64,
     warnings: &mut Vec<String>,
 ) -> Option<Seal> {
     if !s.enabled {
         return None;
     }
-    let d = s.diameter.resolve(|| d_auto);
     let radius = d / 2.0;
     let length = s.length.resolve(|| SEAL_LENGTH_RATIO * d);
     let min_clearance = seal_clearance(d);
@@ -170,13 +181,10 @@ fn resolve_seal(
         ));
     }
     let impeller_ring = s.impeller_ring.enabled.then(|| {
-        let wanted = s
-            .impeller_ring
-            .thickness
-            .resolve(|| default_ring_thickness(d));
-        let floor = basis.inlet_diameter / 2.0 + MIN_REMAINING_WALL_SHARE * wall_thickness;
+        let wanted = s.impeller_ring.thickness.resolve(|| ring);
+        let floor = basis.inlet_diameter / 2.0 + wall_thickness;
         let most = (radius - floor).max(0.0);
-        if wanted > most {
+        if wanted > most + 1e-12 {
             warnings.push(format!(
                 "the {name} impeller ring of {:.1} mm is trimmed to {:.1} mm to leave the neck a wall",
                 wanted * 1e3,
@@ -187,11 +195,10 @@ fn resolve_seal(
             wanted
         }
     });
-    let casing_ring = s.casing_ring.enabled.then(|| {
-        s.casing_ring
-            .thickness
-            .resolve(|| default_ring_thickness(d))
-    });
+    let casing_ring = s
+        .casing_ring
+        .enabled
+        .then(|| s.casing_ring.thickness.resolve(|| ring));
     Some(Seal {
         radius,
         length,
@@ -233,23 +240,34 @@ mod tests {
     use super::*;
     use crate::impeller::meridian::tests::basis;
 
-    // A wall thick enough for the automatic ring to fit in the neck.
-    const WALL: f64 = 0.01;
+    // The automatic wall of a cast impeller of this basis.
+    const WALL: f64 = 0.0034;
 
     #[test]
     fn default_seals_have_both_pairs_of_rings() {
         let b = basis();
         let r = Seals::default().resolve(&b, WALL, 1.0);
         let (front, rear) = (r.front.unwrap(), r.rear.unwrap());
-        let radius = (b.inlet_diameter + 2.0 * WALL) / 2.0;
-        let e = default_ring_thickness(2.0 * radius);
-        assert_eq!(front.radius, radius);
+        let e = default_ring_thickness(b.inlet_diameter + 2.0 * WALL);
+        let seat = b.inlet_diameter / 2.0 + WALL;
+        let radius = seat + e;
+        assert!((front.radius - radius).abs() < 1e-12);
         assert_eq!(rear.radius, front.radius);
-        assert_eq!(front.length, SEAL_LENGTH_RATIO * 2.0 * radius);
-        assert_eq!(front.clearance, seal_clearance(2.0 * radius));
-        assert!((front.impeller_seat - (radius - e)).abs() < 1e-12);
+        assert_eq!(front.length, SEAL_LENGTH_RATIO * 2.0 * front.radius);
+        assert_eq!(front.clearance, seal_clearance(2.0 * front.radius));
+        assert!((front.impeller_seat - seat).abs() < 1e-12);
         assert!((front.casing_seat - (radius + front.clearance + e)).abs() < 1e-12);
         assert!(r.warnings.is_empty(), "{:?}", r.warnings);
+    }
+
+    #[test]
+    fn without_an_impeller_ring_the_seal_sits_on_the_wall() {
+        let b = basis();
+        let mut s = Seals::default();
+        s.front.impeller_ring.enabled = false;
+        let f = s.resolve(&b, WALL, 1.0).front.unwrap();
+        assert!((f.radius - (b.inlet_diameter / 2.0 + WALL)).abs() < 1e-12);
+        assert_eq!(f.impeller_seat, f.radius);
     }
 
     #[test]
@@ -295,7 +313,7 @@ mod tests {
         s.front.impeller_ring.thickness = Param::Manual(0.5);
         let r = s.resolve(&b, WALL, 1.0);
         let f = r.front.unwrap();
-        assert!(f.impeller_seat >= b.inlet_diameter / 2.0 + 0.5 * WALL - 1e-12);
+        assert!((f.impeller_seat - (b.inlet_diameter / 2.0 + WALL)).abs() < 1e-12);
         assert!(f.impeller_ring.unwrap() > 0.0);
         assert!(!r.warnings.is_empty());
     }
