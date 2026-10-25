@@ -17,6 +17,10 @@ use super::ImpellerBasis;
 use crate::Param;
 use crate::losses::{SEAL_LENGTH_RATIO, seal_clearance};
 
+/// Least radial thickness a trimmed impeller ring keeps, m; a thinner one is left out
+/// (our choice: it cannot be made nor drawn).
+pub const MIN_TRIMMED_RING: f64 = 0.0005;
+
 /// Radial thickness of a wear ring over the seal diameter (our choice).
 pub const RING_THICKNESS_RATIO: f64 = 0.03;
 /// Least automatic radial thickness of a wear ring, m (our choice for a cast ring).
@@ -147,7 +151,7 @@ impl Seals {
                 wall_thickness,
                 &mut warnings,
             )
-            .map(|seal| trim_rear(seal, basis, wall_thickness, &mut warnings))
+            .map(|seal| trim_rear(seal, &self.rear, basis, wall_thickness, &mut warnings))
         };
         ResolvedSeals {
             front,
@@ -162,6 +166,7 @@ impl Seals {
 /// choice). The seat and the casing seat move with it.
 fn trim_rear(
     mut seal: Seal,
+    settings: &SealSettings,
     basis: &ImpellerBasis,
     wall_thickness: f64,
     warnings: &mut Vec<String>,
@@ -177,6 +182,11 @@ fn trim_rear(
         seal.impeller_seat -= seal.radius - most;
         seal.casing_seat -= seal.radius - most;
         seal.radius = most;
+        // Automatic length and clearance follow the diameter actually drawn.
+        let d = 2.0 * most;
+        seal.length = settings.length.resolve(|| SEAL_LENGTH_RATIO * d);
+        seal.clearance = settings.clearance.resolve(|| seal_clearance(d));
+        seal.casing_seat = seal.radius + seal.clearance + seal.casing_ring.unwrap_or(0.0);
     }
     seal
 }
@@ -205,21 +215,36 @@ fn resolve_seal(
             d * 1e3
         ));
     }
-    let impeller_ring = s.impeller_ring.enabled.then(|| {
+    let floor = basis.inlet_diameter / 2.0 + wall_thickness;
+    let impeller_ring = if s.impeller_ring.enabled {
         let wanted = s.impeller_ring.thickness.resolve(|| ring);
-        let floor = basis.inlet_diameter / 2.0 + wall_thickness;
         let most = (radius - floor).max(0.0);
-        if wanted > most + 1e-12 {
+        if most < MIN_TRIMMED_RING {
+            warnings.push(format!(
+                "the {name} impeller ring of {:.1} mm does not fit on the neck wall: it is left out",
+                wanted * 1e3
+            ));
+            None
+        } else if wanted > most + 1e-12 {
             warnings.push(format!(
                 "the {name} impeller ring of {:.1} mm is trimmed to {:.1} mm to leave the neck a wall",
                 wanted * 1e3,
                 most * 1e3
             ));
-            most
+            Some(most)
         } else {
-            wanted
+            Some(wanted)
         }
-    });
+    } else {
+        if radius < floor - 1e-12 {
+            warnings.push(format!(
+                "the {name} seal diameter {:.1} mm is below the neck wall ({:.1} mm): the seal cuts into the neck",
+                d * 1e3,
+                2.0 * floor * 1e3
+            ));
+        }
+        None
+    };
     let casing_ring = s
         .casing_ring
         .enabled
@@ -305,6 +330,41 @@ mod tests {
         assert_eq!(f.impeller_seat, f.radius);
         assert_eq!(f.casing_seat, f.radius + f.clearance);
         assert!(f.impeller_ring.is_none() && f.casing_ring.is_none());
+    }
+
+    #[test]
+    fn a_ring_trimmed_to_nothing_is_left_out_with_a_warning() {
+        let b = basis();
+        let mut s = Seals::default();
+        s.front.diameter = Param::Manual(b.inlet_diameter + 2.0 * WALL);
+        let r = s.resolve(&b, WALL, 1.0);
+        let f = r.front.unwrap();
+        assert!(f.impeller_ring.is_none());
+        assert_eq!(f.impeller_seat, f.radius);
+        assert!(r.warnings.iter().any(|w| w.contains("left out")), "{:?}", r.warnings);
+    }
+
+    #[test]
+    fn a_diameter_below_the_neck_wall_without_a_ring_warns() {
+        let b = basis();
+        let mut s = Seals::default();
+        s.front.impeller_ring.enabled = false;
+        s.front.diameter = Param::Manual(b.inlet_diameter + WALL);
+        let r = s.resolve(&b, WALL, 1.0);
+        assert!(r.warnings.iter().any(|w| w.contains("below the neck wall")), "{:?}", r.warnings);
+    }
+
+    #[test]
+    fn a_trimmed_rear_seal_recomputes_its_automatic_length_and_clearance() {
+        let b = basis();
+        let mut s = Seals::default();
+        let rim = (b.outlet_diameter / 2.0).min(b.outlet_hub_diameter / 2.0);
+        s.rear.diameter = Param::Manual(2.0 * rim);
+        let r = s.resolve(&b, WALL, 1.0).rear.unwrap();
+        let d = 2.0 * r.radius;
+        assert_eq!(r.length, SEAL_LENGTH_RATIO * d);
+        assert_eq!(r.clearance, seal_clearance(d));
+        assert!((r.casing_seat - (r.radius + r.clearance + r.casing_ring.unwrap())).abs() < 1e-12);
     }
 
     #[test]

@@ -164,6 +164,9 @@ fn back_face_at(wire: &Wall, r: f64) -> Option<f64> {
         })
 }
 
+/// Least radial or axial extent of a wear ring that can be revolved, m.
+const MIN_RING_EXTENT: f64 = 1e-5;
+
 /// The wear rings the design asks for, as rectangles of the meridional plane, with what
 /// could not be placed. The rings of a wall drawn by hand are left out: its seat is not
 /// ours to know.
@@ -269,6 +272,19 @@ pub(crate) fn ring_spans(g: &ImpellerGeometry) -> (Vec<RingSpan>, Vec<String>) {
             }
         }
     }
+    // A ring with no radial or axial extent cannot be drawn: it is left out.
+    spans.retain(|span| {
+        let thin = span.outer - span.inner < MIN_RING_EXTENT;
+        let short = span.z_high - span.z_low < MIN_RING_EXTENT;
+        if thin || short {
+            warnings.push(format!(
+                "the {} wear ring is left out: it has no {} extent",
+                span.kind.label().to_lowercase(),
+                if thin { "radial" } else { "axial" }
+            ));
+        }
+        !(thin || short)
+    });
     // The front casing ring (L − s_ax) and the rear rings (the slope of the back face) are
     // shorter than their seals by design; only a ring under half the seal is no longer a
     // working seal.
@@ -1375,6 +1391,19 @@ mod tests {
         let cad = build_impeller(&none, &sharp()).unwrap();
         assert!(cad.ring_volume(RingKind::RearCasing).is_none());
         assert!(cad.ring_volume(RingKind::FrontCasing).is_some());
+    }
+
+    #[test]
+    fn a_ring_trimmed_to_nothing_builds_without_that_ring() {
+        let base = reference();
+        let wall = tp_design::impeller::default_wall_thickness(base.basis.outlet_diameter);
+        let g = changed(|i| {
+            i.meridional.seals.front.diameter =
+                tp_design::Param::Manual(base.basis.inlet_diameter + 2.0 * wall);
+        });
+        assert!(g.contour.seals.front.unwrap().impeller_ring.is_none());
+        let cad = build_impeller(&g, &sharp()).expect("the impeller builds");
+        assert!(cad.ring_volume(RingKind::FrontImpeller).is_none());
     }
 
     #[test]
