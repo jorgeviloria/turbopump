@@ -3,6 +3,7 @@
 //! The geometry steps start from the main dimensions, gathered in [`ImpellerBasis`],
 //! so the same code serves any machine type that produces them.
 
+pub mod back_vanes;
 pub mod blade;
 pub mod center;
 pub mod chambers;

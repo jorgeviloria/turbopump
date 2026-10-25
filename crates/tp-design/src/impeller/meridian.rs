@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use tp_math::{Bezier, DVec2, Polyline};
 
 use super::ImpellerBasis;
+use super::back_vanes::{self, BackVaneSettings, BackVanes};
 use super::center;
 pub use super::center::DesignMode;
 use super::chambers::{self, ChamberSettings, Chambers};
@@ -66,6 +67,8 @@ pub struct MeridionalInput {
     pub shroud_material: Option<Vec<SegmentInput>>,
     /// The side chambers between the impeller and the casing.
     pub chambers: ChamberSettings,
+    /// The back vanes on the back of the hub disk; off by default.
+    pub back_vanes: BackVaneSettings,
     /// The inlet duct as older files keep it here; the project moves it to a component
     /// of its own as it loads them.
     #[serde(skip_serializing)]
@@ -449,6 +452,8 @@ pub struct MeridionalContour {
     pub material_warnings: Vec<String>,
     /// The side chambers beside the material, built whether designed or not.
     pub chambers: Chambers,
+    /// The back vanes, `None` when they are off.
+    pub back_vanes: Option<BackVanes>,
     /// Where walls cross each other or themselves; the casing walls only when the
     /// chambers are designed.
     pub crossings: Vec<Crossing>,
@@ -635,6 +640,17 @@ impl MeridionalContour {
         let inside = hub_line
             .point_at_fraction(0.5)
             .lerp(shroud_line.point_at_fraction(0.5), 0.5);
+        let vanes = back_vanes::build(
+            &wires.hub,
+            inside,
+            &input.back_vanes,
+            basis,
+            &settings,
+            seals.rear.as_ref(),
+        );
+        if let Some(v) = &vanes {
+            wires.warnings.extend(v.warnings.iter().cloned());
+        }
         let side_chambers = chambers::build(
             &wires.shroud,
             &wires.hub,
@@ -642,6 +658,7 @@ impl MeridionalContour {
             basis,
             &input.chambers,
             &seals,
+            vanes.as_ref(),
         )?;
         // Walls dragged across each other.
         let mut walls: Vec<(&'static str, &Wall)> = vec![
@@ -662,6 +679,7 @@ impl MeridionalContour {
             shroud_line,
             crossings: found,
             chambers: side_chambers,
+            back_vanes: vanes,
             center_line,
             axial_reference: input.axial_reference,
             hub,

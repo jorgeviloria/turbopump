@@ -12,7 +12,8 @@
 //!   impeller ring, and the chamber wraps the collar: down to the ring, along it, round
 //!   the tip and inside the collar. The rear casing is a plain plate s_ax behind the
 //!   collar tip: the rear seal gap (its diameter and clearance) is in the values only,
-//!   not in the outline.
+//!   not in the outline. With back vanes on the disk the plate also stands their tip
+//!   clearance behind their tips, moving back when s_ax is smaller than that.
 //!
 //! The casing walls are wires like the walls of the flow path: automatic from the
 //! values here, or drawn segment by segment (see [`super::wall`]). The values follow the
@@ -26,6 +27,7 @@ use serde::{Deserialize, Serialize};
 use tp_math::DVec2;
 
 use super::ImpellerBasis;
+use super::back_vanes::BackVanes;
 use super::seals::{ResolvedSeals, Seal};
 use super::wall::{SegmentInput, SegmentKind, Wall, offset_points};
 use crate::losses::AXIAL_GAP_RATIO;
@@ -255,6 +257,7 @@ pub fn build(
     basis: &ImpellerBasis,
     settings: &ChamberSettings,
     seals: &ResolvedSeals,
+    vanes: Option<&BackVanes>,
 ) -> Result<Chambers, DesignError> {
     let mut warnings = Vec::new();
     let axial_gap = settings
@@ -382,7 +385,12 @@ pub fn build(
     // Rear: the back of the disk down to the shaft seal, and a flat wall behind it.
     let shaft_seal_diameter = settings.shaft_seal_diameter.resolve(|| basis.hub_diameter);
     let back = rear_face(disk, shaft_seal_diameter / 2.0, seals.rear.as_ref());
-    let rear_z = back.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max) + axial_gap;
+    let mut rear_z = back.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max) + axial_gap;
+    // Back vanes: the plate also clears their tips by the tip clearance, so it moves
+    // back when the plain gap is smaller than that.
+    if let Some(tips) = vanes.and_then(|v| v.tip_z().map(|z| z + v.tip_clearance)) {
+        rear_z = rear_z.max(tips);
+    }
     let seal_end = *back.last().expect("a face has points");
     let rear_start = DVec2::new(rear_z, back[0].y);
     let rear_end = DVec2::new(rear_z, seal_end.y);
@@ -390,6 +398,15 @@ pub fn build(
         Some(segments) => Wall::build(rear_start, rear_end, segments)?,
         None => Wall::build(rear_start, rear_end, &[line(rear_end)])?,
     };
+    if settings.rear.is_some()
+        && let Some(tips) = vanes.and_then(|v| v.tip_z().map(|z| z + v.tip_clearance))
+        && rear_casing.start().x < tips - 1e-9
+    {
+        warnings.push(format!(
+            "the rear casing wall drawn is closer to the back vanes than their tip clearance ({:.1} mm)",
+            vanes.map_or(0.0, |v| v.tip_clearance) * 1e3
+        ));
+    }
     let mut rear = rear_casing.sample(FACE_SAMPLES / 2);
     rear.extend(back.iter().rev());
 
