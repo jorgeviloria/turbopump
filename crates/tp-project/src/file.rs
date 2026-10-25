@@ -28,8 +28,8 @@ struct FileHeader {
     version: u32,
 }
 
-/// Version 2 moves the neck of the shroud into the seals: every meridional input with
-/// a `material` gets the seals of an earlier project (the front one by its
+/// Version 2 moves the neck of the shroud into the seals: every meridional input gets
+/// the seals of an earlier project (the front one by its
 /// `neck_length`, no rear one, no wear rings), and a chamber seal clearance set by hand
 /// becomes the clearance of the front seal.
 fn migrate_v1_seals(project: &mut serde_json::Value) {
@@ -39,11 +39,13 @@ fn migrate_v1_seals(project: &mut serde_json::Value) {
 
     match project {
         Value::Object(map) => {
-            if let Some(Value::Object(meridional)) = map.get_mut("meridional")
-                && let Some(Value::Object(material)) = meridional.get_mut("material")
-            {
-                let neck = material
-                    .remove("neck_length")
+            if let Some(Value::Object(meridional)) = map.get_mut("meridional") {
+                // A malformed or missing neck length falls back to Auto on purpose:
+                // lenient like the rest of the loader.
+                let neck = meridional
+                    .get_mut("material")
+                    .and_then(Value::as_object_mut)
+                    .and_then(|material| material.remove("neck_length"))
                     .and_then(|v| serde_json::from_value::<Param<f64>>(v).ok())
                     .unwrap_or_default();
                 let mut seals = serde_json::to_value(Seals::legacy(neck)).expect("seals");
@@ -208,8 +210,9 @@ mod tests {
         assert_ne!(new, loaded.components()[0].id());
     }
 
-    /// A version-1 file whose only impeller has the geometry inputs of `edit`, with
-    /// `neck` as the neck length of its material.
+    /// A version-1 file whose only impeller has default geometry inputs, with `neck` as
+    /// the neck length of its material and `chamber_clearance` as the chamber seal
+    /// clearance, when given.
     fn version_1_file(neck: Option<f64>, chamber_clearance: Option<f64>) -> String {
         use tp_design::impeller::ImpellerGeometryInput;
         let mut p = pump();
@@ -267,6 +270,28 @@ mod tests {
         use tp_design::Param;
         let seals = seals_of(&Project::from_json(&version_1_file(None, Some(0.0004))).unwrap());
         assert_eq!(seals.front.clearance, Param::Manual(0.0004));
+        // The key is gone from the chambers JSON, not just copied.
+        let mut value: serde_json::Value =
+            serde_json::from_str(&version_1_file(None, Some(0.0004))).unwrap();
+        super::migrate_v1_seals(&mut value["project"]);
+        let chambers = &value["project"]["components"][0]["geometry"]["meridional"]["chambers"];
+        assert!(chambers.get("seal_clearance").is_none());
+    }
+
+    #[test]
+    fn a_version_1_meridian_without_material_gets_legacy_seals() {
+        use tp_design::Param;
+        let mut value: serde_json::Value =
+            serde_json::from_str(&version_1_file(None, None)).unwrap();
+        value["project"]["components"][0]["geometry"]["meridional"]
+            .as_object_mut()
+            .unwrap()
+            .remove("material");
+        let seals = seals_of(&Project::from_json(&value.to_string()).unwrap());
+        assert!(seals.front.enabled);
+        assert_eq!(seals.front.length, Param::Auto);
+        assert!(!seals.rear.enabled);
+        assert!(!seals.front.impeller_ring.enabled && !seals.front.casing_ring.enabled);
     }
 
     #[test]
