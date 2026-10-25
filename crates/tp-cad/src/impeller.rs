@@ -567,11 +567,13 @@ fn vane_outline(vanes: &BackVanes, sign: f64, z: f64) -> Result<Vec<Vec<DVec3>>,
             let mut sides = (Vec::new(), Vec::new());
             for k in 0..=steps {
                 let r = lo + (hi - lo) * f64::from(k) / f64::from(steps);
-                let theta = sign * (r / r0).ln() / slope;
-                // The centre line and its tangent: dθ/dr = 1/(r·tan), so the tangent is
+                let theta = -sign * (r / r0).ln() / slope;
+                // Backward swept like the blades, whose angle falls with the radius for a
+                // positive sense. The centre line and its tangent: dθ/dr = ∓1/(r·tan), so
+                // the tangent is
                 // (cos θ − r θ' sin θ, sin θ + r θ' cos θ) up to a factor.
                 let (c, s) = (theta.cos(), theta.sin());
-                let rate = sign / slope;
+                let rate = -sign / slope;
                 let tangent = DVec2::new(c - rate * s, s + rate * c).normalize();
                 let normal = DVec2::new(-tangent.y, tangent.x) * half;
                 let centre = DVec2::new(r * c, r * s);
@@ -799,13 +801,28 @@ pub fn build_impeller(g: &ImpellerGeometry, options: &CadOptions) -> Result<Impe
         Some(vanes) => match impeller.fuse_fuzzy(&vanes, VANE_JOIN_TOLERANCE) {
             Ok(joined) if joined.is_valid() && joined.solid_count() == 1 => {
                 // What the join adds: the vanes less the sliver the spline walls overlap.
-                let added = joined.cut_fuzzy(&impeller, VANE_JOIN_TOLERANCE);
-                impeller = joined;
-                match added {
+                let own = vanes.volume();
+                match joined.cut_fuzzy(&impeller, VANE_JOIN_TOLERANCE) {
                     Ok(added) if added.is_valid() && added.solid_count() == vanes.solid_count() => {
-                        Some(added)
+                        if added.volume() < 0.5 * own {
+                            warnings.push(
+                                "the back vanes left out: the join added less than half of their volume"
+                                    .to_string(),
+                            );
+                            None
+                        } else {
+                            impeller = joined;
+                            Some(added)
+                        }
                     }
-                    _ => Some(vanes),
+                    _ => {
+                        warnings.push(
+                            "the volume the back vanes add to the impeller could not be checked"
+                                .to_string(),
+                        );
+                        impeller = joined;
+                        Some(vanes)
+                    }
                 }
             }
             _ => {
@@ -1635,11 +1652,46 @@ mod tests {
         let vanes = cad.back_vanes.as_ref().unwrap();
         let shared = chambers
             .common(vanes)
-            .map_or(0.0, |s| s.volume_with_tolerance(0.0));
+            .expect("the common of the chamber fluid and the vanes")
+            .volume_with_tolerance(1e-7);
         assert!(
-            shared < 1e-9 * vanes.volume_with_tolerance(0.0),
+            shared < 1e-9 * vanes.volume_with_tolerance(1e-7),
             "{shared} mm³ shared with the chamber fluid; {:?}",
             cad.warnings
+        );
+    }
+
+    #[test]
+    fn curved_back_vanes_lean_like_the_blades() {
+        use tp_design::impeller::back_vanes::VaneShape;
+        let curved = VaneShape::Curved {
+            angle: 40f64.to_radians(),
+        };
+        let g = with_vanes(curved, false);
+        let vanes = g.contour.back_vanes.as_ref().unwrap();
+        let sign = g.basis.rotation_sign;
+        // Angle of the vane centre line at its two ends, wrapped to (-pi, pi].
+        let sweep = |sign: f64| {
+            let chains = vane_outline(vanes, sign, 0.0).unwrap();
+            let (a, b) = (&chains[0], &chains[2]);
+            let phi = |k: usize| {
+                let mid = 0.5 * (a[k] + b[b.len() - 1 - k]);
+                mid.y.atan2(mid.x)
+            };
+            let d = phi(a.len() - 1) - phi(0);
+            d.sin().atan2(d.cos())
+        };
+        let (r_in, r_out) = (vanes.inner_radius, vanes.outer_radius);
+        let d = blade_angle_at(&g, r_out) - blade_angle_at(&g, r_in);
+        let blade = d.sin().atan2(d.cos());
+        assert!(
+            blade * sweep(sign) > 0.0,
+            "blade {blade}, vane {}",
+            sweep(sign)
+        );
+        assert!(
+            sweep(sign) * sweep(-sign) < 0.0,
+            "the mirror sense leans the other way"
         );
     }
 }
