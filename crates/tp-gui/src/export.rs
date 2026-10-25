@@ -371,6 +371,18 @@ mod cad {
         }
     }
 
+    /// The name of a wear ring in the current language (literals, so that the
+    /// translation check sees them).
+    fn ring_label(kind: tp_cad::RingKind) -> &'static str {
+        use tp_cad::RingKind;
+        match kind {
+            RingKind::FrontImpeller => tr("Front impeller ring"),
+            RingKind::FrontCasing => tr("Front casing ring"),
+            RingKind::RearImpeller => tr("Rear impeller ring"),
+            RingKind::RearCasing => tr("Rear casing ring"),
+        }
+    }
+
     fn write(shape: &Shape, path: &Path, format: &str, deflection: f64) -> Result<(), String> {
         match format {
             "step" => tp_cad::write_step(shape, path),
@@ -477,24 +489,30 @@ mod cad {
             problems.extend(casing.warnings.iter().cloned());
         }
         let invalid = [
-            ("blade", Some(&cad.blade)),
-            ("flow domain", Some(&cad.fluid)),
-            ("impeller", Some(&cad.impeller)),
+            (tr("blade"), Some(&cad.blade)),
+            (tr("flow domain"), Some(&cad.fluid)),
+            (tr("impeller"), Some(&cad.impeller)),
             (
-                "volute flow domain",
+                tr("volute flow domain"),
                 volute.as_ref().map(|(v, _, _)| &v.fluid),
             ),
-            ("volute casing", volute.as_ref().map(|(_, c, _)| &c.solid)),
-            ("diffuser flow domain", diffuser.as_ref().map(|d| &d.fluid)),
+            (
+                tr("volute casing"),
+                volute.as_ref().map(|(_, c, _)| &c.solid),
+            ),
+            (
+                tr("diffuser flow domain"),
+                diffuser.as_ref().map(|d| &d.fluid),
+            ),
         ]
         .into_iter()
         .filter_map(|(label, s)| s.map(|s| (label, s)))
-        .chain(cad.rings.iter().map(|r| (r.kind.label(), &r.solid)))
+        .chain(cad.rings.iter().map(|r| (ring_label(r.kind), &r.solid)))
         .filter(|(_, s)| !s.is_valid() || s.solid_count() != 1)
         .map(|(label, s)| {
             tf(
                 "the {} is not a single valid solid ({} solids)",
-                &[&tr(label).to_lowercase(), &s.solid_count()],
+                &[&label.to_lowercase(), &s.solid_count()],
             )
         });
         problems.extend(invalid);
@@ -792,7 +810,7 @@ mod cad {
                         for &(kind, volume) in &report.rings {
                             value_row(
                                 ui,
-                                tr(kind.label()),
+                                ring_label(kind),
                                 tf(
                                     "{} cm³, {} (at the impeller density)",
                                     &[&format!("{:.1}", volume * 1e6), &mass(volume)],
