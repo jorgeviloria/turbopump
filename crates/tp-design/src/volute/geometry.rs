@@ -58,6 +58,21 @@ pub struct NozzleSection {
     pub area: f64,
 }
 
+/// How the last section of the spiral runs into the diffuser, measured along the path
+/// of the section centroids.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ThroatJunction {
+    /// Growth of the area per metre of path in the first step of the diffuser over that
+    /// of the last step of the spiral: 1 when the area law has no break at the throat.
+    pub area_slope_ratio: f64,
+    /// Curvature of the centroid path over the last three sections of the spiral, 1/m.
+    pub curvature_before: f64,
+    /// Curvature of the centroid path over the first three sections of the diffuser, 1/m.
+    pub curvature_after: f64,
+    /// Turn of the path direction across the throat, rad.
+    pub direction_turn: f64,
+}
+
 /// The cutwater in the midplane.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CutwaterGeometry {
@@ -491,6 +506,42 @@ impl VoluteGeometry {
             .iter()
             .map(|rings| rings.iter().map(|ring| offset_ring(ring, t)).collect())
             .collect()
+    }
+
+    /// The break of the area law and of the path where the spiral ends and the diffuser
+    /// starts; `None` for a double volute, whose throat is split by the rib, and for
+    /// sections too close together to measure.
+    pub fn throat_junction(&self) -> Option<ThroatJunction> {
+        if self.design.rib.is_some() || self.sections.len() < 3 || self.nozzle.len() < 3 {
+            return None;
+        }
+        let sign = self.basis.rotation_sign;
+        let mean = |p: Vec<DVec3>| p.iter().copied().sum::<DVec3>() / p.len() as f64;
+        let n = self.sections.len();
+        let before: Vec<(DVec3, f64)> = self.sections[n - 3..]
+            .iter()
+            .map(|s| (mean(s.points(sign)), s.size.area))
+            .collect();
+        let after: Vec<(DVec3, f64)> = self.nozzle[..3]
+            .iter()
+            .map(|s| (mean(s.points.clone()), s.area))
+            .collect();
+        let slope = |a: (DVec3, f64), b: (DVec3, f64)| (b.1 - a.1) / (b.0 - a.0).length();
+        // Curvature of the circle through three points.
+        let curvature = |p: [DVec3; 3]| {
+            let (u, v) = (p[1] - p[0], p[2] - p[1]);
+            2.0 * u.cross(v).length() / (u.length() * v.length() * (p[2] - p[0]).length())
+        };
+        let (last, first) = (
+            (before[2].0 - before[1].0).normalize(),
+            (after[1].0 - after[0].0).normalize(),
+        );
+        Some(ThroatJunction {
+            area_slope_ratio: slope(after[0], after[1]) / slope(before[1], before[2]),
+            curvature_before: curvature([before[0].0, before[1].0, before[2].0]),
+            curvature_after: curvature([after[0].0, after[1].0, after[2].0]),
+            direction_turn: last.dot(first).clamp(-1.0, 1.0).acos(),
+        })
     }
 }
 
@@ -1582,6 +1633,63 @@ mod tests {
                 assert_eq!(ring.len(), g.outline_points());
             }
             assert_eq!(g.nozzle.len(), NOZZLE_SECTIONS + 1);
+        }
+    }
+
+    /// The cases the junction is measured on: three section shapes, a straight and a
+    /// radial discharge.
+    fn junction_cases() -> Vec<(String, VoluteGeometry)> {
+        let shapes = [
+            ("trapezoid", SectionShape::default()),
+            ("rectangle", SectionShape::rectangular()),
+            ("round", SectionShape::round()),
+        ];
+        let mut cases = Vec::new();
+        for (name, shape) in shapes {
+            for radial in [false, true] {
+                let mut input = unturned();
+                input.cross_section = CrossSectionInput::single(shape.clone());
+                if radial {
+                    input.diffuser.shape = DischargeShape::default();
+                }
+                let g = VoluteGeometry::build(&reference_basis(), &input).unwrap();
+                cases.push((
+                    format!("{name} {}", if radial { "radial" } else { "tangential" }),
+                    g,
+                ));
+            }
+        }
+        cases
+    }
+
+    #[test]
+    fn the_throat_junction_is_measured_on_every_case() {
+        // Prints the table of the bench: `cargo test -p tp-design throat_junction -- --nocapture`.
+        for (name, g) in junction_cases() {
+            let j = g.throat_junction().expect("a single volute");
+            println!(
+                "{name:22} area slope ×{:6.2}  curvature {:6.2} → {:6.2} 1/m  turn {:5.2}°",
+                j.area_slope_ratio,
+                j.curvature_before,
+                j.curvature_after,
+                j.direction_turn.to_degrees()
+            );
+            assert!(j.area_slope_ratio.is_finite() && j.area_slope_ratio > 0.0);
+            assert!(j.curvature_before.is_finite() && j.curvature_after.is_finite());
+        }
+    }
+
+    #[test]
+    #[ignore = "phase 1 of the throat plan: the diffuser still grows its area from the throat \
+                with a slope several times that of the spiral"]
+    fn the_area_law_has_no_break_at_the_throat() {
+        for (name, g) in junction_cases() {
+            let j = g.throat_junction().expect("a single volute");
+            assert!(
+                (0.8..=1.2).contains(&j.area_slope_ratio),
+                "{name}: the area slope jumps ×{:.2} at the throat",
+                j.area_slope_ratio
+            );
         }
     }
 
