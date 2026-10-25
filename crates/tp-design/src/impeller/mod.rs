@@ -14,6 +14,7 @@ pub mod loading;
 pub mod material;
 pub mod meridian;
 pub mod potential;
+pub mod quality;
 pub mod wall;
 
 use std::f64::consts::PI;

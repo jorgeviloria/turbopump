@@ -188,6 +188,170 @@ pub enum BetaDistribution {
     /// edge with zero slope; `inlet` and `outlet` (0–1) set how long β stays close to
     /// its edge values.
     Smooth { inlet: f64, outlet: f64 },
+    /// β follows from a prescribed blade loading d(r·c_u)/dm̄ (inverse design): the
+    /// swirl r·c_u goes from its leading-edge value to its trailing-edge value along
+    /// the shape at the hub and at the shroud, the spans between blending them with
+    /// their flow fraction, and tan β = c_m/(u − c_u) with the flow following the
+    /// blade. Free-form blades only.
+    Loading {
+        hub: LoadingShape,
+        shroud: LoadingShape,
+    },
+}
+
+impl BetaDistribution {
+    /// The loading distribution with its starting shapes. Both load the rear of the
+    /// blade, where the radius has grown: near the leading edge of a radial impeller
+    /// r is small, and swirl given there soon asks for c_u > u (β past 90°). The
+    /// shroud leading edge, where cavitation starts, is left unloaded; the hub takes a
+    /// little loading there. The numbers are ours: on the reference pump they keep β
+    /// within a few degrees of its edge values and give about the peak loading and
+    /// the hub-to-shroud pressure difference of the linear β distribution, a start
+    /// to shape from.
+    pub fn loading() -> Self {
+        let rear = LoadingShape {
+            leading: 0.0,
+            fore: 0.3,
+            aft: 0.9,
+            slope: 2.0,
+        };
+        BetaDistribution::Loading {
+            hub: LoadingShape {
+                leading: 0.3,
+                ..rear
+            },
+            shroud: rear,
+        }
+    }
+}
+
+/// Shape of the blade loading d(r·c_u)/dm̄ along one section, as a fraction of the
+/// change of r·c_u across the blade, so that its area is 1: a parabola from the
+/// leading edge to `fore`, a straight line of slope `slope` to `aft`, and a parabola
+/// down to zero at the trailing edge, each joining the next with the same value and
+/// slope. The level of the straight line follows from the area. This three-part
+/// loading is the one of Zangeneh, Goto & Harada (1998); a positive slope loads the
+/// rear of the blade, a negative one its front.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LoadingShape {
+    /// Loading at the leading edge; 0 leaves the edge unloaded (no incidence).
+    pub leading: f64,
+    /// End of the front parabola, m̄.
+    pub fore: f64,
+    /// Start of the rear parabola, m̄.
+    pub aft: f64,
+    /// Slope of the straight middle part.
+    pub slope: f64,
+}
+
+impl Default for LoadingShape {
+    fn default() -> Self {
+        Self {
+            leading: 0.0,
+            fore: 0.2,
+            aft: 0.7,
+            slope: 0.0,
+        }
+    }
+}
+
+impl LoadingShape {
+    pub fn validate(&self) -> Result<(), String> {
+        let finite = [self.leading, self.fore, self.aft, self.slope]
+            .iter()
+            .all(|v| v.is_finite());
+        if !finite || self.fore < 0.0 || self.aft < self.fore || self.aft >= 1.0 {
+            return Err(format!(
+                "the blade loading needs 0 ≤ fore ≤ aft < 1, got fore {} and aft {}",
+                self.fore, self.aft
+            ));
+        }
+        Ok(())
+    }
+
+    /// The shape at `t` of the way from `self` to `other`.
+    pub fn lerp(&self, other: &Self, t: f64) -> Self {
+        let mix = |a: f64, b: f64| a + (b - a) * t;
+        Self {
+            leading: mix(self.leading, other.leading),
+            fore: mix(self.fore, other.fore),
+            aft: mix(self.aft, other.aft),
+            slope: mix(self.slope, other.slope),
+        }
+    }
+
+    /// Level of the straight part at `fore`, which makes the area 1.
+    fn level(&self) -> f64 {
+        let (l0, s) = (self.leading, self.slope);
+        let (a, d) = (self.fore, self.aft);
+        let (mid, e) = (d - a, 1.0 - d);
+        let rest = l0 * a / 3.0 - s * a * a / 6.0
+            + s * mid * mid / 2.0
+            + 2.0 / 3.0 * s * mid * e
+            + s * e * e / 6.0;
+        (1.0 - rest) / (2.0 / 3.0 * a + mid + 2.0 / 3.0 * e)
+    }
+
+    /// Coefficients (value, slope, curvature/2) of the front and rear parabolas, the
+    /// rear one in y = m̄ − aft, and the level.
+    fn parts(&self) -> ([f64; 3], [f64; 3], f64) {
+        let (l0, s, a, d) = (self.leading, self.slope, self.fore, self.aft);
+        let c = self.level();
+        let front = if a > 0.0 {
+            let k = (l0 + s * a - c) / (a * a);
+            [l0, s - 2.0 * k * a, k]
+        } else {
+            [c, s, 0.0]
+        };
+        let e = 1.0 - d;
+        let at_aft = c + s * (d - a);
+        let rear = [at_aft, s, -(at_aft + s * e) / (e * e)];
+        (front, rear, c)
+    }
+
+    /// Loading d(r·c_u)/dm̄ at `mbar`, over the change of r·c_u.
+    pub fn value(&self, mbar: f64) -> f64 {
+        let (front, rear, c) = self.parts();
+        let x = mbar.clamp(0.0, 1.0);
+        if x < self.fore {
+            front[0] + front[1] * x + front[2] * x * x
+        } else if x <= self.aft {
+            c + self.slope * (x - self.fore)
+        } else {
+            let y = x - self.aft;
+            rear[0] + rear[1] * y + rear[2] * y * y
+        }
+    }
+
+    /// Fraction of the change of r·c_u reached at `mbar`: the area under the loading
+    /// from the leading edge.
+    pub fn fraction(&self, mbar: f64) -> f64 {
+        let (front, rear, c) = self.parts();
+        let (a, d, s) = (self.fore, self.aft, self.slope);
+        let x = mbar.clamp(0.0, 1.0);
+        let parabola = |p: [f64; 3], y: f64| p[0] * y + p[1] * y * y / 2.0 + p[2] * y * y * y / 3.0;
+        if x < a {
+            return parabola(front, x);
+        }
+        let at_fore = parabola(front, a);
+        if x <= d {
+            let y = x - a;
+            return at_fore + c * y + s * y * y / 2.0;
+        }
+        let mid = d - a;
+        at_fore + c * mid + s * mid * mid / 2.0 + parabola(rear, x - d)
+    }
+
+    /// Smallest loading along the blade and where it is.
+    pub fn lowest(&self) -> (f64, f64) {
+        (0..=200)
+            .map(|i| {
+                let x = f64::from(i) / 200.0;
+                (self.value(x), x)
+            })
+            .fold((f64::INFINITY, 0.0), |a, b| if b.0 < a.0 { b } else { a })
+    }
 }
 
 /// Inputs of the blade mean-line step.
@@ -580,6 +744,9 @@ fn beta_at(distribution: BetaDistribution, beta1: f64, beta2: f64, mbar: f64) ->
             .expect("four control points");
             curve.y_at_x(mbar.clamp(0.0, 1.0)).unwrap_or(beta1)
         }
+        // Each span's frame turns a loading into β with its own radii and velocities;
+        // a plan view never takes it.
+        BetaDistribution::Loading { .. } => beta1 + (beta2 - beta1) * mbar,
     }
 }
 
@@ -597,7 +764,11 @@ fn length_at(line: &Polyline<DVec2>, t: f64) -> f64 {
 /// Channel position t of arc length `s` along a span polyline (the inverse of
 /// [`length_at`]).
 fn position_at(line: &Polyline<DVec2>, s: f64) -> f64 {
-    let cumulative = line.cumulative_lengths();
+    position_in(line.cumulative_lengths(), s)
+}
+
+/// [`position_at`] on the cumulative lengths of the polyline.
+fn position_in(cumulative: &[f64], s: f64) -> f64 {
     let n = cumulative.len() - 1;
     let i = cumulative.partition_point(|&c| c < s).clamp(1, n) - 1;
     let step = cumulative[i + 1] - cumulative[i];
@@ -672,6 +843,25 @@ struct SpanFrame<'a> {
     beta1: f64,
     beta2: f64,
     radius: Vec<f64>,
+    /// The swirl along the section with a loading distribution.
+    swirl: Option<Swirl>,
+}
+
+/// Swirl r·c_u along a section from a prescribed loading.
+struct Swirl {
+    shape: LoadingShape,
+    omega: f64,
+    /// Meridional velocity on the fine grid of m̄, m/s.
+    cm: Vec<f64>,
+    /// r·c_u at the leading edge, m²/s.
+    start: f64,
+    /// Change of r·c_u to the trailing edge, m²/s.
+    change: f64,
+}
+
+/// Value of `values`, sampled evenly over m̄ ∈ [0, 1], at `mbar`.
+fn fine_at(values: &[f64], mbar: f64) -> f64 {
+    at_index(values, mbar.clamp(0.0, 1.0) * (values.len() - 1) as f64)
 }
 
 /// The shape of the wrap bump: 0 at both edges, with zero slope there so that the β
@@ -682,9 +872,46 @@ fn bump_shape(mbar: f64) -> f64 {
 }
 
 impl SpanFrame<'_> {
-    /// Blade angle at m̄ with the wrap bump `bump`.
+    /// Blade angle at m̄ with the wrap bump `bump`. With a loading the bump raises
+    /// r·c_u by `bump` times its change across the blade instead, which moves loading
+    /// between the front and the rear and keeps the edge loadings.
     fn beta(&self, distribution: BetaDistribution, bump: f64, mbar: f64) -> f64 {
-        beta_at(distribution, self.beta1, self.beta2, mbar) + bump * bump_shape(mbar)
+        match &self.swirl {
+            Some(swirl) => {
+                let r = fine_at(&self.radius, mbar);
+                let rcu = swirl.start
+                    + swirl.change * (swirl.shape.fraction(mbar) + bump * bump_shape(mbar));
+                fine_at(&swirl.cm, mbar).atan2(swirl.omega * r - rcu / r)
+            }
+            None => beta_at(distribution, self.beta1, self.beta2, mbar) + bump * bump_shape(mbar),
+        }
+    }
+
+    /// The bumps that keep β at m̄ within `range`.
+    fn bump_limits(
+        &self,
+        distribution: BetaDistribution,
+        mbar: f64,
+        range: (f64, f64),
+    ) -> (f64, f64) {
+        let q = bump_shape(mbar);
+        match &self.swirl {
+            Some(swirl) => {
+                // β grows with r·c_u: β = 90° at r·c_u = ωr², β_min where
+                // u − c_u = c_m/tan β_min.
+                let r = fine_at(&self.radius, mbar);
+                let base = swirl.start + swirl.change * swirl.shape.fraction(mbar);
+                let rcu = |beta: f64| {
+                    r * (swirl.omega * r - fine_at(&swirl.cm, mbar) / beta.tan().max(f64::EPSILON))
+                };
+                let scale = swirl.change * q;
+                ((rcu(range.0) - base) / scale, (rcu(range.1) - base) / scale)
+            }
+            None => {
+                let base = beta_at(distribution, self.beta1, self.beta2, mbar);
+                ((range.0 - base) / q, (range.1 - base) / q)
+            }
+        }
     }
 
     /// θ on the fine grid from the trailing edge back, θ = ∫ dm/(r·tan β).
@@ -712,14 +939,11 @@ impl SpanFrame<'_> {
     /// [`BUMP_BETA_RANGE`]; `Err` with the nearest bump when the target is out of reach.
     fn bump_for(&self, distribution: BetaDistribution, target: f64) -> Result<f64, f64> {
         let n = INTEGRATION_STEPS;
-        let (lo_beta, hi_beta) = BUMP_BETA_RANGE;
         let (mut lo, mut hi) = (f64::NEG_INFINITY, f64::INFINITY);
         for i in 1..n {
-            let mbar = i as f64 / n as f64;
-            let q = bump_shape(mbar);
-            let base = beta_at(distribution, self.beta1, self.beta2, mbar);
-            lo = lo.max((lo_beta - base) / q);
-            hi = hi.min((hi_beta - base) / q);
+            let (a, b) = self.bump_limits(distribution, i as f64 / n as f64, BUMP_BETA_RANGE);
+            lo = lo.max(a);
+            hi = hi.min(b);
         }
         let (lo, hi) = (lo.min(0.0), hi.max(0.0));
         // More angle, less wrap.
@@ -763,12 +987,44 @@ fn frame<'a>(
         )));
     }
     let beta2 = basis.outlet_blade_angle_at(line.point_at_length(s_te).y)?;
-    let radius = (0..=INTEGRATION_STEPS)
+    let radius: Vec<f64> = (0..=INTEGRATION_STEPS)
         .map(|i| {
             let mbar = i as f64 / INTEGRATION_STEPS as f64;
             line.point_at_length(s_le + mbar * meridional_length).y
         })
         .collect();
+    let swirl = match settings.beta {
+        BetaDistribution::Loading { hub, shroud } => {
+            let cumulative = line.cumulative_lengths();
+            let cm: Vec<f64> = (0..=INTEGRATION_STEPS)
+                .map(|i| {
+                    let mbar = i as f64 / INTEGRATION_STEPS as f64;
+                    span.cm_at(position_in(cumulative, s_le + mbar * meridional_length))
+                })
+                .collect();
+            // r·c_u at the edges with the flow along the blade: the edge angles stay.
+            let omega = basis.omega;
+            let rcu = |r: f64, cm: f64, beta: f64| r * (omega * r - cm / beta.tan());
+            let (r1, r2) = (radius[0], radius[INTEGRATION_STEPS]);
+            let start = rcu(r1, cm[0], le.blade_angle);
+            let change = rcu(r2, cm[INTEGRATION_STEPS], beta2) - start;
+            if change <= 0.0 {
+                return Err(DesignError::Infeasible(format!(
+                    "at span {:.2} the edge angles give no rise of r·c_u for the blade \
+                     loading to share out",
+                    span.fraction
+                )));
+            }
+            Some(Swirl {
+                shape: hub.lerp(&shroud, span.fraction),
+                omega,
+                cm,
+                start,
+                change,
+            })
+        }
+        _ => None,
+    };
     Ok(SpanFrame {
         span,
         beta1: le.blade_angle,
@@ -778,6 +1034,7 @@ fn frame<'a>(
         meridional_length,
         le,
         radius,
+        swirl,
     })
 }
 
@@ -1038,6 +1295,26 @@ impl Blade {
                 ));
             }
         }
+        let mut warnings = Vec::new();
+        if let BetaDistribution::Loading { hub, shroud } = mean_lines.beta {
+            if properties.shape == BladeShape::Cylindrical {
+                return Err(DesignError::InvalidInput(
+                    "the blade loading sets β on each section, which a cylindrical blade \
+                     cannot follow: choose the free-form shape or a linear or smooth β"
+                        .into(),
+                ));
+            }
+            for (name, shape) in [("hub", hub), ("shroud", shroud)] {
+                shape.validate().map_err(DesignError::InvalidInput)?;
+                let (lowest, at) = shape.lowest();
+                if lowest < -1e-9 {
+                    warnings.push(format!(
+                        "the blade loading at the {name} turns negative near m̄ = {at:.2}: \
+                         the blade takes swirl back out of the flow there"
+                    ));
+                }
+            }
+        }
         for edge in edges.shapes() {
             edge.validate().map_err(DesignError::InvalidInput)?;
         }
@@ -1088,7 +1365,6 @@ impl Blade {
         let frames = (0..channel.spans.len())
             .map(|j| frame(basis, contour, channel, j, &settings))
             .collect::<Result<Vec<_>, _>>()?;
-        let mut warnings = Vec::new();
         // A common or linear wrap: each free-form section gets the bump that takes it
         // to its target.
         let own = |f: &SpanFrame| f.wrap(settings.beta, 0.0);
@@ -1149,6 +1425,19 @@ impl Blade {
                 section(f, basis, &settings, plan.as_ref(), bump)
             })
             .collect::<Result<_, _>>()?;
+        // A loading that gives swirl too early asks for c_u > u.
+        if matches!(mean_lines.beta, BetaDistribution::Loading { .. }) && plan.is_none() {
+            for s in &sections {
+                if let Some(k) = s.beta.iter().position(|&b| b > FRAC_PI_2) {
+                    warnings.push(format!(
+                        "the blade loading asks for more swirl than the blade speed gives at \
+                         m̄ = {:.2} on span {:.2} (β past 90°): load the blade further back",
+                        s.m[k] / s.m[s.m.len() - 1],
+                        s.span
+                    ));
+                }
+            }
+        }
         // A wrap far from what the edge angles give bends the blade into a hump of β.
         // Only an imposed wrap does that; a cylindrical blade turns axial on purpose.
         let imposed =
@@ -1506,6 +1795,156 @@ mod tests {
         // Monotone between the edge values.
         let (lo, hi) = (22f64.to_radians(), s.beta[0]);
         assert!(s.beta.iter().all(|&b| b >= lo - 1e-9 && b <= hi + 1e-9));
+    }
+
+    #[test]
+    fn a_loading_shape_has_unit_area_and_joins_smoothly() {
+        let shapes = [
+            LoadingShape::default(),
+            LoadingShape {
+                leading: 0.4,
+                fore: 0.3,
+                aft: 0.6,
+                slope: -2.0,
+            },
+            LoadingShape {
+                fore: 0.0,
+                aft: 0.5,
+                slope: 1.0,
+                ..LoadingShape::default()
+            },
+        ];
+        for shape in shapes {
+            shape.validate().unwrap();
+            assert_relative_eq!(shape.fraction(0.0), 0.0);
+            assert_relative_eq!(shape.fraction(1.0), 1.0, epsilon = 1e-12);
+            assert_relative_eq!(shape.value(1.0), 0.0, epsilon = 1e-12);
+            if shape.fore > 0.0 {
+                assert_relative_eq!(shape.value(0.0), shape.leading, epsilon = 1e-12);
+            }
+            // The fraction is the area under the loading, and the parts join with the
+            // same value and slope.
+            let h = 1e-6;
+            for x in [0.05, shape.fore, 0.45, shape.aft, 0.9] {
+                let x = x.clamp(h, 1.0 - h);
+                let derivative = (shape.fraction(x + h) - shape.fraction(x - h)) / (2.0 * h);
+                assert_relative_eq!(derivative, shape.value(x), epsilon = 1e-5);
+                let (left, right) = (
+                    (shape.value(x) - shape.value(x - h)) / h,
+                    (shape.value(x + h) - shape.value(x)) / h,
+                );
+                assert_relative_eq!(left, right, epsilon = 1e-3);
+            }
+        }
+        let bad = LoadingShape {
+            fore: 0.8,
+            aft: 0.5,
+            ..LoadingShape::default()
+        };
+        assert!(bad.validate().is_err());
+    }
+
+    #[test]
+    fn a_loading_sets_the_swirl_along_each_section() {
+        let loading = BetaDistribution::loading();
+        let blade = blade_with(
+            MeanLineInput {
+                beta: loading,
+                wrap: WrapMode::Free,
+                ..Default::default()
+            },
+            EdgeInput::default(),
+        );
+        let BetaDistribution::Loading { hub, shroud } = loading else {
+            unreachable!()
+        };
+        let omega = basis().omega;
+        for s in &blade.sections {
+            let n = s.m.len();
+            assert_relative_eq!(s.beta[0], s.leading_edge.blade_angle, epsilon = 1e-9);
+            assert_relative_eq!(s.beta[n - 1], 22f64.to_radians(), epsilon = 1e-9);
+            // r·c_u with the flow along the blade follows the prescribed fraction.
+            let rcu: Vec<f64> = (0..n)
+                .map(|k| {
+                    let r = s.meridional[k].y;
+                    r * (omega * r - s.cm[k] / s.beta[k].tan())
+                })
+                .collect();
+            let shape = hub.lerp(&shroud, s.span);
+            let total = s.m[n - 1];
+            for k in 0..n {
+                let expected = rcu[0] + (rcu[n - 1] - rcu[0]) * shape.fraction(s.m[k] / total);
+                assert_relative_eq!(rcu[k], expected, max_relative = 2e-3);
+            }
+        }
+        // The shroud leading edge is left unloaded.
+        assert_eq!(shroud.value(0.0), 0.0);
+        assert!(hub.value(0.0) > 0.0);
+    }
+
+    #[test]
+    fn a_common_wrap_moves_the_loading_but_keeps_the_edges() {
+        let blade = blade_with(
+            MeanLineInput {
+                beta: BetaDistribution::loading(),
+                ..Default::default()
+            },
+            EdgeInput::default(),
+        );
+        assert!(blade.warnings.is_empty(), "{:?}", blade.warnings);
+        let wraps: Vec<f64> = blade.sections.iter().map(|s| s.wrap_angle()).collect();
+        for w in &wraps {
+            assert_relative_eq!(*w, wraps[0], max_relative = 1e-6);
+        }
+        for s in &blade.sections {
+            assert_relative_eq!(s.beta[0], s.leading_edge.blade_angle, epsilon = 1e-9);
+            assert_relative_eq!(*s.beta.last().unwrap(), 22f64.to_radians(), epsilon = 1e-9);
+        }
+    }
+
+    #[test]
+    fn early_swirl_is_flagged() {
+        let front = LoadingShape {
+            fore: 0.1,
+            aft: 0.4,
+            slope: -1.0,
+            ..LoadingShape::default()
+        };
+        let blade = blade_with(
+            MeanLineInput {
+                beta: BetaDistribution::Loading {
+                    hub: front,
+                    shroud: front,
+                },
+                wrap: WrapMode::Free,
+                ..Default::default()
+            },
+            EdgeInput::default(),
+        );
+        assert!(blade.warnings.iter().any(|w| w.contains("further back")));
+    }
+
+    #[test]
+    fn a_cylindrical_blade_refuses_a_loading() {
+        let b = basis();
+        let contour = MeridionalContour::build(&b, &MeridionalInput::default()).unwrap();
+        let channel = Channel::build(&contour, b.flow, 61, 5);
+        let built = Blade::build(
+            &b,
+            &contour,
+            &channel,
+            &BladePropertiesInput {
+                shape: BladeShape::Cylindrical,
+                ..Default::default()
+            },
+            &MeanLineInput {
+                beta: BetaDistribution::loading(),
+                ..Default::default()
+            },
+            &ProfileInput::default(),
+            &EdgeInput::default(),
+        );
+        assert!(matches!(built, Err(DesignError::InvalidInput(m)) if m.contains("cylindrical")));
     }
 
     #[test]
