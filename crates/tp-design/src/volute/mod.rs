@@ -380,6 +380,11 @@ pub struct CutwaterInput {
     /// asks for ε > 35° against pressure pulsations). For ε > 0 the edge lies further
     /// downstream toward +z. Automatic: 0, an edge parallel to the axis.
     pub obliquity: Param<f64>,
+    /// Wrap angle from the cutwater where the spiral of a sharp or rounded cutwater
+    /// starts, rad: before its outer wall crosses the inner wall of the diffuser in
+    /// every plane across the inlet width. Automatic: 3°, or the latest start the walls
+    /// allow if that is too late.
+    pub spiral_start: Param<f64>,
 }
 
 /// Inputs of the wall-thickness step.

@@ -132,6 +132,33 @@ pub fn oblique(point: DVec2, obliquity: f64, sign: f64, dz: f64) -> DVec2 {
     DVec2::from_angle(sign * dz * obliquity.tan() / r).rotate(point)
 }
 
+/// Where the outer wall of the spiral crosses the inner wall of the diffuser in each of
+/// the planes across the inlet width: the wrap angle of the tip from the cutwater
+/// (rad) and the wedge between the walls there; `None` in a plane where they do not
+/// cross. `outlines` are the fitted sections of the spiral from an early start, which do
+/// not depend on where the spiral really starts.
+pub(super) fn crossings(
+    design: &VoluteDesign,
+    outlines: &[(f64, Vec<DVec2>)],
+    nozzle: &[NozzleSection],
+    sign: f64,
+    midplane: f64,
+) -> Vec<Option<(f64, f64)>> {
+    let half = 0.5 * design.inlet_width * (1.0 - EDGE_MARGIN);
+    (0..SLICES)
+        .map(|k| {
+            let z = midplane - half + 2.0 * half * k as f64 / (SLICES - 1) as f64;
+            let walls = Walls::at(outlines, nozzle, sign, z)?;
+            let (s, d) = walls.crossing()?;
+            let ts = direction(&walls.spiral, s.segment);
+            let td = direction(&walls.diffuser, d.segment);
+            let wedge = ts.dot(td).clamp(-1.0, 1.0).acos();
+            let angle = (sign * s.point.y.atan2(s.point.x)).rem_euclid(std::f64::consts::TAU);
+            Some((angle, wedge))
+        })
+        .collect()
+}
+
 /// The two walls in one plane, as polylines (x, y) downstream.
 struct Walls {
     spiral: Vec<DVec2>,
@@ -173,12 +200,27 @@ impl Walls {
     /// they never cross (the diffuser wall turns away at once), the start of the spiral
     /// and the nearest point of the diffuser wall to it.
     fn tip(&self) -> (Station, Station) {
+        self.crossing().unwrap_or_else(|| {
+            let start = self.spiral[0];
+            let (segment, point) = nearest_on(&self.diffuser, start);
+            (
+                Station {
+                    segment: 0,
+                    point: start,
+                },
+                Station { segment, point },
+            )
+        })
+    }
+
+    /// Where the spiral wall first crosses the diffuser wall, on each polyline.
+    fn crossing(&self) -> Option<(Station, Station)> {
         for i in 0..self.spiral.len() - 1 {
             let (a, b) = (self.spiral[i], self.spiral[i + 1]);
             for j in 0..self.diffuser.len() - 1 {
                 let (c, d) = (self.diffuser[j], self.diffuser[j + 1]);
                 if let Some(p) = segment_crossing(a, b, c, d) {
-                    return (
+                    return Some((
                         Station {
                             segment: i,
                             point: p,
@@ -187,19 +229,11 @@ impl Walls {
                             segment: j,
                             point: p,
                         },
-                    );
+                    ));
                 }
             }
         }
-        let start = self.spiral[0];
-        let (segment, point) = nearest_on(&self.diffuser, start);
-        (
-            Station {
-                segment: 0,
-                point: start,
-            },
-            Station { segment, point },
-        )
+        None
     }
 
     /// The nose centre M of the midplane: on the stagnation radius on the x axis,
@@ -966,6 +1000,68 @@ mod tests {
                 .iter()
                 .all(|s| s.nose_distance > rz - 1e-9)
         );
+    }
+
+    #[test]
+    fn the_spiral_starts_before_its_wall_crosses_the_diffuser_in_every_plane() {
+        let g = build(|_| {});
+        let (lo, hi) = g.start_range.unwrap();
+        // Automatic: 3°, within the range, and before the tip in every plane.
+        assert!((g.start_angle - 3f64.to_radians()).abs() < 1e-12);
+        assert!(lo <= g.start_angle && g.start_angle <= hi);
+        let sign = g.basis.rotation_sign;
+        let unturned = |p: &DVec3| {
+            let a = sign * p.y.atan2(p.x) - sign * g.cutwater.tip.y.atan2(g.cutwater.tip.x);
+            a.rem_euclid(std::f64::consts::TAU)
+        };
+        let tip = g.cutwater.angle;
+        for s in &g.cutwater_slices {
+            assert!(
+                tip + unturned(&s.tip) > hi,
+                "{}",
+                (tip + unturned(&s.tip)).to_degrees()
+            );
+        }
+        // By hand within the range: the spiral starts there and the cutwater is built.
+        let late = 0.5 * (g.start_angle + hi);
+        let moved = build(|v| v.cutwater.spiral_start = Param::Manual(late));
+        assert!((moved.start_angle - late).abs() < 1e-12);
+        assert_eq!(moved.start_range, g.start_range);
+        assert!(sound(
+            &moved.cutwater_slices,
+            2.0 * moved.design.nose_radius
+        ));
+        // Past the range it says where the range is.
+        let err = VoluteGeometry::build(&reference_basis(), &{
+            let mut v = VoluteInput::default();
+            v.cutwater.spiral_start = Param::Manual(hi + 1f64.to_radians());
+            v
+        })
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("must start between"), "{err}");
+    }
+
+    #[test]
+    fn a_sharp_cutwater_needs_a_true_wedge_in_every_plane() {
+        // In round sections with the inner wall of the diffuser straight the walls only
+        // graze near the side walls: a sharp cutwater would be a knife there, so the
+        // spiral starts where it clears the diffuser. A rounded one fills them.
+        let round = |shape: crate::volute::CutwaterShape| {
+            build(|v| {
+                v.cross_section = CrossSectionInput::single(SectionShape::round());
+                v.diffuser.shape = DischargeShape::Tangential {
+                    straight_wall: StraightWall::Inner,
+                };
+                v.cutwater.shape = shape;
+            })
+        };
+        let sharp = round(crate::volute::CutwaterShape::Sharp);
+        assert!(sharp.start_range.is_none());
+        assert!(sharp.start_angle > 10f64.to_radians());
+        let rounded = round(crate::volute::CutwaterShape::default());
+        assert!(rounded.start_range.is_some());
+        assert!((rounded.start_angle - 3f64.to_radians()).abs() < 1e-12);
     }
 
     #[test]
