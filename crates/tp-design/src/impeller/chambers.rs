@@ -10,7 +10,9 @@
 //!   behind it, from the disk rim down to the shaft seal d_D, where it is closed. With a
 //!   rear seal the wall stands s_ax behind the tip of the collar that carries its
 //!   impeller ring, and the chamber wraps the collar: down to the ring, along it, round
-//!   the tip and inside the collar.
+//!   the tip and inside the collar. The rear casing is a plain plate s_ax behind the
+//!   collar tip: the rear seal gap (its diameter and clearance) is in the values only,
+//!   not in the outline.
 //!
 //! The casing walls are wires like the walls of the flow path: automatic from the
 //! values here, or drawn segment by segment (see [`super::wall`]). The values follow the
@@ -64,7 +66,11 @@ pub struct ChamberValues {
     pub seal_diameter: f64,
     /// Radial clearance of the front seal; 0 without it.
     pub seal_clearance: f64,
-    /// Axial length of the front seal; 0 without it.
+    /// Axial length of the front seal as built: the run of the casing wall on the casing
+    /// seat, where the casing faces the impeller ring. It can be shorter than the nominal
+    /// length of the seal: the wall must keep the axial gap from the shoulder of the
+    /// cover and end at the tip of the seat, so it comes down to the seat that much
+    /// short of the shoulder. 0 without a front seal, or when the wall never runs on it.
     pub seal_length: f64,
     pub shaft_seal_diameter: f64,
     /// Diameter of the rear annular seal, `None` without a rear seal.
@@ -328,6 +334,23 @@ pub fn build(
         Some(segments) => Wall::build(front_start, front_end, segments)?,
         None => Wall::build(front_start, front_end, &automatic_front())?,
     };
+    // The run of the wall on the casing seat: the last segment, a line to the end, when
+    // the one before it ends on the seat.
+    let seal_length = seals.front.map_or(0.0, |seal| {
+        let segments = front_casing.segments();
+        let last = &segments[segments.len() - 1];
+        let from = match segments.len() {
+            1 => front_start,
+            n => segments[n - 2].end(),
+        };
+        if last.kind() == SegmentKind::Line
+            && (from.y - seal.casing_seat).abs() <= 1e-9 * seal.casing_seat
+        {
+            (from.x - front_end.x).max(0.0)
+        } else {
+            0.0
+        }
+    });
     let mut front = front_casing.sample(FACE_SAMPLES / 2);
     if let Some(seal) = seals.front {
         // The wall runs on the casing seat; the fluid is bounded by the casing ring, on
@@ -379,7 +402,7 @@ pub fn build(
             axial_gap,
             seal_diameter: seals.front.map_or(0.0, |s| 2.0 * s.radius),
             seal_clearance: seals.front.map_or(0.0, |s| s.clearance),
-            seal_length: seals.front.map_or(0.0, |s| s.length),
+            seal_length,
             shaft_seal_diameter: 2.0 * seal_end.y,
             rear_seal_diameter: seals.rear.map(|s| 2.0 * s.radius),
             rear_seal_clearance: seals.rear.map(|s| s.clearance),
@@ -417,7 +440,7 @@ mod tests {
         // The seal values are those of the front seal; the casing wall ends on its
         // casing seat.
         let front = c.seals.front.unwrap();
-        assert_eq!(v.seal_length, front.length);
+        assert!(v.seal_length > 0.0 && v.seal_length <= front.length);
         assert_eq!(v.seal_diameter, 2.0 * front.radius);
         assert_eq!(v.seal_clearance, front.clearance);
         assert!((v.seal_clearance - seal_clearance(v.seal_diameter)).abs() < 1e-15);
@@ -496,12 +519,18 @@ mod tests {
         assert!(front.casing_ring.is_some());
         let wall = &c.chambers.front_casing;
         let (lo, hi) = run_on(wall, front.casing_seat).expect("a run on the casing seat");
-        // It ends at the tip of the impeller seat and keeps the seal length, less what
-        // the axial gap takes where the wall comes down to the seat.
+        // It ends at the tip of the impeller seat; its length is the seal length as built,
+        // at most the nominal one.
         assert!((lo - wall.end().x).abs() < 1e-12);
-        let gap = c.chambers.values.axial_gap;
-        assert!(hi - lo <= front.length + 1e-9, "{}", hi - lo);
-        assert!(hi - lo >= front.length - gap - 1e-9, "{}", hi - lo);
+        let v = c.chambers.values;
+        assert!(((hi - lo) - v.seal_length).abs() <= 1e-12 * v.seal_length);
+        assert!(v.seal_length <= front.length);
+        let gap = v.axial_gap;
+        assert!(
+            v.seal_length >= front.length - gap - 1e-9,
+            "{}",
+            v.seal_length
+        );
         assert!((wall.end().y - front.casing_seat).abs() < 1e-12);
         // Nothing of the wall dips below the seat.
         assert!(
@@ -509,6 +538,36 @@ mod tests {
                 .iter()
                 .all(|p| p.y >= front.casing_seat - 1e-9)
         );
+    }
+
+    #[test]
+    fn a_face_that_never_reaches_the_casing_seat_ends_across_to_it() {
+        // A wall so thick that the seal radius lies far above the face: the offset face
+        // never comes down to the casing seat, so the wall goes on to its end and across
+        // to the seat; the run on the seat has no length.
+        let input = MeridionalInput {
+            material: crate::impeller::material::MaterialSettings {
+                wall_thickness: Param::Manual(0.2),
+                ..Default::default()
+            },
+            ..MeridionalInput::default()
+        };
+        let c = MeridionalContour::build(&basis(), &input, 1.0).unwrap();
+        let front = c.seals.front.unwrap();
+        let wall = &c.chambers.front_casing;
+        assert!((wall.end().y - front.casing_seat).abs() < 1e-12);
+        let segments = wall.segments();
+        // The last two segments are the way across to the seat and onto the end.
+        let n = segments.len();
+        assert!(n >= 3);
+        let across = segments[n - 2].end();
+        assert!((across.y - front.casing_seat).abs() < 1e-12);
+        assert!(
+            segments[n - 3].end().y < front.casing_seat,
+            "the face stays below the seat"
+        );
+        // The cover tip lies downstream of the face end, so the run on the seat is empty.
+        assert_eq!(c.chambers.values.seal_length, 0.0);
     }
 
     #[test]
