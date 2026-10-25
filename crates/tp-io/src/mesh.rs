@@ -274,6 +274,60 @@ pub fn cutwater_triangles(g: &VoluteGeometry) -> Vec<Triangle> {
     out
 }
 
+/// The rib of a double volute as a closed surface: lofted through its planes across
+/// the height of the sections and closed at the outermost planes, with the outward
+/// normals. Empty for a single volute.
+pub fn rib_triangles(g: &VoluteGeometry) -> Vec<Triangle> {
+    let Some(rib) = &g.rib else {
+        return Vec::new();
+    };
+    let (Some(first), Some(last)) = (rib.planes.first(), rib.planes.last()) else {
+        return Vec::new();
+    };
+    let rings: Vec<Vec<DVec3>> = rib.planes.iter().map(|p| p.outline()).collect();
+    let n = rings[0].len();
+    // Outward when the outlines run counter-clockwise, as the planes run up.
+    let counter_clockwise = (0..n)
+        .map(|i| {
+            rings[0][i]
+                .truncate()
+                .perp_dot(rings[0][(i + 1) % n].truncate())
+        })
+        .sum::<f64>()
+        > 0.0;
+    let mut out = Vec::new();
+    for pair in rings.windows(2) {
+        let (a, b) = (&pair[0], &pair[1]);
+        for i in 0..n {
+            let j = (i + 1) % n;
+            if counter_clockwise {
+                quad(&mut out, a[i], a[j], b[j], b[i]);
+            } else {
+                quad(&mut out, b[i], b[j], a[j], a[i]);
+            }
+        }
+    }
+    // Each end: the band between the faces, and the nose and the tail fanned from
+    // their middles.
+    for (plane, up) in [(first, false), (last, true)] {
+        let mut end = Vec::new();
+        for (i, o) in plane.inner_face.windows(2).zip(plane.outer_face.windows(2)) {
+            quad(&mut end, i[0], i[1], o[1], o[0]);
+        }
+        cap(&mut end, &plane.nose);
+        cap(&mut end, &plane.tail);
+        out.extend(end.into_iter().map(|t| {
+            let facing_up = (t[1] - t[0]).cross(t[2] - t[0]).z > 0.0;
+            if facing_up == up {
+                t
+            } else {
+                [t[0], t[2], t[1]]
+            }
+        }));
+    }
+    out
+}
+
 /// The inner surface of the volute for viewing: as [`volute_triangles`], without the
 /// pieces of wall that lie inside another channel or inside the body of the cutwater
 /// near it, so that the cutwater shows as it is built. Not a closed surface.
@@ -612,6 +666,34 @@ pub(crate) mod tests {
         }
         let sharp = reference_volute(|v| v.cutwater.shape = CutwaterShape::Sharp);
         assert!(cutwater_triangles(&sharp).is_empty());
+    }
+
+    #[test]
+    fn the_rib_is_a_closed_surface_across_the_height_of_the_sections() {
+        let g = reference_volute(|v| v.setup.kind = tp_design::volute::VoluteKind::Double);
+        let mesh = rib_triangles(&g);
+        assert!(closed(&mesh), "open edges");
+        // Its volume: the area of its outline times its height.
+        let rib = g.rib.as_ref().unwrap();
+        let outline = rib.outline();
+        let area = 0.5
+            * (0..outline.len())
+                .map(|i| {
+                    outline[i]
+                        .truncate()
+                        .perp_dot(outline[(i + 1) % outline.len()].truncate())
+                })
+                .sum::<f64>()
+                .abs();
+        let height = rib.planes[rib.planes.len() - 1].z - rib.planes[0].z;
+        // Positive: the normals point out.
+        let volume = mesh.iter().map(|t| t[0].dot(t[1].cross(t[2]))).sum::<f64>() / 6.0;
+        assert!(
+            (volume / (area * height) - 1.0).abs() < 0.01,
+            "{volume} vs {}",
+            area * height
+        );
+        assert!(rib_triangles(&reference_volute(|_| {})).is_empty());
     }
 
     #[test]

@@ -128,7 +128,8 @@ impl Shape {
     }
 
     /// Distance from each of `points` to the nearest face of the shape: to its surface,
-    /// whether the point lies inside or outside.
+    /// whether the point lies inside or outside. Slow on large shapes: tens of
+    /// milliseconds a point.
     pub fn boundary_distances(&self, points: &[DVec3]) -> Result<Vec<f64>, CadError> {
         let points: Vec<ffi::P3> = points.iter().map(|p| p3(*p)).collect();
         ffi::boundary_distances(&self.0, &points)

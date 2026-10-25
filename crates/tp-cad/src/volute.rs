@@ -185,20 +185,13 @@ pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
     let ring = occ::revolve_z(&occ::planar_face(&profile_wire(&g.inlet_profile())?)?)?;
 
     // The body of a rounded cutwater and the rib of a double volute are carved out of
-    // the flow domain across the whole height of the volute: the body follows its
-    // outlines plane by plane, the rib is the same all the way up.
+    // the flow domain across the whole height of the volute, each lofted through its
+    // outlines plane by plane.
     let zs = g.rings().into_iter().flatten().map(|p| p.z);
     let (z_lo, z_hi) = zs.fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), z| {
         (lo.min(z), hi.max(z))
     });
     let margin = 0.1 * (z_hi - z_lo);
-    let at = |p: &DVec3| DVec3::new(p.x * MM, p.y * MM, (z_lo - margin) * MM);
-    let extrude = |edges: &[Shape]| -> Result<Shape, CadError> {
-        occ::prism_z(
-            &occ::planar_face(&occ::wire(edges)?)?,
-            (z_hi - z_lo + 2.0 * margin) * MM,
-        )
-    };
     // Each tool with the points its cut must leave on the surface of the channel and
     // of the ring.
     let mut tools: Vec<(Shape, Vec<DVec3>, Vec<DVec3>)> = Vec::new();
@@ -206,17 +199,8 @@ pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
         let (faces, noses) = cutwater_probes(g);
         tools.push((body, faces, noses));
     }
-    if let Some(rib) = &g.rib {
-        let spline = |points: &mut dyn Iterator<Item = &DVec3>| {
-            occ::spline_edge(&points.map(at).collect::<Vec<_>>(), false)
-        };
-        let rib = extrude(&[
-            spline(&mut rib.nose.iter())?,
-            spline(&mut rib.inner_face.iter())?,
-            spline(&mut rib.tail.iter())?,
-            spline(&mut rib.outer_face.iter().rev())?,
-        ])?;
-        tools.push((rib, Vec::new(), Vec::new()));
+    if let Some(rib) = rib_body(g, (z_lo - margin) * MM, (z_hi + margin) * MM)? {
+        tools.push((rib, rib_probes(g), Vec::new()));
     }
 
     // A failed fusion may still give one valid solid that lost a piece: the channel must
@@ -374,6 +358,56 @@ fn cutwater_body(g: &VoluteGeometry, z_lo: f64, z_hi: f64) -> Result<Option<Shap
         return Ok(Some(below.fuse(&above)?));
     }
     Ok(Some(occ::loft(&wires)?.fuse(&below)?.fuse(&above)?))
+}
+
+/// The rib of a double volute, mm: lofted smoothly through its planes, and carried
+/// straight on from the two end planes to `z_lo` and `z_hi`. `None` for a single volute.
+fn rib_body(g: &VoluteGeometry, z_lo: f64, z_hi: f64) -> Result<Option<Shape>, CadError> {
+    let Some(rib) = &g.rib else {
+        return Ok(None);
+    };
+    let wire = |p: &tp_design::volute::RibPlane, z: f64| -> Result<Shape, CadError> {
+        let spline = |points: &mut dyn Iterator<Item = &DVec3>| {
+            let points: Vec<DVec3> = points.map(|q| DVec3::new(q.x * MM, q.y * MM, z)).collect();
+            occ::spline_edge(&points, false)
+        };
+        occ::wire(&[
+            spline(&mut p.nose.iter())?,
+            spline(&mut p.inner_face.iter())?,
+            spline(&mut p.tail.iter())?,
+            spline(&mut p.outer_face.iter().rev())?,
+        ])
+    };
+    let (Some(first), Some(last)) = (rib.planes.first(), rib.planes.last()) else {
+        return Ok(None);
+    };
+    let extend = |p: &tp_design::volute::RibPlane, to: f64| -> Result<Shape, CadError> {
+        let from = p.z * MM;
+        occ::prism_z(
+            &occ::planar_face(&wire(p, from.min(to))?)?,
+            (to - from).abs(),
+        )
+    };
+    let wires = rib
+        .planes
+        .iter()
+        .map(|p| wire(p, p.z * MM))
+        .collect::<Result<Vec<_>, _>>()?;
+    let below = extend(first, z_lo)?;
+    let above = extend(last, z_hi)?;
+    Ok(Some(occ::loft(&wires)?.fuse(&below)?.fuse(&above)?))
+}
+
+/// The tips of the rib nose in its planes across the inlet width, mm: where the sections
+/// surely reach, so that a cut leaves them on the surface of the channel.
+fn rib_probes(g: &VoluteGeometry) -> Vec<DVec3> {
+    let (zm, half) = (g.basis.midplane, 0.45 * g.design.inlet_width);
+    g.rib
+        .iter()
+        .flat_map(|r| &r.planes)
+        .filter(|p| (p.z - zm).abs() < half)
+        .map(|p| p.nose[p.nose.len() / 2] * MM)
+        .collect()
 }
 
 /// How far from the surface of a carved shape the points of the body may lie, mm.
@@ -807,9 +841,15 @@ mod tests {
                 .chain(body_mesh)
                 .collect::<Vec<_>>(),
         );
-        let outline_off = outlines
+        // Against the triangles, and exactly for the points far from them: OCCT may
+        // leave a face without triangles, or with coarse ones.
+        let (close, far): (Vec<DVec3>, Vec<DVec3>) = outlines
+            .iter()
+            .partition(|p| solid.distance(**p, 1.0) < 0.05);
+        let outline_off = close
             .iter()
             .map(|p| solid.distance(*p, 1.0))
+            .chain(cad.fluid.boundary_distances(&far).unwrap())
             .fold(0.0, f64::max);
         let around: Vec<DVec3> = solid
             .triangles
@@ -959,6 +999,9 @@ mod tests {
                 assert!(s.is_valid());
                 assert_eq!(s.solid_count(), 1);
             }
+            // The rib nose is carved in every plane, as the cutwater.
+            assert!(on_surface(&cad.fluid, &rib_probes(&g)));
+            assert_matches_the_view(&g, &cad, "double volute");
             (g, cad.channel.volume_with_tolerance(1e-3) / MM.powi(3))
         };
         let (g, channel) = double(&|_| {});
@@ -977,8 +1020,9 @@ mod tests {
             channel < whole - 0.5 * band,
             "{channel} vs {whole} − {band}"
         );
-        // A long elliptic nose, a thick rib, rectangles and a tangent cutwater.
-        let edits: [&dyn Fn(&mut VoluteInput); 4] = [
+        // A long elliptic nose, a thick rib, rectangles, a tangent cutwater, and the
+        // cutwater and the rib nose leaning.
+        let edits: [&dyn Fn(&mut VoluteInput); 5] = [
             &|v| v.setup.rib_nose_ratio = tp_design::Param::Manual(3.0),
             &|v| v.setup.rib_thickness = tp_design::Param::Manual(0.008),
             &|v| v.cross_section = CrossSectionInput::single(SectionShape::rectangular()),
@@ -986,6 +1030,7 @@ mod tests {
                 v.cutwater.shape = tp_design::volute::CutwaterShape::Tangent;
                 v.setup.rib_wrap = tp_design::Param::Manual(170f64.to_radians());
             },
+            &|v| v.cutwater.obliquity = tp_design::Param::Manual(35f64.to_radians()),
         ];
         for edit in edits {
             double(edit);
