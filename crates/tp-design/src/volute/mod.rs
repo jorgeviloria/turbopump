@@ -388,6 +388,10 @@ pub struct CutwaterInput {
 pub struct WallInput {
     /// Casing wall thickness, m.
     pub thickness: Param<f64>,
+    /// Radius that fills and rounds the outside of the casing where the back of the
+    /// start of the spiral meets the diffuser, over the cutwater, m; 0 leaves the sharp
+    /// groove between them. Automatic: the wall thickness.
+    pub cutwater_fillet: Param<f64>,
     pub flange: FlangeInput,
     /// Design pressure of the casing over the suction pressure, Pa; automatic: the rise
     /// at shut-off.
@@ -644,6 +648,8 @@ pub struct VoluteDesign {
     pub cutwater_obliquity: f64,
     pub diffuser: DischargeDiffuser,
     pub wall_thickness: f64,
+    /// Radius of the fillet on the outside of the casing over the cutwater, m.
+    pub cutwater_fillet: f64,
     /// The flange at the outlet, if drawn.
     pub flange: Option<Flange>,
     /// An internal volute: the axial gap between its spiral and the impeller beside it.
@@ -1330,6 +1336,10 @@ impl VoluteDesign {
         require(wall_thickness > 0.0, || {
             "the wall thickness must be positive".into()
         })?;
+        let cutwater_fillet = input.wall.cutwater_fillet.resolve(|| wall_thickness);
+        require(cutwater_fillet >= 0.0, || {
+            "the fillet over the cutwater cannot be negative".into()
+        })?;
         // An internal spiral beside the impeller keeps the side gap from it, past its own
         // casing wall. The neck only moves the spiral sideways, so the automatic neck grows
         // by what the gap lacks.
@@ -1463,6 +1473,7 @@ impl VoluteDesign {
             cutwater_obliquity,
             diffuser,
             wall_thickness,
+            cutwater_fillet,
             flange,
             side_gap,
             warnings,
