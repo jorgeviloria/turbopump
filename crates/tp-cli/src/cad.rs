@@ -223,10 +223,13 @@ pub(crate) fn run(args: CadArgs) -> CliResult {
         for &format in &args.format {
             let chambers = cad.side_chambers.as_ref().map(|s| ("side-chambers", s));
             let duct = duct.as_ref().map(|s| ("inlet-duct", s));
+            // Every wear ring is a file of its own, the chambers designed or not.
+            let rings = cad.rings.iter().map(|r| (r.kind.file_stem(), &r.solid));
             for (stem, shape) in [("impeller", &cad.impeller), ("fluid", &cad.fluid)]
                 .into_iter()
                 .chain(chambers)
                 .chain(duct)
+                .chain(rings)
             {
                 let path = dir.join(format!("{stem}.{}", format.extension()));
                 write(shape, &path, format, deflection)?;
@@ -403,6 +406,15 @@ fn report(cad: &ImpellerCad, density: f64, units: &DisplayUnits) -> bool {
         show(units, QuantityKind::Density, density)
     );
     println!("  Flow domain      {:.1} cm³", fluid * 1e6);
+    for ring in &cad.rings {
+        let volume = cad.ring_volume(ring.kind).unwrap_or(0.0);
+        println!(
+            "  {:<19} {:.1} cm³, {}",
+            ring.kind.label(),
+            volume * 1e6,
+            format_mass(volume * density)
+        );
+    }
     let length = |v: f64| show(units, QuantityKind::Length, v);
     println!(
         "  Hub              bore {}, boss {}",
@@ -427,10 +439,16 @@ fn report(cad: &ImpellerCad, density: f64, units: &DisplayUnits) -> bool {
         println!("  warning: {w}");
     }
     let checks = [
-        ("blade", &cad.blade),
-        ("flow domain", &cad.fluid),
-        ("impeller", &cad.impeller),
-    ];
+        ("blade".to_string(), &cad.blade),
+        ("flow domain".to_string(), &cad.fluid),
+        ("impeller".to_string(), &cad.impeller),
+    ]
+    .into_iter()
+    .chain(
+        cad.rings
+            .iter()
+            .map(|r| (r.kind.label().to_lowercase(), &r.solid)),
+    );
     let mut ok = true;
     for (label, shape) in checks {
         if !shape.is_valid() || shape.solid_count() != 1 {
@@ -442,7 +460,9 @@ fn report(cad: &ImpellerCad, density: f64, units: &DisplayUnits) -> bool {
         }
     }
     if ok {
-        println!("  Solids           valid (blade, flow domain and impeller are single solids)");
+        println!(
+            "  Solids           valid (blade, flow domain, impeller and wear rings are single solids)"
+        );
     }
     ok && cad.warnings.is_empty()
 }

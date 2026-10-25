@@ -437,6 +437,10 @@ pub struct MeridionalContour {
     pub hub_material: Wall,
     /// Wire of the shroud cover, from the shroud end at the outlet back to its start.
     pub shroud_material: Wall,
+    /// Whether the hub disk wire was drawn by hand (`MeridionalInput::hub_material`).
+    pub hub_material_drawn: bool,
+    /// Whether the shroud cover wire was drawn by hand.
+    pub shroud_material_drawn: bool,
     /// Thickness, bore and boss as used for the material.
     pub material: Material,
     /// The seals as used.
@@ -664,6 +668,8 @@ impl MeridionalContour {
             shroud,
             hub_material: wires.hub,
             shroud_material: wires.shroud,
+            hub_material_drawn: input.hub_material.is_some(),
+            shroud_material_drawn: input.shroud_material.is_some(),
             material: settings,
             seals,
             material_warnings: wires.warnings,

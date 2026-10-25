@@ -684,6 +684,28 @@ fn cad_exports_impeller_and_flow_domain() {
         let size = std::fs::metadata(out_dir.join(name)).unwrap().len();
         assert!(size > 100_000, "{name}: {size} bytes");
     }
+    // Each wear ring is a solid of its own, with its volume and mass in the report.
+    for stem in [
+        "front-impeller-ring",
+        "front-casing-ring",
+        "rear-impeller-ring",
+        "rear-casing-ring",
+    ] {
+        for ext in ["step", "stl"] {
+            let name = format!("{stem}.{ext}");
+            let size = std::fs::metadata(out_dir.join(&name)).unwrap().len();
+            assert!(size > 500, "{name}: {size} bytes");
+        }
+    }
+    for label in [
+        "Front impeller ring ",
+        "Front casing ring ",
+        "Rear impeller ring ",
+        "Rear casing ring ",
+    ] {
+        let line = text.lines().find(|l| l.contains(label)).unwrap_or("");
+        assert!(line.contains(" cm³, "), "{label}: {text}");
+    }
     // The volute is reported but skipped until it is designed.
     assert!(text.contains("not designed yet"), "{text}");
     assert_eq!(turbopump(&["volute", file_arg]).status.code(), Some(0));

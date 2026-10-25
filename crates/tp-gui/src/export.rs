@@ -327,6 +327,8 @@ mod cad {
         files: Vec<PathBuf>,
         impeller_volume: f64,
         fluid_volume: f64,
+        /// Each wear ring built, with its volume, m³.
+        rings: Vec<(tp_cad::RingKind, f64)>,
         volute_volume: Option<f64>,
         /// Volume and wall thickness of the volute casing.
         casing: Option<(f64, f64)>,
@@ -415,10 +417,13 @@ mod cad {
         for format in formats {
             let chambers = cad.side_chambers.as_ref().map(|s| ("side-chambers", s));
             let duct = duct.as_ref().map(|s| ("inlet-duct", s));
+            // Every wear ring is a file of its own, the chambers designed or not.
+            let rings = cad.rings.iter().map(|r| (r.kind.file_stem(), &r.solid));
             for (stem, shape) in [("impeller", &cad.impeller), ("fluid", &cad.fluid)]
                 .into_iter()
                 .chain(chambers)
                 .chain(duct)
+                .chain(rings)
             {
                 let path = folder.join(format!("{stem}.{format}"));
                 write(shape, &path, format, deflection)?;
@@ -482,11 +487,12 @@ mod cad {
         ]
         .into_iter()
         .filter_map(|(label, s)| s.map(|s| (label, s)))
+        .chain(cad.rings.iter().map(|r| (r.kind.label(), &r.solid)))
         .filter(|(_, s)| !s.is_valid() || s.solid_count() != 1)
         .map(|(label, s)| {
             tf(
                 "the {} is not a single valid solid ({} solids)",
-                &[&tr(label), &s.solid_count()],
+                &[&tr(label).to_lowercase(), &s.solid_count()],
             )
         });
         problems.extend(invalid);
@@ -495,6 +501,11 @@ mod cad {
             files,
             impeller_volume: cad.impeller_volume(),
             fluid_volume: cad.fluid_volume(),
+            rings: cad
+                .rings
+                .iter()
+                .filter_map(|r| Some((r.kind, cad.ring_volume(r.kind)?)))
+                .collect(),
             volute_volume: volute.as_ref().map(|(v, _, _)| v.fluid_volume()),
             casing: volute.as_ref().map(|(_, c, wall)| (c.volume(), *wall)),
             diffuser_volume: diffuser.as_ref().map(|d| d.fluid_volume()),
@@ -773,6 +784,13 @@ mod cad {
                             tr("Flow domain"),
                             format!("{:.1} cm³", report.fluid_volume * 1e6),
                         );
+                        for &(kind, volume) in &report.rings {
+                            value_row(
+                                ui,
+                                tr(kind.label()),
+                                format!("{:.1} cm³, {}", volume * 1e6, mass(volume)),
+                            );
+                        }
                         value_row(
                             ui,
                             tr("Hub"),
@@ -876,7 +894,19 @@ mod cad {
                 &["step"],
             )
             .unwrap();
-            assert_eq!(report.files.len(), 4);
+            // Impeller, flow domain, volute and its casing, then the four wear rings.
+            assert_eq!(report.files.len(), 8);
+            assert_eq!(report.rings.len(), 4);
+            assert!(report.rings.iter().all(|&(_, v)| v > 0.0));
+            for stem in tp_cad::RingKind::ALL.map(tp_cad::RingKind::file_stem) {
+                assert!(
+                    report
+                        .files
+                        .iter()
+                        .any(|f| f.file_stem().is_some_and(|s| s == stem)),
+                    "{stem}"
+                );
+            }
             assert!(report.volute_volume.is_some_and(|v| v > 0.0));
             assert!(report.casing.is_some_and(|(v, t)| v > 0.0 && t > 0.0));
             for file in &report.files {

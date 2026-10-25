@@ -21,6 +21,7 @@ use tp_design::impeller::ImpellerGeometry;
 use tp_design::impeller::blade::BladeSection;
 use tp_design::impeller::duct::InletDuct;
 use tp_design::impeller::material::collar_inner_radius;
+use tp_design::impeller::seals::Seal;
 use tp_design::impeller::wall::{SegmentKind, Wall};
 use tp_math::{DVec2, DVec3};
 
@@ -76,6 +77,189 @@ impl Default for CadOptions {
     }
 }
 
+/// The four replaceable wear rings of the annular seals.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RingKind {
+    FrontImpeller,
+    FrontCasing,
+    RearImpeller,
+    RearCasing,
+}
+
+impl RingKind {
+    pub const ALL: [RingKind; 4] = [
+        RingKind::FrontImpeller,
+        RingKind::FrontCasing,
+        RingKind::RearImpeller,
+        RingKind::RearCasing,
+    ];
+
+    /// Name of the exported file, without extension.
+    pub fn file_stem(self) -> &'static str {
+        match self {
+            RingKind::FrontImpeller => "front-impeller-ring",
+            RingKind::FrontCasing => "front-casing-ring",
+            RingKind::RearImpeller => "rear-impeller-ring",
+            RingKind::RearCasing => "rear-casing-ring",
+        }
+    }
+
+    /// English name for reports.
+    pub fn label(self) -> &'static str {
+        match self {
+            RingKind::FrontImpeller => "Front impeller ring",
+            RingKind::FrontCasing => "Front casing ring",
+            RingKind::RearImpeller => "Rear impeller ring",
+            RingKind::RearCasing => "Rear casing ring",
+        }
+    }
+}
+
+/// One wear ring: a rectangle of the meridional plane revolved about the axis.
+#[derive(Debug)]
+pub struct WearRing {
+    pub kind: RingKind,
+    pub solid: Shape,
+}
+
+/// The rectangle of a wear ring in the meridional plane, m: radii and axial span.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct RingSpan {
+    pub kind: RingKind,
+    pub inner: f64,
+    pub outer: f64,
+    pub z_low: f64,
+    pub z_high: f64,
+}
+
+/// The axial run (low, high) of the line of `wire` on radius `seat` that is `length` long:
+/// the seat of an impeller ring.
+fn seat_run(wire: &Wall, seat: f64, length: f64) -> Option<(f64, f64)> {
+    let tol = 1e-9 * length.max(seat);
+    wire.segments().iter().find_map(|s| {
+        let (a, b) = (s.start(), s.end());
+        (s.kind() == SegmentKind::Line
+            && (a.y - seat).abs() <= tol
+            && (b.y - seat).abs() <= tol
+            && ((a.x - b.x).abs() - length).abs() <= tol)
+            .then(|| (a.x.min(b.x), a.x.max(b.x)))
+    })
+}
+
+/// Axial position of the back face of the hub disk at radius `r`: the first curved
+/// piece of `wire` that crosses it.
+fn back_face_at(wire: &Wall, r: f64) -> Option<f64> {
+    wire.segments()
+        .iter()
+        .filter(|s| s.kind() != SegmentKind::Line)
+        .find_map(|s| {
+            let points: Vec<DVec2> = (0..=400).map(|i| s.eval(f64::from(i) / 400.0)).collect();
+            points.windows(2).find_map(|w| {
+                ((w[0].y - r) * (w[1].y - r) <= 0.0 && (w[0].y - w[1].y).abs() > 0.0).then(|| {
+                    let f = (r - w[0].y) / (w[1].y - w[0].y);
+                    w[0].x + (w[1].x - w[0].x) * f
+                })
+            })
+        })
+}
+
+/// The wear rings the design asks for, as rectangles of the meridional plane, with what
+/// could not be placed. The rings of a wall drawn by hand are left out: its seat is not
+/// ours to know.
+pub(crate) fn ring_spans(g: &ImpellerGeometry) -> (Vec<RingSpan>, Vec<String>) {
+    let c = &g.contour;
+    let mut spans = Vec::new();
+    let mut warnings = Vec::new();
+    let skipped = |what: &str, wall: &str| {
+        format!(
+            "the {what} wear ring is left out: the {wall} wire is drawn by hand, so its seat is not known"
+        )
+    };
+    let mut push = |kind, inner, outer, run: (f64, f64)| {
+        spans.push(RingSpan {
+            kind,
+            inner,
+            outer,
+            z_low: run.0,
+            z_high: run.1,
+        });
+    };
+    let casing_ring = |seal: &Seal| {
+        seal.casing_ring
+            .map(|_| (seal.radius + seal.clearance, seal.casing_seat))
+    };
+
+    if let Some(seal) = &c.seals.front {
+        let run = if c.shroud_material_drawn {
+            None
+        } else {
+            seat_run(&c.shroud_material, seal.impeller_seat, seal.length)
+        };
+        if seal.impeller_ring.is_some() {
+            match run {
+                Some(run) => push(RingKind::FrontImpeller, seal.impeller_seat, seal.radius, run),
+                None if c.shroud_material_drawn => warnings.push(skipped("front impeller", "shroud")),
+                None => warnings.push(
+                    "the front impeller wear ring is left out: the shroud wire has no seat on the ring radius"
+                        .to_string(),
+                ),
+            }
+        }
+        if let Some((inner, outer)) = casing_ring(seal) {
+            let values = &c.chambers.values;
+            let measured = (c.chambers.enabled && values.seal_length > 0.0).then(|| {
+                let end = c.chambers.front_casing.end().x;
+                (end, end + values.seal_length)
+            });
+            match measured.or(run) {
+                Some(run) => push(RingKind::FrontCasing, inner, outer, run),
+                None if c.shroud_material_drawn => warnings.push(skipped("front casing", "shroud")),
+                None => warnings.push(
+                    "the front casing wear ring is left out: the shroud wire has no seat on the ring radius"
+                        .to_string(),
+                ),
+            }
+        }
+    }
+    if let Some(seal) = &c.seals.rear {
+        let run = if c.hub_material_drawn {
+            None
+        } else {
+            seat_run(&c.hub_material, seal.impeller_seat, seal.length)
+        };
+        for (kind, name, ring) in [
+            (
+                RingKind::RearImpeller,
+                "rear impeller",
+                seal.impeller_ring
+                    .map(|_| (seal.impeller_seat, seal.radius)),
+            ),
+            (RingKind::RearCasing, "rear casing", casing_ring(seal)),
+        ] {
+            let Some((inner, outer)) = ring else { continue };
+            // The back face of the disk rises toward the rim: a ring on the collar starts
+            // where the face reaches its outer radius, so it never enters the disk.
+            let start = run.map(|(low, high)| {
+                let face = back_face_at(&c.hub_material, outer).unwrap_or(low);
+                (low.max(face), high)
+            });
+            match start {
+                Some((low, high)) if high - low <= 1e-9 * high.abs().max(1e-3) => {
+                    warnings.push(format!(
+                        "the {name} wear ring is left out: the back face of the disk leaves no room for it on the collar"
+                    ))
+                }
+                Some(run) => push(kind, inner, outer, run),
+                None if c.hub_material_drawn => warnings.push(skipped(name, "hub disk")),
+                None => warnings.push(format!(
+                    "the {name} wear ring is left out: the hub disk wire has no collar seat"
+                )),
+            }
+        }
+    }
+    (spans, warnings)
+}
+
 /// CAD solids of one impeller, in millimetres.
 #[derive(Debug)]
 pub struct ImpellerCad {
@@ -90,7 +274,10 @@ pub struct ImpellerCad {
     /// Impeller material: hub disk, shroud and blades.
     pub impeller: Shape,
     /// Fluid of the side chambers between the impeller and the casing, when designed.
+    /// The wear rings are taken out of it.
     pub side_chambers: Option<Shape>,
+    /// The wear rings of the annular seals, each its own solid.
+    pub rings: Vec<WearRing>,
     /// Wall thickness used, m.
     pub wall_thickness: f64,
     /// Bore and boss diameters, m.
@@ -112,6 +299,14 @@ impl ImpellerCad {
     /// Volume of the impeller material, m³.
     pub fn impeller_volume(&self) -> f64 {
         self.impeller.volume() * 1e-9
+    }
+
+    /// Volume of a wear ring, m³; `None` when the design has no such ring.
+    pub fn ring_volume(&self, kind: RingKind) -> Option<f64> {
+        self.rings
+            .iter()
+            .find(|r| r.kind == kind)
+            .map(|r| r.solid.volume() * 1e-9)
     }
 }
 
@@ -350,14 +545,44 @@ pub fn build_impeller(g: &ImpellerGeometry, options: &CadOptions) -> Result<Impe
         .map(|p| p.x)
         .fold(g.contour.hub.end().x, f64::max);
 
-    // The side chambers, revolved from their outlines.
+    // The wear rings, each a revolved rectangle.
+    let (spans, mut warnings) = ring_spans(g);
+    let rings = spans
+        .iter()
+        .map(|s| {
+            let corner = |z, r| xz(DVec2::new(z, r));
+            let chains = [
+                vec![corner(s.z_low, s.inner), corner(s.z_high, s.inner)],
+                vec![corner(s.z_high, s.inner), corner(s.z_high, s.outer)],
+                vec![corner(s.z_high, s.outer), corner(s.z_low, s.outer)],
+                vec![corner(s.z_low, s.outer), corner(s.z_low, s.inner)],
+            ];
+            Ok(WearRing {
+                kind: s.kind,
+                solid: occ::revolve_z(&profile_face(&chains)?)?,
+            })
+        })
+        .collect::<Result<Vec<_>, CadError>>()?;
+
+    // The side chambers, revolved from their outlines, less the rings: the fluid and the
+    // rings never share a volume.
     let chambers = &g.contour.chambers;
     let side_chambers = if chambers.enabled {
         let solids = [&chambers.front, &chambers.rear]
             .into_iter()
             .map(|outline| occ::revolve_z(&profile_face(&outline_chains(outline))?))
             .collect::<Result<Vec<_>, _>>()?;
-        Some(occ::compound(&solids)?)
+        let mut fluid = occ::compound(&solids)?;
+        for ring in &rings {
+            match fluid.cut(&ring.solid) {
+                Ok(cut) if cut.is_valid() && cut.solid_count() >= 1 => fluid = cut,
+                _ => warnings.push(format!(
+                    "the {} could not be taken out of the side chambers",
+                    ring.kind.label().to_lowercase()
+                )),
+            }
+        }
+        Some(fluid)
     } else {
         None
     };
@@ -383,7 +608,6 @@ pub fn build_impeller(g: &ImpellerGeometry, options: &CadOptions) -> Result<Impe
         .unwrap_or(0.5 * b.blade_thickness)
         .max(0.0);
     let mut fillet_radius = 0.0;
-    let mut warnings = Vec::new();
     if radius > 0.0 {
         let walls = [g.contour.hub.sample(400), g.contour.shroud.sample(400)];
         // A fillet wider than the corner it rounds fails, typically where a blade root
@@ -455,6 +679,7 @@ pub fn build_impeller(g: &ImpellerGeometry, options: &CadOptions) -> Result<Impe
         blades,
         impeller,
         side_chambers,
+        rings,
         wall_thickness: t,
         bore_diameter: 2.0 * rb,
         boss_diameter: 2.0 * rboss,
@@ -790,12 +1015,14 @@ mod tests {
             ..CadOptions::default()
         };
         let cad = build_impeller(&with, &sharp).unwrap();
-        let chambers = cad.side_chambers.unwrap();
+        let chambers = cad.side_chambers.as_ref().unwrap();
         assert!(chambers.is_valid());
         assert_eq!(chambers.solid_count(), 2);
         let c = &with.contour.chambers;
         let pappus = revolved_volume(&c.front) + revolved_volume(&c.rear);
-        assert_relative_eq!(chambers.volume() * 1e-9, pappus, max_relative = 5e-3);
+        // The rear casing ring stands in the plain rear chamber: its fluid is taken out.
+        let ring = cad.ring_volume(RingKind::RearCasing).unwrap();
+        assert_relative_eq!(chambers.volume() * 1e-9, pappus - ring, max_relative = 5e-3);
     }
 
     #[test]
@@ -890,5 +1117,165 @@ mod tests {
             ..Default::default()
         };
         assert!(build_impeller(&g, &big_holes).is_err());
+    }
+
+    /// The reference geometry rebuilt with `change` applied to the meridional input.
+    fn changed(
+        change: impl FnOnce(&mut tp_design::impeller::ImpellerGeometryInput),
+    ) -> ImpellerGeometry {
+        let g = reference();
+        let mut input = tp_design::impeller::ImpellerGeometryInput::default();
+        change(&mut input);
+        tp_design::impeller::build(&g.basis, &input, 1.0).unwrap()
+    }
+
+    fn sharp() -> CadOptions {
+        CadOptions {
+            fillet_radius: Some(0.0),
+            ..CadOptions::default()
+        }
+    }
+
+    #[test]
+    fn four_rings_are_built_by_default() {
+        let cad = build_impeller(&reference(), &sharp()).unwrap();
+        let kinds: Vec<RingKind> = cad.rings.iter().map(|r| r.kind).collect();
+        assert_eq!(kinds, RingKind::ALL);
+        for ring in &cad.rings {
+            assert!(ring.solid.is_valid() && ring.solid.solid_count() == 1);
+        }
+        let stems: Vec<&str> = RingKind::ALL.iter().map(|k| k.file_stem()).collect();
+        assert_eq!(
+            stems,
+            [
+                "front-impeller-ring",
+                "front-casing-ring",
+                "rear-impeller-ring",
+                "rear-casing-ring"
+            ]
+        );
+        assert!(cad.warnings.is_empty(), "{:?}", cad.warnings);
+    }
+
+    #[test]
+    fn the_ring_volume_is_its_annulus() {
+        let g = changed(|i| i.meridional.chambers.enabled = true);
+        let cad = build_impeller(&g, &sharp()).unwrap();
+        let (spans, _) = ring_spans(&g);
+        assert_eq!(spans.len(), 4);
+        for s in spans {
+            let annulus = PI * (s.outer.powi(2) - s.inner.powi(2)) * (s.z_high - s.z_low);
+            let volume = cad.ring_volume(s.kind).expect("the ring is built");
+            assert_relative_eq!(volume, annulus, max_relative = 1e-6);
+        }
+        // A ring the design does not ask for has no volume.
+        let none = changed(|i| i.meridional.seals.rear.enabled = false);
+        let cad = build_impeller(&none, &sharp()).unwrap();
+        assert!(cad.ring_volume(RingKind::RearCasing).is_none());
+        assert!(cad.ring_volume(RingKind::FrontCasing).is_some());
+    }
+
+    #[test]
+    fn rings_do_not_overlap_the_impeller() {
+        let cad = build_impeller(&reference(), &sharp()).unwrap();
+        for ring in &cad.rings {
+            let shared = cad
+                .impeller
+                .common(&ring.solid)
+                .map_or(0.0, |s| s.volume_with_tolerance(0.0));
+            assert!(
+                shared < 1e-9 * ring.solid.volume_with_tolerance(0.0),
+                "{:?} shares {shared} mm³ with the impeller",
+                ring.kind
+            );
+        }
+    }
+
+    #[test]
+    fn impeller_plus_its_rings_fills_the_solid_seat() {
+        use tp_design::Param;
+        // A seal radius at which the shoulder stands on the face for both seats (a wider
+        // seal has the shoulder held back by the flow wall, a different place with and
+        // without the ring, so the two impellers differ there by design). The 4 mm ring
+        // is trimmed to leave the neck a wall.
+        let seal = |ring: bool| {
+            changed(|i| {
+                i.meridional.seals.front.diameter = Param::Manual(0.088);
+                i.meridional.seals.front.impeller_ring.enabled = ring;
+            })
+        };
+        let (with, without) = (seal(true), seal(false));
+        let (a, b) = (
+            build_impeller(&with, &sharp()).unwrap(),
+            build_impeller(&without, &sharp()).unwrap(),
+        );
+        assert!(b.ring_volume(RingKind::FrontImpeller).is_none());
+        let ring = a.ring_volume(RingKind::FrontImpeller).unwrap();
+        assert_relative_eq!(
+            a.impeller_volume() + ring,
+            b.impeller_volume(),
+            max_relative = 1e-4
+        );
+    }
+
+    #[test]
+    fn a_drawn_wire_leaves_its_rings_out_with_a_warning() {
+        let g = reference();
+        let shroud = g.contour.shroud_material.to_input();
+        let hub = g.contour.hub_material.to_input();
+        let drawn = changed(|i| i.meridional.shroud_material = Some(shroud));
+        assert!(drawn.contour.shroud_material_drawn && !drawn.contour.hub_material_drawn);
+        let cad = build_impeller(&drawn, &sharp()).unwrap();
+        assert!(cad.ring_volume(RingKind::FrontImpeller).is_none());
+        assert!(cad.ring_volume(RingKind::RearImpeller).is_some());
+        assert!(
+            cad.warnings
+                .iter()
+                .any(|w| w.contains("front impeller wear ring")),
+            "{:?}",
+            cad.warnings
+        );
+        let drawn = changed(|i| i.meridional.hub_material = Some(hub));
+        let cad = build_impeller(&drawn, &sharp()).unwrap();
+        assert!(cad.ring_volume(RingKind::RearImpeller).is_none());
+        assert!(cad.ring_volume(RingKind::FrontImpeller).is_some());
+        assert!(
+            cad.warnings
+                .iter()
+                .any(|w| w.contains("rear impeller wear ring")),
+            "{:?}",
+            cad.warnings
+        );
+    }
+
+    #[test]
+    fn the_chamber_fluid_and_the_rings_share_no_volume() {
+        let g = changed(|i| i.meridional.chambers.enabled = true);
+        let cad = build_impeller(&g, &sharp()).unwrap();
+        let chambers = cad.side_chambers.as_ref().unwrap();
+        assert!(chambers.is_valid());
+        assert_eq!(cad.rings.len(), 4);
+        for ring in &cad.rings {
+            let shared = chambers
+                .common(&ring.solid)
+                .map_or(0.0, |s| s.volume_with_tolerance(0.0));
+            assert!(
+                shared < 1e-9 * ring.solid.volume_with_tolerance(0.0),
+                "{:?} shares {shared} mm³ with the chamber fluid",
+                ring.kind
+            );
+        }
+        // The front casing ring spans the measured run on the casing seat.
+        let (spans, _) = ring_spans(&g);
+        let front = spans
+            .iter()
+            .find(|s| s.kind == RingKind::FrontCasing)
+            .unwrap();
+        let v = g.contour.chambers.values;
+        assert_relative_eq!(
+            front.z_high - front.z_low,
+            v.seal_length,
+            max_relative = 1e-12
+        );
     }
 }
