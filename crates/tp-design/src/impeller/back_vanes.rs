@@ -385,14 +385,33 @@ mod tests {
             "{wall_z} {face_z}"
         );
         assert!((wall_z - v.tip_z().unwrap() - v.tip_clearance).abs() < 1e-9);
-        // A chamber gap larger than the vanes need stays as it was.
-        let roomy = contour(&with_vanes(false, BackVaneSettings::default()));
+        // At the default vane settings the plate sits at the same exact gap, not at s_ax.
+        let d = contour(&with_vanes(false, BackVaneSettings::default()));
+        let v = d.back_vanes.as_ref().expect("vanes");
+        let wall = d.chambers.rear_casing.start().x;
+        assert!((wall - v.tip_z().unwrap() - v.tip_clearance).abs() < 1e-12);
+        // Without vanes the plain s_ax stays.
         let mut input = MeridionalInput::default();
         input.seals.rear.enabled = false;
         let plain = contour(&input);
-        assert_eq!(
-            roomy.chambers.rear_casing.start().x,
-            plain.chambers.rear_casing.start().x
-        );
+        assert_ne!(wall, plain.chambers.rear_casing.start().x);
+    }
+
+    #[test]
+    fn the_rear_chamber_gap_follows_the_tip_clearance() {
+        let wall = |clearance: f64| {
+            contour(&with_vanes(
+                false,
+                BackVaneSettings {
+                    tip_clearance: Param::Manual(clearance),
+                    ..BackVaneSettings::default()
+                },
+            ))
+            .chambers
+            .rear_casing
+            .start()
+            .x
+        };
+        assert!((wall(0.003) - wall(0.001) - 0.002).abs() < 1e-12);
     }
 }

@@ -12,8 +12,10 @@
 //!   impeller ring, and the chamber wraps the collar: down to the ring, along it, round
 //!   the tip and inside the collar. The rear casing is a plain plate s_ax behind the
 //!   collar tip: the rear seal gap (its diameter and clearance) is in the values only,
-//!   not in the outline. With back vanes on the disk the plate also stands their tip
-//!   clearance behind their tips, moving back when s_ax is smaller than that.
+//!   not in the outline. With back vanes on the disk (our choice: still one plain
+//!   plate) its gap to the disk is the vane height h plus their tip clearance s_v
+//!   instead of s_ax: the clearance of the vanes governs, moving the plate forward or
+//!   back as needed, because the thrust prediction uses that clearance.
 //!
 //! The casing walls are wires like the walls of the flow path: automatic from the
 //! values here, or drawn segment by segment (see [`super::wall`]). The values follow the
@@ -386,10 +388,12 @@ pub fn build(
     let shaft_seal_diameter = settings.shaft_seal_diameter.resolve(|| basis.hub_diameter);
     let back = rear_face(disk, shaft_seal_diameter / 2.0, seals.rear.as_ref());
     let mut rear_z = back.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max) + axial_gap;
-    // Back vanes: the plate also clears their tips by the tip clearance, so it moves
-    // back when the plain gap is smaller than that.
+    // Back vanes: the clearance of their tips governs, not s_ax. The plate stands
+    // exactly the tip clearance behind the true maximum tip z (the tips are a height
+    // from the face along its normal, so where the face leans their axial distance
+    // from it is slightly under h), moving forward or back from the plain s_ax place.
     if let Some(tips) = vanes.and_then(|v| v.tip_z().map(|z| z + v.tip_clearance)) {
-        rear_z = rear_z.max(tips);
+        rear_z = tips;
     }
     let seal_end = *back.last().expect("a face has points");
     let rear_start = DVec2::new(rear_z, back[0].y);
