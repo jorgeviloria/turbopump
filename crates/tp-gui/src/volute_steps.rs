@@ -1131,6 +1131,30 @@ fn cutwater(
                     -tp_design::volute::MAX_OBLIQUITY..=tp_design::volute::MAX_OBLIQUITY,
                 );
             }
+            if !matches!(input.cutwater.shape, CutwaterShape::Tangent) {
+                // The starts that see the walls cross in every plane.
+                let range = g.and_then(|g| g.start_range);
+                let hint = match range {
+                    Some((lo, hi)) => tf(
+                        "Where the spiral starts, before its wall crosses the diffuser's in every plane: from {} to {} here. Automatic: 3°",
+                        &[&units.show(Angle, lo), &units.show(Angle, hi)],
+                    ),
+                    None => tr(
+                        "Where the spiral starts. Its wall does not cross the diffuser's in every plane: it starts where it clears it",
+                    )
+                    .to_owned(),
+                };
+                param_f64(
+                    ui,
+                    tr("Spiral start"),
+                    &hint,
+                    &mut input.cutwater.spiral_start,
+                    Angle,
+                    g.map(|g| g.start_angle),
+                    &units,
+                    0.0..=std::f64::consts::FRAC_PI_2,
+                );
+            }
             let incidence = input.cutwater.incidence.resolve(|| 0.0);
             param_f64(
                 ui,

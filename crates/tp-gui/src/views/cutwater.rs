@@ -856,6 +856,25 @@ fn measures(ui: &mut Ui, g: &VoluteGeometry, band: Option<(f64, f64)>, units: &D
             tr("more than 35° against pressure pulsations (Gülich Table 10.2); the walls set how far it can lean").to_owned(),
         ));
     }
+    rows.push((
+        if g.start_range.is_some() {
+            Check::Info
+        } else {
+            Check::Watch
+        },
+        tr("Spiral start").to_owned(),
+        show(QuantityKind::Angle, g.start_angle),
+        match g.start_range {
+            Some((lo, hi)) => tf(
+                "before the walls cross in every plane: from {} to {}",
+                &[
+                    &show(QuantityKind::Angle, lo),
+                    &show(QuantityKind::Angle, hi),
+                ],
+            ),
+            None => tr("the walls do not cross in every plane: the spiral starts where it clears the diffuser").to_owned(),
+        },
+    ));
     let (wedge_lo, wedge_hi) = range(slices, |s| s.wedge);
     let degrees = |a: f64| units.to_display(QuantityKind::Angle, a);
     rows.push((
