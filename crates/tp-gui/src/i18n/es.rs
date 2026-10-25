@@ -1260,6 +1260,10 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Flow domain", "Dominio fluido"),
     ("Diffuser flow domain", "Dominio fluido del difusor"),
     ("Volute flow domain", "Dominio fluido de la voluta"),
+    (
+        "{} cm³, {} (at the impeller density)",
+        "{} cm³, {} (con la densidad del rodete)",
+    ),
     ("Front impeller ring", "Anillo delantero del rodete"),
     ("Front casing ring", "Anillo delantero de la carcasa"),
     ("Rear impeller ring", "Anillo trasero del rodete"),

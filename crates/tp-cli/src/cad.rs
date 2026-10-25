@@ -409,7 +409,7 @@ fn report(cad: &ImpellerCad, density: f64, units: &DisplayUnits) -> bool {
     for ring in &cad.rings {
         let volume = cad.ring_volume(ring.kind).unwrap_or(0.0);
         println!(
-            "  {:<19} {:.1} cm³, {}",
+            "  {:<19} {:.1} cm³, {} (at the impeller density)",
             ring.kind.label(),
             volume * 1e6,
             format_mass(volume * density)

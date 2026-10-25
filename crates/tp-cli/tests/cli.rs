@@ -705,6 +705,7 @@ fn cad_exports_impeller_and_flow_domain() {
     ] {
         let line = text.lines().find(|l| l.contains(label)).unwrap_or("");
         assert!(line.contains(" cm³, "), "{label}: {text}");
+        assert!(line.contains("impeller density"), "{label}: {text}");
     }
     // The volute is reported but skipped until it is designed.
     assert!(text.contains("not designed yet"), "{text}");
@@ -720,7 +721,12 @@ fn cad_exports_impeller_and_flow_domain() {
     // Only a reduced fillet radius may be reported now.
     let text = stdout(&again);
     let warnings: Vec<&str> = text.lines().filter(|l| l.contains("warning:")).collect();
-    assert!(warnings.iter().all(|w| w.contains("did not fit")), "{text}");
+    assert!(
+        warnings
+            .iter()
+            .all(|w| w.contains("did not fit") || w.contains("shorter than")),
+        "{text}"
+    );
     assert_eq!(
         again.status.code(),
         Some(i32::from(!warnings.is_empty())),

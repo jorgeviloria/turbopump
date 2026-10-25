@@ -211,6 +211,12 @@ pub(crate) fn ring_spans(g: &ImpellerGeometry) -> (Vec<RingSpan>, Vec<String>) {
                 let end = c.chambers.front_casing.end().x;
                 (end, end + values.seal_length)
             });
+            if measured.is_none() && c.chambers.enabled && run.is_some() {
+                warnings.push(
+                    "the front casing ring follows the impeller seat run: the chamber wall does not run on the casing seat"
+                        .to_string(),
+                );
+            }
             match measured.or(run) {
                 Some(run) => push(RingKind::FrontCasing, inner, outer, run),
                 None if c.shroud_material_drawn => warnings.push(skipped("front casing", "shroud")),
@@ -239,9 +245,14 @@ pub(crate) fn ring_spans(g: &ImpellerGeometry) -> (Vec<RingSpan>, Vec<String>) {
             let Some((inner, outer)) = ring else { continue };
             // The back face of the disk rises toward the rim: a ring on the collar starts
             // where the face reaches its outer radius, so it never enters the disk.
-            let start = run.map(|(low, high)| {
-                let face = back_face_at(&c.hub_material, outer).unwrap_or(low);
-                (low.max(face), high)
+            let start = run.map(|(low, high)| match back_face_at(&c.hub_material, outer) {
+                Some(face) => (low.max(face), high),
+                None => {
+                    warnings.push(format!(
+                        "the back face of the disk does not reach the {name} wear ring radius: the ring spans the whole collar"
+                    ));
+                    (low, high)
+                }
             });
             match start {
                 Some((low, high)) if high - low <= 1e-9 * high.abs().max(1e-3) => {
@@ -254,6 +265,25 @@ pub(crate) fn ring_spans(g: &ImpellerGeometry) -> (Vec<RingSpan>, Vec<String>) {
                 None => warnings.push(format!(
                     "the {name} wear ring is left out: the hub disk wire has no collar seat"
                 )),
+            }
+        }
+    }
+    // A ring shorter than its seal (the front casing ring by the axial gap, the rear rings
+    // by the slope of the back face) shortens the leak path the seal length stands for.
+    for span in &spans {
+        let seal = match span.kind {
+            RingKind::FrontImpeller | RingKind::FrontCasing => c.seals.front,
+            RingKind::RearImpeller | RingKind::RearCasing => c.seals.rear,
+        };
+        if let Some(seal) = seal {
+            let length = span.z_high - span.z_low;
+            if length < 0.95 * seal.length {
+                warnings.push(format!(
+                    "the {} is {:.1} mm long, shorter than the {:.1} mm of its seal",
+                    span.kind.label().to_lowercase(),
+                    length * 1e3,
+                    seal.length * 1e3
+                ));
             }
         }
     }
@@ -575,7 +605,9 @@ pub fn build_impeller(g: &ImpellerGeometry, options: &CadOptions) -> Result<Impe
         let mut fluid = occ::compound(&solids)?;
         for ring in &rings {
             match fluid.cut(&ring.solid) {
-                Ok(cut) if cut.is_valid() && cut.solid_count() >= 1 => fluid = cut,
+                Ok(cut) if cut.is_valid() && cut.solid_count() == fluid.solid_count() => {
+                    fluid = cut
+                }
                 _ => warnings.push(format!(
                     "the {} could not be taken out of the side chambers",
                     ring.kind.label().to_lowercase()
@@ -1154,7 +1186,12 @@ mod tests {
                 "rear-casing-ring"
             ]
         );
-        assert!(cad.warnings.is_empty(), "{:?}", cad.warnings);
+        // Only the rings shorter than their seals are noted.
+        assert!(
+            cad.warnings.iter().all(|w| w.contains("shorter than")),
+            "{:?}",
+            cad.warnings
+        );
     }
 
     #[test]
@@ -1168,11 +1205,83 @@ mod tests {
             let volume = cad.ring_volume(s.kind).expect("the ring is built");
             assert_relative_eq!(volume, annulus, max_relative = 1e-6);
         }
+        // The lengths come from the design, not from the spans themselves.
+        let (spans, _) = ring_spans(&g);
+        let length = |kind| {
+            let s = spans.iter().find(|s| s.kind == kind).unwrap();
+            s.z_high - s.z_low
+        };
+        let front = g.contour.seals.front.unwrap();
+        assert_relative_eq!(
+            length(RingKind::FrontImpeller),
+            front.length,
+            max_relative = 1e-9
+        );
+        assert_relative_eq!(
+            length(RingKind::FrontCasing),
+            g.contour.chambers.values.seal_length,
+            max_relative = 1e-9
+        );
         // A ring the design does not ask for has no volume.
         let none = changed(|i| i.meridional.seals.rear.enabled = false);
         let cad = build_impeller(&none, &sharp()).unwrap();
         assert!(cad.ring_volume(RingKind::RearCasing).is_none());
         assert!(cad.ring_volume(RingKind::FrontCasing).is_some());
+    }
+
+    #[test]
+    fn the_rear_rings_sit_on_the_collar_and_clear_of_the_disk() {
+        let g = reference();
+        let rear = g.contour.seals.rear.unwrap();
+        let (spans, warnings) = ring_spans(&g);
+        for kind in [RingKind::RearImpeller, RingKind::RearCasing] {
+            let s = spans.iter().find(|s| s.kind == kind).unwrap();
+            // The collar seat is the inner radius of the impeller ring.
+            if kind == RingKind::RearImpeller {
+                assert_relative_eq!(s.inner, rear.impeller_seat, max_relative = 1e-12);
+            }
+            // Never longer than the seal, and behind the back face at its outer radius.
+            assert!(s.z_high - s.z_low <= rear.length * (1.0 + 1e-9));
+            let face = back_face_at(&g.contour.hub_material, s.outer).unwrap();
+            assert!(s.z_low >= face - 1e-12, "{kind:?}: {} < {face}", s.z_low);
+            // The shortening is reported.
+            let name = kind.label().to_lowercase();
+            let short = s.z_high - s.z_low < 0.95 * rear.length;
+            assert_eq!(
+                warnings
+                    .iter()
+                    .any(|w| w.contains(&name) && w.contains("shorter")),
+                short,
+                "{kind:?}: {warnings:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_front_casing_ring_without_a_run_on_the_seat_says_so() {
+        use tp_design::impeller::wall::{SegmentInput, SegmentKind};
+        // A casing wall drawn straight to its end, never running on the casing seat.
+        let end = changed(|i| i.meridional.chambers.enabled = true)
+            .contour
+            .chambers
+            .front_casing
+            .end();
+        let g = changed(|i| {
+            i.meridional.chambers.enabled = true;
+            i.meridional.chambers.front = Some(vec![SegmentInput {
+                kind: SegmentKind::Line,
+                end,
+                ..SegmentInput::default()
+            }]);
+        });
+        assert_eq!(g.contour.chambers.values.seal_length, 0.0);
+        let (_, warnings) = ring_spans(&g);
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.contains("front casing ring follows the impeller seat run")),
+            "{warnings:?}"
+        );
     }
 
     #[test]
@@ -1194,10 +1303,8 @@ mod tests {
     #[test]
     fn impeller_plus_its_rings_fills_the_solid_seat() {
         use tp_design::Param;
-        // A seal radius at which the shoulder stands on the face for both seats (a wider
-        // seal has the shoulder held back by the flow wall, a different place with and
-        // without the ring, so the two impellers differ there by design). The 4 mm ring
-        // is trimmed to leave the neck a wall.
+        // The identity is exact at a seal radius where the shoulder stands on the face
+        // for both seats (the 4 mm ring is trimmed to leave the neck a wall).
         let seal = |ring: bool| {
             changed(|i| {
                 i.meridional.seals.front.diameter = Param::Manual(0.088);
@@ -1215,6 +1322,26 @@ mod tests {
             a.impeller_volume() + ring,
             b.impeller_volume(),
             max_relative = 1e-4
+        );
+
+        // At the default diameter the flow wall holds the shoulder back differently
+        // with and without the ring; the shift is tolerated (ruling R8).
+        let default_seal = |ring: bool| {
+            let d = 2.0 * changed(|_| {}).contour.seals.front.unwrap().radius;
+            changed(|i| {
+                i.meridional.seals.front.diameter = Param::Manual(d);
+                i.meridional.seals.front.impeller_ring.enabled = ring;
+            })
+        };
+        let (a, b) = (
+            build_impeller(&default_seal(true), &sharp()).unwrap(),
+            build_impeller(&default_seal(false), &sharp()).unwrap(),
+        );
+        let ring = a.ring_volume(RingKind::FrontImpeller).unwrap();
+        assert_relative_eq!(
+            a.impeller_volume() + ring,
+            b.impeller_volume(),
+            max_relative = 2e-3
         );
     }
 
@@ -1265,6 +1392,8 @@ mod tests {
                 ring.kind
             );
         }
+        // The front casing ring, which lies in the front chamber, is out of it too.
+        assert!(cad.ring_volume(RingKind::FrontCasing).is_some());
         // The front casing ring spans the measured run on the casing seat.
         let (spans, _) = ring_spans(&g);
         let front = spans
