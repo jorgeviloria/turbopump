@@ -461,11 +461,15 @@ fn on_surface(shape: &Shape, points: &[DVec3]) -> bool {
 }
 
 /// Builds the casing around the flow domain `cad` of the volute `g`.
-pub fn build_volute_casing(g: &VoluteGeometry, cad: &VoluteCad) -> Result<VoluteCasing, CadError> {
-    // The start of the spiral runs just inside its throat, the cutwater between them:
-    // offset outward, the two would cut into each other within one loft. Each piece is
-    // lofted in two halves, which meet on their middle outline.
-    let halves: Vec<Vec<Vec<DVec3>>> = g
+/// Sequences of outlines to loft through, one per piece.
+type Lofts = Vec<Vec<Vec<DVec3>>>;
+
+/// The outlines of the casing lofted, mm. The start of the spiral runs just inside its
+/// throat, the cutwater between them: offset outward, the two would cut into each other
+/// within one loft. Each piece is lofted in two halves, which meet on their middle
+/// outline.
+fn casing_pieces(g: &VoluteGeometry) -> Result<(Vec<Shape>, Lofts), CadError> {
+    let halves: Lofts = g
         .casing_lofts()
         .into_iter()
         .flat_map(|rings| {
@@ -477,7 +481,11 @@ pub fn build_volute_casing(g: &VoluteGeometry, cad: &VoluteCad) -> Result<Volute
             }
         })
         .collect();
-    let mut outer = loft_pieces(&halves, &g.ring_breaks())?;
+    Ok((loft_pieces(&halves, &g.ring_breaks())?, halves))
+}
+
+pub fn build_volute_casing(g: &VoluteGeometry, cad: &VoluteCad) -> Result<VoluteCasing, CadError> {
+    let (mut outer, halves) = casing_pieces(g)?;
     // The wall round the bend and neck of an internal volute.
     if let Some(profile) = g.bend_casing_profile() {
         let pieces = smooth_pieces(&profile);
@@ -503,25 +511,47 @@ pub fn build_volute_casing(g: &VoluteGeometry, cad: &VoluteCad) -> Result<Volute
     // A failed boolean may still give one valid solid: the casing must also have lost
     // the channel out of its outer volume (quick estimates of the volumes).
     let channel = cad.channel.volume_with_tolerance(0.0);
-    let enclose = |fuzzy: f64| -> Result<(Shape, f64), CadError> {
+    // The groove where the back of the start of the spiral runs into the diffuser's
+    // casing, over the cutwater, filled and rounded before the flow domain comes out:
+    // the fillet only adds material outside, so it cannot reach the flow.
+    let radius = g.design.cutwater_fillet * MM;
+    let enclose = |fuzzy: f64| -> Result<(Shape, f64, Option<f64>), CadError> {
         let space = cad.fluid.fuse_fuzzy(&impeller, fuzzy)?;
-        let whole = fuse_all(&outer, fuzzy)?;
+        let mut whole = fuse_all(&outer, fuzzy)?;
+        // The radius it took; 0 when asked for none.
+        let mut rounded = Some(0.0);
+        if radius > 0.0 && !g.cutwater_slices.is_empty() {
+            rounded = fill_groove(&whole, &outer, g, radius).map(|(filled, r)| {
+                whole = filled;
+                r
+            });
+        }
         let gross = whole.volume_with_tolerance(0.0);
-        Ok((whole.cut_fuzzy(&space, fuzzy)?, gross))
+        Ok((whole.cut_fuzzy(&space, fuzzy)?, gross, rounded))
     };
-    let sound = |(solid, gross): &(Shape, f64)| {
+    let sound = |(solid, gross, _): &(Shape, f64, Option<f64>)| {
         solid.is_valid()
             && solid.solid_count() == 1
             && solid.volume_with_tolerance(0.0) < gross - 0.8 * channel
     };
-    let (solid, _) = first_sound(enclose, sound, |(solid, gross)| {
-        Some((solid.fixed().ok()?, *gross))
+    let (solid, _, rounded) = first_sound(enclose, sound, |(solid, gross, rounded)| {
+        Some((solid.fixed().ok()?, *gross, *rounded))
     })?;
+    let mut warnings = Vec::new();
+    match rounded {
+        None => warnings
+            .push("the groove over the cutwater could not be rounded: it stays sharp".to_owned()),
+        Some(r) if radius > 0.0 && r < radius => warnings.push(format!(
+            "the groove over the cutwater is rounded with {r:.1} mm, the most the CAD kernel \
+             takes there"
+        )),
+        Some(_) => {}
+    }
     let Some(f) = &g.design.flange else {
         return Ok(VoluteCasing {
             solid,
             flange: false,
-            warnings: Vec::new(),
+            warnings,
         });
     };
     match flange(g, f).and_then(|disk| {
@@ -531,17 +561,99 @@ pub fn build_volute_casing(g: &VoluteGeometry, cad: &VoluteCad) -> Result<Volute
         Ok(joined) if joined.is_valid() && joined.solid_count() == 1 => Ok(VoluteCasing {
             solid: joined,
             flange: true,
-            warnings: Vec::new(),
+            warnings,
         }),
-        result => Ok(VoluteCasing {
-            solid,
-            flange: false,
-            warnings: vec![format!(
+        result => {
+            warnings.push(format!(
                 "the flange could not be joined to the casing{}: the casing ends flat",
                 result.err().map_or(String::new(), |e| format!(" ({e})"))
-            )],
-        }),
+            ));
+            Ok(VoluteCasing {
+                solid,
+                flange: false,
+                warnings,
+            })
+        }
     }
+}
+
+/// The edges of `whole`, the fused outer lofts `pieces`, along the groove where the back
+/// of the start of the spiral runs into the diffuser's casing, over the cutwater: edges
+/// the fusion made (no loft has them), near the cutwater and farther from the axis than
+/// its tip. All of them, and those that run across the height.
+fn groove_edges(whole: &Shape, pieces: &[Shape], g: &VoluteGeometry) -> (Vec<usize>, Vec<usize>) {
+    const SAMPLES: usize = 17;
+    let lofted: Vec<Vec<DVec3>> = pieces
+        .iter()
+        .flat_map(|p| p.edge_samples(4 * SAMPLES))
+        .filter(|e| !e.is_empty())
+        .collect();
+    // Distance from `p` to the nearest lofted edge, along its samples.
+    let off_the_lofts = |p: DVec3| {
+        lofted
+            .iter()
+            .flat_map(|e| e.windows(2))
+            .map(|w| {
+                let (a, b) = (w[0], w[1]);
+                let t = ((p - a).dot(b - a) / (b - a).length_squared().max(1e-24)).clamp(0.0, 1.0);
+                p.distance(a + (b - a) * t)
+            })
+            .fold(f64::INFINITY, f64::min)
+    };
+    let tip = g.cutwater.tip * MM;
+    let t = g.design.wall_thickness * MM;
+    let mut all = Vec::new();
+    let mut across = Vec::new();
+    for (k, e) in whole.edge_samples(SAMPLES).iter().enumerate() {
+        if e.is_empty() {
+            continue;
+        }
+        let mid = e[SAMPLES / 2];
+        let near = e
+            .iter()
+            .all(|p| p.truncate().distance(tip.truncate()) < 10.0 * t);
+        let behind = mid.truncate().length() > tip.truncate().length() + 0.5 * t;
+        if !(near && behind) || off_the_lofts(mid) < 0.01 {
+            continue;
+        }
+        all.push(k);
+        let length: f64 = e.windows(2).map(|w| w[0].distance(w[1])).sum();
+        let (lo, hi) = e
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| {
+                (lo.min(p.z), hi.max(p.z))
+            });
+        if hi - lo > 0.5 * length {
+            across.push(k);
+        }
+    }
+    (all, across)
+}
+
+/// `whole` with the groove over the cutwater filled and rounded with `radius`, mm, and
+/// the radius it took: along all its edges if OCCT can, else along those across the
+/// height, and with a smaller radius if neither takes this one (round sections take
+/// less); `None` if none does.
+fn fill_groove(
+    whole: &Shape,
+    pieces: &[Shape],
+    g: &VoluteGeometry,
+    radius: f64,
+) -> Option<(Shape, f64)> {
+    let (all, across) = groove_edges(whole, pieces, g);
+    [1.0, 0.75, 0.5, 0.25].into_iter().find_map(|share| {
+        let r = share * radius;
+        [&all, &across]
+            .into_iter()
+            .filter(|edges| !edges.is_empty())
+            .find_map(|edges| {
+                whole
+                    .filleted(edges, r)
+                    .ok()
+                    .filter(|f| f.is_valid() && f.solid_count() == 1)
+            })
+            .map(|filled| (filled, r))
+    })
 }
 
 /// The flange at the outlet of the diffuser: a disk whose front face is the outlet face,
@@ -969,6 +1081,8 @@ mod tests {
             let casing = build_volute_casing(&g, &cad).unwrap();
             assert!(casing.solid.is_valid() && casing.solid.solid_count() == 1);
             assert!(casing.flange, "{:?}", casing.warnings);
+            // The groove over the cutwater rounded with the radius asked for.
+            assert!(casing.warnings.is_empty(), "{:?}", casing.warnings);
             // The shell around the channel, plus the cutwater, the walls beside the
             // inlet ring and the flange beyond the wall, less its bolt holes.
             let f = g.design.flange.unwrap();
@@ -983,6 +1097,61 @@ mod tests {
                 volume > 0.9 * shell && volume < 1.6 * shell,
                 "{:?}: {volume} vs {shell}",
                 input.cross_section
+            );
+        }
+    }
+
+    #[test]
+    fn the_casing_fills_and_rounds_the_groove_over_the_cutwater() {
+        // Round sections take a smaller radius there.
+        for (shape, whole_radius) in [
+            (SectionShape::default(), true),
+            (SectionShape::rectangular(), true),
+            (SectionShape::round(), false),
+        ] {
+            let input = VoluteInput {
+                cross_section: CrossSectionInput::single(shape.clone()),
+                ..VoluteInput::default()
+            };
+            let g = VoluteGeometry::build(&basis(), &input).unwrap();
+            let radius = g.design.cutwater_fillet * MM;
+            approx::assert_relative_eq!(radius, g.design.wall_thickness * MM);
+            let (pieces, _) = casing_pieces(&g).unwrap();
+            // As the casing does: the first fusion that takes the fillet.
+            let (whole, (filled, took)) = FUZZY_GAPS
+                .into_iter()
+                .find_map(|fuzzy| {
+                    let whole = fuse_all(&pieces, fuzzy).ok()?;
+                    let filled = fill_groove(&whole, &pieces, &g, radius)?;
+                    Some((whole, filled))
+                })
+                .unwrap_or_else(|| panic!("{shape:?}: no fillet"));
+            assert!(filled.is_valid() && filled.solid_count() == 1, "{shape:?}");
+            assert!(
+                if whole_radius {
+                    (took - radius).abs() < 1e-9
+                } else {
+                    took < radius
+                },
+                "{shape:?}: {took} mm"
+            );
+            // The bottom of the groove ends up inside the material.
+            let (_, across) = groove_edges(&whole, &pieces, &g);
+            assert!(!across.is_empty(), "{shape:?}");
+            let samples = whole.edge_samples(9);
+            let bottom: Vec<DVec3> = across.iter().map(|&k| samples[k][4]).collect();
+            for (p, d) in bottom
+                .iter()
+                .zip(filled.boundary_distances(&bottom).unwrap())
+            {
+                assert!(d > 0.2 * took, "{shape:?}: {p} only {d} mm deep");
+            }
+            // Material only added, a little of it.
+            let added = filled.volume_with_tolerance(0.0) - whole.volume_with_tolerance(0.0);
+            let height = (g.design.inlet_width + 2.0 * g.design.wall_thickness) * MM;
+            assert!(
+                added > 0.0 && added < 10.0 * took * took * height,
+                "{shape:?}: {added}"
             );
         }
     }
