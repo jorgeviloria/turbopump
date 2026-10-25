@@ -387,8 +387,9 @@ pub struct CutwaterInput {
     pub spiral_start: Param<f64>,
     /// Radius of the side endings of a rounded cutwater: toward each side wall of the
     /// channel its body widens with this round between its faces and the wall, m; 0
-    /// leaves the sharp corner. Automatic: the nose radius ρ in a single volute with
-    /// sections of straight side walls (rectangular or trapezoidal), 0 for the others.
+    /// leaves the sharp corner. Automatic: the nose radius ρ in a single volute whose
+    /// sections take them ([`SectionShape::takes_side_endings`]), 0 for the others,
+    /// which the CAD kernel does not cut cleanly.
     pub side_radius: Param<f64>,
     /// Shape of the nose of a rounded cutwater, as a blade edge on a body as thick as
     /// the nose: elliptic (round by default), tapered, Bézier or blunt. Gülich asks for
@@ -1317,17 +1318,18 @@ impl VoluteDesign {
         require((0.0..=1.0).contains(&cutwater_share), || {
             "the share of the spiral side of the cutwater must lie between 0 and 1".into()
         })?;
-        // Automatic only where the side walls are straight, in a single volute, so far:
-        // a double volute does not carve them reliably yet.
-        let straight = rib_wrap.is_none()
+        // Automatic only where the CAD kernel cuts them cleanly: in a single volute (with
+        // the rib of a double one it leaves the body about the radius off its design),
+        // of sections that take them.
+        let takes = rib_wrap.is_none()
             && cross_sections
                 .definitions()
                 .iter()
-                .all(|d| d.shape.straight_sided());
+                .all(|d| d.shape.takes_side_endings());
         let cutwater_side_radius = input
             .cutwater
             .side_radius
-            .resolve(|| if straight { nose_radius } else { 0.0 });
+            .resolve(|| if takes { nose_radius } else { 0.0 });
         require(cutwater_side_radius >= 0.0, || {
             "the radius of the side endings of the cutwater cannot be negative".into()
         })?;

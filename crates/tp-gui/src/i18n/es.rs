@@ -20,8 +20,8 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("G2, same curvature", "G2, misma curvatura"),
     ("Side endings R", "Remates laterales R"),
     (
-        "Toward each side wall of the channel the body widens with this round between its faces and the wall, so it meets the wall without a sharp corner; 0 leaves the corner. Automatic: the nose radius ρ for rectangular and trapezoidal sections, 0 for the others",
-        "Hacia cada pared lateral del canal el cuerpo se ensancha con este redondeo entre sus caras y la pared, para llegar a ella sin canto vivo; 0 deja el canto. Automático: el radio de la nariz ρ en las secciones rectangulares y trapeciales, 0 en las demás",
+        "Toward each side wall of the channel the body widens with this round between its faces and the wall, so it meets the wall without a sharp corner; 0 leaves the corner. Automatic: the nose radius ρ in a single volute, except with radius-based sides or external and internal round sections; 0 for those and for a double volute",
+        "Hacia cada pared lateral del canal el cuerpo se ensancha con este redondeo entre sus caras y la pared, para llegar a ella sin canto vivo; 0 deja el canto. Automático: el radio de la nariz ρ en una voluta simple, salvo con lados por radios o secciones redondas externas e internas; 0 en esas y en una voluta doble",
     ),
     ("Spiral start", "Inicio de la espiral"),
     (
@@ -4064,6 +4064,10 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
     (
         "the cutwater of the CAD solid lies up to {} mm off its design: the CAD kernel could not cut it cleanly",
         "el corte de agua del sólido CAD se aparta hasta {} mm de su diseño: el núcleo CAD no pudo recortarlo limpio",
+    ),
+    (
+        "the flow domain of the CAD is not one valid solid: the CAD kernel could not cut the cutwater cleanly",
+        "el dominio de flujo del CAD no es un solo sólido válido: el núcleo CAD no pudo recortar limpio el corte de agua",
     ),
     (
         "the obliquity of the cutwater must lie within ±{}°, got {}°",

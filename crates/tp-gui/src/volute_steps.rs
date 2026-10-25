@@ -1173,7 +1173,7 @@ fn cutwater(
                     ui,
                     tr("Side endings R"),
                     tr(
-                        "Toward each side wall of the channel the body widens with this round between its faces and the wall, so it meets the wall without a sharp corner; 0 leaves the corner. Automatic: the nose radius ρ for rectangular and trapezoidal sections, 0 for the others",
+                        "Toward each side wall of the channel the body widens with this round between its faces and the wall, so it meets the wall without a sharp corner; 0 leaves the corner. Automatic: the nose radius ρ in a single volute, except with radius-based sides or external and internal round sections; 0 for those and for a double volute",
                     ),
                     &mut input.cutwater.side_radius,
                     Length,

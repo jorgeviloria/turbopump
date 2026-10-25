@@ -1404,9 +1404,15 @@ mod tests {
                 .flatten()
                 .all(|p| p.truncate().length() > rz - 1e-9)
         );
-        // Automatic only for straight side walls in a single volute.
+        // Automatic in a single volute of sections that take them, not in a double one.
         let round = build(|v| v.cross_section = CrossSectionInput::single(SectionShape::round()));
-        assert_eq!(round.design.cutwater_side_radius, 0.0);
+        assert_eq!(round.design.cutwater_side_radius, round.design.nose_radius);
+        let external = build(|v| {
+            v.cross_section = CrossSectionInput::single(SectionShape::RoundExternal(
+                crate::volute::ExternalRound::default(),
+            ))
+        });
+        assert_eq!(external.design.cutwater_side_radius, 0.0);
         let double = build(|v| v.setup.kind = crate::volute::VoluteKind::Double);
         assert_eq!(double.design.cutwater_side_radius, 0.0);
     }

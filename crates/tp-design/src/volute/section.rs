@@ -510,18 +510,13 @@ impl SectionShape {
         SectionShape::symmetric(SideShape::Round { ellipse_ratio: 1.0 })
     }
 
-    /// Whether both sides are straight walls, rectangular or trapezoidal.
-    pub fn straight_sided(&self) -> bool {
-        let straight = |side: &SideShape| {
-            matches!(
-                side,
-                SideShape::Rectangular { .. } | SideShape::Trapezoidal { .. }
-            )
-        };
+    /// Whether the CAD kernel cuts the side endings of a rounded cutwater cleanly out of
+    /// a channel of this section: checked for every side shape but the radius-based one,
+    /// and not for external or internal round sections.
+    pub fn takes_side_endings(&self) -> bool {
+        let takes = |side: &SideShape| !matches!(side, SideShape::RadiusBased(_));
         match self {
-            SectionShape::Sides { left, right } => {
-                straight(left) && right.as_ref().is_none_or(straight)
-            }
+            SectionShape::Sides { left, right } => takes(left) && right.as_ref().is_none_or(takes),
             SectionShape::RoundExternal(_) | SectionShape::RoundInternal(_) => false,
         }
     }

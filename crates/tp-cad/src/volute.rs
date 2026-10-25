@@ -321,21 +321,29 @@ pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
         }
         plain.get_or_insert(fluid);
     }
-    // Else a sound domain whose cut lies off the design, and says by how much.
+    // Else a sound domain whose cut lies off the design, saying by how much, or the
+    // first that built at all.
+    let warning = if let Some(fluid) = &plain {
+        let off = fluid
+            .boundary_distances(&probes)
+            .map_or(f64::INFINITY, |d| {
+                d.into_iter()
+                    .map(|d| if d.is_nan() { f64::INFINITY } else { d })
+                    .fold(0.0, f64::max)
+            });
+        format!(
+            "the cutwater of the CAD solid lies up to {off:.1} mm off its design: the CAD \
+             kernel could not cut it cleanly"
+        )
+    } else {
+        "the flow domain of the CAD is not one valid solid: the CAD kernel could not cut \
+         the cutwater cleanly"
+            .to_owned()
+    };
     let fluid = plain
         .or(built)
         .ok_or_else(|| CadError::Operation("the flow domain of the volute failed".into()))?;
-    let off = fluid
-        .boundary_distances(&probes)
-        .map_or(f64::INFINITY, |d| {
-            d.into_iter()
-                .map(|d| if d.is_nan() { f64::INFINITY } else { d })
-                .fold(0.0, f64::max)
-        });
-    let warnings = vec![format!(
-        "the cutwater of the CAD solid lies up to {off:.1} mm off its design: the CAD \
-         kernel could not cut it cleanly"
-    )];
+    let warnings = vec![warning];
     Ok(VoluteCad {
         channel,
         fluid,
@@ -1190,9 +1198,11 @@ mod tests {
             d.solid,
             d.walls
         );
-        // Within the deflection of the triangles.
+        // Within the deflection of the triangles, and of the splines where the side
+        // endings ride the cutwater circle: they kink onto it, and a spline dips some
+        // hundredths of a millimetre past the kink (0.03 mm in round sections).
         assert!(
-            d.nearest > nose - 0.02,
+            d.nearest > nose - 0.05,
             "{case}: {} vs {nose} mm",
             d.nearest
         );
