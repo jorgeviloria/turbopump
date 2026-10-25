@@ -2799,7 +2799,7 @@ fn edge_value(
     changed
 }
 
-fn edge_shape(ui: &mut Ui, salt: &str, shape: &mut EdgeShape) -> bool {
+pub(crate) fn edge_shape(ui: &mut Ui, salt: &str, shape: &mut EdgeShape) -> bool {
     let mut changed = false;
     widgets::list(ui, |ui| {
         ComboBox::from_id_salt(salt)

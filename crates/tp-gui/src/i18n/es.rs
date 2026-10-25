@@ -6,6 +6,18 @@
 
 /// English text → Spanish text.
 pub(super) static TEXTS: &[(&str, &str)] = &[
+    ("Nose shape", "Forma de la nariz"),
+    (
+        "As a blade edge on a body as thick as the nose: elliptic (round by default; Gülich asks for an elliptic profile), tapered, Bézier or blunt. Its pressure face is the diffuser side",
+        "Como un borde de álabe sobre un cuerpo tan grueso como la nariz: elíptica (redonda por defecto; Gülich pide un perfil elíptico), afilada, Bézier o roma. Su cara de presión es el lado del difusor",
+    ),
+    ("Join to the walls", "Unión con las paredes"),
+    (
+        "How the faces run into the spiral and diffuser walls: G1 tangent, G2 with the curvature of the wall too",
+        "Cómo entran las caras en las paredes de la espiral y del difusor: G1 tangente, G2 también con la curvatura de la pared",
+    ),
+    ("G1, tangent", "G1, tangente"),
+    ("G2, same curvature", "G2, misma curvatura"),
     ("Side endings R", "Remates laterales R"),
     (
         "Toward each side wall of the channel the body widens with this round between its faces and the wall, so it meets the wall without a sharp corner; 0 leaves the corner. Automatic: the nose radius ρ for rectangular and trapezoidal sections, 0 for the others",
@@ -3648,6 +3660,10 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
     (
         "the groove over the cutwater could not be rounded: it stays sharp",
         "no se pudo redondear la hendidura sobre el corte de agua: queda aguda",
+    ),
+    (
+        "the cutwater of the CAD solid lies up to {} mm off its design: the CAD kernel could not cut it cleanly",
+        "el corte de agua del sólido CAD se aparta hasta {} mm de su diseño: el núcleo CAD no pudo recortarlo limpio",
     ),
     (
         "the obliquity of the cutwater must lie within ±{}°, got {}°",

@@ -6,15 +6,17 @@
 //!
 //! - its camber line leaves the nose at the blade angle α₃B = α₃′ + i₃ to the
 //!   circumferential direction (eq. T7.7.6);
-//! - the nose is a circle of radius ρ whose centre M lies on the stagnation radius
-//!   r′_z on the x axis, moved radially so that the innermost point of the cutwater lies
-//!   on the cutwater circle d_z;
+//! - the nose is shaped as a blade edge on a body e = 2ρ thick (round by default, or
+//!   elliptic, tapered, Bézier or blunt), with the end of its shape M on the stagnation
+//!   radius r′_z on the x axis, moved radially so that the innermost point of the
+//!   cutwater lies on the cutwater circle d_z;
 //! - from the nose to the tip of the wedge the body keeps the nose thickness e = 2ρ
 //!   about a cubic Bézier camber line, tangent to α₃B at the nose and to the middle of
 //!   the walls at the tip;
 //! - past the tip each face is its wall moved into the flow by its share (½ by default)
-//!   of what the wedge lacks of e, through a quadratic smooth maximum, so that it runs tangentially into
-//!   the wall where the wedge has grown to e + k.
+//!   of what the wedge lacks of e, through a smooth maximum, so that it runs into the
+//!   wall where the wedge has grown to e + k: quadratic, tangent to it (G1), or quartic,
+//!   with its curvature too (G2).
 //!
 //! So the cutwater is nowhere thinner than e, and takes no more of the flow than that
 //! needs (our construction: Gülich asks for a short, thick profile, except the nose
@@ -29,8 +31,8 @@
 use tp_math::{Bezier, DVec2, DVec3};
 
 use super::NozzleSection;
-use super::{CutwaterShape, VoluteDesign};
-use crate::impeller::edge::{EdgeProfile, EdgeShape};
+use super::{Continuity, CutwaterShape, VoluteDesign};
+use crate::impeller::edge::EdgeProfile;
 
 /// Planes across the inlet width, an odd number so that one is the midplane.
 pub const SLICES: usize = 9;
@@ -318,7 +320,7 @@ impl Walls {
         let (sa, ca) = design.cutwater_angle.sin_cos();
         let camber = along * ca + radial * sa;
         let normal = radial * ca - along * sa;
-        let profile = EdgeProfile::new(EdgeShape::Ellipse { ratio: 1.0 }, 2.0 * h).ok()?;
+        let profile = EdgeProfile::new(design.cutwater_nose, 2.0 * h).ok()?;
         let lead = centre - camber * profile.length();
         let [outer_nose, inner_nose] = profile.faces().map(|face| -> Vec<DVec2> {
             face.iter()
@@ -358,7 +360,12 @@ impl Walls {
                 } else if g <= -k {
                     0.0
                 } else {
-                    (g + k) * (g + k) / (4.0 * k)
+                    match design.cutwater_join {
+                        // Quadratic: C¹, the faces tangent to the walls.
+                        Continuity::G1 => (g + k) * (g + k) / (4.0 * k),
+                        // Quartic: C², the curvature of the walls carried on too.
+                        Continuity::G2 => (g + k).powi(3) * (3.0 * k - g) / (16.0 * k.powi(3)),
+                    }
                 }
             };
             let join = if gap(longest) < target + k {
@@ -1402,6 +1409,89 @@ mod tests {
         assert_eq!(round.design.cutwater_side_radius, 0.0);
         let double = build(|v| v.setup.kind = crate::volute::VoluteKind::Double);
         assert_eq!(double.design.cutwater_side_radius, 0.0);
+    }
+
+    #[test]
+    fn the_nose_takes_any_edge_shape() {
+        use crate::impeller::edge::EdgeShape;
+        let round = build(|_| {});
+        let e = 2.0 * round.design.nose_radius;
+        let rz = round.design.cutwater_diameter / 2.0;
+        // How far upstream the nose reaches, along the cutwater circle.
+        let sign = round.basis.rotation_sign;
+        let reach = |g: &VoluteGeometry| {
+            let s = &g.cutwater_slices[SLICES / 2];
+            let ahead = |p: &DVec3| -sign * p.y.atan2(p.x);
+            rz * s
+                .outline
+                .iter()
+                .map(ahead)
+                .fold(f64::NEG_INFINITY, f64::max)
+        };
+        for shape in [
+            EdgeShape::Ellipse { ratio: 3.0 },
+            EdgeShape::TAPER,
+            EdgeShape::BEZIER,
+            EdgeShape::Cut,
+        ] {
+            let g = build(|v| v.cutwater.nose_shape = shape);
+            assert_eq!(g.cutwater_slices.len(), SLICES, "{shape:?}");
+            for s in &g.cutwater_slices {
+                assert!(
+                    (s.nose_distance - rz).abs() < 1e-6,
+                    "{shape:?}: {}",
+                    s.nose_distance
+                );
+                assert!(
+                    s.min_thickness > e * (1.0 - 1e-3),
+                    "{shape:?}: {}",
+                    s.min_thickness
+                );
+            }
+            if matches!(shape, EdgeShape::Ellipse { .. }) {
+                // Two half thicknesses longer than the round one, at the flow angle.
+                let longer = reach(&g) - reach(&round);
+                let expected = 2.0 * round.design.nose_radius * g.design.cutwater_angle.cos();
+                assert!(
+                    (longer / expected - 1.0).abs() < 0.25,
+                    "{longer} vs {expected}"
+                );
+            }
+        }
+        // A shape that cannot be built says so.
+        let err = VoluteGeometry::build(&reference_basis(), &{
+            let mut v = VoluteInput::default();
+            v.cutwater.nose_shape = EdgeShape::Ellipse { ratio: -1.0 };
+            v
+        })
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("nose of the cutwater"), "{err}");
+    }
+
+    #[test]
+    fn a_g2_join_carries_the_curvature_of_the_wall() {
+        // The gap between the spiral face and its wall along the stations of the face:
+        // its second difference jumps at the join with a G1 face, fades with a G2 one.
+        let jump = |join: crate::volute::Continuity| {
+            let g = build(|v| v.cutwater.join = join);
+            let s = &g.cutwater_slices[SLICES / 2];
+            let wall: Vec<DVec2> = s.spiral_wall.iter().map(|p| p.truncate()).collect();
+            // The spiral face runs from its join (the first point) toward the nose.
+            let gaps: Vec<f64> = s.outline[..FACE_POINTS]
+                .iter()
+                .map(|p| distance_to(&wall, p.truncate()))
+                .collect();
+            let second: Vec<f64> = gaps.windows(3).map(|w| w[0] - 2.0 * w[1] + w[2]).collect();
+            let largest = second.iter().map(|d| d.abs()).fold(0.0, f64::max);
+            // At the join, against the largest bend along the face.
+            second[0].abs() / largest
+        };
+        let (g1, g2) = (
+            jump(crate::volute::Continuity::G1),
+            jump(crate::volute::Continuity::G2),
+        );
+        assert!(g2 < 0.5 * g1, "G1 {g1}, G2 {g2}");
     }
 
     #[test]

@@ -454,7 +454,8 @@ mod cad {
         }
         let mut problems: Vec<String> = cad.warnings.clone();
         problems.extend(joined_warnings);
-        if let Some((_, casing, _)) = &volute {
+        if let Some((volute, casing, _)) = &volute {
+            problems.extend(volute.warnings.iter().cloned());
             problems.extend(casing.warnings.iter().cloned());
         }
         let invalid = [

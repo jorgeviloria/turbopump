@@ -96,6 +96,11 @@ struct Nose {
     along: DVec2,
     camber: DVec2,
     radius: f64,
+    /// The innermost point of the nose in the midplane.
+    innermost: DVec2,
+    /// Length of the shape of the nose along the camber line over the radius: 1 for a
+    /// round one, 0 for a blunt one.
+    length: f64,
 }
 
 impl Nose {
@@ -104,20 +109,36 @@ impl Nose {
         let radial = centre.normalize();
         let along = DVec2::new(-radial.y, radial.x) * g.basis.rotation_sign;
         let (s, c) = g.design.cutwater_angle.sin_cos();
+        let mid = g
+            .cutwater_slices
+            .iter()
+            .find(|s| (s.z - g.basis.midplane).abs() < 1e-12);
+        let innermost = mid
+            .and_then(|s| {
+                s.outline
+                    .iter()
+                    .map(|p| p.truncate())
+                    .min_by(|a, b| a.length().total_cmp(&b.length()))
+            })
+            .unwrap_or(centre - radial * g.cutwater.radius);
+        let length = tp_design::impeller::edge::EdgeProfile::new(g.design.cutwater_nose, 2.0)
+            .map_or(1.0, |p| p.length());
         Self {
             centre,
             radial,
             along,
             camber: along * c + radial * s,
             radius: g.cutwater.radius,
+            innermost,
+            length,
         }
     }
 
     /// Where each point to drag lies.
     fn grip(&self, grip: Grip) -> DVec2 {
         match grip {
-            Grip::Nose => self.centre - self.radial * self.radius,
-            Grip::Radius => self.centre - self.camber * self.radius,
+            Grip::Nose => self.innermost,
+            Grip::Radius => self.centre - self.camber * (self.length * self.radius),
             Grip::Camber => self.centre + self.camber * (CAMBER_REACH * self.radius),
         }
     }
@@ -147,10 +168,12 @@ fn dragged(
             next.setup.cutwater_diameter = Param::Manual(dz);
         }
         Grip::Radius => {
-            // The innermost point stays on d_z while the radius changes, so the leading
-            // point moves from it along r̂ − c, by the radius.
-            let fixed = nose.centre - nose.radial * nose.radius;
-            let way = nose.radial - nose.camber;
+            // The innermost point stays on d_z while the radius changes, and the centre
+            // of the nose and its leading point scale with it: the leading point moves
+            // from the innermost one along (rise·r̂ − length·c), by the radius.
+            let fixed = nose.innermost;
+            let rise = (nose.centre - fixed).dot(nose.radial) / nose.radius.max(1e-12);
+            let way = nose.radial * rise - nose.camber * nose.length;
             let radius = ((p - fixed).dot(way) / way.length_squared()).max(1e-4);
             next.cutwater.shape = CutwaterShape::Rounded {
                 radius: Param::Manual(radius),
@@ -167,10 +190,16 @@ fn dragged(
 
 /// The grips a cutwater of this shape has.
 fn grips(g: &VoluteGeometry) -> &'static [Grip] {
-    if g.cutwater.radius > 0.0 {
-        &[Grip::Nose, Grip::Radius, Grip::Camber]
-    } else {
+    if g.cutwater.radius <= 0.0 {
         &[]
+    } else if matches!(
+        g.design.cutwater_nose,
+        tp_design::impeller::edge::EdgeShape::Cut
+    ) {
+        // A blunt nose has no leading point.
+        &[Grip::Nose, Grip::Camber]
+    } else {
+        &[Grip::Nose, Grip::Radius, Grip::Camber]
     }
 }
 

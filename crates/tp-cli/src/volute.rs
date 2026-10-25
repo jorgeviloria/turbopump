@@ -51,7 +51,9 @@ pub(crate) struct VoluteArgs {
     /// outlet (discharge diffuser), incidence (cutwater), obliquity (of a rounded
     /// cutwater and the rib nose: the angle of the edge to the pump axis), spiral_start
     /// (where the spiral of a sharp or rounded cutwater starts), side_radius (the round
-    /// where a rounded cutwater meets the side walls; 0 for none), wall, fillet
+    /// where a rounded cutwater meets the side walls; 0 for none), nose_shape (of a
+    /// rounded cutwater, as a blade edge: round, ellipse:R, taper, bezier, cut), join (g1
+    /// or g2: how its faces run into the walls), wall, fillet
     /// (radius rounding the outside of the casing over the cutwater; 0 for none), type
     /// (single or double),
     /// rib_wrap (wrap of the inner volute of a double volute), rib (rib thickness),
@@ -687,6 +689,14 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
         "obliquity" => input.cutwater.obliquity = quantity(Angle)?,
         "spiral_start" => input.cutwater.spiral_start = quantity(Angle)?,
         "side_radius" => input.cutwater.side_radius = quantity(Length)?,
+        "nose_shape" => input.cutwater.nose_shape = crate::geometry::parse_edge(value)?,
+        "join" => {
+            input.cutwater.join = match value {
+                "g1" | "G1" => tp_design::volute::Continuity::G1,
+                "g2" | "G2" => tp_design::volute::Continuity::G2,
+                _ => return Err(format!("join must be g1 or g2, got {value:?}")),
+            }
+        }
         "wall" => input.wall.thickness = quantity(Length)?,
         "fillet" => input.wall.cutwater_fillet = quantity(Length)?,
         "pressure" => input.wall.pressure = quantity(Pressure)?,
@@ -735,7 +745,7 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
                  wrap, x, k3, cu4, qi, q0, end_height, end_area, end_area_radius, \
                  progression, compensation, comp_e, comp_start, arcs, \
                  sections, correction, length, outlet, incidence, obliquity, spiral_start, \
-                 side_radius, wall, \
+                 side_radius, nose_shape, join, wall, \
                  fillet, type, \
                  rib_wrap, rib, \
                  rib_nose, channel_ratio, discharge, bend, rotation, cutwater, nose, height, \

@@ -1130,6 +1130,45 @@ fn cutwater(
                     &units,
                     -tp_design::volute::MAX_OBLIQUITY..=tp_design::volute::MAX_OBLIQUITY,
                 );
+                label(
+                    ui,
+                    tr("Nose shape"),
+                    tr(
+                        "As a blade edge on a body as thick as the nose: elliptic (round by default; Gülich asks for an elliptic profile), tapered, Bézier or blunt. Its pressure face is the diffuser side",
+                    ),
+                );
+                crate::steps::edge_shape(
+                    ui,
+                    "volute_cutwater_nose",
+                    &mut input.cutwater.nose_shape,
+                );
+                label(
+                    ui,
+                    tr("Join to the walls"),
+                    tr(
+                        "How the faces run into the spiral and diffuser walls: G1 tangent, G2 with the curvature of the wall too",
+                    ),
+                );
+                crate::widgets::list(ui, |ui| {
+                    ComboBox::from_id_salt("volute_cutwater_join")
+                        .selected_text(match input.cutwater.join {
+                            tp_design::volute::Continuity::G1 => "G1",
+                            tp_design::volute::Continuity::G2 => "G2",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut input.cutwater.join,
+                                tp_design::volute::Continuity::G1,
+                                tr("G1, tangent"),
+                            );
+                            ui.selectable_value(
+                                &mut input.cutwater.join,
+                                tp_design::volute::Continuity::G2,
+                                tr("G2, same curvature"),
+                            );
+                        })
+                });
+                ui.end_row();
                 param_f64(
                     ui,
                     tr("Side endings R"),
