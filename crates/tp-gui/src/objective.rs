@@ -101,6 +101,85 @@ fn chip(ui: &mut Ui, key: &str, line: &mut Line, tip: &str) -> Response {
     }
 }
 
+/// How long a changed value keeps its arrow, s.
+const FLASH: f64 = 1.6;
+
+/// A value as last shown, and when it last changed and which way.
+#[derive(Debug, Clone, Default)]
+struct Shown {
+    text: String,
+    value: f64,
+    change: Option<(f64, bool)>,
+}
+
+/// Marks a predicted value that just changed: a small triangle up or down at the top
+/// right of its chip at `rect`, in the gap before the next one, for [`FLASH`] seconds. It takes
+/// no room, so nothing moves, and asks for one repaint, to go: no animation keeps the
+/// interface repainting. `text` is the value as shown: a change too small to show is no change,
+/// and neither is the same value in other units.
+fn flash(ui: &Ui, key: &str, text: &str, value: f64, rect: egui::Rect) {
+    let id = egui::Id::new(("objective_flash", key));
+    let now = ui.input(|i| i.time);
+    let mut shown = ui.data(|d| d.get_temp::<Shown>(id));
+    match &mut shown {
+        // Other units change the text, not the value: no arrow.
+        Some(s) if s.text != text => {
+            if (value - s.value).abs() > 1e-9 * value.abs().max(s.value.abs()) {
+                s.change = Some((now, value > s.value));
+            }
+            s.text = text.to_owned();
+            s.value = value;
+        }
+        Some(_) => {}
+        None => {
+            shown = Some(Shown {
+                text: text.to_owned(),
+                value,
+                change: None,
+            });
+        }
+    }
+    let shown = shown.expect("set above");
+    if let Some((since, up)) = shown.change {
+        let age = now - since;
+        if age < FLASH {
+            let color = Palette::of(ui).accent;
+            // Like a superscript, above the separator that follows.
+            let (x, y, h) = (rect.right() + 1.0, rect.top() + 5.0, 2.8);
+            let points = if up {
+                vec![
+                    egui::pos2(x, y + h),
+                    egui::pos2(x + 2.0 * h, y + h),
+                    egui::pos2(x + h, y - h),
+                ]
+            } else {
+                vec![
+                    egui::pos2(x, y - h),
+                    egui::pos2(x + 2.0 * h, y - h),
+                    egui::pos2(x + h, y + h),
+                ]
+            };
+            ui.painter().add(egui::Shape::convex_polygon(
+                points,
+                color,
+                egui::Stroke::NONE,
+            ));
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_secs_f64(FLASH - age));
+        }
+    }
+    ui.data_mut(|d| d.insert_temp(id, shown));
+}
+
+/// Which way the value under `key` is flashing, if it is.
+#[cfg(test)]
+pub(crate) fn flashing(ctx: &egui::Context, key: &str) -> Option<bool> {
+    let now = ctx.input(|i| i.time);
+    let shown = ctx.data(|d| d.get_temp::<Shown>(egui::Id::new(("objective_flash", key))))?;
+    let (since, up) = shown.change?;
+    (now - since < FLASH).then_some(up)
+}
+
 /// The strip. `impeller` is the one whose prediction it shows.
 pub(crate) fn show(
     ui: &mut Ui,
@@ -284,7 +363,15 @@ fn prediction(
             ],
         );
     }
-    curves(chip(ui, "head", &mut line, &tip));
+    let response = chip(ui, "head", &mut line, &tip);
+    flash(
+        ui,
+        "head",
+        &units.show(QuantityKind::Head, head),
+        head,
+        response.rect,
+    );
+    curves(response);
 
     // Efficiency, with the scatter of the statistics.
     if detail >= Detail::Medium {
@@ -308,20 +395,21 @@ fn prediction(
                 &format!("{:.1}", main.efficiency_tolerance * 100.0),
             ],
         );
-        curves(chip(ui, "efficiency", &mut line, &tip));
+        let response = chip(ui, "efficiency", &mut line, &tip);
+        let eta = perf.design.efficiency * 100.0;
+        flash(ui, "efficiency", &format!("{eta:.1}"), eta, response.rect);
+        curves(response);
     }
 
     // Power.
     if detail == Detail::Full {
         dot(ui, p);
         let mut line = Line::new();
-        line.value("P", &units.show(QuantityKind::Power, perf.design.power), p);
-        curves(chip(
-            ui,
-            "power",
-            &mut line,
-            tr("Shaft power at the design flow"),
-        ));
+        let power = units.show(QuantityKind::Power, perf.design.power);
+        line.value("P", &power, p);
+        let response = chip(ui, "power", &mut line, tr("Shaft power at the design flow"));
+        flash(ui, "power", &power, perf.design.power, response.rect);
+        curves(response);
     }
 
     // Cavitation: the NPSH₃ against the NPSH available, and the margin Gülich's Table
@@ -390,7 +478,15 @@ fn prediction(
             tr("The NPSH₃ at the design flow is below the NPSH available of the inlet conditions.")
         )
     };
-    curves(chip(ui, "npsh", &mut line, &tip));
+    let response = chip(ui, "npsh", &mut line, &tip);
+    flash(
+        ui,
+        "npsh",
+        &units.show(QuantityKind::Head, npsh3),
+        npsh3,
+        response.rect,
+    );
+    curves(response);
 
     // Where the best efficiency is.
     if detail == Detail::Full && perf.design.flow > 0.0 {

@@ -2718,6 +2718,59 @@ mod tests {
     }
 
     #[test]
+    fn a_predicted_value_that_changes_flashes_its_way() {
+        use crate::objective::flashing;
+        let mut harness = editor();
+        let id = harness.state().active_impeller().unwrap();
+        assert_eq!(flashing(&harness.ctx, "head"), None);
+        // Another impeller: its head and power move, and the arrows point their way.
+        let predicted = |h: &Harness<'_, TurbopumpApp>| {
+            let p = h.state().derived.impeller(id).unwrap();
+            let design = &p.performance.as_ref().unwrap().design;
+            (design.head, design.power)
+        };
+        let before = predicted(&harness);
+        let mut input = harness
+            .state()
+            .doc
+            .project()
+            .pump_impeller_input(id)
+            .unwrap();
+        input.outlet_diameter = tp_project::Param::Manual(0.19);
+        harness
+            .state_mut()
+            .doc
+            .edit("larger d₂", |p| {
+                p.set_main_dimensions(id, tp_design::MainDimensionsInput::CentrifugalPump(input))
+            })
+            .unwrap();
+        // The arrow asks for one repaint, to go: the harness still settles.
+        harness.run();
+        let after = predicted(&harness);
+        assert_ne!(before, after);
+        assert_eq!(flashing(&harness.ctx, "head"), Some(after.0 > before.0));
+        assert_eq!(flashing(&harness.ctx, "power"), Some(after.1 > before.1));
+        // Gone after a while.
+        for _ in 0..3 {
+            harness.step();
+            std::thread::sleep(std::time::Duration::from_millis(600));
+        }
+        harness.run();
+        assert_eq!(flashing(&harness.ctx, "head"), None);
+        // Other units show the same head: no arrow.
+        harness
+            .state_mut()
+            .doc
+            .edit("units", |p| {
+                p.display_units = tp_units::DisplayUnits::us();
+                Ok(())
+            })
+            .unwrap();
+        harness.run();
+        assert_eq!(flashing(&harness.ctx, "head"), None);
+    }
+
+    #[test]
     fn the_objective_strip_warns_of_a_small_npsh_margin() {
         use egui_kittest::kittest::NodeT;
         let npsh = |pressure: f64| {
