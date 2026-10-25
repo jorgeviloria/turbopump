@@ -6,6 +6,25 @@
 
 /// English text → Spanish text.
 pub(super) static TEXTS: &[(&str, &str)] = &[
+    ("obliquity ε", "oblicuidad ε"),
+    ("Obliquity ε", "Oblicuidad ε"),
+    (
+        "Angle between the edge and the pump axis, unrolled onto d_z; Gülich Table 10.2 asks for more than 35° against pressure pulsations",
+        "Ángulo entre el borde y el eje de la bomba, desarrollado sobre d_z; la tabla 10.2 de Gülich pide más de 35° contra las pulsaciones de presión",
+    ),
+    (
+        "Angle between the edge of the cutwater and the pump axis, unrolled onto d_z; positive leans it downstream toward +z. Gülich Table 10.2 asks for more than 35° against pressure pulsations; the walls set how far it can lean. Automatic: 0",
+        "Ángulo entre el borde del corte de agua y el eje de la bomba, desarrollado sobre d_z; positivo lo inclina aguas abajo hacia +z. La tabla 10.2 de Gülich pide más de 35° contra las pulsaciones de presión; las paredes fijan cuánto puede inclinarse. Automático: 0",
+    ),
+    (
+        "more than 35° against pressure pulsations (Gülich Table 10.2); the walls set how far it can lean",
+        "más de 35° contra las pulsaciones de presión (tabla 10.2 de Gülich); las paredes fijan cuánto puede inclinarse",
+    ),
+    ("Within ±3°", "Dentro de ±3°"),
+    (
+        "the flow range over which the flow meets the cutwater within ±3°; it comes flatter at part load (Gülich Fig. 9.20)",
+        "el rango de caudal en que el flujo llega al corte de agua dentro de ±3°; a carga parcial llega más plano (Gülich, Fig. 9.20)",
+    ),
     ("Remove control point", "Quitar el punto de control"),
     ("Add control point", "Añadir un punto de control"),
     (
@@ -3576,6 +3595,14 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
 
 /// Messages of the design code, most specific first.
 pub(super) static MESSAGES: &[(&str, &str)] = &[
+    (
+        "the obliquity of the cutwater must lie within ±{}°, got {}°",
+        "la oblicuidad del corte de agua debe quedar dentro de ±{}°, se pidió {}°",
+    ),
+    (
+        "the cutwater cannot lean {}°: past about {}° it gets thinner than its nose in some plane, where the walls leave it no room",
+        "el corte de agua no puede inclinarse {}°: pasados unos {}° queda más fino que su nariz en algún plano, donde las paredes no le dejan sitio",
+    ),
     (
         "the joined fluid came out as {} solids{}; check the faces at r₂ and, with the inlet duct, at the eye and the seal exit",
         "el fluido unido salió en {} sólidos{}; revisa las caras en r₂ y, con la tubería de entrada, en la boca y en la salida del sello",

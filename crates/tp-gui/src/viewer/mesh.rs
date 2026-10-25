@@ -9,8 +9,8 @@ use tp_design::diffuser::DiffuserDesign;
 use tp_design::impeller::ImpellerGeometry;
 use tp_design::volute::VoluteGeometry;
 use tp_io::mesh::{
-    Triangle, blade_solids, cutwater_triangles, diffuser_parts, impeller_parts, volute_solids,
-    volute_view_triangles,
+    Triangle, blade_solids, cutwater_triangles, diffuser_parts, impeller_parts, rib_triangles,
+    volute_solids, volute_view_triangles,
 };
 use tp_math::{DVec2, DVec3};
 
@@ -419,7 +419,10 @@ pub(crate) fn build(
     let diffuser = stator.map(diffuser_parts).unwrap_or_default();
     // The casing as the cutwater shapes it, and the body of the cutwater.
     let casing = volute.map(volute_view_triangles).unwrap_or_default();
-    let cutwater = volute.map(cutwater_triangles).unwrap_or_default();
+    // The rounded cutwater and the rib of a double volute, its second cutwater.
+    let cutwater: Vec<Triangle> = volute
+        .map(|g| [cutwater_triangles(g), rib_triangles(g)].concat())
+        .unwrap_or_default();
     let duct = &g.contour.inlet_duct;
     let duct = if duct.enabled {
         revolved(&duct.outline)

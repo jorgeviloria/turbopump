@@ -465,6 +465,42 @@ fn cutwater_3d() {
 /// second definition of line segments, its corners ready to drag.
 #[test]
 #[ignore = "needs a GPU; run with --ignored"]
+fn oblique_cutwater() {
+    let mut harness = harness(egui::Theme::Dark);
+    for _ in 0..6 {
+        harness.get_by_label_contains("Accept step").click();
+        harness.run();
+    }
+    harness.get_by_label("Volute 1").click();
+    harness.run();
+    for _ in 0..4 {
+        harness.get_by_label_contains("Accept step").click();
+        harness.run();
+    }
+    // Lean the cutwater with the keyboard on its slider.
+    harness
+        .get_by_role_and_label(egui::accesskit::Role::Slider, "obliquity ε")
+        .focus();
+    harness.run();
+    for _ in 0..35 {
+        harness.key_press(egui::Key::ArrowRight);
+    }
+    harness.run_steps(4);
+    harness.remove_cursor();
+    save(&mut harness, "cutwater-oblique");
+    harness.get_by_label_contains("View in 3D").click();
+    harness.run_steps(6);
+    // Whole, without the cut and the panel: the edge leans across the inlet.
+    harness.get_by_label("Cut across").click();
+    let open = harness.state().sidebar_open();
+    harness.state_mut().set_sidebar_open(!open);
+    harness.remove_cursor();
+    harness.run_steps(6);
+    save(&mut harness, "cutwater-oblique-3d");
+}
+
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
 fn cross_sections() {
     let mut harness = harness(egui::Theme::Light);
     for _ in 0..6 {

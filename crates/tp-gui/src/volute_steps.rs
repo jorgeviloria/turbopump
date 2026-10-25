@@ -1118,6 +1118,18 @@ fn cutwater(
                     &units,
                     0.0..=1.0,
                 );
+                param_f64(
+                    ui,
+                    tr("Obliquity ε"),
+                    tr(
+                        "Angle between the edge of the cutwater and the pump axis, unrolled onto d_z; positive leans it downstream toward +z. Gülich Table 10.2 asks for more than 35° against pressure pulsations; the walls set how far it can lean. Automatic: 0",
+                    ),
+                    &mut input.cutwater.obliquity,
+                    Angle,
+                    g.map(|g| g.design.cutwater_obliquity),
+                    &units,
+                    -tp_design::volute::MAX_OBLIQUITY..=tp_design::volute::MAX_OBLIQUITY,
+                );
             }
             let incidence = input.cutwater.incidence.resolve(|| 0.0);
             param_f64(

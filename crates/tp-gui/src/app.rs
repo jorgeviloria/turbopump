@@ -1267,7 +1267,7 @@ impl TurbopumpApp {
             cutwater: self
                 .active_volute()
                 .and_then(|id| self.derived.volute(id))
-                .is_some_and(|g| !g.cutwater_outline().is_empty()),
+                .is_some_and(|g| !g.cutwater_outline().is_empty() || g.rib.is_some()),
         }
     }
 

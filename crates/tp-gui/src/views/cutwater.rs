@@ -58,6 +58,8 @@ pub(crate) struct CutwaterPage {
     pitch: f32,
     /// The plane z to show in the 3D view, asked for with its button.
     pub open_3d: Option<f64>,
+    /// Why the last obliquity asked for could not be built.
+    lean_limit: Option<String>,
 }
 
 impl Default for CutwaterPage {
@@ -68,6 +70,7 @@ impl Default for CutwaterPage {
             dragging: None,
             transform: None,
             frame: true,
+            lean_limit: None,
             yaw: -0.6,
             pitch: 0.9,
             open_3d: None,
@@ -289,6 +292,29 @@ impl CutwaterPage {
                     next.cutwater.share = Param::Manual(share);
                     edit = Some(next);
                 }
+                // The obliquity only as far as the walls leave room: a lean they cannot
+                // take keeps the last one and says how far it goes.
+                let mut lean = g.design.cutwater_obliquity.to_degrees();
+                let most = tp_design::volute::MAX_OBLIQUITY.to_degrees();
+                let response = ui
+                    .add(egui::Slider::new(&mut lean, -most..=most).suffix("°").text(tr("obliquity ε")))
+                    .on_hover_text(tr(
+                        "Angle between the edge and the pump axis, unrolled onto d_z; Gülich Table 10.2 asks for more than 35° against pressure pulsations",
+                    ));
+                if response.changed() {
+                    let mut next = input.clone();
+                    next.cutwater.obliquity = Param::Manual(lean.to_radians());
+                    match VoluteGeometry::build(&g.basis, &next) {
+                        Ok(_) => {
+                            self.lean_limit = None;
+                            edit = Some(next);
+                        }
+                        Err(e) => self.lean_limit = Some(crate::i18n::message(&e.to_string())),
+                    }
+                }
+                if let Some(limit) = &self.lean_limit {
+                    ui.colored_label(ui.visuals().warn_fg_color, limit);
+                }
             }
         });
 
@@ -302,8 +328,17 @@ impl CutwaterPage {
                 edit = Some(next);
             }
         });
+        // Where the flow meets the cutwater within ±3°, as q*.
+        let band = cx
+            .derived
+            .impeller(impeller)
+            .and_then(|r| r.performance.as_ref().ok())
+            .and_then(|p| {
+                let (lo, hi) = p.volute.as_ref()?.incidence_range?;
+                Some((lo / p.design.flow, hi / p.design.flow))
+            });
         ui.scope_builder(egui::UiBuilder::new().max_rect(right), |ui| {
-            measures(ui, g, units);
+            measures(ui, g, band, units);
             let height = ((ui.available_height() - gap) / 2.0).max(120.0);
             self.preview(ui, g, plane, height);
             ui.add_space(gap);
@@ -715,7 +750,7 @@ fn fill_strip(ui: &Ui, t: &PlotTransform, outline: &[DVec2], scale: f64, color: 
 }
 
 /// The measures of the cutwater against the guidelines of Gülich.
-fn measures(ui: &mut Ui, g: &VoluteGeometry, units: &DisplayUnits) {
+fn measures(ui: &mut Ui, g: &VoluteGeometry, band: Option<(f64, f64)>, units: &DisplayUnits) {
     let d = &g.design;
     let slices = &g.cutwater_slices;
     let show = |kind: QuantityKind, v: f64| units.show(kind, v);
@@ -796,6 +831,31 @@ fn measures(ui: &mut Ui, g: &VoluteGeometry, units: &DisplayUnits) {
             ],
         ),
     ));
+    if let Some((lo, hi)) = band {
+        rows.push((
+            if lo < 0.8 && hi > 1.2 {
+                Check::Good
+            } else {
+                Check::Watch
+            },
+            tr("Within ±3°").to_owned(),
+            format!("q* {lo:.2}–{hi:.2}"),
+            tr("the flow range over which the flow meets the cutwater within ±3°; it comes flatter at part load (Gülich Fig. 9.20)").to_owned(),
+        ));
+    }
+    if g.cutwater.radius > 0.0 {
+        let lean = d.cutwater_obliquity;
+        rows.push((
+            if lean.abs() >= 35f64.to_radians() - 1e-9 {
+                Check::Good
+            } else {
+                Check::Info
+            },
+            tr("Obliquity ε").to_owned(),
+            show(QuantityKind::Angle, lean),
+            tr("more than 35° against pressure pulsations (Gülich Table 10.2); the walls set how far it can lean").to_owned(),
+        ));
+    }
     let (wedge_lo, wedge_hi) = range(slices, |s| s.wedge);
     let degrees = |a: f64| units.to_display(QuantityKind::Angle, a);
     rows.push((
@@ -860,8 +920,9 @@ fn incidence_plot(
         .filter(|p| p.flow > 0.0 && design.theoretical_head > 0.0)
         .map(|p| {
             let q = p.flow / design.flow;
-            let angle = d.cutwater_flow_angle_at(q, p.theoretical_head / design.theoretical_head);
-            [q, (d.cutwater_angle - angle).to_degrees()]
+            let incidence =
+                d.cutwater_incidence_at(q, p.theoretical_head / design.theoretical_head);
+            [q, incidence.to_degrees()]
         })
         .filter(|[q, i]| q.is_finite() && i.is_finite())
         .collect();
