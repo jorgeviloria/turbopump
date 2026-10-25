@@ -329,6 +329,8 @@ mod cad {
         fluid_volume: f64,
         /// Each wear ring built, with its volume, m³.
         rings: Vec<(tp_cad::RingKind, f64)>,
+        /// Volume of the back vanes, m³ (part of the impeller); `None` without them.
+        back_vanes: Option<f64>,
         volute_volume: Option<f64>,
         /// Volume and wall thickness of the volute casing.
         casing: Option<(f64, f64)>,
@@ -506,6 +508,7 @@ mod cad {
                 .iter()
                 .filter_map(|r| Some((r.kind, cad.ring_volume(r.kind)?)))
                 .collect(),
+            back_vanes: cad.back_vanes.as_ref().map(|v| v.volume() * 1e-9),
             volute_volume: volute.as_ref().map(|(v, _, _)| v.fluid_volume()),
             casing: volute.as_ref().map(|(_, c, wall)| (c.volume(), *wall)),
             diffuser_volume: diffuser.as_ref().map(|d| d.fluid_volume()),
@@ -794,6 +797,16 @@ mod cad {
                                 ),
                             );
                         }
+                        if let Some(volume) = report.back_vanes {
+                            value_row(
+                                ui,
+                                tr("Back vanes"),
+                                tf(
+                                    "{} cm³, {} (part of the impeller)",
+                                    &[&format!("{:.1}", volume * 1e6), &mass(volume)],
+                                ),
+                            );
+                        }
                         value_row(
                             ui,
                             tr("Hub"),
@@ -922,6 +935,32 @@ mod cad {
                 report.problems
             );
             assert!(report.impeller_volume > 0.0 && report.fluid_volume > 0.0);
+            // The vanes are off by default and so is their line.
+            assert!(report.back_vanes.is_none());
+            std::fs::remove_dir_all(&folder).unwrap();
+        }
+
+        #[test]
+        fn cad_export_reports_the_back_vanes() {
+            let project = default_project();
+            let mut derived = Derived::default();
+            derived.update(&project);
+            let g = derived.geometry(project.components()[0].id()).unwrap();
+            let mut input = tp_design::impeller::ImpellerGeometryInput::default();
+            input.meridional.back_vanes.enabled = true;
+            let g = tp_design::impeller::build(&g.basis, &input, 1.0).unwrap();
+            let folder = std::env::temp_dir().join(format!("tp-gui-vanes-{}", std::process::id()));
+            let report = run(
+                &g,
+                None,
+                None,
+                None,
+                &CadOptions::default(),
+                &folder,
+                &["step"],
+            )
+            .unwrap();
+            assert!(report.back_vanes.is_some_and(|v| v > 0.0));
             std::fs::remove_dir_all(&folder).unwrap();
         }
     }

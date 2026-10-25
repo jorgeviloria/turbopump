@@ -1233,6 +1233,59 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "An annular seal between the impeller and the casing, with an optional pair of replaceable wear rings, one on the impeller and one in the casing",
         "Un sello anular entre el rodete y la carcasa, con un par opcional de anillos de desgaste reemplazables, uno en el rodete y otro en la carcasa",
     ),
+    ("Back vanes", "Álabes de rebombeo"),
+    (
+        "Short ribs on the back of the hub disk that drag the fluid of the rear chamber round with the impeller: the pressure on the back falls and so does the axial thrust (Gülich §9.2.7)",
+        "Nervios cortos en la cara trasera del disco que arrastran el fluido de la cámara trasera con el rodete: baja la presión sobre la cara trasera y con ella el empuje axial (Gülich §9.2.7)",
+    ),
+    (
+        "Fit the vanes; switched off, the values below are kept",
+        "Poner los álabes; apagados, se conservan los valores de abajo",
+    ),
+    ("Count", "Cantidad"),
+    (
+        "Automatic: 4 below d₂ = 200 mm, else 6 (Gülich Table 9.3)",
+        "Automático: 4 por debajo de d₂ = 200 mm, si no 6 (tabla 9.3 de Gülich)",
+    ),
+    (
+        "Radial and straight (Gülich §9.2.7), or curved like the main blades",
+        "Radiales y rectos (Gülich §9.2.7), o curvos como los álabes principales",
+    ),
+    ("Radial", "Radial"),
+    ("Curved", "Curvo"),
+    ("Vane angle β_v", "Ángulo del álabe β_v"),
+    (
+        "Measured from the circumferential direction, like the blade angle β (90° is radial); the vane turns in the sense of the main blades",
+        "Medido desde la dirección circunferencial, como el ángulo β del álabe (90° es radial); el álabe gira en el sentido de los álabes principales",
+    ),
+    (
+        "Automatic: 0.80·d₂ (Gülich Table 9.3: 0.75 to 0.85)",
+        "Automático: 0,80·d₂ (tabla 9.3 de Gülich: 0,75 a 0,85)",
+    ),
+    ("Inner diameter", "Diámetro interior"),
+    (
+        "Automatic: the boss plus a wall on each side (our choice); with the rear seal on, no lower than its casing ring",
+        "Automático: el cubo más una pared a cada lado (elección nuestra); con el sello trasero activo, no menos que su anillo de la carcasa",
+    ),
+    (
+        "Axial height h; automatic: 0.04·r₂ (Gülich Table 9.3: 0.03 to 0.05)",
+        "Altura axial h; automático: 0,04·r₂ (tabla 9.3 de Gülich: 0,03 a 0,05)",
+    ),
+    (
+        "Circumferential width of a vane; automatic: 2·h (Gülich Table 9.3)",
+        "Ancho circunferencial de un álabe; automático: 2·h (tabla 9.3 de Gülich)",
+    ),
+    ("Tip clearance", "Holgura de punta"),
+    (
+        "Axial, between the vane tips and the casing; automatic: 0.2·h (Gülich Table 9.3). The value shown is the gap as built, larger than asked when the collar of the rear seal governs",
+        "Axial, entre las puntas de los álabes y la carcasa; automática: 0,2·h (tabla 9.3 de Gülich). El valor mostrado es la holgura construida, mayor que la pedida cuando manda el collar del sello trasero",
+    ),
+    ("Rear seal in the way", "El sello trasero estorba"),
+    (
+        "With the rear seal on, the vanes stop outside its casing ring. Nothing changes until you press the button",
+        "Con el sello trasero activo, los álabes terminan fuera de su anillo de la carcasa. Nada cambia hasta que pulses el botón",
+    ),
+    ("Turn off the rear seal", "Quitar el sello trasero"),
     (
         "Fit the seal; switched off, the values below are kept",
         "Poner el sello; apagado, se conservan los valores de abajo",
@@ -1307,6 +1360,10 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     (
         "{} cm³, {} (at the impeller density)",
         "{} cm³, {} (con la densidad del rodete)",
+    ),
+    (
+        "{} cm³, {} (part of the impeller)",
+        "{} cm³, {} (parte del rodete)",
     ),
     ("Front impeller ring", "Anillo delantero del rodete"),
     ("Front casing ring", "Anillo delantero de la carcasa"),

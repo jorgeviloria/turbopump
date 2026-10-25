@@ -1846,3 +1846,121 @@ fn a_double_entry_impeller_hides_the_rear_seal() {
     assert!(harness.get_all_by_label("Front seal").next().is_some());
     assert!(harness.query_by_label("Rear seal").is_none());
 }
+
+fn back_vanes(h: &Harness<'_, TurbopumpApp>) -> tp_design::impeller::back_vanes::BackVaneSettings {
+    let project = h.state().document().project();
+    let id = project.components()[0].id();
+    project
+        .impeller_geometry_input(id)
+        .unwrap()
+        .meridional
+        .back_vanes
+}
+
+/// Scrolls the back vanes card into view.
+fn show_the_back_vanes(h: &mut Harness<'_, TurbopumpApp>) {
+    h.get_all_by_label("Back vanes")
+        .next()
+        .unwrap()
+        .scroll_to_me();
+    h.run_steps(4);
+}
+
+#[test]
+fn the_back_vanes_card_starts_with_its_switch_only() {
+    let harness = on_the_contour("vanes-off", |_, _| {});
+    assert!(harness.get_all_by_label("Back vanes").next().is_some());
+    for text in ["Count", "Tip clearance", "Turn off the rear seal"] {
+        assert!(harness.query_by_label(text).is_none(), "{text:?} shown");
+    }
+}
+
+#[test]
+fn back_vanes_card_offers_to_turn_off_the_rear_seal() {
+    let mut harness = on_the_contour("vanes-seal", |project, id| {
+        let mut input = project.impeller_geometry_input(id).unwrap();
+        input.meridional.back_vanes.enabled = true;
+        project.set_impeller_geometry(id, input).unwrap();
+    });
+    for text in [
+        "Count",
+        "Shape",
+        "Outer diameter",
+        "Inner diameter",
+        "Height",
+        "Thickness",
+        "Tip clearance",
+    ] {
+        assert!(
+            harness.get_all_by_label(text).next().is_some(),
+            "no {text:?}"
+        );
+    }
+    // The warning offers the button, which does nothing by itself.
+    assert!(seals(&harness).rear.enabled);
+    harness
+        .get_by_label("Turn off the rear seal")
+        .scroll_to_me();
+    harness.run_steps(4);
+    harness.get_by_label("Turn off the rear seal").click();
+    harness.run();
+    harness.run();
+    assert!(!seals(&harness).rear.enabled);
+    assert!(back_vanes(&harness).enabled);
+    // With the seal off there is nothing left to turn off.
+    assert!(harness.query_by_label("Turn off the rear seal").is_none());
+}
+
+#[test]
+fn back_vanes_without_a_rear_seal_offer_no_button() {
+    let harness = on_the_contour("vanes-no-seal", |project, id| {
+        let mut input = project.impeller_geometry_input(id).unwrap();
+        input.meridional.back_vanes.enabled = true;
+        input.meridional.seals.rear.enabled = false;
+        project.set_impeller_geometry(id, input).unwrap();
+    });
+    assert!(harness.get_all_by_label("Count").next().is_some());
+    assert!(harness.query_by_label("Turn off the rear seal").is_none());
+}
+
+#[test]
+fn back_vanes_card_does_not_move_on_hover() {
+    let mut harness = on_the_contour("vanes-hover", |project, id| {
+        let mut input = project.impeller_geometry_input(id).unwrap();
+        input.meridional.back_vanes.enabled = true;
+        project.set_impeller_geometry(id, input).unwrap();
+    });
+    show_the_back_vanes(&mut harness);
+    nothing_moves_on_hover(&mut harness);
+}
+
+#[test]
+fn toggling_the_back_vanes_moves_nothing_above_them() {
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::NodeT;
+    let mut harness = on_the_contour("vanes-toggle-layout", |_, _| {});
+    show_the_back_vanes(&mut harness);
+    for _ in 0..2 {
+        harness.remove_cursor();
+        harness.run();
+        let before = layout(&harness);
+        let node = harness
+            .get_all_by_label("Back vanes")
+            .rfind(|n| n.accesskit_node().role() == Role::CheckBox)
+            .unwrap();
+        let top = node.rect().top();
+        node.click_accesskit();
+        harness.run();
+        harness.remove_cursor();
+        harness.run();
+        let after = layout(&harness);
+        let shifted: Vec<String> = before
+            .iter()
+            .filter(|(_, r)| r.bottom() < top)
+            .filter(|(k, r)| after.get(*k).is_some_and(|a| a != *r))
+            .map(|(k, _)| k.clone())
+            .collect();
+        assert!(shifted.is_empty(), "{shifted:?}");
+    }
+    assert!(!back_vanes(&harness).enabled);
+}

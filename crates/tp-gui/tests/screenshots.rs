@@ -1308,6 +1308,45 @@ fn blade_loading() {
     save(&mut harness, "blade-loading");
 }
 
+/// The back vanes card of the meridional contour step and the band they draw in the
+/// Meridian view.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn back_vanes() {
+    let mut project = tp_gui::default_project();
+    let id = project.components()[0].id();
+    let mut input = project.impeller_geometry_input(id).unwrap();
+    input.meridional.back_vanes.enabled = true;
+    input.meridional.seals.rear.enabled = false;
+    project.set_impeller_geometry(id, input).unwrap();
+    let path = std::env::temp_dir().join("turbopump-back-vanes.tpj");
+    project.save(&path).unwrap();
+    let mut harness = Harness::builder()
+        .with_size([1440.0, 900.0])
+        .with_pixels_per_point(1.5)
+        .with_theme(egui::Theme::Light)
+        .wgpu()
+        .build_eframe(|cc| TurbopumpApp::new(cc, Some(&path)));
+    harness.run();
+    harness
+        .get_all_by_label("Meridional contour")
+        .find(|n| n.rect().left() < 400.0)
+        .unwrap()
+        .click();
+    harness.run();
+    harness.run();
+    harness
+        .get_all_by_label("Back vanes")
+        .next()
+        .unwrap()
+        .scroll_to_me();
+    harness.run_steps(4);
+    save(&mut harness, "back-vanes-card");
+    harness.state_mut().focus_view(View::Meridian);
+    harness.run();
+    save(&mut harness, "back-vanes-meridian");
+}
+
 /// The seal cards of the meridional contour step, the rear one scrolled into view.
 #[test]
 #[ignore = "needs a GPU; run with --ignored"]

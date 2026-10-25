@@ -2,6 +2,7 @@
 
 use eframe::egui::{self, ComboBox, DragValue, Grid, RichText, Ui};
 use tp_design::MainDimensionsInput;
+use tp_design::impeller::back_vanes::{BackVaneSettings, BackVanes, VaneShape};
 use tp_design::impeller::blade::{
     BetaDistribution, BladeShape, DEFAULT_POINTS, DEFAULT_SPANS, EdgeShape, InletVelocity,
     LoadingShape, MeridionalFlow, WrapMode,
@@ -2342,6 +2343,15 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
             &units,
         );
     }
+    changed |= back_vanes_card(
+        ui,
+        &mut m.back_vanes,
+        // Offered while the rear seal is there to turn off.
+        (!double_entry).then_some(&mut m.seals.rear.enabled),
+        g.and_then(|g| g.contour.back_vanes.as_ref()),
+        g.and_then(|g| g.contour.chambers.values.rear_vane_gap),
+        &units,
+    );
     if section_info(
         ui,
         tr("Side chambers"),
@@ -2685,6 +2695,189 @@ fn seal_card(
             );
         },
     );
+    changed
+}
+
+/// The angle a back vane starts with when it is made curved, rad (30°).
+const CURVED_ANGLE: f64 = std::f64::consts::FRAC_PI_6;
+
+/// The name of a back vane shape.
+fn vane_shape_name(shape: VaneShape) -> &'static str {
+    match shape {
+        VaneShape::Radial => tr("Radial"),
+        VaneShape::Curved { .. } => tr("Curved"),
+    }
+}
+
+/// The card of the back vanes on the rear face of the hub disk: their switch and, with
+/// them on, number, shape and dimensions. `rear_seal` is the switch of the rear seal,
+/// `None` when the impeller has none; with both on, the card offers a button to turn the
+/// seal off (it never does so by itself). `used` are the vanes as built and `gap` the
+/// tip gap as built, which exceeds the asked clearance when the rear seal collar governs.
+/// Returns whether anything changed.
+fn back_vanes_card(
+    ui: &mut Ui,
+    vanes: &mut BackVaneSettings,
+    rear_seal: Option<&mut bool>,
+    used: Option<&BackVanes>,
+    gap: Option<f64>,
+    units: &DisplayUnits,
+) -> bool {
+    use QuantityKind::Length;
+    let title = tr("Back vanes");
+    let mut changed = false;
+    if !section_info(
+        ui,
+        title,
+        tr(
+            "Short ribs on the back of the hub disk that drag the fluid of the rear chamber \
+             round with the impeller: the pressure on the back falls and so does the axial \
+             thrust (Gülich §9.2.7)",
+        ),
+    ) {
+        return false;
+    }
+    props(ui, "back_vanes", |ui| {
+        changed |= toggle_row(
+            ui,
+            title,
+            tr("Fit the vanes; switched off, the values below are kept"),
+            &mut vanes.enabled,
+        );
+        if !vanes.enabled {
+            return;
+        }
+        changed |= widgets::param_u32(
+            ui,
+            tr("Count"),
+            tr("Automatic: 4 below d₂ = 200 mm, else 6 (Gülich Table 9.3)"),
+            &mut vanes.count,
+            used.map(|v| v.count),
+            1..=24,
+        );
+        label(
+            ui,
+            tr("Shape"),
+            tr("Radial and straight (Gülich §9.2.7), or curved like the main blades"),
+        );
+        widgets::list(ui, |ui| {
+            ComboBox::from_id_salt("back_vane_shape")
+                .selected_text(widgets::noted(ui, vane_shape_name(vanes.shape)))
+                .show_ui(ui, |ui| {
+                    for option in [
+                        VaneShape::Radial,
+                        VaneShape::Curved {
+                            angle: CURVED_ANGLE,
+                        },
+                    ] {
+                        let selected =
+                            std::mem::discriminant(&vanes.shape) == std::mem::discriminant(&option);
+                        if ui
+                            .selectable_label(selected, vane_shape_name(option))
+                            .clicked()
+                            && !selected
+                        {
+                            vanes.shape = option;
+                            changed = true;
+                        }
+                    }
+                })
+        });
+        ui.end_row();
+        if let VaneShape::Curved { angle } = &mut vanes.shape {
+            label(
+                ui,
+                tr("Vane angle β_v"),
+                tr(
+                    "Measured from the circumferential direction, like the blade angle β \
+                     (90° is radial); the vane turns in the sense of the main blades",
+                ),
+            );
+            let mut degrees = angle.to_degrees();
+            let edited = widgets::with_unit(ui, "°", |ui| {
+                ui.add(DragValue::new(&mut degrees).range(5.0..=90.0).speed(0.2))
+            });
+            if edited.changed() {
+                *angle = degrees.to_radians();
+                changed = true;
+            }
+            ui.end_row();
+        }
+        changed |= param_f64(
+            ui,
+            tr("Outer diameter"),
+            tr("Automatic: 0.80·d₂ (Gülich Table 9.3: 0.75 to 0.85)"),
+            &mut vanes.outer_diameter,
+            Length,
+            used.map(|v| 2.0 * v.outer_radius),
+            units,
+            0.001..=2.0,
+        );
+        changed |= param_f64(
+            ui,
+            tr("Inner diameter"),
+            tr(
+                "Automatic: the boss plus a wall on each side (our choice); with the rear seal \
+                 on, no lower than its casing ring",
+            ),
+            &mut vanes.inner_diameter,
+            Length,
+            used.map(|v| 2.0 * v.inner_radius),
+            units,
+            0.001..=2.0,
+        );
+        changed |= param_f64(
+            ui,
+            tr("Height"),
+            tr("Axial height h; automatic: 0.04·r₂ (Gülich Table 9.3: 0.03 to 0.05)"),
+            &mut vanes.height,
+            Length,
+            used.map(|v| v.height),
+            units,
+            0.0005..=0.1,
+        );
+        changed |= param_f64(
+            ui,
+            tr("Thickness"),
+            tr("Circumferential width of a vane; automatic: 2·h (Gülich Table 9.3)"),
+            &mut vanes.thickness,
+            Length,
+            used.map(|v| v.thickness),
+            units,
+            0.0005..=0.2,
+        );
+        changed |= param_f64(
+            ui,
+            tr("Tip clearance"),
+            tr(
+                "Axial, between the vane tips and the casing; automatic: 0.2·h (Gülich Table \
+                 9.3). The value shown is the gap as built, larger than asked when the \
+                 collar of the rear seal governs",
+            ),
+            &mut vanes.tip_clearance,
+            Length,
+            gap.or(used.map(|v| v.tip_clearance)),
+            units,
+            0.0..=0.05,
+        );
+        if let Some(rear) = rear_seal
+            && *rear
+        {
+            label(
+                ui,
+                tr("Rear seal in the way"),
+                tr(
+                    "With the rear seal on, the vanes stop outside its casing ring. Nothing \
+                     changes until you press the button",
+                ),
+            );
+            if ui.button(tr("Turn off the rear seal")).clicked() {
+                *rear = false;
+                changed = true;
+            }
+            ui.end_row();
+        }
+    });
     changed
 }
 
