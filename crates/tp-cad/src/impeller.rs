@@ -18,6 +18,7 @@
 use std::f64::consts::PI;
 
 use tp_design::impeller::ImpellerGeometry;
+use tp_design::impeller::back_vanes::{BackVanes, VaneShape};
 use tp_design::impeller::blade::BladeSection;
 use tp_design::impeller::duct::InletDuct;
 use tp_design::impeller::material::collar_inner_radius;
@@ -309,6 +310,9 @@ pub struct ImpellerCad {
     pub side_chambers: Option<Shape>,
     /// The wear rings of the annular seals, each its own solid.
     pub rings: Vec<WearRing>,
+    /// The back vanes on the rear face of the hub disk, already fused into `impeller`;
+    /// `None` when the design has none or they have no room.
+    pub back_vanes: Option<Shape>,
     /// Wall thickness used, m.
     pub wall_thickness: f64,
     /// Bore and boss diameters, m.
@@ -528,6 +532,94 @@ pub fn build_inlet_duct(duct: &InletDuct) -> Result<Shape, CadError> {
     occ::revolve_z(&profile_face(&outline_chains(&duct.outline))?)
 }
 
+/// Fuzzy tolerance of the join of the vanes to the disk, mm: the revolved band and the
+/// wall of the disk are both splines through sampled points, not the same surface.
+const VANE_JOIN_TOLERANCE: f64 = 1e-3;
+
+/// Margin of the vane strips beyond the band, mm: the band alone trims their ends.
+const VANE_MARGIN: f64 = 1.0;
+
+/// Plan outline of one back vane at angle zero, as point chains in the plane `z`, mm: a
+/// straight strip of width `thickness` for radial vanes, a strip following the
+/// logarithmic spiral θ(r) = ln(r/r_in)/tan(angle) for curved ones. The strip runs
+/// beyond the radii of the band, which trims it.
+fn vane_outline(vanes: &BackVanes, sign: f64, z: f64) -> Result<Vec<Vec<DVec3>>, CadError> {
+    let half = 0.5 * vanes.thickness * MM;
+    let (lo, hi) = (
+        0.5 * vanes.inner_radius * MM,
+        vanes.outer_radius * MM + VANE_MARGIN,
+    );
+    let point = |x: f64, y: f64| DVec3::new(x, y, z);
+    let (side_a, side_b): (Vec<DVec3>, Vec<DVec3>) = match vanes.shape {
+        VaneShape::Radial => (
+            vec![point(lo, -half), point(hi, -half)],
+            vec![point(lo, half), point(hi, half)],
+        ),
+        VaneShape::Curved { angle } => {
+            let slope = angle.tan();
+            if !(slope.is_finite() && slope.abs() > 1e-6) {
+                return Err(CadError::Input(
+                    "the curved back vanes need an angle between 0 and 90 degrees".into(),
+                ));
+            }
+            let r0 = vanes.inner_radius * MM;
+            let steps = 24;
+            let mut sides = (Vec::new(), Vec::new());
+            for k in 0..=steps {
+                let r = lo + (hi - lo) * f64::from(k) / f64::from(steps);
+                let theta = sign * (r / r0).ln() / slope;
+                // The centre line and its tangent: dθ/dr = 1/(r·tan), so the tangent is
+                // (cos θ − r θ' sin θ, sin θ + r θ' cos θ) up to a factor.
+                let (c, s) = (theta.cos(), theta.sin());
+                let rate = sign / slope;
+                let tangent = DVec2::new(c - rate * s, s + rate * c).normalize();
+                let normal = DVec2::new(-tangent.y, tangent.x) * half;
+                let centre = DVec2::new(r * c, r * s);
+                sides.0.push(centre - normal);
+                sides.1.push(centre + normal);
+            }
+            let lift = |v: Vec<DVec2>| v.into_iter().map(|p| point(p.x, p.y)).collect();
+            (lift(sides.0), lift(sides.1))
+        }
+    };
+    let last = |v: &Vec<DVec3>| *v.last().expect("a side has points");
+    let mut chains = vec![side_a.clone()];
+    chains.push(vec![last(&side_a), last(&side_b)]);
+    chains.push(side_b.iter().rev().copied().collect());
+    chains.push(vec![side_b[0], side_a[0]]);
+    Ok(chains)
+}
+
+/// The back vanes: the band revolved about the axis, trimmed by `count` strips laid out
+/// in plan. `None` when the design has none or they have no room.
+fn back_vane_solid(g: &ImpellerGeometry) -> Result<Option<Shape>, CadError> {
+    let Some(vanes) = g.contour.back_vanes.as_ref().filter(|v| !v.band.is_empty()) else {
+        return Ok(None);
+    };
+    let ring = occ::revolve_z(&profile_face(&outline_chains(&vanes.band))?)?;
+    let (z_min, z_max) = vanes
+        .band
+        .iter()
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| {
+            (lo.min(p.x), hi.max(p.x))
+        });
+    let z0 = z_min * MM - VANE_MARGIN;
+    let height = (z_max - z_min) * MM + 2.0 * VANE_MARGIN;
+    let chains = vane_outline(vanes, g.basis.rotation_sign, z0)?;
+    let strip = occ::prism_z(&profile_face(&chains)?, height)?;
+    let copies = (0..vanes.count)
+        .map(|i| strip.rotated_z(2.0 * PI * f64::from(i) / f64::from(vanes.count)))
+        .collect::<Result<Vec<_>, _>>()?;
+    let solid = ring.common(&occ::compound(&copies)?)?;
+    if solid.is_valid() && solid.volume() > 0.0 {
+        Ok(Some(solid))
+    } else {
+        Err(CadError::Operation(
+            "the back vanes are not a valid solid".into(),
+        ))
+    }
+}
+
 /// Builds blade, channel, flow domain and impeller solids from the geometry.
 pub fn build_impeller(g: &ImpellerGeometry, options: &CadOptions) -> Result<ImpellerCad, CadError> {
     let b = &g.basis;
@@ -595,6 +687,15 @@ pub fn build_impeller(g: &ImpellerGeometry, options: &CadOptions) -> Result<Impe
         })
         .collect::<Result<Vec<_>, CadError>>()?;
 
+    // The back vanes; a failure leaves them out with a warning.
+    let back_vanes = match back_vane_solid(g) {
+        Ok(vanes) => vanes,
+        Err(e) => {
+            warnings.push(format!("the back vanes were not built: {e}"));
+            None
+        }
+    };
+
     // The side chambers, revolved from their outlines, less the rings: the fluid and the
     // rings never share a volume.
     let chambers = &g.contour.chambers;
@@ -613,6 +714,16 @@ pub fn build_impeller(g: &ImpellerGeometry, options: &CadOptions) -> Result<Impe
                     "the {} could not be taken out of the side chambers",
                     ring.kind.label().to_lowercase()
                 )),
+            }
+        }
+        // The rear chamber fluid does not reach into the back vanes either.
+        if let Some(vanes) = &back_vanes {
+            match fluid.cut_fuzzy(vanes, VANE_JOIN_TOLERANCE) {
+                Ok(cut) if cut.is_valid() && cut.solid_count() == fluid.solid_count() => {
+                    fluid = cut
+                }
+                _ => warnings
+                    .push("the back vanes could not be taken out of the side chambers".to_string()),
             }
         }
         Some(fluid)
@@ -683,6 +794,28 @@ pub fn build_impeller(g: &ImpellerGeometry, options: &CadOptions) -> Result<Impe
         }
     }
 
+    // The back vanes stand on the rear face of the disk: one solid with the impeller.
+    let back_vanes = match back_vanes {
+        Some(vanes) => match impeller.fuse_fuzzy(&vanes, VANE_JOIN_TOLERANCE) {
+            Ok(joined) if joined.is_valid() && joined.solid_count() == 1 => {
+                // What the join adds: the vanes less the sliver the spline walls overlap.
+                let added = joined.cut_fuzzy(&impeller, VANE_JOIN_TOLERANCE);
+                impeller = joined;
+                match added {
+                    Ok(added) if added.is_valid() && added.solid_count() == vanes.solid_count() => {
+                        Some(added)
+                    }
+                    _ => Some(vanes),
+                }
+            }
+            _ => {
+                warnings.push("the back vanes could not be joined to the impeller".to_string());
+                None
+            }
+        },
+        None => None,
+    };
+
     // Balance holes, parallel to the axis through the hub wall, midway between the
     // boss and the rear seal and between two blades (our layout).
     let balance_holes = match (&options.balance_holes, pattern) {
@@ -713,6 +846,7 @@ pub fn build_impeller(g: &ImpellerGeometry, options: &CadOptions) -> Result<Impe
         impeller,
         side_chambers,
         rings,
+        back_vanes,
         wall_thickness: t,
         bore_diameter: 2.0 * rb,
         boss_diameter: 2.0 * rboss,
@@ -1402,6 +1536,110 @@ mod tests {
             front.z_high - front.z_low,
             v.seal_length,
             max_relative = 1e-12
+        );
+    }
+
+    /// The reference impeller with back vanes of the given shape.
+    fn with_vanes(
+        shape: tp_design::impeller::back_vanes::VaneShape,
+        chambers: bool,
+    ) -> ImpellerGeometry {
+        changed(|i| {
+            i.meridional.back_vanes.enabled = true;
+            i.meridional.back_vanes.shape = shape;
+            i.meridional.chambers.enabled = chambers;
+        })
+    }
+
+    /// Area of the closed meridional polygon, m².
+    fn polygon_area(p: &[DVec2]) -> f64 {
+        let n = p.len();
+        (0..n)
+            .map(|i| p[i].x * p[(i + 1) % n].y - p[(i + 1) % n].x * p[i].y)
+            .sum::<f64>()
+            .abs()
+            / 2.0
+    }
+
+    #[test]
+    fn radial_back_vanes_have_their_strip_volume() {
+        use tp_design::impeller::back_vanes::VaneShape;
+        let g = with_vanes(VaneShape::Radial, false);
+        let v = g.contour.back_vanes.as_ref().unwrap();
+        assert!(!v.band.is_empty(), "{:?}", v.warnings);
+        let cad = build_impeller(&g, &sharp()).unwrap();
+        let vanes = cad
+            .back_vanes
+            .as_ref()
+            .unwrap_or_else(|| panic!("the vanes are built: {:?}", cad.warnings));
+        assert!(vanes.is_valid());
+        assert_eq!(vanes.solid_count(), v.count as usize);
+        let expected = f64::from(v.count) * v.thickness * polygon_area(&v.band);
+        assert_relative_eq!(vanes.volume() * 1e-9, expected, max_relative = 0.02);
+    }
+
+    #[test]
+    fn no_back_vanes_when_they_are_off() {
+        assert!(
+            build_impeller(&reference(), &sharp())
+                .unwrap()
+                .back_vanes
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn back_vanes_join_the_impeller() {
+        use tp_design::impeller::back_vanes::VaneShape;
+        let without = build_impeller(&reference(), &sharp()).unwrap();
+        let cad = build_impeller(&with_vanes(VaneShape::Radial, false), &sharp()).unwrap();
+        // A tight quadrature: the default one is off by more on the whole impeller than
+        // the vanes' share of 1e-4.
+        let exact = |s: &Shape| s.volume_with_tolerance(1e-7);
+        let vanes = exact(cad.back_vanes.as_ref().unwrap());
+        assert!(cad.impeller.is_valid() && cad.impeller.solid_count() == 1);
+        assert_relative_eq!(
+            exact(&cad.impeller) - exact(&without.impeller),
+            vanes,
+            max_relative = 1e-4
+        );
+    }
+
+    #[test]
+    fn curved_back_vanes_build() {
+        use tp_design::impeller::back_vanes::VaneShape;
+        let radial = build_impeller(&with_vanes(VaneShape::Radial, false), &sharp()).unwrap();
+        let curved = VaneShape::Curved {
+            angle: 60f64.to_radians(),
+        };
+        let cad = build_impeller(&with_vanes(curved, false), &sharp()).unwrap();
+        let vanes = cad
+            .back_vanes
+            .as_ref()
+            .unwrap_or_else(|| panic!("the vanes are built: {:?}", cad.warnings));
+        assert!(vanes.is_valid() && cad.impeller.is_valid());
+        assert_eq!(cad.impeller.solid_count(), 1);
+        // A spiral is longer than the straight strip across the same radii.
+        let (a, b) = (vanes.volume(), radial.back_vanes.as_ref().unwrap().volume());
+        assert!(
+            a > b && a < 1.5 * b,
+            "curved {a} mm³ against radial {b} mm³"
+        );
+    }
+
+    #[test]
+    fn the_chamber_fluid_and_the_back_vanes_share_no_volume() {
+        use tp_design::impeller::back_vanes::VaneShape;
+        let cad = build_impeller(&with_vanes(VaneShape::Radial, true), &sharp()).unwrap();
+        let chambers = cad.side_chambers.as_ref().unwrap();
+        let vanes = cad.back_vanes.as_ref().unwrap();
+        let shared = chambers
+            .common(vanes)
+            .map_or(0.0, |s| s.volume_with_tolerance(0.0));
+        assert!(
+            shared < 1e-9 * vanes.volume_with_tolerance(0.0),
+            "{shared} mm³ shared with the chamber fluid; {:?}",
+            cad.warnings
         );
     }
 }

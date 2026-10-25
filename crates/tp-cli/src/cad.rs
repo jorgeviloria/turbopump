@@ -415,6 +415,14 @@ fn report(cad: &ImpellerCad, density: f64, units: &DisplayUnits) -> bool {
             format_mass(volume * density)
         );
     }
+    if let Some(vanes) = &cad.back_vanes {
+        let volume = vanes.volume() * 1e-9;
+        println!(
+            "  Back vanes       {:.1} cm³, {} (part of the impeller)",
+            volume * 1e6,
+            format_mass(volume * density)
+        );
+    }
     let length = |v: f64| show(units, QuantityKind::Length, v);
     println!(
         "  Hub              bore {}, boss {}",

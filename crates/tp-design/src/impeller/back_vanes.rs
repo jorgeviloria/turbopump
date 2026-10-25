@@ -47,8 +47,9 @@ pub enum VaneShape {
     /// Straight and radial (Gülich §9.2.7).
     #[default]
     Radial,
-    /// A logarithmic spiral leaning back from the radial direction by `angle`, rad,
-    /// as the main blades do.
+    /// A logarithmic spiral θ(r) = ln(r/r_in)/tan(angle) turned in the sense of
+    /// the main blades; `angle`, rad, is measured from the circumferential
+    /// direction, like the blade angle β.
     Curved { angle: f64 },
 }
 
