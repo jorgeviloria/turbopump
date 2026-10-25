@@ -400,7 +400,8 @@ mod tests {
         use tp_design::impeller::back_vanes::VaneShape;
         let project = crate::default_project();
         let id = project.components()[0].id();
-        let cases: Vec<Box<dyn Fn(&mut tp_design::impeller::ImpellerGeometryInput)>> = vec![
+        type Change = Box<dyn Fn(&mut tp_design::impeller::ImpellerGeometryInput)>;
+        let cases: Vec<Change> = vec![
             Box::new(|i| i.meridional.seals.front.diameter = Manual(0.001)),
             Box::new(|i| {
                 i.meridional.seals.front.impeller_ring.enabled = false;
@@ -457,21 +458,25 @@ mod tests {
             .iter()
             .filter(|w| !w.contains("cross") && spanish(|| message(w)) == **w)
             .collect();
-        assert!(untranslated.is_empty(), "without Spanish: {untranslated:#?}");
+        assert!(
+            untranslated.is_empty(),
+            "without Spanish: {untranslated:#?}"
+        );
     }
 
     #[test]
     fn ring_and_seal_names_inside_messages_are_translated() {
         let text = spanish(|| {
-            message("the front impeller ring of 6.0 mm is trimmed to 2.0 mm to leave the neck a wall")
+            message(
+                "the front impeller ring of 6.0 mm is trimmed to 2.0 mm to leave the neck a wall",
+            )
         });
         assert_eq!(
             text,
             "el anillo delantero del rodete, de 6.0 mm, se recorta a 2.0 mm para dejar una pared al cuello"
         );
-        let text = spanish(|| {
-            message("the rear casing wear ring is left out: it has no radial extent")
-        });
+        let text =
+            spanish(|| message("the rear casing wear ring is left out: it has no radial extent"));
         assert_eq!(
             text,
             "el anillo de desgaste trasero de la carcasa se omite: no tiene extensión radial"

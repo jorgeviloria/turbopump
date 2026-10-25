@@ -225,8 +225,9 @@ rotación casi no depende del radio y el cálculo se hace sin fuga:
   k = k_av: p(r) = p₂ − (ρ/2)·u₂²·k_av²·(1 − r²/r₂²).
 - **Empuje:** Gülich ec. T9.2.8 (526 / 561), poniendo k̄ = k_av en el lado trasero y
   dejando el delantero como está: F_Hy = π·r₂²·{Δp_La·(x_sp² − x_D²) −
-  (ρ/4)·u₂²·[k_av²·(1 − x_D²)² − k̄_FS²·(1 − x_sp²)²]}, con x = d/d₂. Gülich lo indica
-  así en la pág. 534 / 569 (ecs. T9.2.3 o T9.2.8 con k_av).
+  (ρ/4)·u₂²·[k_av²·(1 − x_D²)² − k̄_FS²·(1 − x_sp²)²]}, con x = d/d₂. Es
+  nuestra lectura de lo que Gülich dice en la pág. 534 / 569 («T9.2.3 o 9.2.8 usando
+  k_av»): él no escribe esta sustitución, la hacemos nosotros.
 
 Contraste (no se implementa): Stepanoff, cap. 11 (205–209 / 109–111). Su ec. 11.5
 estima la rotación con nervios que no ajustan a la carcasa como ω′ = (ω/2)·(1 + t/s),

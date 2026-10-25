@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 
 use clap::{Args, ValueEnum};
 use tp_cad::{BalanceHoleOptions, CadOptions, ImpellerCad, Shape};
-use tp_design::axial_thrust::{AxialThrust, AxialThrustInput};
 use tp_project::{
     ComponentId, ComponentKind, DesignStep, Project, StepStatus, VANED_STEPS, VANELESS_STEPS,
     VOLUTE_STEPS,

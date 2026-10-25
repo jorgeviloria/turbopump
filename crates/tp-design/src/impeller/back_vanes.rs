@@ -49,7 +49,8 @@ pub enum VaneShape {
     Radial,
     /// A logarithmic spiral θ(r) = ln(r/r_in)/tan(angle) turned in the sense of
     /// the main blades; `angle`, rad, is measured from the circumferential
-    /// direction, like the blade angle β.
+    /// direction, like the blade angle β, in (0°, 90°] (90° is radial; more would be
+    /// forward-curved).
     Curved { angle: f64 },
 }
 

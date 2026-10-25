@@ -1877,6 +1877,22 @@ fn the_back_vanes_card_starts_with_its_switch_only() {
 }
 
 #[test]
+fn a_curved_angle_made_elsewhere_is_not_rewritten_by_the_card() {
+    use tp_design::impeller::back_vanes::VaneShape;
+    // 2° is in the CLI's range (0°, 90°] but below the widget's 5° floor.
+    let angle = 2f64.to_radians();
+    let mut harness = on_the_contour("vanes-angle", |project, id| {
+        let mut input = project.impeller_geometry_input(id).unwrap();
+        input.meridional.back_vanes.enabled = true;
+        input.meridional.back_vanes.shape = VaneShape::Curved { angle };
+        project.set_impeller_geometry(id, input).unwrap();
+    });
+    show_the_back_vanes(&mut harness);
+    harness.run_steps(4);
+    assert_eq!(back_vanes(&harness).shape, VaneShape::Curved { angle });
+}
+
+#[test]
 fn back_vanes_card_offers_to_turn_off_the_rear_seal() {
     let mut harness = on_the_contour("vanes-seal", |project, id| {
         let mut input = project.impeller_geometry_input(id).unwrap();

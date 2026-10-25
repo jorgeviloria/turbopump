@@ -2798,7 +2798,12 @@ fn back_vanes_card(
             );
             let mut degrees = angle.to_degrees();
             let edited = widgets::with_unit(ui, "°", |ui| {
-                ui.add(DragValue::new(&mut degrees).range(5.0..=90.0).speed(0.2))
+                ui.add(
+                    DragValue::new(&mut degrees)
+                        .range(5.0..=90.0)
+                        .clamp_existing_to_range(false)
+                        .speed(0.2),
+                )
             });
             if edited.changed() {
                 *angle = degrees.to_radians();

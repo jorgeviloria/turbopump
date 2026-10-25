@@ -694,7 +694,8 @@ fn cad_exports_impeller_and_flow_domain() {
     );
     // Half the blade thickness, or the largest radius that fits the outlet corner.
     assert!(text.contains("Fillets          1."), "{text}");
-    assert!(text.contains("Balance holes    7 × 8.500 mm"), "{text}");
+    // Sized on the rear seal as drawn (with its wear rings), not on the automatic one.
+    assert!(text.contains("Balance holes    7 × 9.000 mm"), "{text}");
     // OCCT's transfer statistics are silenced.
     assert!(!text.contains("Statistics on Transfer"), "{text}");
     for name in ["impeller.step", "fluid.step", "impeller.stl", "fluid.stl"] {

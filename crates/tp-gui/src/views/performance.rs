@@ -245,7 +245,15 @@ impl PerformanceView {
                                 ),
                             );
                             let rear = has_rear_seal(derived, id);
-                            ui.add_enabled(rear, egui::Checkbox::new(&mut self.balance_holes, ""))
+                            // Without the seal the holes are ignored: show it unchecked, and
+                            // keep what the user chose for when the seal is back.
+                            let mut unchecked = false;
+                            let value = if rear {
+                                &mut self.balance_holes
+                            } else {
+                                &mut unchecked
+                            };
+                            ui.add_enabled(rear, egui::Checkbox::new(value, ""))
                                 .on_disabled_hover_text(tr(
                                     "The impeller has no rear seal: turn it on in the meridional contour",
                                 ));

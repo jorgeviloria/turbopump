@@ -505,14 +505,14 @@ fn parse_vane_shape(value: &str) -> Result<VaneShape, String> {
     let bad = || {
         format!(
             "back-vanes-shape must be radial or curved:<degrees> with the angle above 0 and \
-             below 180, got {value:?}"
+             up to 90, got {value:?}"
         )
     };
     let degrees: f64 = lower
         .strip_prefix("curved:")
         .and_then(|d| d.trim().trim_end_matches('°').trim().parse().ok())
         .ok_or_else(bad)?;
-    if degrees > 0.0 && degrees < 180.0 {
+    if degrees > 0.0 && degrees <= 90.0 {
         Ok(VaneShape::Curved {
             angle: degrees.to_radians(),
         })
@@ -605,7 +605,7 @@ fn print_report(
         );
     }
     println!(
-        "Flow       cm {} → {}   area {} → {}   max local rise of cm {:.1} %",
+        "Flow        cm {} → {}   area {} → {}   max local rise of cm {:.1} %",
         s(Velocity, inlet.cm),
         s(Velocity, outlet.cm),
         s(Area, inlet.area),
@@ -725,6 +725,9 @@ mod tests {
         assert!(set(&mut input, "back-vanes-shape=spiral").is_err());
         assert!(set(&mut input, "back-vanes-shape=curved:abc").is_err());
         assert!(set(&mut input, "back-vanes-shape=curved:0").is_err());
+        assert!(set(&mut input, "back-vanes-shape=curved:-10").is_err());
+        assert!(set(&mut input, "back-vanes-shape=curved:90.5").is_err());
+        assert!(set(&mut input, "back-vanes-shape=curved:90").is_ok());
         assert!(set(&mut input, "back-vanes-z=0").is_err());
         assert!(set(&mut input, "back-vanes-z=2.5").is_err());
     }

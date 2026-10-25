@@ -968,8 +968,10 @@ mod cad {
         fn balance_holes_follow_the_rear_seal_of_the_contour() {
             let mut project = default_project();
             let id = project.components()[0].id();
-            let mut export = CadExport::default();
-            export.balance_holes = true;
+            let export = CadExport {
+                balance_holes: true,
+                ..CadExport::default()
+            };
             let mut input = project.impeller_geometry_input(id).unwrap();
             input.meridional.seals.rear.diameter = Param::Manual(0.09);
             project.set_impeller_geometry(id, input.clone()).unwrap();

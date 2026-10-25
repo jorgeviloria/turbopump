@@ -341,7 +341,11 @@ mod tests {
         let f = r.front.unwrap();
         assert!(f.impeller_ring.is_none());
         assert_eq!(f.impeller_seat, f.radius);
-        assert!(r.warnings.iter().any(|w| w.contains("left out")), "{:?}", r.warnings);
+        assert!(
+            r.warnings.iter().any(|w| w.contains("left out")),
+            "{:?}",
+            r.warnings
+        );
     }
 
     #[test]
@@ -351,7 +355,11 @@ mod tests {
         s.front.impeller_ring.enabled = false;
         s.front.diameter = Param::Manual(b.inlet_diameter + WALL);
         let r = s.resolve(&b, WALL, 1.0);
-        assert!(r.warnings.iter().any(|w| w.contains("below the neck wall")), "{:?}", r.warnings);
+        assert!(
+            r.warnings.iter().any(|w| w.contains("below the neck wall")),
+            "{:?}",
+            r.warnings
+        );
     }
 
     #[test]

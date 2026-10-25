@@ -279,7 +279,7 @@ pub(crate) fn ring_spans(g: &ImpellerGeometry) -> (Vec<RingSpan>, Vec<String>) {
         if thin || short {
             warnings.push(format!(
                 "the {} wear ring is left out: it has no {} extent",
-                span.kind.label().to_lowercase(),
+                span.kind.label().to_lowercase().trim_end_matches(" ring"),
                 if thin { "radial" } else { "axial" }
             ));
         }
@@ -573,9 +573,13 @@ fn vane_outline(vanes: &BackVanes, sign: f64, z: f64) -> Result<Vec<Vec<DVec3>>,
         ),
         VaneShape::Curved { angle } => {
             let slope = angle.tan();
-            if !(slope.is_finite() && slope.abs() > 1e-6) {
+            if !(slope.is_finite()
+                && slope.abs() > 1e-6
+                && angle > 0.0
+                && angle <= std::f64::consts::FRAC_PI_2 + 1e-9)
+            {
                 return Err(CadError::Input(
-                    "the curved back vanes need an angle between 0 and 90 degrees".into(),
+                    "the curved back vanes need an angle above 0 and up to 90 degrees".into(),
                 ));
             }
             let r0 = vanes.inner_radius * MM;
