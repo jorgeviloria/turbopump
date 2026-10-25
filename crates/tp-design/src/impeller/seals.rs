@@ -147,6 +147,7 @@ impl Seals {
                 wall_thickness,
                 &mut warnings,
             )
+            .map(|seal| trim_rear(seal, basis, wall_thickness, &mut warnings))
         };
         ResolvedSeals {
             front,
@@ -154,6 +155,30 @@ impl Seals {
             warnings,
         }
     }
+}
+
+/// The rear seal held inside the rim of the hub disk: its radius is at most the outlet
+/// hub radius less a wall, so the collar keeps a wall of disk outside it (our own
+/// choice). The seat and the casing seat move with it.
+fn trim_rear(
+    mut seal: Seal,
+    basis: &ImpellerBasis,
+    wall_thickness: f64,
+    warnings: &mut Vec<String>,
+) -> Seal {
+    let rim = (basis.outlet_diameter / 2.0).min(basis.outlet_hub_diameter / 2.0);
+    let most = rim - wall_thickness;
+    if seal.radius > most + 1e-12 {
+        warnings.push(format!(
+            "the rear seal of {:.1} mm reaches beyond the hub disk rim: it is trimmed to {:.1} mm",
+            2.0 * seal.radius * 1e3,
+            2.0 * most * 1e3
+        ));
+        seal.impeller_seat -= seal.radius - most;
+        seal.casing_seat -= seal.radius - most;
+        seal.radius = most;
+    }
+    seal
 }
 
 fn resolve_seal(

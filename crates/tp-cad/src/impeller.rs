@@ -20,6 +20,7 @@ use std::f64::consts::PI;
 use tp_design::impeller::ImpellerGeometry;
 use tp_design::impeller::blade::BladeSection;
 use tp_design::impeller::duct::InletDuct;
+use tp_design::impeller::material::collar_inner_radius;
 use tp_design::impeller::wall::{SegmentKind, Wall};
 use tp_math::{DVec2, DVec3};
 
@@ -324,7 +325,7 @@ pub fn build_impeller(g: &ImpellerGeometry, options: &CadOptions) -> Result<Impe
     let pattern = options
         .balance_holes
         .as_ref()
-        .map(|holes| hole_pattern(holes, rboss))
+        .map(|holes| hole_pattern(holes, rboss, collar_limit(g, holes)))
         .transpose()?;
 
     // Everything the impeller fills when the flow domain is taken out, in one profile:
@@ -507,25 +508,37 @@ fn root_edges(shape: &Shape, walls: &[Vec<DVec2>]) -> Vec<usize> {
         .collect()
 }
 
-/// The pitch circle of the balance holes: midway between the boss and the rear seal,
-/// where both leave room for a hole.
-fn hole_pattern(holes: &BalanceHoleOptions, boss: f64) -> Result<BalanceHoles, CadError> {
+/// Radius the balance holes must stay inside, m: the inner radius of the collar of the
+/// rear seal when the design has one, else the given seal diameter.
+fn collar_limit(g: &ImpellerGeometry, holes: &BalanceHoleOptions) -> f64 {
+    match &g.contour.seals.rear {
+        Some(rear) => collar_inner_radius(rear, g.contour.material.wall_thickness),
+        None => holes.seal_diameter / 2.0,
+    }
+}
+
+/// The pitch circle of the balance holes: midway between the boss and the inside of the
+/// collar of the rear seal (`limit`), where both leave room for a hole.
+fn hole_pattern(
+    holes: &BalanceHoleOptions,
+    boss: f64,
+    limit: f64,
+) -> Result<BalanceHoles, CadError> {
     let radius = holes.diameter / 2.0;
-    let seal = holes.seal_diameter / 2.0;
-    let pitch = 0.5 * (boss + seal);
+    let pitch = 0.5 * (boss + limit);
     if holes.count == 0
         || radius.is_nan()
         || radius <= 0.0
         || pitch - radius < boss
-        || pitch + radius > seal
+        || pitch + radius > limit
     {
         return Err(CadError::Input(format!(
             "{} balance holes of {:.1} mm do not fit between the boss ({:.1} mm) and the rear \
-             seal ({:.1} mm)",
+             seal collar ({:.1} mm)",
             holes.count,
             holes.diameter * MM,
             2.0 * boss * MM,
-            holes.seal_diameter * MM
+            2.0 * limit * MM
         )));
     }
     Ok(BalanceHoles {
@@ -836,6 +849,32 @@ mod tests {
         // The thinner trailing edge takes a little of the blade away.
         let (shaped, full) = (blade.volume(), plain.volume());
         assert!(shaped < full && shaped > 0.85 * full, "{shaped} vs {full}");
+    }
+
+    #[test]
+    fn balance_holes_sit_inside_the_collar() {
+        let g = reference();
+        let c = &g.contour;
+        let rear = c.seals.rear.expect("the default design has a rear seal");
+        let inner = collar_inner_radius(&rear, c.material.wall_thickness);
+        let holes = BalanceHoleOptions {
+            count: 7,
+            diameter: 0.0085,
+            // Not what bounds the holes when there is a collar.
+            seal_diameter: 1.0,
+        };
+        let limit = collar_limit(&g, &holes);
+        assert!((limit - inner).abs() < 1e-15);
+        let boss = c.material.boss_diameter / 2.0;
+        let pattern = hole_pattern(&holes, boss, limit).unwrap();
+        assert!(pattern.pitch_diameter > 2.0 * boss);
+        assert!(pattern.pitch_diameter + holes.diameter <= 2.0 * inner + 1e-12);
+        // A hole that fits between boss and seal but not inside the collar is refused.
+        let wide = BalanceHoleOptions {
+            diameter: 2.0 * (inner - boss),
+            ..holes
+        };
+        assert!(hole_pattern(&wide, boss, limit).is_err());
     }
 
     #[test]

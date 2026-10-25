@@ -5,7 +5,9 @@
 //! An automatic wire follows a wall thickness, the shaft bore and a boss around it (our
 //! layout for a cast impeller, the one the CAD model always had):
 //! - hub: across the wall at the outlet, the hub contour offset by the thickness down
-//!   to the boss, the rear face of the boss, the bore, and up to the hub at the inlet;
+//!   to the boss (with a rear seal, out to the collar of its impeller seat on the way:
+//!   out the seal length on the seat radius, down a wall and back to the face), the rear
+//!   face of the boss, the bore, and up to the hub at the inlet;
 //! - shroud: across the wall at the outlet, the shroud contour offset outwards by the
 //!   thickness up to the front seal radius, the shoulder down to the impeller seat,
 //!   the seat upstream of the inlet for the annular seal, and down to the shroud at the
@@ -105,6 +107,12 @@ fn curve(points: &[DVec2]) -> Result<SegmentInput, DesignError> {
     })
 }
 
+/// Inner radius of the collar that carries the rear seal's impeller seat: the collar is
+/// one disk thickness `t` thick, standing on the seat radius and growing inwards.
+pub fn collar_inner_radius(rear: &Seal, t: f64) -> f64 {
+    rear.impeller_seat - t
+}
+
 /// The automatic wire of the hub disk, from the hub end at the outlet to the hub start
 /// at the inlet.
 pub fn automatic_hub(
@@ -112,8 +120,8 @@ pub fn automatic_hub(
     shroud: &Wall,
     basis: &ImpellerBasis,
     m: &Material,
-    _rear: Option<&Seal>,
-) -> Result<Vec<SegmentInput>, DesignError> {
+    rear: Option<&Seal>,
+) -> Result<(Vec<SegmentInput>, Vec<String>), DesignError> {
     let t = m.wall_thickness;
     let (rb, rboss) = (m.bore_diameter / 2.0, m.boss_diameter / 2.0);
     let rn = hub.start().y;
@@ -165,23 +173,114 @@ pub fn automatic_hub(
         ));
     }
     let meet = *back.last().expect("not empty");
-    let rear = hub.end().x + t;
+    let behind_boss = hub.end().x + t;
     let start = hub.start();
-    let mut wire = vec![line(back[0]), curve(&back)?];
+    let mut warnings = Vec::new();
+    // The collar of the rear seal stands out of the back face at the seat radius.
+    let collar = rear.and_then(|seal| {
+        let (seat, inner) = (seal.impeller_seat, collar_inner_radius(seal, t));
+        if inner <= rboss + 1e-9 {
+            warnings.push(format!(
+                "the rear seal collar (inner radius {:.1} mm) would sit on the boss ({:.1} mm): the collar is left out",
+                inner * 1e3,
+                rboss * 1e3
+            ));
+            None
+        } else if seat >= back[0].y - 1e-9 {
+            warnings.push(format!(
+                "the rear seal seat ({:.1} mm) is not below the hub disk rim ({:.1} mm): the collar is left out",
+                seat * 1e3,
+                back[0].y * 1e3
+            ));
+            None
+        } else {
+            Some((seal, face_at(&back, seat), face_at(&back, inner)))
+        }
+    });
+    let mut wire = vec![line(back[0])];
+    let mut from = meet;
+    match collar {
+        None => wire.push(curve(&back)?),
+        Some((seal, (out, top), (back_in, bottom))) => {
+            // Down the back face to the seat radius, out the length of the seal, down
+            // the collar wall and back to the face, then on to the boss.
+            let mut upper = back[..out].to_vec();
+            upper.push(top);
+            let mut lower = vec![bottom];
+            lower.extend_from_slice(&back[back_in..]);
+            let tip = DVec2::new(top.x + seal.length, seal.impeller_seat);
+            wire.push(face_piece(&upper)?);
+            wire.push(line(tip));
+            wire.push(line(DVec2::new(tip.x, bottom.y)));
+            wire.push(line(bottom));
+            if lower.len() >= 2 && bottom.distance(meet) > 1e-9 {
+                wire.push(face_piece(&lower)?);
+            }
+        }
+    }
     let corners = [
-        DVec2::new(rear, rboss),
-        DVec2::new(rear, rb),
+        DVec2::new(behind_boss, rboss),
+        DVec2::new(behind_boss, rb),
         DVec2::new(start.x, rb),
         start,
     ];
-    let mut from = meet;
     for corner in corners {
         if corner.distance(from) > 1e-9 {
             wire.push(line(corner));
             from = corner;
         }
     }
-    Ok(wire)
+    Ok((wire, warnings))
+}
+
+/// The point of the back face `back` (from the rim inwards) at radius `y`, with the
+/// index of the first point past it.
+fn face_at(back: &[DVec2], y: f64) -> (usize, DVec2) {
+    let i = back
+        .iter()
+        .position(|p| p.y <= y)
+        .filter(|&i| i > 0)
+        .unwrap_or(back.len() - 1);
+    let (p, q) = (back[i - 1], back[i]);
+    let f = ((p.y - y) / (p.y - q.y)).clamp(0.0, 1.0);
+    (i, p + (q - p) * f)
+}
+
+/// A piece of the back face through `points`: a B-spline, or a straight line when it is
+/// too short for one.
+fn face_piece(points: &[DVec2]) -> Result<SegmentInput, DesignError> {
+    let last = *points.last().expect("points");
+    if points.len() < 4 {
+        return Ok(line(last));
+    }
+    if points.len() >= OFFSET_POINTS {
+        return curve(points);
+    }
+    // Fewer points than a curve keeps: spread them by arc length.
+    let lengths: Vec<f64> = points
+        .windows(2)
+        .scan(0.0, |s, w| {
+            *s += w[0].distance(w[1]);
+            Some(*s)
+        })
+        .collect();
+    let total = *lengths.last().expect("lengths");
+    if total <= 1e-9 {
+        return Ok(line(last));
+    }
+    let even: Vec<DVec2> = (0..OFFSET_POINTS)
+        .map(|k| {
+            let s = total * k as f64 / (OFFSET_POINTS - 1) as f64;
+            let j = lengths
+                .iter()
+                .position(|&l| l >= s)
+                .unwrap_or(lengths.len() - 1);
+            let l0 = if j == 0 { 0.0 } else { lengths[j - 1] };
+            let f = ((s - l0) / (lengths[j] - l0)).clamp(0.0, 1.0);
+            points[j] + (points[j + 1] - points[j]) * f
+        })
+        .collect();
+    curve(&even)
 }
 
 /// The automatic wire of the shroud, from the shroud end at the outlet to the shroud
@@ -340,7 +439,7 @@ pub fn wires(
         hub,
         middle(shroud),
         drawn.0,
-        automatic_hub(hub, shroud, basis, m, seals.rear.as_ref()).map(|wire| (wire, Vec::new())),
+        automatic_hub(hub, shroud, basis, m, seals.rear.as_ref()),
     )?;
     let shroud_wire = pick(
         "shroud",
@@ -513,6 +612,119 @@ mod tests {
             "{:?}",
             c.material_warnings
         );
+    }
+
+    fn collar_wall<'a>(
+        w: &'a Wall,
+        rear: &Seal,
+        t: f64,
+    ) -> Option<&'a crate::impeller::wall::Segment> {
+        w.segments().iter().find(|s| {
+            s.kind() == SegmentKind::Line
+                && (s.start().x - s.end().x).abs() < 1e-12
+                && (s.start().y - rear.impeller_seat).abs() < 1e-12
+                && (s.start().y - s.end().y - t).abs() < 1e-12
+        })
+    }
+
+    #[test]
+    fn the_rear_collar_stands_behind_the_disk() {
+        let (_, c) = contour();
+        let rear = c.seals.rear.expect("rear seal");
+        let seat = c
+            .hub_material
+            .segments()
+            .iter()
+            .find(|s| {
+                s.kind() == SegmentKind::Line
+                    && (s.start().y - rear.impeller_seat).abs() < 1e-12
+                    && (s.end().y - rear.impeller_seat).abs() < 1e-12
+                    && (s.end().x - s.start().x - rear.length).abs() < 1e-12
+            })
+            .expect("a line of the seal length on the seat radius");
+        // The collar leaves the back face of the disk, which lies a wall behind the hub.
+        let t = c.material.wall_thickness;
+        let hub_x = c
+            .hub
+            .sample(400)
+            .into_iter()
+            .min_by(|a, b| {
+                (a.y - rear.impeller_seat)
+                    .abs()
+                    .total_cmp(&(b.y - rear.impeller_seat).abs())
+            })
+            .expect("samples")
+            .x;
+        assert!(seat.start().x > hub_x + 0.5 * t);
+        assert!(seat.end().x > seat.start().x + 0.99 * rear.length);
+        assert!(c.material_warnings.is_empty(), "{:?}", c.material_warnings);
+    }
+
+    #[test]
+    fn the_collar_wall_is_the_disk_thickness() {
+        let (_, c) = contour();
+        let rear = c.seals.rear.expect("rear seal");
+        let t = c.material.wall_thickness;
+        assert!(collar_wall(&c.hub_material, &rear, t).is_some());
+        assert!((collar_inner_radius(&rear, t) - (rear.impeller_seat - t)).abs() < 1e-15);
+        // The wire still ends at the hub start and passes the rear face of the boss.
+        assert_eq!(c.hub_material.end(), c.hub.start());
+        let rb = c.material.bore_diameter / 2.0;
+        let back = c.hub.end().x + t;
+        assert!(
+            c.hub_material
+                .points()
+                .iter()
+                .any(|(_, p)| p.distance(DVec2::new(back, rb)) < 1e-12)
+        );
+    }
+
+    #[test]
+    fn a_collar_on_the_boss_warns() {
+        let b = basis();
+        let (_, c) = contour();
+        let rear = c.seals.rear.expect("rear seal");
+        let t = c.material.wall_thickness;
+        let input = MeridionalInput {
+            material: MaterialSettings {
+                boss_diameter: Param::Manual(2.0 * (rear.impeller_seat - 0.5 * t)),
+                ..MaterialSettings::default()
+            },
+            ..MeridionalInput::default()
+        };
+        let c = MeridionalContour::build(&b, &input, 1.0).unwrap();
+        assert!(
+            c.material_warnings.iter().any(|w| w.contains("collar")),
+            "{:?}",
+            c.material_warnings
+        );
+        assert!(collar_wall(&c.hub_material, &rear, t).is_none());
+    }
+
+    #[test]
+    fn a_rear_seal_beyond_the_disk_rim_is_trimmed() {
+        let b = basis();
+        let mut input = MeridionalInput::default();
+        input.seals.rear.diameter = Param::Manual(b.outlet_diameter);
+        let c = MeridionalContour::build(&b, &input, 1.0).unwrap();
+        let t = c.material.wall_thickness;
+        let rear = c.seals.rear.expect("rear seal");
+        let r2 = (b.outlet_diameter / 2.0).min(b.outlet_hub_diameter / 2.0);
+        assert!(
+            rear.radius <= r2 - t + 1e-12,
+            "{} vs {}",
+            rear.radius,
+            r2 - t
+        );
+        let seat = rear.radius - rear.impeller_ring.unwrap();
+        assert!((rear.impeller_seat - seat).abs() < 1e-12);
+        assert!(
+            c.material_warnings.iter().any(|w| w.contains("rear seal")),
+            "{:?}",
+            c.material_warnings
+        );
+        // The collar is built on the trimmed seat.
+        assert!(collar_wall(&c.hub_material, &rear, t).is_some());
     }
 
     #[test]
