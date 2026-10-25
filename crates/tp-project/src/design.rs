@@ -300,6 +300,7 @@ impl Project {
                 outer_diameter: 2.0 * b.outer_radius,
                 height: b.height,
                 gap: built.unwrap_or(b.tip_clearance),
+                rear_seal: contour.seals.rear.is_some(),
             });
         }
         input
@@ -1218,6 +1219,7 @@ mod tests {
         assert_eq!(law.outer_diameter, 2.0 * vanes.outer_radius);
         assert_eq!(law.height, vanes.height);
         assert_eq!(law.gap, vanes.tip_clearance);
+        assert!(!law.rear_seal);
         let after = p.compute_performance(impeller, &base).unwrap();
         assert!(after.axial.design.back_vanes > 0.0);
         assert!(after.axial.design.total < before.axial.design.total);
@@ -1244,6 +1246,24 @@ mod tests {
             .back_vanes
             .unwrap();
         assert_eq!(law.gap, built);
+        // With the rear seal on, the vanes stop outside its ring, with a warning.
+        let mut input = p.impeller_geometry_input(impeller).unwrap();
+        input.meridional.seals.rear.enabled = true;
+        p.set_impeller_geometry(impeller, input).unwrap();
+        let law = p
+            .with_contour_seals(impeller, &base)
+            .axial
+            .back_vanes
+            .unwrap();
+        assert!(law.rear_seal);
+        let sealed = p.compute_performance(impeller, &base).unwrap();
+        assert!(
+            sealed
+                .warnings
+                .iter()
+                .any(|w| w.contains("together with a rear seal"))
+        );
+        assert!(sealed.axial.design.back_vanes > 0.0);
     }
 
     #[test]

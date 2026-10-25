@@ -208,6 +208,8 @@ pub struct SecondaryLosses {
     /// (eq. T9.3.4).
     pub front_friction: f64,
     pub rear_friction: f64,
+    /// Back vanes on the rear shroud, whose power `rear_friction` is then.
+    pub back_vanes: bool,
     /// k_RR of the front shroud.
     pub friction_coefficient: f64,
     /// Mechanical losses, W.
@@ -288,6 +290,7 @@ impl SecondaryLosses {
             volumetric_efficiency: 1.0,
             front_friction: 0.0,
             rear_friction: 0.0,
+            back_vanes: false,
             friction_coefficient: 0.0,
             mechanical: 0.0,
             tip_speed: u2,
@@ -328,6 +331,7 @@ impl SecondaryLosses {
             losses.rear_friction = match &axial.back_vanes {
                 // The vanes replace the disk friction of the rear face (eq. T9.3.4).
                 Some(v) => {
+                    losses.back_vanes = true;
                     let zeta = back_vane_power_coefficient(
                         reynolds,
                         v.outer_diameter / d2,
@@ -657,6 +661,7 @@ mod tests {
             outer_diameter: 0.8 * d.outlet_diameter,
             height: 0.04 * r2,
             gap: 0.008 * r2,
+            rear_seal: false,
         };
         let losses = |back_vanes| {
             let input = AxialThrustInput {
@@ -688,6 +693,7 @@ mod tests {
             max_relative = 1e-9
         );
         assert!(with.rear_friction > plain.rear_friction);
+        assert!(with.back_vanes && !plain.back_vanes);
         assert_eq!(with.front_friction, plain.front_friction);
         assert!(with.secondary_power() > plain.secondary_power());
     }

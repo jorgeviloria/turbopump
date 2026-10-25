@@ -1233,11 +1233,14 @@ pub const PERFORMANCE_CORRELATIONS: &[crate::pump::correlations::CorrelationInfo
     },
     crate::pump::correlations::CorrelationInfo {
         id: "performance.back_vanes",
-        description: "k_Rs = 1/[1 + 0.13·s/(s + h)·√(r₂/(h·z))], k_av for trimmed vanes, on \
-                      the rear shroud of the axial force; P_Rs = ζ_Rs·ρ·ω³·r₂⁵ in place of the \
-                      rear disk friction (our reading)",
-        reference: "Gülich 2nd ed., Table 9.3 (after Möhring), eqs. T9.3.2 to T9.3.4",
-        verification: crate::pump::correlations::Verification::Verified,
+        description: "k_Rs = 1/[1 + 0.13·s/(s + h)·√(r₂/(h·z))] and k_av for trimmed vanes \
+                      over the span of the vanes, put into the rear side of eq. T9.2.8 (our \
+                      reading); P_Rs = ζ_Rs·ρ·ω³·r₂⁵ in place of the rear disk friction (our \
+                      reading); above the ring only with a rear seal (our choice)",
+        reference: "Gülich 2nd ed., Table 9.3 (after Möhring), eqs. T9.3.2 to T9.3.4, \
+                    checked against the book; their use in the axial force and the losses \
+                    is our reading",
+        verification: crate::pump::correlations::Verification::EngineeringDefault,
     },
     crate::pump::correlations::CorrelationInfo {
         id: "performance.axial_balance",

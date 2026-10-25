@@ -2688,8 +2688,8 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Rozamiento de disco y pérdidas mecánicas",
     ),
     (
-        "front {}, rear {}, mechanical {} (Gülich eqs. T3.6.2, T3.6.3, T3.5.6a)",
-        "delantero {}, trasero {}, mecánicas {} (Gülich ecs. T3.6.2, T3.6.3, T3.5.6a)",
+        "front {}, rear {}{}, mechanical {} (Gülich eqs. T3.6.2, T3.6.3, T3.5.6a)",
+        "delantero {}, trasero {}{}, mecánicas {} (Gülich ecs. T3.6.2, T3.6.3, T3.5.6a)",
     ),
     ("Efficiency breakdown", "Desglose del rendimiento"),
     (
@@ -2789,6 +2789,14 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "discos {} (k {} delantero, {} trasero{}), cantidad de movimiento {}, eje {}",
     ),
     (", balance holes", ", agujeros de equilibrado"),
+    (
+        " (with back vanes, eq. T9.3.4)",
+        " (con álabes de rebombeo, ec. T9.3.4)",
+    ),
+    (
+        "{} off the rear shroud (Gülich Table 9.3)",
+        "{} menos sobre el disco trasero (tabla 9.3 de Gülich)",
+    ),
     (
         "Annular and shaft seals",
         "Anillo de desgaste y sello del eje",
@@ -3798,6 +3806,22 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
 
 /// Messages of the design code, most specific first.
 pub(super) static MESSAGES: &[(&str, &str)] = &[
+    (
+        "the back vanes have {} = {}, outside the {} to {} tested behind Gülich Table 9.3: their effect on the axial force and the power is an extrapolation",
+        "los álabes de rebombeo tienen {} = {}, fuera del rango ensayado de {} a {} de la tabla 9.3 de Gülich: su efecto sobre el empuje axial y la potencia es una extrapolación",
+    ),
+    (
+        "Gülich eqs. T9.3.2 and T9.3.4 hold for radial back vanes only: the axial force and the power of the curved vanes are estimates",
+        "las ecs. T9.3.2 y T9.3.4 de Gülich solo valen para álabes de rebombeo radiales: el empuje axial y la potencia de los álabes curvos son estimaciones",
+    ),
+    (
+        "Gülich gives no rule for back vanes together with a rear seal: they turn the liquid faster above the seal only, an estimate outside the tested range",
+        "Gülich no da ninguna regla para álabes de rebombeo junto con un sello trasero: aceleran el líquido solo por encima del sello, una estimación fuera del rango ensayado",
+    ),
+    (
+        "a double-entry impeller has no rear shroud: its back vanes are left out of the axial force and the power",
+        "un rodete de doble entrada no tiene disco trasero: sus álabes de rebombeo quedan fuera del empuje axial y de la potencia",
+    ),
     (
         "the fillet over the cutwater cannot be negative",
         "el redondeo sobre el corte de agua no puede ser negativo",

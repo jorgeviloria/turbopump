@@ -33,9 +33,11 @@
 //!   9.2.8 using k_av"; putting k_av into the rear term of T9.2.8 is our reading. The
 //!   tested range is s/r₂ = 0.008 to 0.015, s/h = 0.1 to 0.2, h/r₂ = 0.03 to 0.05,
 //!   z_v = 4 to 8 and d_Rs/d₂ = 0.75 to 0.85, with radial vanes; outside it the force is
-//!   computed anyway, with a warning. With balance holes and a rear seal, which Gülich
-//!   does not cover, k_av acts only above the rear seal, with the leakage-corrected k as
-//!   k_o (our choice, with a warning). The power of the vanes is in [`crate::losses`].
+//!   computed anyway, with a warning. k_av acts over the radial span of the vanes only,
+//!   from their inner diameter to d₂ (our choice); with a rear seal, which Gülich does
+//!   not cover, the vanes stop outside its ring, so k_av acts above the ring only, with
+//!   the leakage-corrected k as k_o when there are balance holes (our choice, with a
+//!   warning). The power of the vanes is in [`crate::losses`].
 //!
 //! The leakage at other flows scales with √(H/H_opt), our choice: it follows the
 //! pressure difference across the seal.
@@ -96,6 +98,9 @@ pub struct BackVaneLaw {
     pub height: f64,
     /// Axial gap s between the vane tips and the casing, m.
     pub gap: f64,
+    /// The impeller has a rear seal too: the vanes stop outside its ring.
+    #[serde(default)]
+    pub rear_seal: bool,
 }
 
 /// The parts of the axial force at one flow, N, positive toward the suction side.
@@ -427,21 +432,31 @@ impl AxialThrust {
             }
         };
         // Back vanes: k_av of eqs. T9.3.2 and T9.3.3 on the rear side of eq. T9.2.8 (our
-        // reading of Gülich's "eq. T9.2.3 or 9.2.8 using k_av"). Without balance holes
-        // it acts on the whole rear shroud from the shaft seal; with them only above the
-        // rear seal, with the leakage-corrected k there as k_o (our choice: Gülich does
-        // not cover a rear seal with back vanes).
+        // reading of Gülich's "eq. T9.2.3 or 9.2.8 using k_av"). It acts over the radial
+        // span of the vanes only, from their inner diameter (or the shaft seal, or the
+        // rear seal with balance holes, whichever lies further out) to d₂; with balance
+        // holes the leakage-corrected k there is k_o. Our choice: Gülich does not cover
+        // vanes that stop short of the hub nor a rear seal with back vanes. Without
+        // balance holes it slightly underestimates the effect: the lower pressure that
+        // the vanes leave at their inner diameter also shifts the pressure further in.
         let (rear, back_vanes, rear_rotation) = match &self.back_vanes {
             None => (plain_rear, 0.0, rear_rotation),
             Some(v) => {
-                let x_in = self.rear_seal_diameter.map_or(x_d, |d| d / d2);
-                let k_av = v.rotation(d2, rear_rotation);
-                let reduction = shroud_force(r2, x_in, pressure_rise, rho, u2, rear_rotation)
-                    - shroud_force(r2, x_in, pressure_rise, rho, u2, k_av);
+                let x_in = self
+                    .rear_seal_diameter
+                    .map_or(x_d, |d| d / d2)
+                    .max(v.inner_diameter / d2);
+                let reduction = |k_o: f64| {
+                    shroud_force(r2, x_in, pressure_rise, rho, u2, k_o)
+                        - shroud_force(r2, x_in, pressure_rise, rho, u2, v.rotation(d2, k_o))
+                };
                 // The rear shroud force without balance holes, as `rear` always is.
-                let k_plain = v.rotation(d2, self.rotation_factor);
-                let rear = shroud_force(r2, x_d, pressure_rise, rho, u2, k_plain);
-                (rear, reduction, k_av)
+                let rear = plain_rear - reduction(self.rotation_factor);
+                (
+                    rear,
+                    reduction(rear_rotation),
+                    v.rotation(d2, rear_rotation),
+                )
             }
         };
         let hydraulic = hydraulic - back_vanes;
@@ -480,11 +495,10 @@ impl AxialThrust {
             ];
         }
         let mut warnings = v.warnings(self.impeller_diameter);
-        if self.rear_seal_diameter.is_some() {
+        if v.rear_seal || self.rear_seal_diameter.is_some() {
             warnings.push(
-                "Gülich gives no rule for back vanes behind a rear seal with balance holes: \
-                 they turn the liquid faster above the seal only, an estimate outside the \
-                 tested range"
+                "Gülich gives no rule for back vanes together with a rear seal: they turn the \
+                 liquid faster above the seal only, an estimate outside the tested range"
                     .into(),
             );
         }
@@ -582,10 +596,11 @@ mod tests {
         BackVaneLaw {
             count: 6,
             radial: true,
-            inner_diameter: 0.06,
+            inner_diameter: 0.05,
             outer_diameter: d_rs,
             height: 6e-3,
             gap: 1.2e-3,
+            rear_seal: false,
         }
     }
 
@@ -662,5 +677,48 @@ mod tests {
         let above = sealed.forces(0.05, 50.0, 60.0);
         let whole = law(Some(vanes(0.24))).forces(0.05, 50.0, 60.0);
         assert!(above.back_vanes > 0.0 && above.back_vanes < whole.back_vanes);
+    }
+
+    #[test]
+    fn back_vanes_act_over_their_own_span() {
+        // Vanes from 120 mm, beyond the 50 mm shaft seal: x_in = d_in/d₂ = 0.4.
+        let short = BackVaneLaw {
+            inner_diameter: 0.12,
+            ..vanes(0.24)
+        };
+        let f = law(Some(short)).forces(0.05, 50.0, 60.0);
+        let k_av = short.rotation(0.3, 0.5);
+        let dp = f.pressure_rise;
+        assert_relative_eq!(
+            f.back_vanes,
+            shroud_force(0.15, 0.4, dp, 1000.0, 30.0, 0.5)
+                - shroud_force(0.15, 0.4, dp, 1000.0, 30.0, k_av),
+            max_relative = 1e-12
+        );
+        let whole = law(Some(vanes(0.24))).forces(0.05, 50.0, 60.0);
+        assert!(f.back_vanes < whole.back_vanes);
+        assert_relative_eq!(f.hydraulic, f.rear - f.front, max_relative = 1e-12);
+    }
+
+    #[test]
+    fn a_rear_seal_without_balance_holes_keeps_the_vanes_above_its_ring() {
+        // The contour trims the vanes outside the casing ring of the rear seal.
+        let sealed = BackVaneLaw {
+            inner_diameter: 0.14,
+            rear_seal: true,
+            ..vanes(0.24)
+        };
+        let thrust = law(Some(sealed));
+        assert!(thrust.rear_seal_diameter.is_none());
+        let f = thrust.forces(0.05, 50.0, 60.0);
+        let whole = law(Some(vanes(0.24))).forces(0.05, 50.0, 60.0);
+        assert!(f.back_vanes > 0.0 && f.back_vanes < whole.back_vanes);
+        assert!(
+            thrust
+                .back_vane_warnings()
+                .iter()
+                .any(|w| w.contains("together with a rear seal"))
+        );
+        assert!(law(Some(vanes(0.24))).back_vane_warnings().is_empty());
     }
 }
