@@ -995,6 +995,17 @@ Los sólidos se construyen en milímetros con Open CASCADE:
     corre justo por dentro de su garganta, con el corte de agua entre ambos; desplazados
     hacia fuera se cortarían dentro de un mismo loft, y Open CASCADE da entonces
     resultados sin sentido aunque el sólido parezca válido;
+  - por fuera, donde el dorso del comienzo de la espiral se mete en la carcasa de la
+    tobera, sobre el corte de agua, las dos paredes desplazadas se cruzan en una
+    hendidura en V. Antes de restar el fluido se rellena y redondea con un radio $R$
+    (`--set fillet=…`; por defecto el espesor de pared, 0 la deja), con el redondeo de
+    Open CASCADE sobre las aristas que la unión crea ahí (construcción propia). Solo
+    añade material por fuera, así que no puede tocar el flujo. Primero se prueba toda la
+    línea de unión. Si no se puede, se prueba solo el tramo que cruza la altura por el
+    dorso; los costados tienen las aristas vivas del tubo trapecial, que el redondeo no
+    cruza. Si tampoco sale con $R$, se prueba con tres cuartos, la mitad y un cuarto de $R$, y
+    se avisa. En la bomba de referencia, las secciones redondas no toman los 6 mm. Con $2s$ los extremos del redondeo acaban con
+    picos donde se juntan con los costados, por eso el valor por defecto es $s$;
   - a la unión de las mitades se le restan el dominio fluido y un cilindro con el radio
     $r_2$ en toda la altura, el espacio del rodete;
   - quedan macizos el corte de agua y su nariz, el nervio de la voluta doble y unas paredes
