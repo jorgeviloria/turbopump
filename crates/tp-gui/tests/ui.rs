@@ -1161,6 +1161,31 @@ fn what_an_accepted_step_showed_is_kept_in_the_project_file() {
 }
 
 #[test]
+fn folded_sections_keep_their_rows_as_the_step_is_accepted() {
+    // What the rows of the main dimensions showed as they were accepted.
+    let accepted = |fold: bool| {
+        let mut harness = harness();
+        if fold {
+            harness.get_by_label("More actions of the step").click();
+            harness.run();
+            harness.get_by_label_contains("Fold every section").click();
+            harness.run();
+            harness.run();
+            assert!(harness.query_by_label("Outlet diameter d₂").is_none());
+        }
+        accept(&mut harness);
+        let rows = harness.state().document().project().components()[0]
+            .accepted(DesignStep::MainDimensions)
+            .cloned()
+            .unwrap();
+        rows.into_keys().collect::<Vec<_>>()
+    };
+    let open = accepted(false);
+    assert!(open.iter().any(|k| k.ends_with("Outlet diameter d₂")));
+    assert_eq!(accepted(true), open);
+}
+
+#[test]
 fn other_units_or_language_mark_no_row() {
     let mut harness = harness();
     accept(&mut harness);

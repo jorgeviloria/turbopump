@@ -202,11 +202,50 @@ pub(crate) fn show(ui: &mut Ui, cx: &mut EditCtx<'_>) {
         d.remove::<StepStatus>(status_id());
         d.insert_temp(showing_id(), AcceptedRows::new());
     });
+    ui.data_mut(|d| d.remove::<bool>(folded_seen_id()));
     let selection = *cx.selection;
     widgets::shared_columns(ui, |ui| match selection {
         Selection::Setup => setup(ui, cx),
         Selection::Step(id, step) => step_panel(ui, cx, id, step),
     });
+    // The rows of folded sections are not drawn: draw the step again with every section
+    // open in a context of its own, never painted, deaf to the pointer and out of the
+    // accessibility tree, so that what they show is noted too, for an accept to keep.
+    if let Selection::Step(id, step) = selection
+        && ui
+            .data(|d| d.get_temp::<bool>(folded_seen_id()))
+            .unwrap_or(false)
+    {
+        let width = ui.available_width().max(300.0);
+        let rows = ALL_OPEN.with(|all_open| {
+            let mut rows = None;
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(width, 4000.0),
+                )),
+                ..Default::default()
+            };
+            let mut output = all_open.run_ui(input, |ui| {
+                ui.data_mut(|d| {
+                    d.insert_temp(all_open_id(), true);
+                    d.insert_temp(showing_id(), AcceptedRows::new());
+                });
+                widgets::shared_columns(ui, |ui| step_panel(ui, cx, id, step));
+                rows = ui.data(|d| d.get_temp::<AcceptedRows>(showing_id()));
+            });
+            output.textures_delta.clear();
+            rows
+        });
+        if let Some(rows) = rows {
+            ui.data_mut(|d| {
+                let showing = d.get_temp_mut_or_default::<AcceptedRows>(showing_id());
+                for (key, value) in rows {
+                    showing.entry(key).or_insert(value);
+                }
+            });
+        }
+    }
     // What the rows showed, for an accept to keep. A step done out of sight, or in an
     // older file, keeps them the first time it shows, and rows of a section opened
     // later join them.
@@ -475,6 +514,25 @@ fn status_id() -> egui::Id {
     egui::Id::new("properties_status")
 }
 
+thread_local! {
+    // Where a step is drawn with every section open; the interface runs on one thread.
+    static ALL_OPEN: egui::Context = {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        ctx
+    };
+}
+
+/// Set while the step is drawn out of sight with every section open.
+fn all_open_id() -> egui::Id {
+    egui::Id::new("properties_all_open")
+}
+
+/// Set when a section of the shown step was drawn folded.
+fn folded_seen_id() -> egui::Id {
+    egui::Id::new("properties_folded_seen")
+}
+
 /// Where the rows of the shown step note what they show, by [`row_key`].
 fn showing_id() -> egui::Id {
     egui::Id::new("properties_showing")
@@ -589,6 +647,16 @@ pub(crate) fn section_kind(ui: &mut Ui, title: &str, hint: &str, kind: Kind) -> 
         .data(|d| d.get_temp::<(u32, bool)>(key))
         .filter(|(g, _)| *g == generation)
         .map_or(!folded, |(_, open)| open);
+    // Out of sight every section is open, for what its rows show; in sight, a folded
+    // one asks for that pass.
+    if ui
+        .data(|d| d.get_temp::<bool>(all_open_id()))
+        .unwrap_or(false)
+    {
+        open = true;
+    } else if !open {
+        ui.data_mut(|d| d.insert_temp(folded_seen_id(), true));
+    }
     ui.add_space(8.0);
     ui.horizontal(|ui| {
         let caret = if open {
