@@ -242,11 +242,6 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "The casing walls beside the impeller: the front chamber down to the annular seal, the rear one down to the shaft seal",
         "Las paredes de carcasa junto al rodete: la cámara delantera hasta el sello anular y la trasera hasta el sello del eje",
     ),
-    ("Neck length", "Longitud del cuello"),
-    (
-        "Of the shroud upstream of the inlet, where the annular seal runs; automatic: 0.12·d_sp (Gülich Chap. 3.6.2); 0 for none",
-        "De la tapa aguas arriba de la entrada, donde va el sello anular; automático: 0,12·d_sp (Gülich, cap. 3.6.2); 0 para ninguno",
-    ),
     ("Design the side chambers", "Diseñar las cámaras laterales"),
     ("Axial gap s_ax", "Holgura axial s_ax"),
     (
@@ -1220,6 +1215,103 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "La geometría del rodete tiene errores; corrígelos antes.",
     ),
     ("Wall thickness", "Espesor de pared"),
+    ("Front seal", "Sello delantero"),
+    ("Rear seal", "Sello trasero"),
+    ("Seal diameter", "Diámetro del sello"),
+    ("Seal length", "Largo del sello"),
+    ("Radial clearance", "Holgura radial"),
+    ("Impeller ring", "Anillo del rodete"),
+    ("Casing ring", "Anillo de la carcasa"),
+    ("Impeller ring thickness", "Espesor anillo rodete"),
+    ("Casing ring thickness", "Espesor anillo carcasa"),
+    ("Performance view", "vista de Rendimiento"),
+    (
+        "Set them in the Performance view",
+        "Se ponen en la vista de Rendimiento",
+    ),
+    (
+        "An annular seal between the impeller and the casing, with an optional pair of replaceable wear rings, one on the impeller and one in the casing",
+        "Un sello anular entre el rodete y la carcasa, con un par opcional de anillos de desgaste reemplazables, uno en el rodete y otro en la carcasa",
+    ),
+    ("Back vanes", "Álabes de rebombeo"),
+    (
+        "Short ribs on the back of the hub disk that drag the fluid of the rear chamber round with the impeller: the pressure on the back falls and so does the axial thrust (Gülich §9.2.7)",
+        "Nervios cortos en la cara trasera del disco que arrastran el fluido de la cámara trasera con el rodete: baja la presión sobre la cara trasera y con ella el empuje axial (Gülich §9.2.7)",
+    ),
+    (
+        "Fit the vanes; switched off, the values below are kept",
+        "Poner los álabes; apagados, se conservan los valores de abajo",
+    ),
+    ("Count", "Cantidad"),
+    (
+        "Automatic: 4 below d₂ = 200 mm, else 6 (Gülich Table 9.3)",
+        "Automático: 4 por debajo de d₂ = 200 mm, si no 6 (tabla 9.3 de Gülich)",
+    ),
+    (
+        "Radial and straight (Gülich §9.2.7), or curved like the main blades",
+        "Radiales y rectos (Gülich §9.2.7), o curvos como los álabes principales",
+    ),
+    ("Radial", "Radial"),
+    ("Curved", "Curvo"),
+    ("Vane angle β_v", "Ángulo del álabe β_v"),
+    (
+        "Measured from the circumferential direction, like the blade angle β (90° is radial); the vane turns in the sense of the main blades",
+        "Medido desde la dirección circunferencial, como el ángulo β del álabe (90° es radial); el álabe gira en el sentido de los álabes principales",
+    ),
+    (
+        "Automatic: 0.80·d₂ (Gülich Table 9.3: 0.75 to 0.85)",
+        "Automático: 0,80·d₂ (tabla 9.3 de Gülich: 0,75 a 0,85)",
+    ),
+    ("Inner diameter", "Diámetro interior"),
+    (
+        "Automatic: the boss plus a wall on each side (our choice); with the rear seal on, no lower than its casing ring",
+        "Automático: el cubo más una pared a cada lado (elección nuestra); con el sello trasero activo, no menos que su anillo de la carcasa",
+    ),
+    (
+        "Axial height h; automatic: 0.04·r₂ (Gülich Table 9.3: 0.03 to 0.05)",
+        "Altura axial h; automático: 0,04·r₂ (tabla 9.3 de Gülich: 0,03 a 0,05)",
+    ),
+    (
+        "Circumferential width of a vane; automatic: 2·h (Gülich Table 9.3)",
+        "Ancho circunferencial de un álabe; automático: 2·h (tabla 9.3 de Gülich)",
+    ),
+    ("Tip clearance", "Holgura de punta"),
+    (
+        "Axial, between the vane tips and the casing; automatic: 0.2·h (Gülich Table 9.3). The value shown is the gap as built, larger than asked when the collar of the rear seal governs",
+        "Axial, entre las puntas de los álabes y la carcasa; automática: 0,2·h (tabla 9.3 de Gülich). El valor mostrado es la holgura construida, mayor que la pedida cuando manda el collar del sello trasero",
+    ),
+    ("Rear seal in the way", "El sello trasero estorba"),
+    (
+        "With the rear seal on, the vanes stop outside its casing ring. Nothing changes until you press the button",
+        "Con el sello trasero activo, los álabes terminan fuera de su anillo de la carcasa. Nada cambia hasta que pulses el botón",
+    ),
+    ("Turn off the rear seal", "Quitar el sello trasero"),
+    (
+        "Fit the seal; switched off, the values below are kept",
+        "Poner el sello; apagado, se conservan los valores de abajo",
+    ),
+    (
+        "Automatic: d₁ + 2t + 2·e_r with the impeller ring, d₁ + 2t without",
+        "Automático: d₁ + 2t + 2·e_r con el anillo del rodete, d₁ + 2t sin él",
+    ),
+    ("Automatic: d_sp", "Automático: d_sp"),
+    (
+        "Automatic: 0.12·d (Gülich Chap. 3.6.2)",
+        "Automático: 0,12·d (Gülich cap. 3.6.2)",
+    ),
+    ("Automatic: Gülich eq. 3.12", "Automático: Gülich ec. 3.12"),
+    (
+        "Automatic: max(0.03·d, 4 mm), our choice",
+        "Automático: máx(0,03·d, 4 mm), elección nuestra",
+    ),
+    (
+        "A replaceable wear ring pressed on the impeller",
+        "Un anillo de desgaste reemplazable, montado a presión en el rodete",
+    ),
+    (
+        "A replaceable wear ring fitted in the casing",
+        "Un anillo de desgaste reemplazable, montado en la carcasa",
+    ),
     (
         "Hub disk and shroud; automatic: max(3 mm, 0.02·d₂)",
         "Disco del cubo y carcasa; automático: máx(3 mm, 0,02·d₂)",
@@ -1265,6 +1357,18 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Flow domain", "Dominio fluido"),
     ("Diffuser flow domain", "Dominio fluido del difusor"),
     ("Volute flow domain", "Dominio fluido de la voluta"),
+    (
+        "{} cm³, {} (at the impeller density)",
+        "{} cm³, {} (con la densidad del rodete)",
+    ),
+    (
+        "{} cm³, {} (part of the impeller)",
+        "{} cm³, {} (parte del rodete)",
+    ),
+    ("Front impeller ring", "Anillo delantero del rodete"),
+    ("Front casing ring", "Anillo delantero de la carcasa"),
+    ("Rear impeller ring", "Anillo trasero del rodete"),
+    ("Rear casing ring", "Anillo trasero de la carcasa"),
     (
         "Every solid is a single valid solid.",
         "Cada sólido es un único sólido válido.",
@@ -2584,8 +2688,8 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Rozamiento de disco y pérdidas mecánicas",
     ),
     (
-        "front {}, rear {}, mechanical {} (Gülich eqs. T3.6.2, T3.6.3, T3.5.6a)",
-        "delantero {}, trasero {}, mecánicas {} (Gülich ecs. T3.6.2, T3.6.3, T3.5.6a)",
+        "front {}, rear {}{}, mechanical {} (Gülich eqs. T3.6.2, T3.6.3, T3.5.6a)",
+        "delantero {}, trasero {}{}, mecánicas {} (Gülich ecs. T3.6.2, T3.6.3, T3.5.6a)",
     ),
     ("Efficiency breakdown", "Desglose del rendimiento"),
     (
@@ -2686,6 +2790,14 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ),
     (", balance holes", ", agujeros de equilibrado"),
     (
+        " (with back vanes, eq. T9.3.4)",
+        " (con álabes de rebombeo, ec. T9.3.4)",
+    ),
+    (
+        "{} off the rear shroud (Gülich Table 9.3)",
+        "{} menos sobre el disco trasero (tabla 9.3 de Gülich)",
+    ),
+    (
         "Annular and shaft seals",
         "Anillo de desgaste y sello del eje",
     ),
@@ -2694,6 +2806,10 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "d_sp {}, d_D {}; estimación rápida de {} a {} (ec. T9.2.12)",
     ),
     ("Balance holes", "Agujeros de equilibrado"),
+    (
+        "The impeller has no rear seal: turn it on in the meridional contour",
+        "El rodete no tiene sello trasero: actívalo en el contorno meridional",
+    ),
     (
         "Holes in the rear shroud with an annular seal there: most of the axial force on the shrouds cancels (Gülich eq. T9.2.14)",
         "Agujeros en el disco trasero con un anillo de desgaste allí: se anula la mayor parte del empuje axial sobre los discos (Gülich ec. T9.2.14)",
@@ -3653,10 +3769,7 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "de Haller criterion: not below 0.7 on the outer streamline, or the flow stalls early and loses efficiency (Gülich, Chap. 7.2.1)",
         "Criterio de de Haller: no menos de 0.7 en la línea de corriente exterior, o el flujo se desprende antes y pierde rendimiento (Gülich, cap. 7.2.1)",
     ),
-    (
-        "Suction-face peak / outlet w",
-        "Pico de succión / w₂",
-    ),
+    ("Suction-face peak / outlet w", "Pico de succión / w₂"),
     (
         "Highest suction-face velocity over the mean outlet velocity: how much the suction face decelerates to the trailing edge. Lower is better",
         "Mayor velocidad en la cara de succión entre la velocidad media de salida: cuánto desacelera la cara de succión hasta el borde de salida. Cuanto menor, mejor",
@@ -3682,10 +3795,7 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Below zero the relative flow on the pressure face turns back and may separate (the last 5 % of the blade, where the flow slips, is left out)",
         "Por debajo de cero el flujo relativo en la cara de presión retrocede y puede desprenderse (se deja fuera el último 5 % del álabe, donde el flujo resbala)",
     ),
-    (
-        "Secondary-flow drive ΔC_p",
-        "Flujo secundario ΔC_p",
-    ),
+    ("Secondary-flow drive ΔC_p", "Flujo secundario ΔC_p"),
     (
         "Largest difference of reduced static pressure on the suction face between hub and shroud, over ½ρu₂². Above 0 it draws low-energy fluid to the shroud corner, where the wake forms; loading the hub further back than the shroud lowers it (Zangeneh, Goto & Harada 1998; Gülich, Chap. 8.9.4)",
         "Mayor diferencia de presión estática reducida en la cara de succión entre el cubo y la carcasa, entre ½ρu₂². Por encima de 0 arrastra fluido de baja energía a la esquina de la carcasa, donde se forma la estela; cargar el cubo más atrás que la carcasa la reduce (Zangeneh, Goto y Harada 1998; Gülich, cap. 8.9.4)",
@@ -3696,6 +3806,202 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
 
 /// Messages of the design code, most specific first.
 pub(super) static MESSAGES: &[(&str, &str)] = &[
+    (
+        "a double-entry impeller has no rear seal: the rear seal is left out",
+        "un rodete de doble entrada no tiene sello trasero: el sello trasero se omite",
+    ),
+    (
+        "the rear seal of {} mm reaches beyond the hub disk rim: it is trimmed to {} mm",
+        "el sello trasero de {} mm sale del borde del disco del cubo: se recorta a {} mm",
+    ),
+    (
+        "the {} seal clearance {} mm is below the {} mm Gülich recommends for a seal of {} mm",
+        "la holgura {} del sello, de {} mm, es menor que los {} mm que recomienda Gülich para un sello de {} mm",
+    ),
+    (
+        "the {} impeller ring of {} mm is trimmed to {} mm to leave the neck a wall",
+        "el anillo {} del rodete, de {} mm, se recorta a {} mm para dejar una pared al cuello",
+    ),
+    (
+        "the {} impeller ring of {} mm does not fit on the neck wall: it is left out",
+        "el anillo {} del rodete, de {} mm, no cabe sobre la pared del cuello: se omite",
+    ),
+    (
+        "the {} seal diameter {} mm is below the neck wall ({} mm): the seal cuts into the neck",
+        "el diámetro {} del sello, de {} mm, queda por debajo de la pared del cuello ({} mm): el sello corta el cuello",
+    ),
+    ("front", "delantero"),
+    ("rear", "trasero"),
+    (
+        "the rear seal collar (inner radius {} mm) would sit on the boss ({} mm): the collar is left out",
+        "el collar del sello trasero (radio interior {} mm) quedaría sobre el cubo ({} mm): se omite el collar",
+    ),
+    (
+        "the rear seal seat ({} mm) is not below the hub disk rim ({} mm): the collar is left out",
+        "el asiento del sello trasero ({} mm) no queda por debajo del borde del disco del cubo ({} mm): se omite el collar",
+    ),
+    (
+        "the front seal shoulder reaches only {} mm on the shroud, below the seal radius of {} mm: the shoulder is made on the face",
+        "el resalte del sello delantero llega solo a {} mm sobre la carcasa, por debajo del radio del sello, de {} mm: el resalte se hace sobre la cara",
+    ),
+    (
+        "the automatic {} material could not be built ({}); a plain one is used",
+        "no se pudo construir el material automático de {} ({}); se usa uno liso",
+    ),
+    (
+        "the back vanes reach out to {} mm, beyond the disk rim ({} mm): they stop at the rim",
+        "los álabes de rebombeo llegan hasta {} mm, más allá del borde del disco ({} mm): se detienen en el borde",
+    ),
+    (
+        "the back vanes stop outside the rear casing ring: their inner radius is raised from {} mm to {} mm",
+        "los álabes de rebombeo quedarían fuera del anillo trasero de la carcasa: su radio interior sube de {} mm a {} mm",
+    ),
+    (
+        "the {} back vanes {} mm wide overlap at their inner radius ({} mm)",
+        "los {} álabes de rebombeo, de {} mm de ancho, se solapan en su radio interior ({} mm)",
+    ),
+    (
+        "the back vanes have no room: the outer radius ({} mm) is not above the inner one ({} mm)",
+        "los álabes de rebombeo no tienen espacio: el radio exterior ({} mm) no supera al interior ({} mm)",
+    ),
+    (
+        "the back vanes find no back face of the disk between their radii",
+        "los álabes de rebombeo no encuentran cara trasera del disco entre sus radios",
+    ),
+    (
+        "the back vanes {} mm high do not fit the curvature of the back face; the face is moved straight back",
+        "los álabes de rebombeo de {} mm de alto no caben en la curvatura de la cara trasera; la cara se desplaza hacia atrás en línea recta",
+    ),
+    (
+        "a double-entry impeller has no rear shroud: the back vanes are left out",
+        "un rodete de doble entrada no tiene disco trasero: los álabes de rebombeo se omiten",
+    ),
+    (
+        "the front seal is off: the front chamber closes on the face of the shroud cover",
+        "el sello delantero está apagado: la cámara delantera se cierra sobre la cara de la tapa",
+    ),
+    (
+        "the front casing wall {} mm from the shroud does not fit its curvature; a straight one is used",
+        "la pared delantera de la carcasa, a {} mm de la tapa, no cabe en su curvatura; se usa una recta",
+    ),
+    (
+        "the rear seal collar keeps the rear casing wall {} mm from the back vane tips, more than their {} mm clearance",
+        "el collar del sello trasero mantiene la pared trasera de la carcasa a {} mm de las puntas de los álabes de rebombeo, más que su holgura de {} mm",
+    ),
+    (
+        "the rear casing wall drawn is closer to the back vanes than their tip clearance ({} mm)",
+        "la pared trasera de la carcasa dibujada queda más cerca de los álabes de rebombeo que su holgura de punta ({} mm)",
+    ),
+    (
+        "balance holes need the rear seal; they are left out",
+        "los agujeros de equilibrado necesitan el sello trasero; se omiten",
+    ),
+    (
+        "the front seal is off in the contour: the thrust and the leakage assume the automatic seal d₁ + 2t that is not drawn",
+        "el sello delantero está apagado en el contorno: el empuje y la fuga suponen el sello automático d₁ + 2t, que no está dibujado",
+    ),
+    (
+        "the back vanes need a count, a positive height and a gap that is not negative",
+        "los álabes de rebombeo necesitan un número, una altura positiva y una holgura no negativa",
+    ),
+    (
+        "the back vanes must run outward up to d₂ = {} mm at most",
+        "los álabes de rebombeo deben ir hacia fuera hasta d₂ = {} mm como máximo",
+    ),
+    (
+        "the {} wear ring is left out: the {} wire is drawn by hand, so its seat is not known",
+        "el anillo de desgaste {} se omite: el alambre de {} está dibujado a mano y no se conoce su asiento",
+    ),
+    (
+        "the front impeller wear ring is left out: the shroud wire has no seat on the ring radius",
+        "el anillo de desgaste delantero del rodete se omite: el alambre de la carcasa no tiene asiento en el radio del anillo",
+    ),
+    (
+        "the front casing wear ring is left out: the shroud wire has no seat on the ring radius",
+        "el anillo de desgaste delantero de la carcasa se omite: el alambre de la carcasa no tiene asiento en el radio del anillo",
+    ),
+    (
+        "the front casing ring follows the impeller seat run: the chamber wall does not run on the casing seat",
+        "el anillo delantero de la carcasa sigue el tramo del asiento del rodete: la pared de la cámara no corre sobre el asiento de la carcasa",
+    ),
+    (
+        "the back face of the disk does not reach the {} wear ring radius: the ring spans the whole collar",
+        "la cara trasera del disco no llega al radio del anillo de desgaste {}: el anillo ocupa todo el collar",
+    ),
+    (
+        "the {} wear ring is left out: the back face of the disk leaves no room for it on the collar",
+        "el anillo de desgaste {} se omite: la cara trasera del disco no le deja sitio en el collar",
+    ),
+    (
+        "the {} wear ring is left out: the hub disk wire has no collar seat",
+        "el anillo de desgaste {} se omite: el alambre del disco del cubo no tiene asiento de collar",
+    ),
+    (
+        "the {} wear ring is left out: it has no {} extent",
+        "el anillo de desgaste {} se omite: no tiene extensión {}",
+    ),
+    ("radial", "radial"),
+    ("axial", "axial"),
+    (
+        "the {} is {} mm long, shorter than the {} mm of its seal",
+        "el {} mide {} mm, menos que los {} mm de su sello",
+    ),
+    ("front impeller", "delantero del rodete"),
+    ("front casing", "delantero de la carcasa"),
+    ("rear impeller", "trasero del rodete"),
+    ("rear casing", "trasero de la carcasa"),
+    ("front impeller ring", "anillo delantero del rodete"),
+    ("front casing ring", "anillo delantero de la carcasa"),
+    ("rear impeller ring", "anillo trasero del rodete"),
+    ("rear casing ring", "anillo trasero de la carcasa"),
+    (
+        "the curved back vanes need an angle above 0 and up to 90 degrees",
+        "los álabes de rebombeo curvos necesitan un ángulo mayor que 0 y de hasta 90 grados",
+    ),
+    (
+        "the back vanes are not a valid solid",
+        "los álabes de rebombeo no son un sólido válido",
+    ),
+    (
+        "the back vanes were not built: {}",
+        "no se construyeron los álabes de rebombeo: {}",
+    ),
+    (
+        "the {} could not be taken out of the side chambers",
+        "no se pudo restar el {} de las cámaras laterales",
+    ),
+    (
+        "the back vanes could not be taken out of the side chambers",
+        "no se pudieron restar los álabes de rebombeo de las cámaras laterales",
+    ),
+    (
+        "the back vanes left out: the join added less than half of their volume",
+        "los álabes de rebombeo se omiten: la unión añadió menos de la mitad de su volumen",
+    ),
+    (
+        "the volume the back vanes add to the impeller could not be checked",
+        "no se pudo comprobar el volumen que los álabes de rebombeo añaden al rodete",
+    ),
+    (
+        "the back vanes could not be joined to the impeller",
+        "no se pudieron unir los álabes de rebombeo al rodete",
+    ),
+    (
+        "the back vanes have {} = {}, outside the {} to {} tested behind Gülich Table 9.3: their effect on the axial force and the power is an extrapolation",
+        "los álabes de rebombeo tienen {} = {}, fuera del rango ensayado de {} a {} de la tabla 9.3 de Gülich: su efecto sobre el empuje axial y la potencia es una extrapolación",
+    ),
+    (
+        "Gülich eqs. T9.3.2 and T9.3.4 hold for radial back vanes only: the axial force and the power of the curved vanes are estimates",
+        "las ecs. T9.3.2 y T9.3.4 de Gülich solo valen para álabes de rebombeo radiales: el empuje axial y la potencia de los álabes curvos son estimaciones",
+    ),
+    (
+        "Gülich gives no rule for back vanes together with a rear seal: they turn the liquid faster above the seal only, an estimate outside the tested range",
+        "Gülich no da ninguna regla para álabes de rebombeo junto con un sello trasero: aceleran el líquido solo por encima del sello, una estimación fuera del rango ensayado",
+    ),
+    (
+        "a double-entry impeller has no rear shroud: its back vanes are left out of the axial force and the power",
+        "un rodete de doble entrada no tiene disco trasero: sus álabes de rebombeo quedan fuera del empuje axial y de la potencia",
+    ),
     (
         "the fillet over the cutwater cannot be negative",
         "el redondeo sobre el corte de agua no puede ser negativo",

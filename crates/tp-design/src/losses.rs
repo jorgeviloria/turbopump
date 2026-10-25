@@ -12,6 +12,14 @@
 //! - Disk friction on each shroud, P_RR = k_RR·ρ·ω³·R⁵·{1 − (R_n/R)⁵} (eq. T3.6.2), with
 //!   k_RR of eq. T3.6.3 for hydraulically smooth shrouds and the leakage factor f_L of
 //!   eq. T3.6.7. The front shroud runs from the seal, the rear one from the shaft seal.
+//! - Back vanes on the rear shroud, after Gülich Table 9.3 (Möhring 1976):
+//!   P_Rs = ζ_Rs·ρ·ω³·r₂⁵ with ζ_Rs = 0.1/Re_u^0.2·{x⁴·((h + s)/r₂ + 0.24) +
+//!   ¼·((h + s)/r₂)^0.1·(1 − x⁵)}, x = d_Rs/d₂ and Re_u = u₂·r₂/ν (eq. T9.3.4). Its second
+//!   term covers the plain ring between d_Rs and d₂, so we read P_Rs as the power of the
+//!   whole rear face with vanes: it replaces the disk friction of the rear shroud
+//!   instead of adding to it (our reading), without the leakage factor. The equation
+//!   holds for radial vanes; curved ones take it too, with a warning (see
+//!   [`crate::axial_thrust::AxialThrust::back_vane_warnings`]).
 //! - Mechanical losses P_m/P = 0.0045·(Q_Ref/Q)^0.4·(n_Ref/n)^0.3 (eq. T3.5.6a), constant
 //!   with flow.
 //!
@@ -160,6 +168,15 @@ pub fn disk_friction_power(k_rr: f64, density: f64, omega: f64, r: f64, inner: f
     k_rr * density * omega.powi(3) * r.powi(5) * (1.0 - (inner / r).powi(5))
 }
 
+/// ζ_Rs of back vanes trimmed to `diameter_ratio` = d_Rs/d₂ with height plus tip gap
+/// `axial_ratio` = (h + s)/r₂ at Re_u = u₂·r₂/ν (Gülich eq. T9.3.4); the power of the
+/// rear face with them is ζ_Rs·ρ·ω³·r₂⁵.
+pub fn back_vane_power_coefficient(reynolds: f64, diameter_ratio: f64, axial_ratio: f64) -> f64 {
+    let x = diameter_ratio;
+    0.1 / reynolds.powf(0.2)
+        * (x.powi(4) * (axial_ratio + 0.24) + 0.25 * axial_ratio.powf(0.1) * (1.0 - x.powi(5)))
+}
+
 /// Mechanical losses for power `power` (W) at flow `flow` (m³/s) and speed `omega`
 /// (rad/s): P_m = 0.0045·P·(Q_Ref/Q)^0.4·(n_Ref/n)^0.3 with Q_Ref = 1 m³/s and
 /// n_Ref = 1500 rpm (Gülich eq. T3.5.6a), W.
@@ -187,9 +204,12 @@ pub struct SecondaryLosses {
     /// η_v = Q/(Q + Q_sp) (eq. T3.5.9).
     pub volumetric_efficiency: f64,
     /// Disk friction of the front and rear shrouds (both front shrouds of a double-entry
-    /// impeller), W.
+    /// impeller), W; with back vanes, the rear one is the power of the face with them
+    /// (eq. T9.3.4).
     pub front_friction: f64,
     pub rear_friction: f64,
+    /// Back vanes on the rear shroud, whose power `rear_friction` is then.
+    pub back_vanes: bool,
     /// k_RR of the front shroud.
     pub friction_coefficient: f64,
     /// Mechanical losses, W.
@@ -270,6 +290,7 @@ impl SecondaryLosses {
             volumetric_efficiency: 1.0,
             front_friction: 0.0,
             rear_friction: 0.0,
+            back_vanes: false,
             friction_coefficient: 0.0,
             mechanical: 0.0,
             tip_speed: u2,
@@ -307,9 +328,22 @@ impl SecondaryLosses {
                 }
                 None => 1.0,
             };
-            let k_rear = disk_friction_coefficient(reynolds, r2, gap, f_l);
-            losses.rear_friction =
-                disk_friction_power(k_rear, rho, omega, r2, axial.shaft_seal_diameter / 2.0);
+            losses.rear_friction = match &axial.back_vanes {
+                // The vanes replace the disk friction of the rear face (eq. T9.3.4).
+                Some(v) => {
+                    losses.back_vanes = true;
+                    let zeta = back_vane_power_coefficient(
+                        reynolds,
+                        v.outer_diameter / d2,
+                        (v.height + v.gap) / r2,
+                    );
+                    zeta * rho * omega.powi(3) * r2.powi(5)
+                }
+                None => {
+                    let k_rear = disk_friction_coefficient(reynolds, r2, gap, f_l);
+                    disk_friction_power(k_rear, rho, omega, r2, axial.shaft_seal_diameter / 2.0)
+                }
+            };
         }
         // Mechanical losses against the coupling power of the design statistics.
         losses.mechanical = mechanical_loss(design.stage_power, duty.flow, omega);
@@ -601,5 +635,66 @@ mod tests {
         );
         // Small pumps lose a larger share.
         assert!(mechanical_loss(1e4, 0.01, omega) / 1e4 > 0.01);
+    }
+    #[test]
+    fn back_vanes_cost_power() {
+        use crate::axial_thrust::{AxialThrustInput, BackVaneLaw};
+        use crate::pump::{CentrifugalPumpInput, design};
+        let duty = PumpDuty {
+            flow: 100.0 / 3600.0,
+            head: 32.0,
+            machine_head: 32.0,
+            stages: 1,
+            speed: 2900.0 * PI / 30.0,
+            density: 998.2,
+            vapor_pressure: 2339.0,
+            inlet_total_pressure: 101_325.0,
+            kinematic_viscosity: 1.0e-6,
+        };
+        let d = design(&duty, &CentrifugalPumpInput::default()).unwrap();
+        let r2 = d.outlet_diameter / 2.0;
+        // The defaults of Gülich Table 9.3: d_Rs = 0.8·d₂, h = 0.04·r₂, s = 0.008·r₂.
+        let vanes = BackVaneLaw {
+            count: 6,
+            radial: true,
+            inner_diameter: 0.3 * d.outlet_diameter,
+            outer_diameter: 0.8 * d.outlet_diameter,
+            height: 0.04 * r2,
+            gap: 0.008 * r2,
+            rear_seal: false,
+        };
+        let losses = |back_vanes| {
+            let input = AxialThrustInput {
+                back_vanes,
+                ..Default::default()
+            };
+            let axial = AxialThrust::new(&duty, &d, &input, false).unwrap();
+            SecondaryLosses::new(
+                &duty,
+                &d,
+                &axial,
+                &LossInput::default(),
+                false,
+                d.theoretical_head,
+            )
+            .unwrap()
+        };
+        let plain = losses(None);
+        let with = losses(Some(vanes));
+        // Eq. T9.3.4 by hand: it replaces the disk friction of the rear shroud.
+        let omega = duty.speed;
+        let re = omega * r2 * r2 / 1e-6;
+        let zeta = 0.1 / re.powf(0.2)
+            * (0.8f64.powi(4) * (0.048 + 0.24)
+                + 0.25 * 0.048f64.powf(0.1) * (1.0 - 0.8f64.powi(5)));
+        assert_relative_eq!(
+            with.rear_friction,
+            zeta * 998.2 * omega.powi(3) * r2.powi(5),
+            max_relative = 1e-9
+        );
+        assert!(with.rear_friction > plain.rear_friction);
+        assert!(with.back_vanes && !plain.back_vanes);
+        assert_eq!(with.front_friction, plain.front_friction);
+        assert!(with.secondary_power() > plain.secondary_power());
     }
 }

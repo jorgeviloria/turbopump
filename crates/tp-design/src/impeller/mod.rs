@@ -3,6 +3,7 @@
 //! The geometry steps start from the main dimensions, gathered in [`ImpellerBasis`],
 //! so the same code serves any machine type that produces them.
 
+pub mod back_vanes;
 pub mod blade;
 pub mod center;
 pub mod chambers;
@@ -15,6 +16,7 @@ pub mod material;
 pub mod meridian;
 pub mod potential;
 pub mod quality;
+pub mod seals;
 pub mod wall;
 
 use std::f64::consts::PI;
@@ -229,12 +231,14 @@ impl ImpellerGeometry {
     }
 }
 
-/// Builds the meridional contour, the meridional flow and the blades.
+/// Builds the meridional contour, the meridional flow and the blades. `eyes` is 1 or 2 (a
+/// double-entry impeller has no rear seal).
 pub fn build(
     basis: &ImpellerBasis,
     input: &ImpellerGeometryInput,
+    eyes: f64,
 ) -> Result<ImpellerGeometry, DesignError> {
-    let mut contour = MeridionalContour::build(basis, &input.meridional)?;
+    let mut contour = MeridionalContour::build(basis, &input.meridional, eyes)?;
     if input.properties.shape.is_cylindrical()
         && input.meridional.leading_edge_hub.is_auto()
         && input.meridional.leading_edge_shroud.is_auto()
@@ -474,7 +478,7 @@ pub(crate) mod tests {
     pub(crate) fn reference_geometry() -> ImpellerGeometry {
         let (d, input) = reference_design();
         let basis = ImpellerBasis::from_pump(&d, &input, 1.0);
-        build(&basis, &ImpellerGeometryInput::default()).unwrap()
+        build(&basis, &ImpellerGeometryInput::default(), 1.0).unwrap()
     }
 
     fn reference_design() -> (CentrifugalPumpDesign, CentrifugalPumpInput) {
@@ -509,7 +513,7 @@ pub(crate) mod tests {
             ImpellerGeometryInput::default(),
             with_flow(MeridionalFlow::QuasiOneDimensional),
         ] {
-            let g = build(&basis, &input).unwrap();
+            let g = build(&basis, &input, 1.0).unwrap();
             assert!(g.warnings.is_empty(), "{:?}", g.warnings);
             assert_eq!(g.blade.sections.len(), DEFAULT_SPANS as usize);
             assert_eq!(g.blade.count, d.blade_count);
@@ -526,8 +530,8 @@ pub(crate) mod tests {
     fn potential_flow_sets_the_inlet_angles() {
         let (d, input) = reference_design();
         let basis = ImpellerBasis::from_pump(&d, &input, 1.0);
-        let quasi = build(&basis, &with_flow(MeridionalFlow::QuasiOneDimensional)).unwrap();
-        let potential = build(&basis, &ImpellerGeometryInput::default()).unwrap();
+        let quasi = build(&basis, &with_flow(MeridionalFlow::QuasiOneDimensional), 1.0).unwrap();
+        let potential = build(&basis, &ImpellerGeometryInput::default(), 1.0).unwrap();
         let hub = |g: &ImpellerGeometry| g.blade.sections[0].leading_edge;
         let shroud = |g: &ImpellerGeometry| g.blade.sections.last().unwrap().leading_edge;
         // In the bend the shroud, the inner wall, runs faster and the hub slower than
@@ -571,7 +575,7 @@ pub(crate) mod tests {
     fn blade_loading_of_the_reference_impeller() {
         let (d, input) = reference_design();
         let basis = ImpellerBasis::from_pump(&d, &input, 1.0);
-        let g = build(&basis, &with_flow(MeridionalFlow::QuasiOneDimensional)).unwrap();
+        let g = build(&basis, &with_flow(MeridionalFlow::QuasiOneDimensional), 1.0).unwrap();
         let loading = g.blade_loading;
         // ξ_al = (40/35.92)^0.77
         assert_relative_eq!(
@@ -585,7 +589,7 @@ pub(crate) mod tests {
             loading.ratio()
         );
         // On the potential flow with a common wrap too.
-        let g = build(&basis, &ImpellerGeometryInput::default()).unwrap();
+        let g = build(&basis, &ImpellerGeometryInput::default(), 1.0).unwrap();
         assert!(
             (1.0 - BladeLoading::BAND..1.0 + BladeLoading::BAND).contains(&g.blade_loading.ratio())
         );
@@ -609,7 +613,7 @@ pub(crate) mod tests {
             input.blade_count = crate::Param::Manual(z);
             let d = design(&duty, input).unwrap();
             let basis = ImpellerBasis::from_pump(&d, input, 1.0);
-            build(&basis, &ImpellerGeometryInput::default())
+            build(&basis, &ImpellerGeometryInput::default(), 1.0)
                 .unwrap()
                 .blade_loading
                 .ratio()
@@ -623,7 +627,7 @@ pub(crate) mod tests {
             design(&duty, &input).unwrap()
         };
         let basis = ImpellerBasis::from_pump(&d, &input, 1.0);
-        let g = build(&basis, &ImpellerGeometryInput::default()).unwrap();
+        let g = build(&basis, &ImpellerGeometryInput::default(), 1.0).unwrap();
         assert!(
             g.warnings.iter().any(|w| w.contains("heavily loaded")),
             "{:?}",
@@ -637,7 +641,7 @@ pub(crate) mod tests {
     ) -> Result<ImpellerGeometry, DesignError> {
         let mut g = ImpellerGeometryInput::default();
         g.properties.shape = shape;
-        build(basis, &g)
+        build(basis, &g, 1.0)
     }
 
     /// θ of a section at radius `r`, interpolated between its stations.
@@ -744,7 +748,7 @@ pub(crate) mod tests {
         let d = design(&duty, &input).unwrap();
         assert!(d.semi_axial);
         let basis = ImpellerBasis::from_pump(&d, &input, 1.0);
-        build(&basis, &ImpellerGeometryInput::default()).unwrap()
+        build(&basis, &ImpellerGeometryInput::default(), 1.0).unwrap()
     }
 
     #[test]
@@ -808,6 +812,6 @@ pub(crate) mod tests {
         let basis = ImpellerBasis::from_pump(&d, &input, 1.0);
         let mut g = ImpellerGeometryInput::default();
         g.properties.spans = crate::Param::Manual(1);
-        assert!(build(&basis, &g).is_err());
+        assert!(build(&basis, &g, 1.0).is_err());
     }
 }

@@ -90,6 +90,7 @@ jobs:
           --skip a_double_volute_is_one_valid_solid
           --skip spiral_development_options_give_one_valid_flow_domain
           --skip the_casing_fills_and_rounds_the_groove_over_the_cutwater
+          --skip back_vanes_join_the_impeller
       - name: Tests sin CoolProp
         run: cargo test -p tp-fluids --no-default-features
       - name: CLI sin CAD

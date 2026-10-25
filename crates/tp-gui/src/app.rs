@@ -2813,14 +2813,42 @@ mod tests {
         let app = harness.state();
         let c = &app.derived.geometry(id).unwrap().contour;
         let thickness = c.material.wall_thickness;
-        let cover = c.shroud_material.segments()[1].eval(0.5);
+        // The offset face is the B-spline of the wire. The click goes where the pointer
+        // is farthest on screen from every handle of the wire (its joints and control
+        // points), so that the segment, not a handle, is under it.
+        let face_index = c
+            .shroud_material
+            .segments()
+            .iter()
+            .position(|s| s.kind() == tp_design::impeller::wall::SegmentKind::BSpline)
+            .expect("the offset face is a B-spline");
+        let handles: Vec<egui::Pos2> = c
+            .shroud_material
+            .points()
+            .into_iter()
+            .map(|(_, p)| screen_of(app, p))
+            .collect();
+        let t = (1..20)
+            .map(|k| f64::from(k) / 20.0)
+            .max_by(|a, b| {
+                let clear = |t: &f64| {
+                    let at = screen_of(app, c.shroud_material.segments()[face_index].eval(*t));
+                    handles
+                        .iter()
+                        .map(|h| h.distance(at))
+                        .fold(f32::INFINITY, f32::min)
+                };
+                clear(a).total_cmp(&clear(b))
+            })
+            .unwrap();
+        let cover = c.shroud_material.segments()[face_index].eval(t);
         let at = screen_of(app, cover);
         right_click(&mut harness, at);
         harness.get_by_label("Apply").click();
         harness.run();
         let c = &harness.state().derived.geometry(id).unwrap().contour;
         assert!(meridional(harness.state()).shroud_material.is_some());
-        let moved = c.shroud_material.segments()[1].eval(0.5);
+        let moved = c.shroud_material.segments()[face_index].eval(t);
         let wall = c.shroud.sample(2000);
         let gap = |p: tp_math::DVec2| {
             wall.iter()

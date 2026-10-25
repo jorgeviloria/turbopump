@@ -244,7 +244,7 @@ mod tests {
     fn duct(chambers: bool, input: DuctInput) -> (MeridionalContour, InletDuct) {
         let mut meridional = MeridionalInput::default();
         meridional.chambers.enabled = chambers;
-        let contour = MeridionalContour::build(&basis(), &meridional).unwrap();
+        let contour = MeridionalContour::build(&basis(), &meridional, 1.0).unwrap();
         let duct = build(&contour, &basis(), &input);
         (contour, duct)
     }

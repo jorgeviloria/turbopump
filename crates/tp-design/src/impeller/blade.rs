@@ -1477,7 +1477,7 @@ mod tests {
 
     fn blade_with(mean_lines: MeanLineInput, edges: EdgeInput) -> Blade {
         let b = basis();
-        let contour = MeridionalContour::build(&b, &MeridionalInput::default()).unwrap();
+        let contour = MeridionalContour::build(&b, &MeridionalInput::default(), 1.0).unwrap();
         let channel = Channel::build(&contour, b.flow, 61, 5);
         Blade::build(
             &b,
@@ -1708,7 +1708,7 @@ mod tests {
             ..EdgeInput::default()
         };
         let b = basis();
-        let contour = MeridionalContour::build(&b, &MeridionalInput::default()).unwrap();
+        let contour = MeridionalContour::build(&b, &MeridionalInput::default(), 1.0).unwrap();
         let channel = Channel::build(&contour, b.flow, 61, 5);
         let built = Blade::build(
             &b,
@@ -1757,7 +1757,7 @@ mod tests {
     #[test]
     fn overlapping_edges_are_rejected() {
         let b = basis();
-        let contour = MeridionalContour::build(&b, &MeridionalInput::default()).unwrap();
+        let contour = MeridionalContour::build(&b, &MeridionalInput::default(), 1.0).unwrap();
         let channel = Channel::build(&contour, b.flow, 61, 5);
         let long = EdgeShape::Ellipse { ratio: 60.0 };
         let built = Blade::build(
@@ -1927,7 +1927,7 @@ mod tests {
     #[test]
     fn a_cylindrical_blade_refuses_a_loading() {
         let b = basis();
-        let contour = MeridionalContour::build(&b, &MeridionalInput::default()).unwrap();
+        let contour = MeridionalContour::build(&b, &MeridionalInput::default(), 1.0).unwrap();
         let channel = Channel::build(&contour, b.flow, 61, 5);
         let built = Blade::build(
             &b,
@@ -2027,7 +2027,7 @@ mod tests {
     #[test]
     fn a_uniform_inlet_velocity_sets_every_leading_edge_with_the_eye_velocity() {
         let b = basis();
-        let contour = MeridionalContour::build(&b, &MeridionalInput::default()).unwrap();
+        let contour = MeridionalContour::build(&b, &MeridionalInput::default(), 1.0).unwrap();
         let channel = Channel::build(&contour, b.flow, 61, 5);
         let blade = Blade::build(
             &b,
@@ -2121,7 +2121,7 @@ mod tests {
     #[test]
     fn thick_blades_are_rejected() {
         let b = basis();
-        let contour = MeridionalContour::build(&b, &MeridionalInput::default()).unwrap();
+        let contour = MeridionalContour::build(&b, &MeridionalInput::default(), 1.0).unwrap();
         let channel = Channel::build(&contour, b.flow, 61, 5);
         let profiles = ProfileInput {
             thickness_leading: Param::Manual(0.03),

@@ -392,6 +392,97 @@ mod tests {
         }
     }
 
+    /// The warnings the seals, the back vanes and the chambers raise on odd inputs have
+    /// a Spanish message (the check above only sees the literals of `tr` and `tf`).
+    #[test]
+    fn contour_warnings_have_spanish() {
+        use tp_design::Param::Manual;
+        use tp_design::impeller::back_vanes::VaneShape;
+        let project = crate::default_project();
+        let id = project.components()[0].id();
+        type Change = Box<dyn Fn(&mut tp_design::impeller::ImpellerGeometryInput)>;
+        let cases: Vec<Change> = vec![
+            Box::new(|i| i.meridional.seals.front.diameter = Manual(0.001)),
+            Box::new(|i| {
+                i.meridional.seals.front.impeller_ring.enabled = false;
+                i.meridional.seals.front.diameter = Manual(0.001);
+            }),
+            Box::new(|i| i.meridional.seals.front.impeller_ring.thickness = Manual(0.5)),
+            Box::new(|i| i.meridional.seals.front.clearance = Manual(1e-6)),
+            Box::new(|i| i.meridional.seals.rear.diameter = Manual(0.5)),
+            Box::new(|i| i.meridional.seals.front.enabled = false),
+            Box::new(|i| {
+                i.meridional.chambers.enabled = true;
+                i.meridional.seals.front.enabled = false;
+                i.meridional.back_vanes.enabled = true;
+                i.meridional.back_vanes.outer_diameter = Manual(1.0);
+                i.meridional.back_vanes.inner_diameter = Manual(0.02);
+                i.meridional.back_vanes.height = Manual(0.5);
+                i.meridional.back_vanes.shape = VaneShape::Curved { angle: 0.5 };
+            }),
+            Box::new(|i| {
+                i.meridional.back_vanes.enabled = true;
+                i.meridional.back_vanes.outer_diameter = Manual(0.02);
+            }),
+            Box::new(|i| {
+                i.meridional.chambers.enabled = true;
+                i.meridional.back_vanes.enabled = true;
+                i.meridional.seals.rear.diameter = Manual(0.12);
+            }),
+        ];
+        let mut warnings = Vec::new();
+        for case in &cases {
+            let mut p = project.clone();
+            let mut input = p.impeller_geometry_input(id).unwrap();
+            case(&mut input);
+            p.set_impeller_geometry(id, input).unwrap();
+            if let Ok(g) = p.compute_impeller_geometry(id) {
+                warnings.extend(g.warnings);
+            }
+        }
+        for needle in [
+            "impeller ring of",
+            "below the neck wall",
+            "Gülich recommends",
+            "reaches beyond the hub disk rim",
+            "front seal is off",
+            "reach out to",
+            "no room",
+        ] {
+            assert!(
+                warnings.iter().any(|w| w.contains(needle)),
+                "no warning with {needle:?}: {warnings:#?}"
+            );
+        }
+        let untranslated: Vec<_> = warnings
+            .iter()
+            .filter(|w| !w.contains("cross") && spanish(|| message(w)) == **w)
+            .collect();
+        assert!(
+            untranslated.is_empty(),
+            "without Spanish: {untranslated:#?}"
+        );
+    }
+
+    #[test]
+    fn ring_and_seal_names_inside_messages_are_translated() {
+        let text = spanish(|| {
+            message(
+                "the front impeller ring of 6.0 mm is trimmed to 2.0 mm to leave the neck a wall",
+            )
+        });
+        assert_eq!(
+            text,
+            "el anillo delantero del rodete, de 6.0 mm, se recorta a 2.0 mm para dejar una pared al cuello"
+        );
+        let text =
+            spanish(|| message("the rear casing wear ring is left out: it has no radial extent"));
+        assert_eq!(
+            text,
+            "el anillo de desgaste trasero de la carcasa se omite: no tiene extensión radial"
+        );
+    }
+
     #[test]
     fn language_codes_round_trip() {
         for l in Language::ALL {

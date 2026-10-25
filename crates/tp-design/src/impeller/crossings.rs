@@ -142,7 +142,7 @@ mod tests {
                 ..MeridionalInput::default()
             };
             input.chambers.enabled = true;
-            MeridionalContour::build(b, &input).unwrap()
+            MeridionalContour::build(b, &input, 1.0).unwrap()
         };
         for b in [&radial, &semi] {
             let c = build(b, DesignMode::Walls);
@@ -156,13 +156,13 @@ mod tests {
         let b = basis();
         let mut input = MeridionalInput::default();
         input.chambers.enabled = true;
-        let c = MeridionalContour::build(&b, &input).unwrap();
+        let c = MeridionalContour::build(&b, &input, 1.0).unwrap();
         let mut front = c.chambers.front_casing.to_input();
         let inside = c.shroud.sample(9)[4] + DVec2::new(0.002, 0.0);
         front[0].controls[3] = inside;
         input.chambers.front = Some(front);
         input.chambers.axial_gap = Param::Manual(c.chambers.values.axial_gap);
-        let crossed = MeridionalContour::build(&b, &input).unwrap();
+        let crossed = MeridionalContour::build(&b, &input, 1.0).unwrap();
         assert!(
             crossed
                 .crossings

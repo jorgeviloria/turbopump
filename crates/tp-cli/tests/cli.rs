@@ -347,6 +347,23 @@ fn geometry_overrides() {
 
     let bad = turbopump(&["geometry", file_arg, "--set", "le=pointy"]);
     assert_eq!(bad.status.code(), Some(2));
+    // Seals: the report lists the active ones.
+    assert!(text.contains("Front seal  d "), "{text}");
+    let out = turbopump(&[
+        "geometry",
+        file_arg,
+        "--dry-run",
+        "--set",
+        "front-seal=off",
+        "--set",
+        "rear-casing-ring=off",
+    ]);
+    let seals = stdout(&out);
+    assert_eq!(out.status.code(), Some(0), "{seals}");
+    assert!(!seals.contains("Front seal"), "{seals}");
+    assert!(seals.contains("casing ring none"), "{seals}");
+    let bad = turbopump(&["geometry", file_arg, "--set", "front-seal=x"]);
+    assert_eq!(bad.status.code(), Some(2));
     // β from a blade loading, the starting shapes or one given at hub and shroud.
     for beta in ["beta=loading", "beta=loading:0.3,0.3,0.9,2/0,0.3,0.9,1"] {
         let out = turbopump(&["geometry", file_arg, "--set", beta]);
@@ -677,12 +694,36 @@ fn cad_exports_impeller_and_flow_domain() {
     );
     // Half the blade thickness, or the largest radius that fits the outlet corner.
     assert!(text.contains("Fillets          1."), "{text}");
-    assert!(text.contains("Balance holes    7 × 8.500 mm"), "{text}");
+    // Sized on the rear seal as drawn (with its wear rings), not on the automatic one.
+    assert!(text.contains("Balance holes    7 × 9.000 mm"), "{text}");
     // OCCT's transfer statistics are silenced.
     assert!(!text.contains("Statistics on Transfer"), "{text}");
     for name in ["impeller.step", "fluid.step", "impeller.stl", "fluid.stl"] {
         let size = std::fs::metadata(out_dir.join(name)).unwrap().len();
         assert!(size > 100_000, "{name}: {size} bytes");
+    }
+    // Each wear ring is a solid of its own, with its volume and mass in the report.
+    for stem in [
+        "front-impeller-ring",
+        "front-casing-ring",
+        "rear-impeller-ring",
+        "rear-casing-ring",
+    ] {
+        for ext in ["step", "stl"] {
+            let name = format!("{stem}.{ext}");
+            let size = std::fs::metadata(out_dir.join(&name)).unwrap().len();
+            assert!(size > 500, "{name}: {size} bytes");
+        }
+    }
+    for label in [
+        "Front impeller ring ",
+        "Front casing ring ",
+        "Rear impeller ring ",
+        "Rear casing ring ",
+    ] {
+        let line = text.lines().find(|l| l.contains(label)).unwrap_or("");
+        assert!(line.contains(" cm³, "), "{label}: {text}");
+        assert!(line.contains("impeller density"), "{label}: {text}");
     }
     // The volute is reported but skipped until it is designed.
     assert!(text.contains("not designed yet"), "{text}");
@@ -734,21 +775,21 @@ fn performance_predicts_the_characteristic() {
     // The seals leak less than the statistics assume, so the impeller gives a little
     // more head; the loss analysis puts η above the statistics.
     assert!(
-        text.contains("Design     Q 100.0 m³/h   H 32.32 m"),
+        text.contains("Design     Q 100.0 m³/h   H 32.27 m"),
         "{text}"
     );
     assert!(
-        text.contains("Losses     η 0.856 by losses (statistics 0.814"),
+        text.contains("Losses     η 0.854 by losses (statistics 0.814"),
         "{text}"
     );
     // The hydraulic losses summed by Gülich Table 3.8 land near the statistical η_h.
-    assert!(text.contains("η_h 0.909 (statistics 0.907)"), "{text}");
+    assert!(text.contains("η_h 0.908 (statistics 0.907)"), "{text}");
     assert!(text.contains("Shut-off   H"), "{text}");
     assert!(
         text.contains("Axial      ") && text.contains("at design toward the suction side"),
         "{text}"
     );
-    assert!(text.contains("operating point Q 100.4 m³/h"), "{text}");
+    assert!(text.contains("operating point Q 100.3 m³/h"), "{text}");
     // An oil shifts the water curve (Gülich Chap. 13.1).
     let oil = stdout(&turbopump(&[
         "performance",

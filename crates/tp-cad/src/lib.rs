@@ -14,7 +14,8 @@ mod volute;
 
 pub use diffuser::{DiffuserCad, build_diffuser};
 pub use impeller::{
-    BalanceHoleOptions, BalanceHoles, CadOptions, ImpellerCad, build_impeller, build_inlet_duct,
+    BalanceHoleOptions, BalanceHoles, CadOptions, ImpellerCad, RingKind, WearRing, build_impeller,
+    build_inlet_duct,
 };
 pub use joined::{join_fluid, joining_ring};
 pub use occ::{Shape, read_step, write_iges, write_step, write_stl};

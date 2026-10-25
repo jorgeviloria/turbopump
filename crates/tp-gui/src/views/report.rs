@@ -617,10 +617,15 @@ fn content(
                                     ui,
                                     tr("Disk friction and mechanical losses"),
                                     tf(
-                                        "front {}, rear {}, mechanical {} (Gülich eqs. T3.6.2, T3.6.3, T3.5.6a)",
+                                        "front {}, rear {}{}, mechanical {} (Gülich eqs. T3.6.2, T3.6.3, T3.5.6a)",
                                         &[
                                             &s(Power, l.front_friction),
                                             &s(Power, l.rear_friction),
+                                            &if l.back_vanes {
+                                                tr(" (with back vanes, eq. T9.3.4)").to_owned()
+                                            } else {
+                                                String::new()
+                                            },
                                             &s(Power, l.mechanical),
                                         ],
                                     ),
@@ -788,6 +793,16 @@ fn content(
                                     ],
                                 ),
                             );
+                            if a.law.back_vanes.is_some() {
+                                value_row(
+                                    ui,
+                                    tr("Back vanes"),
+                                    tf(
+                                        "{} off the rear shroud (Gülich Table 9.3)",
+                                        &[&s(Force, f.back_vanes)],
+                                    ),
+                                );
+                            }
                             value_row(
                                 ui,
                                 tr("Annular and shaft seals"),

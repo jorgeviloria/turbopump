@@ -1811,6 +1811,45 @@ fn triangulate(outline: &[DVec2]) -> Vec<[DVec2; 3]> {
     triangles
 }
 
+/// Strokes at 45° that hatch the simple polygon `outline`, `spacing` apart measured
+/// along the z axis. The lines are offset by half a spacing so that none runs through a
+/// corner.
+fn band_hatch(outline: &[DVec2], spacing: f64) -> Vec<[DVec2; 2]> {
+    const MAX_LINES: f64 = 2000.0;
+    if outline.len() < 3 || spacing <= 0.0 || !spacing.is_finite() {
+        return Vec::new();
+    }
+    // u = z - r is constant along a stroke and t = z + r runs along it.
+    let u_of = |p: DVec2| p.x - p.y;
+    let (lo, hi) = outline
+        .iter()
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| {
+            (lo.min(u_of(*p)), hi.max(u_of(*p)))
+        });
+    let spacing = spacing.max((hi - lo) / MAX_LINES);
+    let mut strokes = Vec::new();
+    let mut u = lo + spacing / 2.0;
+    while u < hi {
+        let mut ts: Vec<f64> = (0..outline.len())
+            .filter_map(|i| {
+                let (a, b) = (outline[i], outline[(i + 1) % outline.len()]);
+                let (ua, ub) = (u_of(a), u_of(b));
+                ((ua - u) * (ub - u) < 0.0).then(|| {
+                    let p = a.lerp(b, (u - ua) / (ub - ua));
+                    p.x + p.y
+                })
+            })
+            .collect();
+        ts.sort_by(f64::total_cmp);
+        let at = |t: f64| DVec2::new((t + u) / 2.0, (t - u) / 2.0);
+        for [from, to] in ts.as_chunks::<2>().0 {
+            strokes.push([at(*from), at(*to)]);
+        }
+        u += spacing;
+    }
+    strokes
+}
+
 fn line(points: impl IntoIterator<Item = DVec2>, scale: f64) -> PlotPoints<'static> {
     points
         .into_iter()
@@ -2112,6 +2151,24 @@ impl MeridionalView {
                     Line::new("material", line(side.wall(&g.contour).sample(240), scale))
                         .color(color)
                         .width(width),
+                );
+            }
+            // The back vanes: their meridional band, outlined and hatched like a cut.
+            if let Some(vanes) = g.contour.back_vanes.as_ref().filter(|v| v.band.len() > 2) {
+                let color = Side::HubMaterial.color(&palette);
+                for [a, b] in band_hatch(&vanes.band, vanes.height) {
+                    plot.line(
+                        Line::new("back vanes", line([a, b], scale))
+                            .color(color.gamma_multiply(0.6))
+                            .width(0.8),
+                    );
+                }
+                let mut closed = vanes.band.clone();
+                closed.push(vanes.band[0]);
+                plot.line(
+                    Line::new("back vanes", line(closed, scale))
+                        .color(color)
+                        .width(1.4),
                 );
             }
             if chambers {
@@ -3428,7 +3485,7 @@ mod tests {
         let g = geometry();
         let mut input = tp_design::impeller::ImpellerGeometryInput::default();
         input.meridional.hub_segments = Some(wall::split(&g.contour.hub, 0, 0.5));
-        let drawn = tp_design::impeller::build(&g.basis, &input).unwrap();
+        let drawn = tp_design::impeller::build(&g.basis, &input, 1.0).unwrap();
         let points: Vec<Handle> = handles(&drawn.contour, &input.meridional)
             .into_iter()
             .filter(|h| matches!(h, Handle::Point(Side::Hub, _)))
@@ -3444,7 +3501,7 @@ mod tests {
         let mut moved = input.meridional.clone();
         apply_drag(joint, to, &drawn.contour, &drawn.basis, &mut moved);
         input.meridional = moved;
-        let after = tp_design::impeller::build(&drawn.basis, &input).unwrap();
+        let after = tp_design::impeller::build(&drawn.basis, &input, 1.0).unwrap();
         assert!(handle_position(joint, &after.contour).distance(to) < 1e-12);
     }
 
@@ -3497,14 +3554,14 @@ mod tests {
             semi_axial: false,
             duct: None,
         };
-        let drawn = tp_design::impeller::build(&g.basis, &input).unwrap();
+        let drawn = tp_design::impeller::build(&g.basis, &input, 1.0).unwrap();
         let joint = Handle::Point(Side::Hub, WallPoint::Joint { segment: 0 });
         let Some(Change::Geometry(moved)) =
             set_dimension(Dimension::R(joint), 0.03, &drawn, inputs)
         else {
             panic!("a geometry change");
         };
-        let after = tp_design::impeller::build(&drawn.basis, &moved).unwrap();
+        let after = tp_design::impeller::build(&drawn.basis, &moved, 1.0).unwrap();
         let p = handle_position(joint, &after.contour);
         assert!((p.y - 0.03).abs() < 1e-12);
         assert!((p.x - handle_position(joint, &drawn.contour).x).abs() < 1e-12);
@@ -3618,7 +3675,7 @@ mod tests {
         basis.outlet_inclination = 25f64.to_radians();
         basis.outlet_hub_diameter = basis.outlet_diameter * 0.8;
         let input = MeridionalInput::default();
-        let contour = MeridionalContour::build(&basis, &input).unwrap();
+        let contour = MeridionalContour::build(&basis, &input, 1.0).unwrap();
         let lines = dimension_lines(&contour, &basis, true, None);
         let b2 = lines
             .iter()
@@ -3725,5 +3782,38 @@ mod tests {
             &mut input,
         );
         assert!(input.leading_edge_hub.manual_value().unwrap() <= 0.9);
+    }
+
+    #[test]
+    fn the_meridian_draws_the_back_vane_band() {
+        let g = geometry();
+        // Off by default: nothing to draw.
+        assert!(g.contour.back_vanes.is_none());
+        let mut input = tp_design::impeller::ImpellerGeometryInput::default();
+        input.meridional.back_vanes.enabled = true;
+        let g = tp_design::impeller::build(&g.basis, &input, 1.0).unwrap();
+        let band = &g.contour.back_vanes.as_ref().expect("vanes").band;
+        assert!(band.len() >= 4);
+        let spacing = 0.001;
+        let hatch = band_hatch(band, spacing);
+        assert!(!hatch.is_empty());
+        // Every stroke runs at 45 degrees inside the band, so that its length times the
+        // spacing between strokes covers the band's area.
+        let mut length = 0.0;
+        for [a, b] in &hatch {
+            let d = *b - *a;
+            assert!((d.x.abs() - d.y.abs()).abs() < 1e-9, "{a} {b}");
+            length += d.length();
+        }
+        let polygon: f64 = (0..band.len())
+            .map(|i| band[i].perp_dot(band[(i + 1) % band.len()]))
+            .sum::<f64>()
+            .abs()
+            / 2.0;
+        let covered = length * spacing / std::f64::consts::SQRT_2;
+        assert!(
+            (covered / polygon - 1.0).abs() < 0.2,
+            "{covered} against {polygon}"
+        );
     }
 }

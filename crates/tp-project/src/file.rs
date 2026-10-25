@@ -11,7 +11,7 @@ use crate::{Project, ProjectError};
 pub const FILE_EXTENSION: &str = "tpj";
 
 /// Version written by this program. Older versions are migrated on load.
-pub const FORMAT_VERSION: u32 = 1;
+pub const FORMAT_VERSION: u32 = 2;
 
 const FORMAT_ID: &str = "turbopump-project";
 
@@ -26,6 +26,43 @@ struct FileOut<'a> {
 struct FileHeader {
     format: String,
     version: u32,
+}
+
+/// Version 2 moves the neck of the shroud into the seals: every meridional input gets
+/// the seals of an earlier project (the front one by its
+/// `neck_length`, no rear one, no wear rings), and a chamber seal clearance set by hand
+/// becomes the clearance of the front seal.
+fn migrate_v1_seals(project: &mut serde_json::Value) {
+    use serde_json::Value;
+    use tp_design::Param;
+    use tp_design::impeller::seals::Seals;
+
+    match project {
+        Value::Object(map) => {
+            if let Some(Value::Object(meridional)) = map.get_mut("meridional") {
+                // A malformed or missing neck length falls back to Auto on purpose:
+                // lenient like the rest of the loader.
+                let neck = meridional
+                    .get_mut("material")
+                    .and_then(Value::as_object_mut)
+                    .and_then(|material| material.remove("neck_length"))
+                    .and_then(|v| serde_json::from_value::<Param<f64>>(v).ok())
+                    .unwrap_or_default();
+                let mut seals = serde_json::to_value(Seals::legacy(neck)).expect("seals");
+                if let Some(Value::Object(chambers)) = meridional.get_mut("chambers")
+                    && let Some(clearance) = chambers.remove("seal_clearance")
+                {
+                    seals["front"]["clearance"] = clearance;
+                }
+                meridional.insert("seals".into(), seals);
+            }
+            for v in map.values_mut() {
+                migrate_v1_seals(v);
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(migrate_v1_seals),
+        _ => {}
+    }
 }
 
 impl Project {
@@ -51,7 +88,9 @@ impl Project {
                 supported: FORMAT_VERSION,
             });
         }
-        // Version 1 is the first format; migrations from older versions go here.
+        if header.version < 2 {
+            migrate_v1_seals(&mut value["project"]);
+        }
         let mut project: Project = serde_json::from_value(value["project"].take())?;
         project.repair_after_load()?;
         Ok(project)
@@ -126,7 +165,7 @@ mod tests {
     #[test]
     fn rejects_foreign_and_future_files() {
         let text = pump().to_json().unwrap();
-        let future = text.replace(r#""version": 1"#, r#""version": 99"#);
+        let future = text.replace(r#""version": 2"#, r#""version": 99"#);
         assert!(matches!(
             Project::from_json(&future),
             Err(ProjectError::UnsupportedVersion { found: 99, .. })
@@ -169,5 +208,104 @@ mod tests {
         let mut loaded = Project::from_json(&value.to_string()).unwrap();
         let new = loaded.add_component(ComponentKind::Impeller, None).unwrap();
         assert_ne!(new, loaded.components()[0].id());
+    }
+
+    /// A version-1 file whose only impeller has default geometry inputs, with `neck` as
+    /// the neck length of its material and `chamber_clearance` as the chamber seal
+    /// clearance, when given.
+    fn version_1_file(neck: Option<f64>, chamber_clearance: Option<f64>) -> String {
+        use tp_design::impeller::ImpellerGeometryInput;
+        let mut p = pump();
+        let id = p.add_component(ComponentKind::Impeller, None).unwrap();
+        p.set_impeller_geometry(id, ImpellerGeometryInput::default())
+            .unwrap();
+        let mut value: serde_json::Value = serde_json::from_str(&p.to_json().unwrap()).unwrap();
+        value["version"] = serde_json::json!(1);
+        let meridional = &mut value["project"]["components"][0]["geometry"]["meridional"];
+        assert!(meridional.is_object(), "geometry layout changed");
+        meridional.as_object_mut().unwrap().remove("seals");
+        if let Some(n) = neck {
+            meridional["material"]["neck_length"] =
+                serde_json::json!({"mode": "manual", "value": n});
+        }
+        if let Some(c) = chamber_clearance {
+            meridional["chambers"]["seal_clearance"] =
+                serde_json::json!({"mode": "manual", "value": c});
+        }
+        value.to_string()
+    }
+
+    fn seals_of(project: &Project) -> tp_design::impeller::seals::Seals {
+        project.components()[0].geometry().unwrap().meridional.seals
+    }
+
+    #[test]
+    fn a_version_1_file_gets_legacy_seals() {
+        use tp_design::Param;
+        let seals = seals_of(&Project::from_json(&version_1_file(Some(0.015), None)).unwrap());
+        assert_eq!(seals.front.length, Param::Manual(0.015));
+        assert!(seals.front.enabled);
+        assert!(!seals.rear.enabled);
+        assert!(!seals.front.impeller_ring.enabled && !seals.front.casing_ring.enabled);
+        assert!(!seals.rear.impeller_ring.enabled && !seals.rear.casing_ring.enabled);
+    }
+
+    #[test]
+    fn a_version_1_file_without_a_neck_keeps_the_automatic_one() {
+        use tp_design::Param;
+        let seals = seals_of(&Project::from_json(&version_1_file(None, None)).unwrap());
+        assert!(seals.front.enabled);
+        assert_eq!(seals.front.length, Param::Auto);
+        assert!(!seals.front.impeller_ring.enabled && !seals.front.casing_ring.enabled);
+    }
+
+    #[test]
+    fn a_version_1_neck_of_zero_turns_the_front_seal_off() {
+        let seals = seals_of(&Project::from_json(&version_1_file(Some(0.0), None)).unwrap());
+        assert!(!seals.front.enabled);
+    }
+
+    #[test]
+    fn a_version_1_chamber_clearance_moves_to_the_front_seal() {
+        use tp_design::Param;
+        let seals = seals_of(&Project::from_json(&version_1_file(None, Some(0.0004))).unwrap());
+        assert_eq!(seals.front.clearance, Param::Manual(0.0004));
+        // The key is gone from the chambers JSON, not just copied.
+        let mut value: serde_json::Value =
+            serde_json::from_str(&version_1_file(None, Some(0.0004))).unwrap();
+        super::migrate_v1_seals(&mut value["project"]);
+        let chambers = &value["project"]["components"][0]["geometry"]["meridional"]["chambers"];
+        assert!(chambers.get("seal_clearance").is_none());
+    }
+
+    #[test]
+    fn a_version_1_meridian_without_material_gets_legacy_seals() {
+        use tp_design::Param;
+        let mut value: serde_json::Value =
+            serde_json::from_str(&version_1_file(None, None)).unwrap();
+        value["project"]["components"][0]["geometry"]["meridional"]
+            .as_object_mut()
+            .unwrap()
+            .remove("material");
+        let seals = seals_of(&Project::from_json(&value.to_string()).unwrap());
+        assert!(seals.front.enabled);
+        assert_eq!(seals.front.length, Param::Auto);
+        assert!(!seals.rear.enabled);
+        assert!(!seals.front.impeller_ring.enabled && !seals.front.casing_ring.enabled);
+    }
+
+    #[test]
+    fn a_version_2_file_keeps_its_seals() {
+        use tp_design::impeller::ImpellerGeometryInput;
+        let mut p = pump();
+        let id = p.add_component(ComponentKind::Impeller, None).unwrap();
+        let mut input = ImpellerGeometryInput::default();
+        input.meridional.seals.rear.enabled = false;
+        p.set_impeller_geometry(id, input).unwrap();
+        assert!(
+            !seals_of(&Project::from_json(&p.to_json().unwrap()).unwrap())
+                .rear
+                .enabled
+        );
     }
 }

@@ -152,8 +152,8 @@ mod tests {
             design_mode: DesignMode::CenterLine,
             ..MeridionalInput::default()
         };
-        let c = MeridionalContour::build(&b, &input).unwrap();
-        let walls = MeridionalContour::build(&b, &MeridionalInput::default()).unwrap();
+        let c = MeridionalContour::build(&b, &input, 1.0).unwrap();
+        let walls = MeridionalContour::build(&b, &MeridionalInput::default(), 1.0).unwrap();
         // The same ends as the walls of the main dimensions.
         assert_eq!(c.hub.start(), walls.hub.start());
         assert_eq!(c.hub.end(), walls.hub.end());
@@ -193,8 +193,8 @@ mod tests {
             area_progression: vec![[0.0, 0.0], [0.4, 0.55], [1.0, 1.0]],
             ..MeridionalInput::default()
         };
-        let c = MeridionalContour::build(&b, &input).unwrap();
-        let walls = MeridionalContour::build(&b, &MeridionalInput::default()).unwrap();
+        let c = MeridionalContour::build(&b, &input, 1.0).unwrap();
+        let walls = MeridionalContour::build(&b, &MeridionalInput::default(), 1.0).unwrap();
         assert_eq!(c.hub.end(), walls.hub.end());
         assert_eq!(c.shroud.end(), walls.shroud.end());
     }
@@ -208,6 +208,6 @@ mod tests {
             area_progression: vec![[0.0, 0.0], [0.5, 100.0], [1.0, 1.0]],
             ..MeridionalInput::default()
         };
-        assert!(MeridionalContour::build(&b, &input).is_err());
+        assert!(MeridionalContour::build(&b, &input, 1.0).is_err());
     }
 }

@@ -549,7 +549,7 @@ pub(crate) mod tests {
         let input = CentrifugalPumpInput::default();
         let main = design(&duty, &input).unwrap();
         let basis = ImpellerBasis::from_pump(&main, &input, 1.0);
-        impeller::build(&basis, &ImpellerGeometryInput::default()).unwrap()
+        impeller::build(&basis, &ImpellerGeometryInput::default(), 1.0).unwrap()
     }
 
     #[test]

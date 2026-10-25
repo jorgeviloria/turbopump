@@ -243,11 +243,15 @@ impl Project {
         })
     }
 
-    /// The performance input of impeller `id` with the seals and gaps of its side
-    /// chambers, when they are designed, wherever `input` leaves them automatic: the
-    /// annular seal on the neck, its clearance and length, the shaft seal and the axial
-    /// gap. Values set by hand in `input` stay.
-    pub fn with_chamber_seals(
+    /// The performance input of impeller `id` with the seals of its meridional contour,
+    /// wherever `input` leaves them automatic: the front annular seal (diameter,
+    /// clearance and length) and the rear one for the balance holes. With the side
+    /// chambers designed, the casing run measured on the front seat is its length, and
+    /// the shaft seal and the axial gap come from the chambers too. Back vanes on the
+    /// contour enter the axial force and the losses, with the tip gap as built when the
+    /// chambers are designed (the collar of the rear seal can widen it). Values set by
+    /// hand in `input` stay.
+    pub fn with_contour_seals(
         &self,
         id: ComponentId,
         input: &PerformanceInput,
@@ -256,11 +260,7 @@ impl Project {
         let Ok(geometry) = self.compute_impeller_geometry(id) else {
             return input;
         };
-        let chambers = &geometry.contour.chambers;
-        if !chambers.enabled {
-            return input;
-        }
-        let v = chambers.values;
+        let contour = &geometry.contour;
         let set = |param: &mut tp_design::Param<f64>, value: f64| {
             if param.is_auto() && value > 0.0 {
                 *param = tp_design::Param::Manual(value);
@@ -268,24 +268,95 @@ impl Project {
         };
         // Worn seals stay twice as wide, as the analysis takes them.
         let wear = if input.wide_seal_clearances { 2.0 } else { 1.0 };
-        set(&mut input.axial.seal_diameter, v.seal_diameter);
-        set(&mut input.axial.shaft_seal_diameter, v.shaft_seal_diameter);
-        set(&mut input.losses.seal_clearance, wear * v.seal_clearance);
-        set(&mut input.losses.seal_length, v.seal_length);
-        set(&mut input.losses.axial_gap, v.axial_gap);
+        let chambers = &contour.chambers;
+        let v = chambers.values;
+        if let Some(front) = &contour.seals.front {
+            set(&mut input.axial.seal_diameter, 2.0 * front.radius);
+            set(&mut input.losses.seal_clearance, wear * front.clearance);
+            // The measured run can be shorter than the nominal length.
+            let length = if chambers.enabled && v.seal_length > 0.0 {
+                v.seal_length
+            } else {
+                front.length
+            };
+            set(&mut input.losses.seal_length, length);
+        }
+        if let Some(rear) = &contour.seals.rear {
+            set(&mut input.axial.rear_seal_diameter, 2.0 * rear.radius);
+        }
+        if chambers.enabled {
+            set(&mut input.axial.shaft_seal_diameter, v.shaft_seal_diameter);
+            set(&mut input.losses.axial_gap, v.axial_gap);
+        }
+        let vanes = contour.back_vanes.as_ref().filter(|b| !b.band.is_empty());
+        if let Some(b) = vanes
+            && input.axial.back_vanes.is_none()
+        {
+            let built = chambers.enabled.then_some(v.rear_vane_gap).flatten();
+            input.axial.back_vanes = Some(tp_design::axial_thrust::BackVaneLaw {
+                count: b.count,
+                radial: b.shape == tp_design::impeller::back_vanes::VaneShape::Radial,
+                inner_diameter: 2.0 * b.inner_radius,
+                outer_diameter: 2.0 * b.outer_radius,
+                height: b.height,
+                gap: built.unwrap_or(b.tip_clearance),
+                rear_seal: contour.seals.rear.is_some(),
+            });
+        }
         input
     }
 
+    /// The balance holes of impeller `id` for the CAD export, sized as in the axial thrust
+    /// (Gülich Chap. 9.2.2) on the rear seal drawn in `geometry`; `None` when the contour
+    /// has no rear seal for the holes to open into.
+    pub fn balance_hole_size(
+        &self,
+        id: ComponentId,
+        geometry: &ImpellerGeometry,
+    ) -> Result<Option<tp_design::axial_thrust::BalanceHoleSize>, String> {
+        use tp_design::axial_thrust::AxialThrust;
+        let Some(rear) = &geometry.contour.seals.rear else {
+            return Ok(None);
+        };
+        let base = self.performance_input(id).map_err(|e| e.to_string())?;
+        let mut input = self.with_contour_seals(id, &base);
+        input.axial.balance_holes = true;
+        // The geometry may differ from the project's (the CLI overrides the material).
+        input.axial.rear_seal_diameter = tp_design::Param::Manual(2.0 * rear.radius);
+        if let Some(front) = &geometry.contour.seals.front {
+            input.axial.seal_diameter = tp_design::Param::Manual(2.0 * front.radius);
+        }
+        let duty = self.pump_duty(id).map_err(|e| e.to_string())?;
+        let design = self
+            .compute_main_dimensions(id)
+            .map_err(|e| e.to_string())?;
+        let axial =
+            AxialThrust::new(&duty, &design, &input.axial, false).map_err(|e| e.to_string())?;
+        Ok(axial.balance_holes(design.blade_count))
+    }
+
     /// Predicts the characteristic of impeller `id` from its main dimensions and the
-    /// collector after it, with the seals of its side chambers when they are designed
-    /// (see [`Project::with_chamber_seals`]). A collector that cannot be computed is left
+    /// collector after it, with the seals of its meridional contour
+    /// (see [`Project::with_contour_seals`]). A collector that cannot be computed is left
     /// out with a warning.
     pub fn compute_performance(
         &self,
         id: ComponentId,
         input: &PerformanceInput,
     ) -> Result<PumpPerformance, ProjectError> {
-        let input = &self.with_chamber_seals(id, input);
+        let mut input = self.with_contour_seals(id, input);
+        // The balance holes open into the rear seal's gap: without it they are left out.
+        let no_rear_seal = input.axial.balance_holes
+            && self
+                .compute_impeller_geometry(id)
+                .is_ok_and(|g| g.contour.seals.rear.is_none());
+        if no_rear_seal {
+            input.axial.balance_holes = false;
+        }
+        let front_off = self
+            .compute_impeller_geometry(id)
+            .is_ok_and(|g| g.contour.seals.front.is_none());
+        let input = &input;
         let duty = self.pump_duty(id)?;
         let design = self.compute_main_dimensions(id)?;
         let (collector, problem) = match self.collector_data_after(id) {
@@ -293,6 +364,17 @@ impl Project {
             Err(e) => (CollectorData::default(), Some(e)),
         };
         let mut curve = performance::predict(&duty, &design, input, &collector)?;
+        if no_rear_seal {
+            curve
+                .warnings
+                .push("balance holes need the rear seal; they are left out".to_string());
+        }
+        if front_off {
+            curve.warnings.push(
+                "the front seal is off in the contour: the thrust and the leakage assume the automatic seal d₁ + 2t that is not drawn"
+                    .to_string(),
+            );
+        }
         if let Some(e) = problem {
             curve.warnings.push(format!(
                 "the collector after the impeller is left out of the prediction: {e}"
@@ -338,7 +420,11 @@ impl Project {
             Rotation::CounterClockwise => -1.0,
         };
         let basis = ImpellerBasis::from_pump(&main, &main_input, sign);
-        Ok(impeller::build(&basis, &self.impeller_geometry_input(id)?)?)
+        Ok(impeller::build(
+            &basis,
+            &self.impeller_geometry_input(id)?,
+            main_input.suction.eyes(),
+        )?)
     }
 
     /// Every step of component `id` that is not done yet, computed in order with the
@@ -988,11 +1074,13 @@ mod tests {
     fn designed_side_chambers_lend_their_seals_to_the_performance() {
         let (mut p, impeller, _) = pump_with_volute();
         let base = p.performance_input(impeller).unwrap();
-        // Without chambers nothing changes.
-        assert_eq!(p.with_chamber_seals(impeller, &base), base);
+        // Without chambers the gap and the shaft seal stay automatic.
+        let plain = p.with_contour_seals(impeller, &base);
+        assert!(plain.losses.axial_gap.is_auto());
+        assert!(plain.axial.shaft_seal_diameter.is_auto());
         let mut input = p.impeller_geometry_input(impeller).unwrap();
         input.meridional.chambers.enabled = true;
-        input.meridional.chambers.seal_clearance = Param::Manual(0.0004);
+        input.meridional.seals.front.clearance = Param::Manual(0.0004);
         p.set_impeller_geometry(impeller, input).unwrap();
         let v = p
             .compute_impeller_geometry(impeller)
@@ -1000,7 +1088,7 @@ mod tests {
             .contour
             .chambers
             .values;
-        let shared = p.with_chamber_seals(impeller, &base);
+        let shared = p.with_contour_seals(impeller, &base);
         assert_eq!(shared.losses.seal_clearance, Param::Manual(0.0004));
         assert_eq!(shared.axial.seal_diameter, Param::Manual(v.seal_diameter));
         assert_eq!(shared.losses.axial_gap, Param::Manual(v.axial_gap));
@@ -1009,19 +1097,283 @@ mod tests {
         let mut own = base.clone();
         own.losses.axial_gap = Param::Manual(0.01);
         own.wide_seal_clearances = true;
-        let kept = p.with_chamber_seals(impeller, &own);
+        let kept = p.with_contour_seals(impeller, &own);
         assert_eq!(kept.losses.axial_gap, Param::Manual(0.01));
         assert_eq!(kept.losses.seal_clearance, Param::Manual(0.0008));
         // A wider seal on the neck leaks more: the efficiency drops.
         let tight = {
             let mut q = p.clone();
             let mut input = q.impeller_geometry_input(impeller).unwrap();
-            input.meridional.chambers.seal_clearance = Param::Manual(0.0001);
+            input.meridional.seals.front.clearance = Param::Manual(0.0001);
             q.set_impeller_geometry(impeller, input).unwrap();
             q.compute_performance(impeller, &base).unwrap()
         };
         let loose = p.compute_performance(impeller, &base).unwrap();
         assert!(loose.design.efficiency < tight.design.efficiency);
+    }
+
+    /// Seals on, rings off: the automatic seal diameter is d1 + 2t, as the axial thrust
+    /// took it before the seals were part of the contour.
+    fn plain_seals(p: &mut Project, impeller: ComponentId) {
+        let mut input = p.impeller_geometry_input(impeller).unwrap();
+        for side in [
+            &mut input.meridional.seals.front,
+            &mut input.meridional.seals.rear,
+        ] {
+            side.enabled = true;
+            side.impeller_ring.enabled = false;
+            side.casing_ring.enabled = false;
+        }
+        p.set_impeller_geometry(impeller, input).unwrap();
+    }
+
+    #[test]
+    fn performance_takes_the_front_seal_without_chambers() {
+        let (mut p, impeller, _) = pump_with_volute();
+        let mut input = p.impeller_geometry_input(impeller).unwrap();
+        input.meridional.seals.front.enabled = true;
+        input.meridional.seals.front.clearance = Param::Manual(0.0004);
+        p.set_impeller_geometry(impeller, input).unwrap();
+        let front = p
+            .compute_impeller_geometry(impeller)
+            .unwrap()
+            .contour
+            .seals
+            .front
+            .unwrap();
+        let base = p.performance_input(impeller).unwrap();
+        let shared = p.with_contour_seals(impeller, &base);
+        assert_eq!(
+            shared.axial.seal_diameter,
+            Param::Manual(2.0 * front.radius)
+        );
+        assert_eq!(shared.losses.seal_clearance, Param::Manual(0.0004));
+        assert_eq!(shared.losses.seal_length, Param::Manual(front.length));
+        assert!(shared.losses.axial_gap.is_auto());
+        let mut worn = base.clone();
+        worn.wide_seal_clearances = true;
+        let worn = p.with_contour_seals(impeller, &worn);
+        assert_eq!(worn.losses.seal_clearance, Param::Manual(0.0008));
+        // The thrust takes the same diameter, the ring included.
+        let curve = p.compute_performance(impeller, &base).unwrap();
+        assert_eq!(curve.axial.law.seal_diameter, 2.0 * front.radius);
+    }
+
+    #[test]
+    fn performance_takes_the_rear_seal_for_balance_holes() {
+        let (mut p, impeller, _) = pump_with_volute();
+        let rear = p
+            .compute_impeller_geometry(impeller)
+            .unwrap()
+            .contour
+            .seals
+            .rear
+            .unwrap();
+        let mut base = p.performance_input(impeller).unwrap();
+        base.axial.balance_holes = true;
+        let shared = p.with_contour_seals(impeller, &base);
+        assert_eq!(
+            shared.axial.rear_seal_diameter,
+            Param::Manual(2.0 * rear.radius)
+        );
+        let curve = p.compute_performance(impeller, &base).unwrap();
+        assert_eq!(curve.axial.law.rear_seal_diameter, Some(2.0 * rear.radius));
+        // Without a rear seal the diameter stays automatic.
+        let mut input = p.impeller_geometry_input(impeller).unwrap();
+        input.meridional.seals.rear.enabled = false;
+        p.set_impeller_geometry(impeller, input).unwrap();
+        assert!(
+            p.with_contour_seals(impeller, &base)
+                .axial
+                .rear_seal_diameter
+                .is_auto()
+        );
+    }
+
+    #[test]
+    fn balance_holes_without_a_rear_seal_are_left_out_with_a_warning() {
+        let (mut p, impeller, _) = pump_with_volute();
+        let mut base = p.performance_input(impeller).unwrap();
+        base.axial.balance_holes = true;
+        let with = p.compute_performance(impeller, &base).unwrap();
+        assert!(with.axial.law.rear_seal_diameter.is_some());
+        assert!(!with.warnings.iter().any(|w| w.contains("balance holes")));
+        let mut input = p.impeller_geometry_input(impeller).unwrap();
+        input.meridional.seals.rear.enabled = false;
+        p.set_impeller_geometry(impeller, input).unwrap();
+        let without = p.compute_performance(impeller, &base).unwrap();
+        assert!(without.axial.law.rear_seal_diameter.is_none());
+        assert!(
+            without
+                .warnings
+                .iter()
+                .any(|w| w.contains("balance holes need the rear seal")),
+            "{:?}",
+            without.warnings
+        );
+    }
+
+    #[test]
+    fn balance_hole_size_uses_the_rear_seal_of_the_contour() {
+        let (mut p, impeller, _) = pump_with_volute();
+        let mut input = p.impeller_geometry_input(impeller).unwrap();
+        input.meridional.seals.rear.diameter = Param::Manual(0.09);
+        p.set_impeller_geometry(impeller, input.clone()).unwrap();
+        let g = p.compute_impeller_geometry(impeller).unwrap();
+        let rear = g.contour.seals.rear.unwrap();
+        let size = p.balance_hole_size(impeller, &g).unwrap().unwrap();
+        assert!((size.seal_diameter - 2.0 * rear.radius).abs() < 1e-12);
+        input.meridional.seals.rear.enabled = false;
+        p.set_impeller_geometry(impeller, input).unwrap();
+        let g = p.compute_impeller_geometry(impeller).unwrap();
+        assert!(p.balance_hole_size(impeller, &g).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_front_seal_that_is_off_is_said_in_the_performance() {
+        let (mut p, impeller, _) = pump_with_volute();
+        let base = p.performance_input(impeller).unwrap();
+        let on = p.compute_performance(impeller, &base).unwrap();
+        assert!(!on.warnings.iter().any(|w| w.contains("front seal is off")));
+        let mut input = p.impeller_geometry_input(impeller).unwrap();
+        input.meridional.seals.front.enabled = false;
+        p.set_impeller_geometry(impeller, input).unwrap();
+        let off = p.compute_performance(impeller, &base).unwrap();
+        assert!(
+            off.warnings.iter().any(|w| w.contains("front seal is off")),
+            "{:?}",
+            off.warnings
+        );
+    }
+
+    #[test]
+    fn manual_performance_values_beat_the_seals() {
+        let (p, impeller, _) = pump_with_volute();
+        let mut own = p.performance_input(impeller).unwrap();
+        own.axial.seal_diameter = Param::Manual(0.09);
+        own.axial.rear_seal_diameter = Param::Manual(0.08);
+        own.losses.seal_clearance = Param::Manual(0.0003);
+        own.losses.seal_length = Param::Manual(0.02);
+        let kept = p.with_contour_seals(impeller, &own);
+        assert_eq!(kept, own);
+    }
+
+    #[test]
+    fn back_vanes_of_the_contour_enter_the_performance() {
+        let (mut p, impeller, _) = pump_with_volute();
+        let base = p.performance_input(impeller).unwrap();
+        let before = p.compute_performance(impeller, &base).unwrap();
+        assert!(
+            p.with_contour_seals(impeller, &base)
+                .axial
+                .back_vanes
+                .is_none()
+        );
+        let mut input = p.impeller_geometry_input(impeller).unwrap();
+        input.meridional.seals.rear.enabled = false;
+        input.meridional.back_vanes.enabled = true;
+        p.set_impeller_geometry(impeller, input.clone()).unwrap();
+        let vanes = p
+            .compute_impeller_geometry(impeller)
+            .unwrap()
+            .contour
+            .back_vanes
+            .unwrap();
+        // Without chambers the gap is the tip clearance asked for.
+        let law = p
+            .with_contour_seals(impeller, &base)
+            .axial
+            .back_vanes
+            .unwrap();
+        assert_eq!(law.count, vanes.count);
+        assert!(law.radial);
+        assert_eq!(law.outer_diameter, 2.0 * vanes.outer_radius);
+        assert_eq!(law.height, vanes.height);
+        assert_eq!(law.gap, vanes.tip_clearance);
+        assert!(!law.rear_seal);
+        let after = p.compute_performance(impeller, &base).unwrap();
+        assert!(after.axial.design.back_vanes > 0.0);
+        assert!(after.axial.design.total < before.axial.design.total);
+        // The defaults lie inside the range of Gülich Table 9.3.
+        assert!(
+            !after.warnings.iter().any(|w| w.contains("back vanes")),
+            "{:?}",
+            after.warnings
+        );
+        // With the chambers designed, the gap as built.
+        input.meridional.chambers.enabled = true;
+        p.set_impeller_geometry(impeller, input).unwrap();
+        let built = p
+            .compute_impeller_geometry(impeller)
+            .unwrap()
+            .contour
+            .chambers
+            .values
+            .rear_vane_gap
+            .unwrap();
+        let law = p
+            .with_contour_seals(impeller, &base)
+            .axial
+            .back_vanes
+            .unwrap();
+        assert_eq!(law.gap, built);
+        // With the rear seal on, the vanes stop outside its ring, with a warning.
+        let mut input = p.impeller_geometry_input(impeller).unwrap();
+        input.meridional.seals.rear.enabled = true;
+        p.set_impeller_geometry(impeller, input).unwrap();
+        let law = p
+            .with_contour_seals(impeller, &base)
+            .axial
+            .back_vanes
+            .unwrap();
+        assert!(law.rear_seal);
+        let sealed = p.compute_performance(impeller, &base).unwrap();
+        assert!(
+            sealed
+                .warnings
+                .iter()
+                .any(|w| w.contains("together with a rear seal"))
+        );
+        assert!(sealed.axial.design.back_vanes > 0.0);
+    }
+
+    #[test]
+    fn automatic_seals_keep_todays_axial_thrust() {
+        let (mut p, impeller, _) = pump_with_volute();
+        let base = p.performance_input(impeller).unwrap();
+        // Today: the seals off, the thrust takes its own automatic diameter.
+        let mut off = p.impeller_geometry_input(impeller).unwrap();
+        off.meridional.seals.front.enabled = false;
+        off.meridional.seals.rear.enabled = false;
+        p.set_impeller_geometry(impeller, off).unwrap();
+        let today = p.compute_performance(impeller, &base).unwrap().axial;
+        // Seals on without rings: d1 + 2t is the same diameter.
+        plain_seals(&mut p, impeller);
+        let now = p.compute_performance(impeller, &base).unwrap().axial;
+        let close = |a: f64, b: f64| (a - b).abs() <= 1e-9 * a.abs().max(b.abs()).max(1e-300);
+        assert!(close(now.law.seal_diameter, today.law.seal_diameter));
+        assert!(close(now.design.total, today.design.total));
+        assert!(close(now.shutoff.total, today.shutoff.total));
+        assert!(close(now.largest, today.largest));
+    }
+
+    #[test]
+    fn the_default_rings_widen_the_axial_seal_diameter() {
+        let (p, impeller, _) = pump_with_volute();
+        let base = p.performance_input(impeller).unwrap();
+        let front = p
+            .compute_impeller_geometry(impeller)
+            .unwrap()
+            .contour
+            .seals
+            .front
+            .unwrap();
+        let axial = p.compute_performance(impeller, &base).unwrap().axial;
+        assert_eq!(axial.law.seal_diameter, 2.0 * front.radius);
+        let mut plain = p.clone();
+        plain_seals(&mut plain, impeller);
+        let narrow = plain.compute_performance(impeller, &base).unwrap().axial;
+        assert!(axial.law.seal_diameter > narrow.law.seal_diameter);
     }
 
     #[test]
