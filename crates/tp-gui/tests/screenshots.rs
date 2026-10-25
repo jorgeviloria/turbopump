@@ -1307,3 +1307,24 @@ fn blade_loading() {
     harness.run();
     save(&mut harness, "blade-loading");
 }
+
+/// The seal cards of the meridional contour step, the rear one scrolled into view.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn seal_cards() {
+    let mut harness = harness(egui::Theme::Light);
+    harness
+        .get_all_by_label("Meridional contour")
+        .find(|n| n.rect().left() < 400.0)
+        .unwrap()
+        .click();
+    harness.run();
+    harness.run();
+    harness
+        .get_all_by_label("Rear seal")
+        .next()
+        .unwrap()
+        .scroll_to_me();
+    harness.run_steps(4);
+    save(&mut harness, "seal-cards");
+}

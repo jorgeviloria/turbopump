@@ -1215,6 +1215,49 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "La geometría del rodete tiene errores; corrígelos antes.",
     ),
     ("Wall thickness", "Espesor de pared"),
+    ("Front seal", "Sello delantero"),
+    ("Rear seal", "Sello trasero"),
+    ("Seal diameter", "Diámetro del sello"),
+    ("Seal length", "Largo del sello"),
+    ("Radial clearance", "Holgura radial"),
+    ("Impeller ring", "Anillo del rodete"),
+    ("Casing ring", "Anillo de la carcasa"),
+    ("Ring thickness", "Espesor del anillo"),
+    ("Performance view", "vista de Rendimiento"),
+    (
+        "Set them in the Performance view",
+        "Se ponen en la vista de Rendimiento",
+    ),
+    (
+        "An annular seal between the impeller and the casing, with an optional pair of replaceable wear rings, one on the impeller and one in the casing",
+        "Un sello anular entre el rodete y la carcasa, con un par opcional de anillos de desgaste reemplazables, uno en el rodete y otro en la carcasa",
+    ),
+    (
+        "Fit the seal; switched off, the values below are kept",
+        "Poner el sello; apagado, se conservan los valores de abajo",
+    ),
+    (
+        "Automatic: d₁ + 2t + 2·e_r with the impeller ring, d₁ + 2t without",
+        "Automático: d₁ + 2t + 2·e_r con el anillo del rodete, d₁ + 2t sin él",
+    ),
+    ("Automatic: d_sp", "Automático: d_sp"),
+    (
+        "Automatic: 0.12·d (Gülich Chap. 3.6.2)",
+        "Automático: 0,12·d (Gülich cap. 3.6.2)",
+    ),
+    ("Automatic: Gülich eq. 3.12", "Automático: Gülich ec. 3.12"),
+    (
+        "Automatic: max(0.03·d, 4 mm), our choice",
+        "Automático: máx(0,03·d, 4 mm), elección nuestra",
+    ),
+    (
+        "A replaceable wear ring pressed on the impeller",
+        "Un anillo de desgaste reemplazable, montado a presión en el rodete",
+    ),
+    (
+        "A replaceable wear ring fitted in the casing",
+        "Un anillo de desgaste reemplazable, montado en la carcasa",
+    ),
     (
         "Hub disk and shroud; automatic: max(3 mm, 0.02·d₂)",
         "Disco del cubo y carcasa; automático: máx(3 mm, 0,02·d₂)",

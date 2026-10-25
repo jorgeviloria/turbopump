@@ -1662,3 +1662,111 @@ fn a_blade_loading_sets_the_beta_distribution() {
     assert_eq!(harness.get_all_by_label("Middle slope").count(), 2);
     harness.get_by_label("Secondary-flow drive ΔC_p");
 }
+
+/// A harness on the meridional contour of a saved copy of the default pump, after
+/// `prepare` has changed its inputs.
+fn on_the_contour(
+    name: &str,
+    prepare: impl FnOnce(&mut tp_project::Project, tp_project::ComponentId),
+) -> Harness<'static, TurbopumpApp> {
+    let mut project = tp_gui::default_project();
+    let id = project.components()[0].id();
+    project.design_step(id, DesignStep::MainDimensions).unwrap();
+    prepare(&mut project, id);
+    let path = std::env::temp_dir().join(format!("turbopump-{name}.tpj"));
+    project.save(&path).unwrap();
+    let mut harness = Harness::builder()
+        .with_size([1440.0, 900.0])
+        .build_eframe(|cc| TurbopumpApp::new(cc, Some(&path)));
+    harness.run();
+    harness
+        .get_all_by_label("Meridional contour")
+        .find(|n| n.rect().left() < 400.0)
+        .unwrap()
+        .click();
+    harness.run();
+    harness.run();
+    harness
+}
+
+fn seals(h: &Harness<'_, TurbopumpApp>) -> tp_design::impeller::seals::Seals {
+    let project = h.state().document().project();
+    let id = project.components()[0].id();
+    project
+        .impeller_geometry_input(id)
+        .unwrap()
+        .meridional
+        .seals
+}
+
+#[test]
+fn the_material_step_shows_both_seal_cards() {
+    let harness = on_the_contour("seal-cards", |_, _| {});
+    for text in [
+        "Front seal",
+        "Rear seal",
+        "Seal diameter",
+        "Seal length",
+        "Radial clearance",
+        "Impeller ring",
+        "Casing ring",
+    ] {
+        assert!(
+            harness.get_all_by_label(text).next().is_some(),
+            "no {text:?}"
+        );
+    }
+    // Two cards: each has its own rows.
+    assert_eq!(harness.get_all_by_label("Seal diameter").count(), 2);
+}
+
+#[test]
+fn toggling_a_seal_keeps_its_manual_values() {
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::NodeT;
+    use tp_design::Param;
+    let mut harness = on_the_contour("seal-toggle", |project, id| {
+        let mut input = project.impeller_geometry_input(id).unwrap();
+        input.meridional.seals.rear.diameter = Param::Manual(0.09);
+        project.set_impeller_geometry(id, input).unwrap();
+    });
+    let toggle = |h: &mut Harness<'_, TurbopumpApp>| {
+        h.get_all_by_label("Rear seal")
+            .find(|n| n.accesskit_node().role() == Role::CheckBox)
+            .unwrap()
+            .click_accesskit();
+        h.run();
+        h.run();
+    };
+    toggle(&mut harness);
+    assert!(!seals(&harness).rear.enabled);
+    // A switched-off seal hides its rows.
+    assert_eq!(harness.get_all_by_label("Seal diameter").count(), 1);
+    toggle(&mut harness);
+    let rear = seals(&harness).rear;
+    assert!(rear.enabled);
+    assert_eq!(rear.diameter, Param::Manual(0.09));
+    assert_eq!(harness.get_all_by_label("Seal diameter").count(), 2);
+}
+
+#[test]
+fn seal_cards_do_not_move_on_hover() {
+    let mut harness = on_the_contour("seal-hover", |_, _| {});
+    nothing_moves_on_hover(&mut harness);
+}
+
+#[test]
+fn a_double_entry_impeller_hides_the_rear_seal() {
+    use tp_design::MainDimensionsInput;
+    use tp_design::pump::Suction;
+    let harness = on_the_contour("seal-double", |project, id| {
+        let mut input = project.pump_impeller_input(id).unwrap();
+        input.suction = Suction::Double;
+        project
+            .set_main_dimensions(id, MainDimensionsInput::CentrifugalPump(input))
+            .unwrap();
+        project.design_step(id, DesignStep::MainDimensions).unwrap();
+    });
+    assert!(harness.get_all_by_label("Front seal").next().is_some());
+    assert!(harness.query_by_label("Rear seal").is_none());
+}

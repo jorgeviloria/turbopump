@@ -2319,6 +2319,29 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
             }
         });
     }
+    let seals = g.map(|g| g.contour.seals.clone());
+    let double_entry = project
+        .pump_impeller_input(id)
+        .is_ok_and(|p| p.suction == Suction::Double);
+    changed |= seal_card(
+        ui,
+        tr("Front seal"),
+        &mut m.seals.front,
+        seals.as_ref().and_then(|s| s.front.as_ref()),
+        SealSide::Front,
+        &units,
+    );
+    // A double-entry impeller has no rear seal.
+    if !double_entry {
+        changed |= seal_card(
+            ui,
+            tr("Rear seal"),
+            &mut m.seals.rear,
+            seals.as_ref().and_then(|s| s.rear.as_ref()),
+            SealSide::Rear,
+            &units,
+        );
+    }
     if section_info(
         ui,
         tr("Side chambers"),
@@ -2507,6 +2530,148 @@ fn area_progression(ui: &mut Ui, id: ComponentId, table: &mut Vec<[f64; 2]>) -> 
         }
     });
     ui.ctx().data_mut(|d| d.insert_temp(key, text));
+    changed
+}
+
+/// Which of the two annular seals a card edits.
+#[derive(Clone, Copy, PartialEq)]
+enum SealSide {
+    Front,
+    Rear,
+}
+
+/// A checkbox on its own row, named `name` for the accessibility tree.
+fn toggle_row(ui: &mut Ui, name: &str, hint: &str, on: &mut bool) -> bool {
+    label(ui, name, hint);
+    let shown = *on;
+    let response = ui.checkbox(on, "");
+    response
+        .widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, shown, name));
+    ui.end_row();
+    response.changed()
+}
+
+/// The card of one annular seal: its switch, and with it on its diameter, length and
+/// radial clearance and the two wear rings. A seal switched off keeps its values.
+/// `used` is the seal as the design drew it. Returns whether anything changed.
+fn seal_card(
+    ui: &mut Ui,
+    title: &str,
+    seal: &mut tp_design::impeller::seals::SealSettings,
+    used: Option<&tp_design::impeller::seals::Seal>,
+    side: SealSide,
+    units: &DisplayUnits,
+) -> bool {
+    use QuantityKind::Length;
+    let mut changed = false;
+    if !section_info(
+        ui,
+        title,
+        tr(
+            "An annular seal between the impeller and the casing, with an optional pair of \
+             replaceable wear rings, one on the impeller and one in the casing",
+        ),
+    ) {
+        return false;
+    }
+    props(
+        ui,
+        if side == SealSide::Front {
+            "front_seal"
+        } else {
+            "rear_seal"
+        },
+        |ui| {
+            changed |= toggle_row(
+                ui,
+                title,
+                tr("Fit the seal; switched off, the values below are kept"),
+                &mut seal.enabled,
+            );
+            if side == SealSide::Rear {
+                value_info(
+                    ui,
+                    tr("Balance holes"),
+                    tr("Set them in the Performance view"),
+                    tr("Performance view"),
+                );
+            }
+            if !seal.enabled {
+                return;
+            }
+            changed |= param_f64(
+                ui,
+                tr("Seal diameter"),
+                tr(match side {
+                    SealSide::Front => {
+                        "Automatic: d₁ + 2t + 2·e_r with the impeller ring, d₁ + 2t without"
+                    }
+                    SealSide::Rear => "Automatic: d_sp",
+                }),
+                &mut seal.diameter,
+                Length,
+                used.map(|s| 2.0 * s.radius),
+                units,
+                0.001..=2.0,
+            );
+            changed |= param_f64(
+                ui,
+                tr("Seal length"),
+                tr("Automatic: 0.12·d (Gülich Chap. 3.6.2)"),
+                &mut seal.length,
+                Length,
+                used.map(|s| s.length),
+                units,
+                0.0..=1.0,
+            );
+            changed |= param_f64(
+                ui,
+                tr("Radial clearance"),
+                tr("Automatic: Gülich eq. 3.12"),
+                &mut seal.clearance,
+                Length,
+                used.map(|s| s.clearance),
+                units,
+                0.00001..=0.01,
+            );
+            changed |= toggle_row(
+                ui,
+                tr("Impeller ring"),
+                tr("A replaceable wear ring pressed on the impeller"),
+                &mut seal.impeller_ring.enabled,
+            );
+            if seal.impeller_ring.enabled {
+                changed |= param_f64(
+                    ui,
+                    tr("Ring thickness"),
+                    tr("Automatic: max(0.03·d, 4 mm), our choice"),
+                    &mut seal.impeller_ring.thickness,
+                    Length,
+                    used.and_then(|s| s.impeller_ring),
+                    units,
+                    0.0005..=0.1,
+                );
+            }
+            changed |= toggle_row(
+                ui,
+                tr("Casing ring"),
+                tr("A replaceable wear ring fitted in the casing"),
+                &mut seal.casing_ring.enabled,
+            );
+            if seal.casing_ring.enabled {
+                changed |= param_f64(
+                    ui,
+                    tr("Ring thickness"),
+                    tr("Automatic: max(0.03·d, 4 mm), our choice"),
+                    &mut seal.casing_ring.thickness,
+                    Length,
+                    used.and_then(|s| s.casing_ring),
+                    units,
+                    0.0005..=0.1,
+                );
+            }
+        },
+    );
     changed
 }
 
