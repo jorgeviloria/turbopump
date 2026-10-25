@@ -1,24 +1,25 @@
-//! Meridian editor: the meridional section of the impeller over the whole view, with
-//! the Bézier points of hub and shroud, both blade edges and the main dimensions to
-//! drag or type. The inputs of the step sit in the properties panel; the analysis
-//! aids (curvature, area, stream lines, reference curves) come on from a menu.
+//! The Meridian view: the meridional section of the impeller over the whole view, in
+//! one of four scopes (the stage, the impeller channel, its materials or its side
+//! chambers), with the points to drag and the dimensions to type. The inputs of the
+//! step sit in the properties panel and the tools in the Meridian tab of the toolbar.
 
-use eframe::egui::containers::menu::{MenuButton, MenuConfig};
-use eframe::egui::{self, ComboBox, Grid, PopupCloseBehavior, RichText, Ui};
+use eframe::egui::{self, Grid, RichText, Ui};
 use egui_plot::{Corner, Legend, Line, Plot, PlotPoints};
 use tp_design::impeller::ImpellerGeometry;
 use tp_design::impeller::guide;
 use tp_project::ComponentId;
 use tp_units::{DisplayUnits, QuantityKind};
 
-use super::meridional::{Fit, MeridionalView, Page, Reference, Scene, parse_points};
+use super::meridional::{MeridionalView, Reference, Scene, Scope, parse_points, wall_velocities};
 use super::{Palette, unavailable};
 use crate::app::EditCtx;
 use crate::i18n::{tf, tr};
 use crate::theme::icon;
 
 impl MeridionalView {
-    pub(crate) fn show_editor(
+    /// The view, clear of the `cover` px the floating properties panel hides on the
+    /// right.
+    pub(crate) fn show(
         &mut self,
         ui: &mut Ui,
         cx: &mut EditCtx<'_>,
@@ -41,55 +42,66 @@ impl MeridionalView {
             }
         };
         let units = cx.units();
-        // On opening, frame the meridian with its dimensions, which the plot leaves out
-        // of its own bounds.
-        if !self.framed {
-            self.fit = Some(Fit::Meridian);
+        // On opening, in a new scope, and when an inlet duct comes or goes, frame the
+        // drawing with its dimensions, which the plot leaves out of its own bounds.
+        let duct = cx.derived.duct_before(id).is_some();
+        if !self.framed || self.shown_scope != Some(self.scope) || self.framed_duct != duct {
+            self.fit = Some(self.scope.fit());
             self.framed = true;
+            self.shown_scope = Some(self.scope);
+            self.framed_duct = duct;
         }
         let current = cx
             .doc
             .project()
             .impeller_geometry_input(id)
             .unwrap_or_default();
+        let mut display = self.display;
+        display.page = self.scope.page();
+        if self.scope == Scope::Stage {
+            display.adjacent = true;
+            display.legend = true;
+        }
+        let flow = display
+            .potential
+            .then(|| self.potential(derived.revision(), id, g).cloned())
+            .flatten();
+
+        // The side chambers are drawn once they are designed; the switch is also in the
+        // panel.
+        if self.scope == Scope::Chambers && !current.meridional.chambers.enabled {
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(tr("The side chambers are not designed yet."))
+                        .color(ui.visuals().weak_text_color()),
+                );
+                if ui.button(tr("Design the side chambers")).clicked() {
+                    let mut input = current.clone();
+                    input.meridional.chambers.enabled = true;
+                    cx.edit("edit meridional contour", |p| {
+                        p.set_impeller_geometry(id, input)
+                    });
+                }
+            });
+            ui.add_space(4.0);
+        }
 
         // Clear of the floating properties panel, as the other views.
-        let right = (ui.max_rect().max.x - cover).max(ui.max_rect().min.x + 320.0);
-        let width = right - ui.cursor().min.x;
-        ui.allocate_ui_with_layout(
-            egui::vec2(width, 0.0),
-            egui::Layout::left_to_right(egui::Align::Center).with_main_wrap(true),
-            |ui| {
-                self.toolbar(ui, &units);
-                // The side chambers are designed, for the CAD model, from their page.
-                if self.editor.page == Page::Chambers {
-                    let mut enabled = current.meridional.chambers.enabled;
-                    let toggled = ui
-                        .checkbox(&mut enabled, tr("design the side chambers"))
-                        .on_hover_text(tr(
-                            "Export their fluid with the CAD model and check them in the \
-                             design; the walls can be shaped either way",
-                        ))
-                        .changed();
-                    if toggled {
-                        let mut input = current.clone();
-                        input.meridional.chambers.enabled = enabled;
-                        cx.edit("edit meridional contour", |p| {
-                            p.set_impeller_geometry(id, input)
-                        });
-                    }
-                }
-            },
-        );
-        ui.add_space(4.0);
-
-        let display = self.editor;
-        let charts = if display.charts {
-            (ui.available_height() * 0.25).clamp(120.0, 220.0)
+        let area = ui.available_rect_before_wrap();
+        let right = (area.max.x - cover).max(area.min.x + 320.0);
+        let width = right - area.min.x;
+        let below = |share: f32, min: f32, max: f32| (area.height() * share).clamp(min, max);
+        let velocities = if flow.is_some() {
+            below(0.3, 120.0, 260.0)
         } else {
             0.0
         };
-        let diagram = (ui.available_height() - charts - 8.0).max(150.0);
+        let charts = if display.charts {
+            below(0.25, 120.0, 220.0)
+        } else {
+            0.0
+        };
+        let diagram = (area.height() - velocities - charts - 8.0).max(150.0);
         self.diagram(
             ui,
             cx,
@@ -99,124 +111,28 @@ impl MeridionalView {
                 current: &current,
                 stator,
                 volute,
-                potential: None,
+                potential: flow.as_ref(),
                 display,
                 size: egui::vec2(width, diagram),
             },
         );
+        match &flow {
+            Some(Ok(flow)) => {
+                let rect =
+                    egui::Rect::from_min_size(ui.cursor().min, egui::vec2(width, velocities));
+                ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+                    wall_velocities(ui, flow, g, id, velocities, &units);
+                });
+            }
+            Some(Err(e)) => {
+                ui.colored_label(ui.visuals().error_fg_color, format!("Potential flow: {e}"));
+            }
+            None => {}
+        }
         if display.charts {
             ui.add_space(8.0);
             progressions(ui, id, g, &units, width, charts);
         }
-    }
-
-    /// One row: the page, dimensions, the analysis menu, framing, the snap grid and the
-    /// help.
-    fn toolbar(&mut self, ui: &mut Ui, units: &DisplayUnits) {
-        // What the handles edit: the walls of the flow path, the closed material or the
-        // casing walls of the side chambers.
-        let page = self.editor.page;
-        ui.selectable_value(&mut self.editor.page, Page::FlowPath, tr("Flow path"))
-            .on_hover_text(tr("Hub, shroud and blade edges"));
-        ui.selectable_value(&mut self.editor.page, Page::Materials, tr("Materials"))
-            .on_hover_text(tr(
-                "The closed contours of the hub disk and the shroud cover: drag their \
-                 points, right-click a wire for its segments",
-            ));
-        ui.selectable_value(&mut self.editor.page, Page::Chambers, tr("Side chambers"))
-            .on_hover_text(tr(
-                "The casing walls beside the impeller: the front chamber down to the annular \
-                 seal, the rear one down to the shaft seal",
-            ));
-        if self.editor.page != page {
-            self.fit = Some(Fit::Meridian);
-        }
-        ui.separator();
-        ui.checkbox(&mut self.editor.dimensions, tr("dimensions"))
-            .on_hover_text(tr(
-                "The main dimensions d_n, d₁, d₂, b₂ and L. Click a value to type it.",
-            ));
-        let charts = self.editor.charts;
-        MenuButton::new(format!("{} {}", icon::EYE, tr("Analysis")))
-            .config(MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside))
-            .ui(ui, |ui| {
-                let d = &mut self.editor;
-                ui.checkbox(&mut d.curvature, tr("curvature maximum"))
-                    .on_hover_text(tr(
-                        "Point of smallest radius of curvature of hub and shroud",
-                    ));
-                ui.checkbox(&mut d.area_circles, tr("area circles"))
-                    .on_hover_text(tr("Circles as wide as the channel normal to the flow"));
-                ui.checkbox(&mut d.stream_lines, tr("stream lines"));
-                ui.checkbox(&mut d.quasi_orthogonals, tr("quasi-orthogonals"));
-                ui.checkbox(&mut d.adjacent, tr("adjacent components"));
-                ui.checkbox(&mut d.charts, tr("area and curvature charts"))
-                    .on_hover_text(tr(
-                        "Cross-section area along the channel and curvature along the \
-                         walls, under the diagram: both should change smoothly",
-                    ));
-                ui.separator();
-                references_panel(ui, &mut self.references, &mut self.reference_text, units);
-            });
-        // The diagram changes height with the charts: frame the meridian again.
-        if self.editor.charts != charts {
-            self.fit = Some(Fit::Meridian);
-        }
-        ui.separator();
-        if ui
-            .button(format!("{} {}", icon::FRAME_CORNERS, tr("Fit meridian")))
-            .clicked()
-        {
-            self.fit = Some(Fit::Meridian);
-        }
-        if ui
-            .button(format!("{} {}", icon::ARROWS_OUT, tr("Fit all")))
-            .clicked()
-        {
-            self.fit = Some(Fit::All);
-        }
-        ui.separator();
-        // Grid steps in display units; dragged points snap to them.
-        let scale = units.to_display(QuantityKind::Length, 1.0);
-        let unit = units.get(QuantityKind::Length).symbol;
-        let step = self.editor.snap * scale;
-        let name = |step: f64| {
-            if step > 0.0 {
-                format!("{step} {unit}")
-            } else {
-                tr("free").to_owned()
-            }
-        };
-        ui.label(tr("grid"))
-            .on_hover_text(tr("Dragged points snap to this grid"));
-        ComboBox::from_id_salt("meridian_grid")
-            .width(70.0)
-            .selected_text(name(step))
-            .show_ui(ui, |ui| {
-                for option in [0.0, 0.01, 0.1, 0.5, 1.0] {
-                    if ui
-                        .selectable_label((step - option).abs() < 1e-12, name(option))
-                        .clicked()
-                    {
-                        self.editor.snap = option / scale;
-                    }
-                }
-            });
-        ui.checkbox(&mut self.editor.snap_points, tr("point snap"))
-            .on_hover_text(tr(
-                "A dragged point takes the z or r of another point near it; hold Ctrl \
-                 (Cmd) to drag freely",
-            ));
-        ui.checkbox(&mut self.editor.snap_lines, tr("line snap"))
-            .on_hover_text(tr(
-                "A dragged point lands on the line through two other points near it",
-            ));
-        ui.weak(icon::QUESTION).on_hover_text(tr(
-            "Drag a point to shape the meridian: hollow points are automatic, filled \
-             ones set by hand. Double-click a point to make it automatic again. \
-             Right-click a point or a wall for exact values, segments and joints. Click \
-             a dimension to type it. Hold Alt and drag to measure a distance.",
-        ));
     }
 }
 
@@ -310,7 +226,7 @@ pub(crate) fn guide_table(ui: &mut Ui, g: &ImpellerGeometry, units: &DisplayUnit
 }
 
 /// Curves to compare with: pasted points, or copies kept from the wall menu.
-fn references_panel(
+pub(crate) fn references_panel(
     ui: &mut Ui,
     references: &mut Vec<Reference>,
     text: &mut String,
@@ -403,7 +319,8 @@ fn recover(ui: &mut Ui, cx: &mut EditCtx<'_>, id: ComponentId, reason: &str) {
     });
 }
 
-/// Cross-section area along the channel and curvature along the walls.
+/// Cross-section area along the channel, static moment along the blade sections and
+/// curvature along the walls.
 fn progressions(
     ui: &mut Ui,
     id: ComponentId,
@@ -416,12 +333,12 @@ fn progressions(
     let unit = units.get(QuantityKind::Length).symbol;
     // Curvature in 1/display unit.
     let per_unit = 1.0 / units.to_display(QuantityKind::Length, 1.0);
-    let half = (width - 8.0) / 2.0;
+    let third = (width - 16.0) / 3.0;
     ui.horizontal_top(|ui| {
         let qos = &g.channel.quasi_orthogonals;
         let inlet = qos[0].area;
         Plot::new(("meridian_area", id.0))
-            .width(half)
+            .width(third)
             .height(height)
             .allow_drag(false)
             .allow_zoom(false)
@@ -437,8 +354,45 @@ fn progressions(
                         .width(1.8),
                 );
             });
+        // Pfleiderer's static moment S = ∫ r dm of each section, from its leading edge.
+        let area_unit = units.get(QuantityKind::Area).symbol;
+        let sections = &g.blade.sections;
+        Plot::new(("meridian_static_moment", id.0))
+            .width(third)
+            .height(height)
+            .allow_drag(false)
+            .allow_zoom(false)
+            .allow_scroll(false)
+            .x_axis_label(tr("fraction of the blade length"))
+            .y_axis_label(format!("S = ∫ r dm [{area_unit}]"))
+            .legend(Legend::default().position(Corner::LeftTop))
+            .show(ui, |plot| {
+                let last = sections.len().saturating_sub(1);
+                for (i, section) in sections.iter().enumerate() {
+                    let moment = section.static_moment();
+                    let length = section.m.last().copied().unwrap_or(1.0).max(f64::EPSILON);
+                    let points: PlotPoints = section
+                        .m
+                        .iter()
+                        .zip(&moment)
+                        .map(|(&m, &s)| [m / length, units.to_display(QuantityKind::Area, s)])
+                        .collect();
+                    let total =
+                        units.show(QuantityKind::Area, moment.last().copied().unwrap_or(0.0));
+                    let line = match i {
+                        0 => Line::new(format!("{} {total}", tr("hub")), points)
+                            .color(palette.hub)
+                            .width(1.8),
+                        i if i == last => Line::new(format!("{} {total}", tr("shroud")), points)
+                            .color(palette.shroud)
+                            .width(1.8),
+                        _ => Line::new("", points).color(palette.guide).width(1.0),
+                    };
+                    plot.line(line);
+                }
+            });
         Plot::new(("meridian_curvature", id.0))
-            .width(half)
+            .width(third)
             .height(height)
             .allow_drag(false)
             .allow_zoom(false)

@@ -21,7 +21,28 @@ fn heading(ui: &mut Ui, text: &str) {
     ui.add_space(2.0);
 }
 
+/// The report of impeller `id` and the components after it, clear of the `cover` px
+/// the floating properties panel hides on the right.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn show(
+    ui: &mut Ui,
+    project: &Project,
+    derived: &Derived,
+    id: ComponentId,
+    stator: Option<ComponentId>,
+    volute: Option<ComponentId>,
+    units: &DisplayUnits,
+    cover: f32,
+) {
+    let area = ui.available_rect_before_wrap();
+    let right = (area.max.x - cover).max(area.min.x + 320.0);
+    let clear = egui::Rect::from_min_max(area.min, egui::pos2(right, area.max.y));
+    ui.scope_builder(egui::UiBuilder::new().max_rect(clear), |ui| {
+        content(ui, project, derived, id, stator, volute, units);
+    });
+}
+
+fn content(
     ui: &mut Ui,
     project: &Project,
     derived: &Derived,
@@ -44,11 +65,12 @@ pub(crate) fn show(
 
         if let Some(Ok(liquid)) = &derived.liquid {
             heading(ui, tr("Fluid"));
-            Grid::new("report_fluid")
-                .num_columns(2)
-                .striped(true)
-                .show(ui, |ui| {
-                    value_row(ui, tr("Fluid"), project.setup().fluid.as_str());
+            crate::widgets::table(ui, "report_fluid", |ui| {
+                    value_row(
+                        ui,
+                        tr("Fluid"),
+                        crate::i18n::fluid_name(&project.setup().fluid),
+                    );
                     value_row(ui, tr("Density ρ"), s(Density, liquid.density));
                     value_row(
                         ui,
@@ -72,10 +94,7 @@ pub(crate) fn show(
         };
         heading(ui, tr("Stage"));
         if let Ok(duty) = project.pump_duty(id) {
-            Grid::new("report_stage")
-                .num_columns(2)
-                .striped(true)
-                .show(ui, |ui| {
+            crate::widgets::table(ui, "report_stage", |ui| {
                     value_row(ui, tr("Flow rate Q"), s(VolumeFlow, duty.flow));
                     value_row(ui, tr("Head H"), s(Head, duty.head));
                     value_row(ui, tr("Speed n"), s(RotationalSpeed, duty.speed));
@@ -97,10 +116,7 @@ pub(crate) fn show(
 
         heading(ui, tr("Efficiencies"));
         let e = &d.efficiencies;
-        Grid::new("report_eff")
-            .num_columns(2)
-            .striped(true)
-            .show(ui, |ui| {
+        crate::widgets::table(ui, "report_eff", |ui| {
                 value_row(
                     ui,
                     tr("Hydraulic η_h"),
@@ -141,10 +157,7 @@ pub(crate) fn show(
             });
 
         heading(ui, tr("Dimensions"));
-        Grid::new("report_dims")
-            .num_columns(2)
-            .striped(true)
-            .show(ui, |ui| {
+        crate::widgets::table(ui, "report_dims", |ui| {
                 let rows = [
                     (
                         "Shaft diameter",
@@ -240,10 +253,7 @@ pub(crate) fn show(
         heading(ui, tr("Outlet"));
         let o = &d.outlet;
         let t = &o.triangle;
-        Grid::new("report_outlet")
-            .num_columns(2)
-            .striped(true)
-            .show(ui, |ui| {
+        crate::widgets::table(ui, "report_outlet", |ui| {
                 value_row(ui, tr("u₂"), s(Velocity, t.u));
                 value_row(ui, tr("c_m2"), s(Velocity, t.cm));
                 value_row(ui, tr("c_u2"), s(Velocity, t.cu));
@@ -270,10 +280,7 @@ pub(crate) fn show(
             });
 
         heading(ui, tr("Checks"));
-        Grid::new("report_checks")
-            .num_columns(2)
-            .striped(true)
-            .show(ui, |ui| {
+        crate::widgets::table(ui, "report_checks", |ui| {
                 value_row(
                     ui,
                     tr("Deviation δ₂ = β₂B − β₂"),
@@ -319,10 +326,7 @@ pub(crate) fn show(
             }
         };
         let qos = &g.channel.quasi_orthogonals;
-        Grid::new("report_geometry")
-            .num_columns(2)
-            .striped(true)
-            .show(ui, |ui| {
+        crate::widgets::table(ui, "report_geometry", |ui| {
                 value_row(ui, tr("Axial length L"), s(Length, g.contour.axial_length));
                 value_row(ui, tr("Hub length"), s(Length, g.contour.hub_length()));
                 value_row(
@@ -424,10 +428,7 @@ pub(crate) fn show(
         match &results.performance {
             Ok(c) => {
                 let q = c.design.flow;
-                Grid::new("report_performance")
-                    .num_columns(2)
-                    .striped(true)
-                    .show(ui, |ui| {
+                crate::widgets::table(ui, "report_performance", |ui| {
                         value_row(
                             ui,
                             tr("Best efficiency"),
@@ -939,10 +940,7 @@ pub(crate) fn show(
                 &[&format!("{:.2}", dev.exponent)],
             ),
         };
-        Grid::new("report_volute")
-            .num_columns(2)
-            .striped(true)
-            .show(ui, |ui| {
+        crate::widgets::table(ui, "report_volute", |ui| {
                 value_row(ui, tr("Design flow Q_Le"), s(VolumeFlow, d.flow));
                 value_row(
                     ui,
@@ -1193,111 +1191,108 @@ fn diffuser(
         "{}: vaneless diffuser"
     };
     heading(ui, &tf(title, &[&component_name(name)]));
-    Grid::new("report_diffuser")
-        .num_columns(2)
-        .striped(true)
-        .show(ui, |ui| {
-            value_row(ui, tr("Design flow Q_Le"), s(VolumeFlow, d.flow));
+    crate::widgets::table(ui, "report_diffuser", |ui| {
+        value_row(ui, tr("Design flow Q_Le"), s(VolumeFlow, d.flow));
+        value_row(
+            ui,
+            tr("Inlet d₃ × b₃"),
+            format!(
+                "{} × {}",
+                s(Length, d.inlet_diameter),
+                s(Length, d.inlet_width)
+            ),
+        );
+        value_row(
+            ui,
+            tr("Outlet d₄ × b₄"),
+            format!(
+                "{} × {} ({:.3}·d₂)",
+                s(Length, d.outlet_diameter),
+                s(Length, d.outlet_width),
+                d.outlet_diameter / d.impeller_diameter
+            ),
+        );
+        value_row(
+            ui,
+            tr("Velocity in / out"),
+            format!(
+                "{} / {}",
+                s(Velocity, d.inlet.velocity()),
+                s(Velocity, d.outlet.velocity())
+            ),
+        );
+        value_row(
+            ui,
+            tr("Ideal pressure recovery"),
+            format!("{:.2}", d.ideal_pressure_recovery),
+        );
+        if let Some(v) = &d.vanes {
+            let c = &v.checks;
+            value_row(ui, tr("Vanes"), v.count.to_string());
             value_row(
                 ui,
-                tr("Inlet d₃ × b₃"),
-                format!(
-                    "{} × {}",
-                    s(Length, d.inlet_diameter),
-                    s(Length, d.inlet_width)
+                tr("Vane angles α₃B / α₄B"),
+                format!("{} / {}", s(Angle, v.inlet_angle), s(Angle, v.outlet_angle)),
+            );
+            value_row(
+                ui,
+                tr("Throat a₃"),
+                tf(
+                    "{} (eq. T7.7.10: {})",
+                    &[&s(Length, v.throat), &s(Length, v.throat_target)],
                 ),
             );
             value_row(
                 ui,
-                tr("Outlet d₄ × b₄"),
-                format!(
-                    "{} × {} ({:.3}·d₂)",
-                    s(Length, d.outlet_diameter),
-                    s(Length, d.outlet_width),
-                    d.outlet_diameter / d.impeller_diameter
+                tr("A: area ratio"),
+                tf(
+                    "{} (optimum {})",
+                    &[
+                        &format!("{:.2}", c.area_ratio),
+                        &format!("{:.2}", c.optimum_area_ratio),
+                    ],
                 ),
             );
             value_row(
                 ui,
-                tr("Velocity in / out"),
-                format!(
-                    "{} / {}",
-                    s(Velocity, d.inlet.velocity()),
-                    s(Velocity, d.outlet.velocity())
-                ),
+                tr("B: c₃q/c₂"),
+                tf("{} (0.7 to 0.85)", &[&format!("{:.2}", c.deceleration)]),
             );
             value_row(
                 ui,
-                tr("Ideal pressure recovery"),
-                format!("{:.2}", d.ideal_pressure_recovery),
+                tr("C: L₃₋₄/a₃"),
+                tf("{} (2.5 to 6)", &[&format!("{:.1}", c.length_ratio)]),
             );
-            if let Some(v) = &d.vanes {
-                let c = &v.checks;
-                value_row(ui, tr("Vanes"), v.count.to_string());
-                value_row(
-                    ui,
-                    tr("Vane angles α₃B / α₄B"),
-                    format!("{} / {}", s(Angle, v.inlet_angle), s(Angle, v.outlet_angle)),
-                );
-                value_row(
-                    ui,
-                    tr("Throat a₃"),
-                    tf(
-                        "{} (eq. T7.7.10: {})",
-                        &[&s(Length, v.throat), &s(Length, v.throat_target)],
-                    ),
-                );
-                value_row(
-                    ui,
-                    tr("A: area ratio"),
-                    tf(
-                        "{} (optimum {})",
-                        &[
-                            &format!("{:.2}", c.area_ratio),
-                            &format!("{:.2}", c.optimum_area_ratio),
-                        ],
-                    ),
-                );
-                value_row(
-                    ui,
-                    tr("B: c₃q/c₂"),
-                    tf("{} (0.7 to 0.85)", &[&format!("{:.2}", c.deceleration)]),
-                );
-                value_row(
-                    ui,
-                    tr("C: L₃₋₄/a₃"),
-                    tf("{} (2.5 to 6)", &[&format!("{:.1}", c.length_ratio)]),
-                );
-                value_row(
-                    ui,
-                    tr("D: b₃/a₃"),
-                    tf("{} (0.8 to 2)", &[&format!("{:.2}", c.aspect_ratio)]),
-                );
-                value_row(
-                    ui,
-                    tr("E: c₄²/(2gH)"),
-                    tf("{} (0.02 to 0.04)", &[&format!("{:.3}", c.outlet_energy)]),
-                );
-                value_row(
-                    ui,
-                    tr("F: opening angle"),
-                    tf(
-                        "{} (allowed {})",
-                        &[&s(Angle, c.opening_angle), &s(Angle, c.allowable_angle)],
-                    ),
-                );
-            } else {
-                value_row(ui, tr("Flow angle"), s(Angle, d.inlet.angle));
-                value_row(
-                    ui,
-                    tr("Path"),
-                    tf(
-                        "{} around, {} long",
-                        &[&s(Angle, d.wrap_angle), &s(Length, d.path_length)],
-                    ),
-                );
-            }
-        });
+            value_row(
+                ui,
+                tr("D: b₃/a₃"),
+                tf("{} (0.8 to 2)", &[&format!("{:.2}", c.aspect_ratio)]),
+            );
+            value_row(
+                ui,
+                tr("E: c₄²/(2gH)"),
+                tf("{} (0.02 to 0.04)", &[&format!("{:.3}", c.outlet_energy)]),
+            );
+            value_row(
+                ui,
+                tr("F: opening angle"),
+                tf(
+                    "{} (allowed {})",
+                    &[&s(Angle, c.opening_angle), &s(Angle, c.allowable_angle)],
+                ),
+            );
+        } else {
+            value_row(ui, tr("Flow angle"), s(Angle, d.inlet.angle));
+            value_row(
+                ui,
+                tr("Path"),
+                tf(
+                    "{} around, {} long",
+                    &[&s(Angle, d.wrap_angle), &s(Length, d.path_length)],
+                ),
+            );
+        }
+    });
     warnings(ui, &d.warnings);
 }
 

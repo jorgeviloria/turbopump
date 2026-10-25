@@ -549,7 +549,14 @@ impl NewProjectForm {
                     .selected_text(tr("common…"))
                     .show_ui(ui, |ui| {
                         for name in crate::steps::COMMON_FLUIDS {
-                            if ui.selectable_label(self.fluid == *name, *name).clicked() {
+                            if ui
+                                .selectable_label(
+                                    self.fluid == *name,
+                                    crate::i18n::fluid_name(name),
+                                )
+                                .on_hover_text(crate::i18n::tf("CoolProp name: {}", &[name]))
+                                .clicked()
+                            {
                                 self.fluid = (*name).to_owned();
                             }
                         }

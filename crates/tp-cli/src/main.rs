@@ -151,7 +151,8 @@ struct NewArgs {
     /// Working fluid (default: Water for pumps and hydro turbines, Air otherwise).
     #[arg(long)]
     fluid: Option<String>,
-    /// Components from inlet to outlet: impeller, stator, vaneless-stator, volute.
+    /// Components from inlet to outlet: inlet-duct, impeller, stator, vaneless-stator,
+    /// volute.
     #[arg(long, value_delimiter = ',', default_value = "impeller")]
     components: Vec<String>,
     /// Overwrite an existing file.
@@ -302,8 +303,10 @@ fn parse_component(name: &str) -> Result<ComponentKind, String> {
         "stator" => Ok(ComponentKind::Stator { vaned: true }),
         "vaneless-stator" => Ok(ComponentKind::Stator { vaned: false }),
         "volute" => Ok(ComponentKind::Volute),
+        "inlet-duct" => Ok(ComponentKind::InletDuct),
         other => Err(format!(
-            "unknown component {other:?}; expected impeller, stator, vaneless-stator or volute"
+            "unknown component {other:?}; expected inlet-duct, impeller, stator, \
+             vaneless-stator or volute"
         )),
     }
 }

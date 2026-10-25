@@ -16,11 +16,12 @@ tp-math.workspace = true
 
 [build-dependencies]
 cxx-build.workspace = true
-# Builds OCCT 7.8.1 from source as static libraries (LGPL-2.1 with exception).
-occt-sys.workspace = true
+# Builds OCCT 8.0.1 from source as static libraries (LGPL-2.1 with exception).
+tp-occt-sys.workspace = true
 
 [dev-dependencies]
 approx.workspace = true
+tp-io.workspace = true
 
 [lints]
 workspace = true

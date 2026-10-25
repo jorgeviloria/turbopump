@@ -9,8 +9,8 @@ use std::path::PathBuf;
 
 use eframe::egui;
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
-use tp_gui::{TurbopumpApp, View};
+use egui_kittest::kittest::{NodeT, Queryable};
+use tp_gui::{Scope, TurbopumpApp, View};
 
 fn output(name: &str) -> PathBuf {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/screenshots");
@@ -18,7 +18,15 @@ fn output(name: &str) -> PathBuf {
     dir.join(format!("{name}.png"))
 }
 
+/// Saves the window without the pointer kittest paints, as a real screenshot would.
 fn save(harness: &mut Harness<'_, TurbopumpApp>, name: &str) {
+    harness.remove_cursor();
+    harness.run_steps(4);
+    save_hovering(harness, name);
+}
+
+/// Saves the window with the pointer, for hover states.
+fn save_hovering(harness: &mut Harness<'_, TurbopumpApp>, name: &str) {
     let image = harness.render().expect("wgpu rendering");
     let path = output(name);
     image.save(&path).unwrap();
@@ -56,20 +64,18 @@ fn main_window() {
             let name = view.title().to_lowercase().replace(' ', "-");
             save(&mut harness, &format!("{name}-{suffix}"));
         }
-        // The home tab of the toolbar and the tree of the 3D model.
-        harness.get_by_label("Home tab").click();
-        harness.get_by_label_contains("3D model").click();
+        // The 3D tab of the toolbar and the scene floating over the view.
         harness.state_mut().focus_view(View::View3d);
         harness.run();
         save(&mut harness, &format!("home-{suffix}"));
         // The global setup: rows with a value and its kind side by side.
-        harness
-            .get_all_by_label("Global setup")
-            .next()
-            .unwrap()
-            .click();
+        harness.get_by_label_contains("TARGET").click();
         harness.run();
         save(&mut harness, &format!("setup-{suffix}"));
+        // The design flow folded to its rail.
+        harness.get_by_label("Fold the design flow").click();
+        harness.run();
+        save(&mut harness, &format!("flow-rail-{suffix}"));
     }
 }
 
@@ -82,7 +88,7 @@ fn documentation() {
         harness.get_by_label_contains("Accept step").click();
         harness.run();
     }
-    harness.get_by_label_contains("Volute setup").click();
+    harness.get_by_label("Volute 1").click();
     harness.run();
     for _ in 0..2 {
         harness.get_by_label_contains("Accept step").click();
@@ -94,6 +100,369 @@ fn documentation() {
     save(&mut harness, "editor");
 }
 
+/// The scene's color picker over a parallel view with a translucent casing, and the
+/// PNG picture the 3D tab saves of that view.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn scene_colors_and_picture() {
+    let mut harness = harness(egui::Theme::Light);
+    for _ in 0..6 {
+        harness.get_by_label_contains("Accept step").click();
+        harness.run();
+    }
+    harness.get_by_label("Volute 1").click();
+    harness.run();
+    for _ in 0..2 {
+        harness.get_by_label_contains("Accept step").click();
+        harness.run();
+    }
+    harness.state_mut().set_sidebar_open(false);
+    harness.get_by_label("3D tab").click();
+    harness.run();
+    harness.get_by_label("Orthographic").click();
+    harness.run();
+    // Glass to opaque to translucent.
+    for _ in 0..2 {
+        harness.get_by_label("Opacity of Casing").click();
+        harness.run();
+    }
+    harness.get_by_label("Color of Blades").click();
+    harness.run_steps(4);
+    save(&mut harness, "scene-colors");
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+    let ctx = harness.ctx.clone();
+    let png = harness
+        .state_mut()
+        .picture_of_3d_view(&ctx)
+        .expect("a picture of the 3D view");
+    assert!(png.starts_with(b"\x89PNG"));
+    let path = output("picture-3d");
+    std::fs::write(&path, png).unwrap();
+    println!("wrote {}", path.display());
+}
+
+/// The button that completes every step, shown on the impeller's header, and the
+/// impeller completed with it.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn complete_all() {
+    let mut harness = harness(egui::Theme::Light);
+    let button = harness
+        .get_by_label("Complete every step of Impeller 1")
+        .rect()
+        .center();
+    harness.hover_at(button);
+    harness.run_steps(40);
+    save_hovering(&mut harness, "complete-all-hover");
+    click_at(&mut harness, button);
+    save(&mut harness, "complete-all");
+}
+
+/// The main dimensions accepted, then a value set by hand: its row marked in the margin.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn changed_since_accepted() {
+    let mut harness = harness(egui::Theme::Light);
+    harness.get_by_label_contains("Accept step").click();
+    harness.run();
+    harness.key_press_modifiers(egui::Modifiers::ALT, egui::Key::ArrowUp);
+    harness.run();
+    harness.run();
+    harness.get_all_by_label("auto").nth(1).unwrap().click();
+    harness.run();
+    harness.run();
+    save(&mut harness, "changed-since-accepted");
+}
+
+/// The pointer on the row of the axial length L in the properties: its dimension
+/// stands out in the meridian.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn row_and_dimension() {
+    let mut harness = harness(egui::Theme::Light);
+    harness.state_mut().focus_view(View::Meridian);
+    harness.run();
+    // Only the section of L open, so its row is in sight.
+    harness.get_by_label("More actions of the step").click();
+    harness.run();
+    harness.get_by_label_contains("Fold every section").click();
+    harness.run();
+    harness.get_all_by_label("Contour").last().unwrap().click();
+    harness.run();
+    let row = harness
+        .get_all_by_label("Axial length L")
+        .next()
+        .unwrap()
+        .rect()
+        .center();
+    harness.hover_at(row);
+    harness.run_steps(4);
+    save_hovering(&mut harness, "row-and-dimension");
+    // The other way: the value of L in the drawing shades its row.
+    harness.hover_at(egui::pos2(683.0, 751.0));
+    harness.run_steps(4);
+    save_hovering(&mut harness, "dimension-and-row");
+}
+
+/// The same link in the front view: the row of d₂ lights its diameter, and the text of
+/// the diameter shades its row.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn front_dimensions() {
+    let mut harness = harness(egui::Theme::Light);
+    harness.state_mut().focus_view(View::FrontView);
+    harness.run();
+    let row = harness
+        .get_all_by_label("Outlet diameter d₂")
+        .next()
+        .unwrap()
+        .rect()
+        .center();
+    harness.hover_at(row);
+    harness.run_steps(4);
+    save_hovering(&mut harness, "front-row-and-dimension");
+    // The drawing comes before the properties, whose summary also names d₂.
+    let text = harness
+        .get_all_by_label_contains("d₂ ")
+        .next()
+        .unwrap()
+        .rect()
+        .center();
+    harness.hover_at(text);
+    harness.run_steps(4);
+    save_hovering(&mut harness, "front-dimension-and-row");
+}
+
+/// The meridional cut with an opaque casing: the cut faces of the volute, the blades
+/// and the inlet duct are capped, as seen and facing the camera.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn cut_caps() {
+    let mut harness = stage_in_3d();
+    harness.get_by_label("Opacity of Casing").click();
+    harness.run();
+    harness.get_by_label("Meridional cut").click();
+    harness.run();
+    harness.remove_cursor();
+    harness.run();
+    save(&mut harness, "cut-caps");
+    // From the side, the cut turned to face the camera: the meridional section.
+    harness.get_by_label("Views").click();
+    harness.run();
+    harness.get_by_label("From the side").click();
+    harness.run_steps(40);
+    harness
+        .get_by_label_contains("Open toward the view")
+        .click();
+    harness.remove_cursor();
+    harness.run_steps(4);
+    save(&mut harness, "cut-caps-facing");
+}
+
+/// The caps of the cut on a double volute, an internal volute and the vanes of a
+/// diffuser: each closed volume shows its cut face, the casing opaque.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn cut_caps_of_every_volume() {
+    use tp_design::volute::{CrossSectionInput, InternalRound, SectionShape, VoluteKind};
+    use tp_project::ComponentKind;
+    // How each variant changes the default project.
+    type Variant = fn(&mut tp_project::Project);
+    let variants: [(&str, Variant); 3] = [
+        ("cut-caps-double", |p| {
+            let id = p.components()[1].id();
+            let mut input = p.volute_input(id).unwrap();
+            input.setup.kind = VoluteKind::Double;
+            p.set_volute(id, input).unwrap();
+        }),
+        ("cut-caps-internal", |p| {
+            let id = p.components()[1].id();
+            let mut input = p.volute_input(id).unwrap();
+            input.cross_section =
+                CrossSectionInput::single(SectionShape::RoundInternal(InternalRound::default()));
+            p.set_volute(id, input).unwrap();
+        }),
+        ("cut-caps-vanes", |p| {
+            p.add_component(ComponentKind::Stator { vaned: true }, Some(1))
+                .unwrap();
+        }),
+    ];
+    for (name, change) in variants {
+        let mut project = tp_gui::default_project();
+        change(&mut project);
+        let ids: Vec<_> = project.components().iter().map(|c| c.id()).collect();
+        for id in ids {
+            assert!(
+                project.design_remaining(id).unwrap().failed.is_none(),
+                "{name}"
+            );
+        }
+        let path = std::env::temp_dir().join(format!("turbopump-{name}.tpj"));
+        project.save(&path).unwrap();
+        let mut harness = Harness::builder()
+            .with_size([1440.0, 900.0])
+            .with_pixels_per_point(1.5)
+            .with_theme(egui::Theme::Light)
+            .wgpu()
+            .build_eframe(|cc| TurbopumpApp::new(cc, Some(&path)));
+        harness.run();
+        harness.state_mut().set_sidebar_open(false);
+        harness.get_by_label("3D tab").click();
+        harness.run();
+        harness.get_by_label("Opacity of Casing").click();
+        harness.run();
+        harness.get_by_label("Meridional cut").click();
+        harness.remove_cursor();
+        harness.run_steps(4);
+        save(&mut harness, name);
+        // The vanes are thin: face on, their cut faces show.
+        if name == "cut-caps-vanes" {
+            harness.get_by_label("Views").click();
+            harness.run();
+            harness.get_by_label("From the side").click();
+            harness.run_steps(40);
+            harness
+                .get_by_label_contains("Open toward the view")
+                .click();
+            harness.remove_cursor();
+            harness.run_steps(4);
+            save(&mut harness, "cut-caps-vanes-facing");
+        }
+    }
+}
+
+/// The Views menu of the 3D tab, a view saved from the side and brought back.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn views_menu() {
+    let mut harness = stage_in_3d();
+    let open = |h: &mut Harness<'_, TurbopumpApp>| {
+        h.get_by_label("Views").click();
+        h.run();
+    };
+    open(&mut harness);
+    harness.get_by_label("From the side").click();
+    harness.run_steps(40);
+    open(&mut harness);
+    harness.get_by_label_contains("Save this view").click();
+    harness.run();
+    open(&mut harness);
+    harness.get_by_label("View 1");
+    save(&mut harness, "views-menu");
+    harness.get_by_label("From the inlet").click();
+    harness.run_steps(40);
+    open(&mut harness);
+    harness.get_by_label("View 1").click();
+    harness.run_steps(40);
+    save(&mut harness, "view-1");
+    open(&mut harness);
+    harness.get_by_label("Forget View 1").click();
+    harness.run();
+    open(&mut harness);
+    assert!(harness.query_by_label("View 1").is_none());
+}
+
+/// A primary click at `pos`, with the pointer left there.
+fn click_at(harness: &mut Harness<'_, TurbopumpApp>, pos: egui::Pos2) {
+    harness.hover_at(pos);
+    harness.run();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run();
+    }
+}
+
+/// The stage with its impeller and volute designed, in the 3D view, properties folded.
+fn stage_in_3d() -> Harness<'static, TurbopumpApp> {
+    let mut harness = harness(egui::Theme::Light);
+    for _ in 0..6 {
+        harness.get_by_label_contains("Accept step").click();
+        harness.run();
+    }
+    harness.get_by_label("Volute 1").click();
+    harness.run();
+    for _ in 0..2 {
+        harness.get_by_label_contains("Accept step").click();
+        harness.run();
+    }
+    harness.state_mut().set_sidebar_open(false);
+    harness.get_by_label("3D tab").click();
+    harness.run();
+    harness
+}
+
+/// Phase C of the 3D view: a part selected and another under the pointer, the
+/// meridional cut, and a distance measured on the cut model.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn inspect_3d() {
+    let mut harness = stage_in_3d();
+    let impeller = egui::pos2(960.0, 560.0);
+    let casing = egui::pos2(960.0, 700.0);
+    click_at(&mut harness, impeller);
+    harness.hover_at(casing);
+    harness.run_steps(4);
+    save_hovering(&mut harness, "pick");
+
+    // A right-click on the casing offers to hide it.
+    harness.hover_at(casing);
+    harness.run();
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos: casing,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run();
+    }
+    save(&mut harness, "part-menu");
+    harness
+        .get_all_by_label_contains("Hide")
+        .find(|n| {
+            n.accesskit_node()
+                .label()
+                .is_some_and(|l| l.ends_with("  Hide"))
+        })
+        .expect("the menu's Hide")
+        .click();
+    harness.run();
+    let casing_shown = harness
+        .get_all_by_label("Casing")
+        .find(|n| n.accesskit_node().role() == egui::accesskit::Role::CheckBox)
+        .and_then(|n| n.accesskit_node().toggled());
+    assert_eq!(casing_shown, Some(egui::accesskit::Toggled::False));
+    harness.get_by_label("Scene menu").click();
+    harness.run();
+    harness.get_by_label("Show all").click();
+    harness.run();
+
+    harness.get_by_label("Meridional cut").click();
+    harness.run();
+    harness.get_by_label_contains("Show the plane").click();
+    harness.run();
+    save(&mut harness, "cut");
+    harness.get_by_label_contains("Show the plane").click();
+    harness.run();
+
+    harness.get_by_label("Measure").click();
+    harness.run();
+    click_at(&mut harness, egui::pos2(900.0, 520.0));
+    // The casing on the far side, which the cut leaves.
+    let far = egui::pos2(1205.0, 520.0);
+    harness.hover_at(far);
+    harness.run_steps(4);
+    save_hovering(&mut harness, "measure-rubber");
+    click_at(&mut harness, far);
+    save(&mut harness, "measure");
+}
+
 /// The whole stage: impeller and volute designed, the spiral step selected.
 #[test]
 #[ignore = "needs a GPU; run with --ignored"]
@@ -103,7 +472,7 @@ fn volute() {
         harness.get_by_label_contains("Accept step").click();
         harness.run();
     }
-    harness.get_by_label_contains("Volute setup").click();
+    harness.get_by_label("Volute 1").click();
     harness.run();
     for _ in 0..2 {
         harness.get_by_label_contains("Accept step").click();
@@ -117,8 +486,93 @@ fn volute() {
     save(&mut harness, "volute-front");
 }
 
+/// The cutwater step opens the cutwater page of the front view: the plane by plane
+/// drawing with its points to drag, the measures, the body in 3D and the incidence over
+/// the flow range.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn cutwater() {
+    for (theme, suffix) in [(egui::Theme::Dark, "dark"), (egui::Theme::Light, "light")] {
+        let mut harness = harness(theme);
+        for _ in 0..6 {
+            harness.get_by_label_contains("Accept step").click();
+            harness.run();
+        }
+        harness.get_by_label("Volute 1").click();
+        harness.run();
+        // Setup, cross section, spiral and diffuser: the cutwater step is next.
+        for _ in 0..4 {
+            harness.get_by_label_contains("Accept step").click();
+            harness.run();
+        }
+        harness.remove_cursor();
+        harness.run();
+        save(&mut harness, &format!("cutwater-{suffix}"));
+    }
+}
+
+/// The cutwater in the 3D view: framed and cut across the axis at the midplane from
+/// its page, then in zebra stripes.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn cutwater_3d() {
+    let mut harness = harness(egui::Theme::Dark);
+    for _ in 0..6 {
+        harness.get_by_label_contains("Accept step").click();
+        harness.run();
+    }
+    harness.get_by_label("Volute 1").click();
+    harness.run();
+    for _ in 0..4 {
+        harness.get_by_label_contains("Accept step").click();
+        harness.run();
+    }
+    harness.get_by_label_contains("View in 3D").click();
+    harness.run_steps(6);
+    save(&mut harness, "cutwater-3d");
+    harness.get_by_label("Zebra").click();
+    harness.run_steps(4);
+    save(&mut harness, "cutwater-zebra");
+}
+
 /// The cross-section step: the default trapezoid, then a radius-based section with a
 /// second definition of line segments, its corners ready to drag.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn oblique_cutwater() {
+    let mut harness = harness(egui::Theme::Dark);
+    for _ in 0..6 {
+        harness.get_by_label_contains("Accept step").click();
+        harness.run();
+    }
+    harness.get_by_label("Volute 1").click();
+    harness.run();
+    for _ in 0..4 {
+        harness.get_by_label_contains("Accept step").click();
+        harness.run();
+    }
+    // Lean the cutwater with the keyboard on its slider.
+    harness
+        .get_by_role_and_label(egui::accesskit::Role::Slider, "obliquity ε")
+        .focus();
+    harness.run();
+    for _ in 0..35 {
+        harness.key_press(egui::Key::ArrowRight);
+    }
+    harness.run_steps(4);
+    harness.remove_cursor();
+    save(&mut harness, "cutwater-oblique");
+    harness.get_by_label_contains("View in 3D").click();
+    harness.run_steps(6);
+    // Whole, without the cut and the panel: the edge leans across the inlet.
+    harness.get_by_label("Cut across").click();
+    let open = harness.state().sidebar_open();
+    harness.state_mut().set_sidebar_open(!open);
+    harness.remove_cursor();
+    harness.run_steps(6);
+    save(&mut harness, "cutwater-oblique-3d");
+}
+
 #[test]
 #[ignore = "needs a GPU; run with --ignored"]
 fn cross_sections() {
@@ -127,7 +581,7 @@ fn cross_sections() {
         harness.get_by_label_contains("Accept step").click();
         harness.run();
     }
-    harness.get_by_label_contains("Volute setup").click();
+    harness.get_by_label("Volute 1").click();
     harness.run();
     harness.get_by_label_contains("Accept step").click();
     harness.run();
@@ -164,7 +618,7 @@ fn internal_volute() {
         harness.get_by_label_contains("Accept step").click();
         harness.run();
     }
-    harness.get_by_label_contains("Volute setup").click();
+    harness.get_by_label("Volute 1").click();
     harness.run();
     harness.get_by_label_contains("Accept step").click();
     harness.run();
@@ -175,8 +629,10 @@ fn internal_volute() {
     harness.remove_cursor();
     harness.run();
     save(&mut harness, "internal-section");
-    harness.get_by_label_contains("Properties").click();
-    harness.state_mut().focus_view(View::Meridional);
+    let open = harness.state().sidebar_open();
+    harness.state_mut().set_sidebar_open(!open);
+    harness.state_mut().set_meridian_scope(Scope::Stage);
+    harness.state_mut().focus_view(View::Meridian);
     harness.remove_cursor();
     harness.run();
     save(&mut harness, "internal-meridional");
@@ -215,14 +671,19 @@ fn diffuser() {
 #[ignore = "needs a GPU; run with --ignored"]
 fn potential_flow() {
     let mut harness = harness(egui::Theme::Light);
-    harness.state_mut().focus_view(View::Meridional);
+    harness.state_mut().set_meridian_scope(Scope::Stage);
+    harness.state_mut().focus_view(View::Meridian);
+    harness.run();
+    harness.get_by_label_contains("Analysis").click();
     harness.run();
     harness.get_by_label("potential flow").click();
+    harness.run();
+    harness.get_by_label_contains("Analysis").click();
     harness.remove_cursor();
     harness.run();
     save(&mut harness, "potential-flow");
     // The color map of c_m with its iso-lines and vectors, the blades blocking the flow.
-    harness.get_by_label_contains("Potential").click();
+    harness.get_by_label_contains("Analysis").click();
     harness.run();
     for option in [
         "c_m iso-lines",
@@ -277,8 +738,7 @@ fn spanish() {
     for (view, name) in [
         (View::Report, "es-report"),
         (View::Performance, "es-curves"),
-        (View::Meridional, "es-meridional"),
-        (View::MeridianEditor, "es-editor"),
+        (View::Meridian, "es-meridian"),
         (View::View3d, "es-3d"),
     ] {
         harness.state_mut().focus_view(view);
@@ -323,7 +783,7 @@ fn double_volute() {
         harness.get_by_label_contains("Accept step").click();
         harness.run();
     }
-    harness.get_by_label_contains("Volute setup").click();
+    harness.get_by_label("Volute 1").click();
     harness.run();
     harness.get_by_value("single").click();
     harness.run();
@@ -334,7 +794,8 @@ fn double_volute() {
     harness.run();
     save(&mut harness, "double-volute-front");
     // Without the properties panel the rib nose shows on the right.
-    harness.get_by_label_contains("Properties").click();
+    let open = harness.state().sidebar_open();
+    harness.state_mut().set_sidebar_open(!open);
     harness.remove_cursor();
     harness.run();
     save(&mut harness, "double-volute-rib");
@@ -353,7 +814,7 @@ fn radial_discharge() {
         harness.get_by_label_contains("Accept step").click();
         harness.run();
     }
-    harness.get_by_label_contains("Volute setup").click();
+    harness.get_by_label("Volute 1").click();
     harness.run();
     for _ in 0..3 {
         harness.get_by_label_contains("Accept step").click();
@@ -376,14 +837,17 @@ fn radial_discharge() {
         .click();
     harness.run();
     front(&mut harness, "tangential-discharge-front");
-    harness.get_by_label_contains("Properties").click();
+    let open = harness.state().sidebar_open();
+    harness.state_mut().set_sidebar_open(!open);
     harness.run();
     harness
         .get_by_value("tangential, opening to both sides")
         .click();
     harness.run();
     harness.get_by_label("radial").click();
-    harness.run();
+    // The panel reopens with the discharge rows changed: its grids take a few frames
+    // to settle.
+    harness.run_steps(8);
     front(&mut harness, "radial-discharge-front");
     harness.state_mut().focus_view(View::View3d);
     harness.run();
@@ -423,12 +887,16 @@ fn spiral_development() {
         .wgpu()
         .build_eframe(|cc| TurbopumpApp::new(cc, Some(&path)));
     harness.run();
+    // The volute folds with the accordion: open it, then its step.
+    harness.get_by_label("Volute 1").click();
+    harness.run();
     harness.get_by_label_contains("Spiral development").click();
     harness.remove_cursor();
     harness.run();
     save(&mut harness, "spiral-development");
     harness.state_mut().focus_view(View::FrontView);
-    harness.get_by_label_contains("Properties").click();
+    let open = harness.state().sidebar_open();
+    harness.state_mut().set_sidebar_open(!open);
     harness.remove_cursor();
     harness.run();
     save(&mut harness, "spiral-development-front");
@@ -448,7 +916,7 @@ fn view_cube() {
         ] {
             harness.hover_at(pos);
             harness.run();
-            save(&mut harness, &format!("cube-{name}-{suffix}"));
+            save_hovering(&mut harness, &format!("cube-{name}-{suffix}"));
         }
     }
 }
@@ -459,7 +927,7 @@ fn view_cube() {
 fn dialogs() {
     for (theme, suffix) in [(egui::Theme::Light, "light"), (egui::Theme::Dark, "dark")] {
         let mut harness = harness(theme);
-        harness.get_by_label("Help tab").click();
+        harness.get_all_by_label("Help").next().unwrap().click();
         harness.run();
         harness.get_by_label_contains("About").click();
         harness.run();
@@ -541,10 +1009,11 @@ fn semi_axial() {
     save(&mut harness, "semi-axial-main");
     harness.get_by_label_contains("Accept step").click();
     harness.run();
-    harness.state_mut().focus_view(View::Meridional);
+    harness.state_mut().set_meridian_scope(Scope::Stage);
+    harness.state_mut().focus_view(View::Meridian);
     harness.run();
     save(&mut harness, "semi-axial-meridional");
-    harness.state_mut().focus_view(View::MeridianEditor);
+    harness.state_mut().set_meridian_scope(Scope::Channel);
     harness.run();
     save(&mut harness, "semi-axial-editor");
     harness.state_mut().focus_view(View::View3d);
@@ -594,10 +1063,11 @@ fn meridional_segments() {
         .wgpu()
         .build_eframe(|cc| TurbopumpApp::new(cc, Some(&path)));
     harness.run();
-    harness.state_mut().focus_view(View::Meridional);
+    harness.state_mut().set_meridian_scope(Scope::Stage);
+    harness.state_mut().focus_view(View::Meridian);
     harness.run();
     save(&mut harness, "meridional-segments");
-    harness.state_mut().focus_view(View::MeridianEditor);
+    harness.state_mut().set_meridian_scope(Scope::Channel);
     harness.run();
     save(&mut harness, "meridian-editor");
 }
@@ -608,17 +1078,19 @@ fn meridional_segments() {
 fn meridian_editor() {
     for (theme, suffix) in [(egui::Theme::Dark, "dark"), (egui::Theme::Light, "light")] {
         let mut harness = harness(theme);
-        harness.state_mut().focus_view(View::MeridianEditor);
+        harness.state_mut().focus_view(View::Meridian);
         harness.run();
         save(&mut harness, &format!("editor-{suffix}"));
     }
     // The analysis menu open, with the charts under the diagram.
     let mut harness = harness(egui::Theme::Light);
-    harness.state_mut().focus_view(View::MeridianEditor);
+    harness.state_mut().focus_view(View::Meridian);
     harness.run();
     harness.get_by_label_contains("Analysis").click();
     harness.run();
-    harness.get_by_label("area and curvature charts").click();
+    harness
+        .get_by_label("area, static moment and curvature charts")
+        .click();
     harness.get_by_label("curvature maximum").click();
     harness.run();
     save(&mut harness, "editor-analysis");
@@ -636,10 +1108,59 @@ fn meridian_editor() {
         .unwrap()
         .click();
     harness.run();
-    harness.get_by_label("design the side chambers").click();
+    harness
+        .get_all_by_label("Design the side chambers")
+        .next()
+        .unwrap()
+        .click();
     harness.run();
     harness.run();
     save(&mut harness, "editor-chambers");
+}
+
+/// The inlet duct with the side chambers: in the chambers scope of the Meridian view
+/// and in the 3D view, impeller and volute designed.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn inlet_duct() {
+    let mut project = tp_gui::default_project();
+    let id = project.components()[0].id();
+    let mut input = project.impeller_geometry_input(id).unwrap();
+    input.meridional.chambers.enabled = true;
+    project.set_impeller_geometry(id, input).unwrap();
+    // The duct ahead of the impeller, and every step of the stage done.
+    project
+        .add_component(tp_project::ComponentKind::InletDuct, Some(0))
+        .unwrap();
+    let ids: Vec<_> = project.components().iter().map(|c| c.id()).collect();
+    // The impeller first: the duct is built on it.
+    for c in [ids[1], ids[0], ids[2]] {
+        assert!(project.design_remaining(c).unwrap().failed.is_none());
+    }
+    let path = std::env::temp_dir().join("turbopump-inlet-duct.tpj");
+    project.save(&path).unwrap();
+    let mut harness = Harness::builder()
+        .with_size([1440.0, 900.0])
+        .with_pixels_per_point(1.5)
+        .with_theme(egui::Theme::Light)
+        .wgpu()
+        .build_eframe(|cc| TurbopumpApp::new(cc, Some(&path)));
+    harness.run();
+    // Its own step in the flow, under the inlet.
+    harness.get_by_label("Inlet duct 1").click();
+    harness.run();
+    harness.state_mut().focus_view(View::Meridian);
+    harness.state_mut().set_meridian_scope(Scope::Chambers);
+    harness.run();
+    harness.get_by_label("Fit all").click();
+    harness.run();
+    save(&mut harness, "inlet-duct-meridian");
+    harness.state_mut().set_sidebar_open(false);
+    harness.get_by_label("3D tab").click();
+    harness.run();
+    harness.get_by_label("Meridional cut").click();
+    harness.run_steps(4);
+    save(&mut harness, "inlet-duct-3d");
 }
 
 /// The segment types of a drawn wall: the hub as lines and an arc, the shroud as a
@@ -681,7 +1202,7 @@ fn meridian_segment_kinds() {
         .wgpu()
         .build_eframe(|cc| TurbopumpApp::new(cc, Some(&path)));
     harness.run();
-    harness.state_mut().focus_view(View::MeridianEditor);
+    harness.state_mut().focus_view(View::Meridian);
     harness.run();
     save(&mut harness, "meridian-kinds");
 }
@@ -720,7 +1241,7 @@ fn center_line_mode() {
         .wgpu()
         .build_eframe(|cc| TurbopumpApp::new(cc, Some(&path)));
     harness.run();
-    harness.state_mut().focus_view(View::MeridianEditor);
+    harness.state_mut().focus_view(View::Meridian);
     harness.run();
     harness.run();
     save(&mut harness, "editor-center-line");

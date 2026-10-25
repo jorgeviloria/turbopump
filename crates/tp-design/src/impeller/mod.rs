@@ -7,6 +7,7 @@ pub mod blade;
 pub mod center;
 pub mod chambers;
 pub mod crossings;
+pub mod duct;
 pub mod edge;
 pub mod guide;
 pub mod loading;

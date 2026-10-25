@@ -63,6 +63,18 @@ pub fn current() -> Language {
 static SPANISH: LazyLock<HashMap<&'static str, &'static str>> =
     LazyLock::new(|| es::TEXTS.iter().copied().collect());
 
+static ENGLISH: LazyLock<HashMap<&'static str, &'static str>> =
+    LazyLock::new(|| es::TEXTS.iter().map(|&(en, es)| (es, en)).collect());
+
+/// The English text that `text`, shown in the current language, translates: the key
+/// that names it whatever the language.
+pub fn key_of(text: &str) -> &str {
+    match current() {
+        Language::English => text,
+        Language::Spanish => ENGLISH.get(text).copied().unwrap_or(text),
+    }
+}
+
 /// `text` in the current language.
 pub fn tr(text: &'static str) -> &'static str {
     match current() {
@@ -105,6 +117,26 @@ fn fill(template: &str, args: &[String]) -> String {
 pub fn tf(template: &'static str, args: &[&dyn Display]) -> String {
     let args: Vec<String> = args.iter().map(ToString::to_string).collect();
     fill(tr(template), &args)
+}
+
+/// The name of a fluid to show: the common CoolProp names in words of the current
+/// language ("HeavyWater" is heavy water); any other name as typed.
+pub fn fluid_name(name: &str) -> String {
+    let words = match name {
+        "Water" => "Water",
+        "HeavyWater" => "Heavy water",
+        "Ethanol" => "Ethanol",
+        "Methanol" => "Methanol",
+        "Acetone" => "Acetone",
+        "Toluene" => "Toluene",
+        "n-Hexane" => "n-Hexane",
+        "n-Heptane" => "n-Heptane",
+        "n-Decane" => "n-Decane",
+        "Ammonia" => "Ammonia",
+        "Propane" => "Propane",
+        other => return other.to_owned(),
+    };
+    tr(words).to_owned()
 }
 
 /// A component name in the current language: the default names ("Impeller 2") are

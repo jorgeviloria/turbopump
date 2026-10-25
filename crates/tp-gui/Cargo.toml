@@ -24,6 +24,7 @@ egui-phosphor = "0.14.0"
 egui_plot = "0.37.0"
 glam.workspace = true
 notosans = "0.1.0"
+png = "0.18.1"
 rfd = "0.17.2"
 tp-cad = { workspace = true, optional = true }
 tp-design.workspace = true

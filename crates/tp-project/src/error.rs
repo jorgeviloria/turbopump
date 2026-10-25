@@ -36,6 +36,12 @@ pub enum ProjectError {
     #[error("{0} is not a stator")]
     NotAStator(ComponentId),
 
+    #[error("{0} is not an inlet duct")]
+    NotAnInletDuct(ComponentId),
+
+    #[error("an inlet duct can only be the first component, before an impeller")]
+    DuctNotBeforeImpeller,
+
     #[error("not available yet: {0}")]
     Unsupported(String),
 

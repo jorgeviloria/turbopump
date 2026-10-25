@@ -90,6 +90,17 @@ impl Document {
         result
     }
 
+    /// Notes something about the project that is not an edit, such as what the rows of
+    /// an accepted step showed: no undo step, and a project with nothing to save keeps
+    /// nothing to save (the note is written with the next save).
+    pub fn annotate(&mut self, note: impl FnOnce(&mut Project)) {
+        let clean = !self.is_dirty();
+        note(&mut self.project);
+        if clean {
+            self.clean = self.project.clone();
+        }
+    }
+
     /// Ends the current gesture: the next edit starts a new undo step.
     pub fn end_gesture(&mut self) {
         self.gesture = None;
@@ -157,6 +168,43 @@ mod tests {
         assert!(doc.project().components().is_empty());
         doc.redo();
         assert_eq!(doc.project().components().len(), 1);
+    }
+
+    #[test]
+    fn notes_are_neither_edits_nor_unsaved_changes() {
+        use crate::{AcceptedValue, DesignStep};
+        let mut doc = Document::new(pump());
+        doc.edit("add impeller", |p| {
+            p.add_component(ComponentKind::Impeller, None)
+        })
+        .unwrap();
+        let id = doc.project().components()[0].id();
+        let note = |doc: &mut Document, text: &str| {
+            let row = AcceptedValue {
+                key: text.into(),
+                text: text.into(),
+                quantity: None,
+                automatic: true,
+            };
+            doc.annotate(|p| {
+                p.component_mut(id).unwrap().set_accepted(
+                    DesignStep::MainDimensions,
+                    [("Dimensions › d₂".to_owned(), row)].into(),
+                );
+            });
+        };
+        // On unsaved changes: still unsaved, and no undo step of its own.
+        note(&mut doc, "172");
+        assert!(doc.is_dirty());
+        assert_eq!(doc.history().undo_label(), Some("add impeller"));
+        // On a project with nothing to save: still nothing to save.
+        let mut clean = Document::new(doc.project().clone());
+        note(&mut clean, "180");
+        assert!(!clean.is_dirty());
+        let kept = clean.project().components()[0]
+            .accepted(DesignStep::MainDimensions)
+            .unwrap();
+        assert_eq!(kept["Dimensions › d₂"].text, "180");
     }
 
     #[test]

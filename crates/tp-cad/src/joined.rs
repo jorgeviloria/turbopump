@@ -1,5 +1,7 @@
-//! One flow domain for CFD: the impeller channel less its blades, the side chambers, a
-//! ring that joins them to the volute at the impeller outlet, and the volute fluid.
+//! One flow domain for CFD: the inlet duct when modelled, the impeller channel less its
+//! blades, the side chambers, a ring that joins them to the volute at the impeller
+//! outlet, and the volute fluid. The duct shares the impeller inlet and the seal exit
+//! of the front chamber.
 //!
 //! The chambers open at r₂ wider than the volute inlet b₃. The ring runs from r₂ out to
 //! r₂ + Δ: at r₂ as wide as the two casing walls, at r₂ + Δ as wide as the ring of the
@@ -58,13 +60,15 @@ pub fn joining_ring(g: &ImpellerGeometry, volute: &VoluteGeometry) -> Result<[DV
     ])
 }
 
-/// The joined flow domain of `impeller` (with designed side chambers) and `volute`, and
-/// what to warn about: separate solids when the faces did not join.
+/// The joined flow domain of `impeller` (with designed side chambers), `volute` and,
+/// when there is one, the inlet `duct` ahead of the impeller, and what to warn about:
+/// separate solids when the faces did not join.
 pub fn join_fluid(
     impeller: &ImpellerCad,
     g: &ImpellerGeometry,
     volute: &VoluteCad,
     volute_geometry: &VoluteGeometry,
+    duct: Option<&Shape>,
 ) -> Result<(Shape, Vec<String>), CadError> {
     let chambers = impeller.side_chambers.as_ref().ok_or_else(|| {
         CadError::Input("the joined fluid needs the side chambers to be designed".into())
@@ -75,16 +79,20 @@ pub fn join_fluid(
         .map(|i| occ::line_edge(xz(corners[i]), xz(corners[(i + 1) % 4])))
         .collect::<Result<Vec<_>, _>>()?;
     let ring = occ::revolve_z(&occ::planar_face(&occ::wire(&edges)?)?)?;
-    let joined = impeller
+    let mut joined = impeller
         .fluid
         .fuse_fuzzy(&ring, JOIN_TOLERANCE)?
         .fuse_fuzzy(chambers, JOIN_TOLERANCE)?
         .fuse_fuzzy(&volute.fluid, JOIN_TOLERANCE)?;
+    if let Some(duct) = duct {
+        joined = joined.fuse_fuzzy(duct, JOIN_TOLERANCE)?;
+    }
     let mut warnings = Vec::new();
     let solids = joined.solid_count();
     if solids != 1 || !joined.is_valid() {
         warnings.push(format!(
-            "the joined fluid came out as {solids} solids{}; check the faces at r₂",
+            "the joined fluid came out as {solids} solids{}; check the faces at r₂ and, \
+             with the inlet duct, at the eye and the seal exit",
             if joined.is_valid() { "" } else { ", not valid" }
         ));
     }
@@ -122,7 +130,7 @@ mod tests {
         };
         let cad = build_impeller(&g, &sharp).unwrap();
         let volute = build_volute(&vg).unwrap();
-        let (joined, warnings) = join_fluid(&cad, &g, &volute, &vg).unwrap();
+        let (joined, warnings) = join_fluid(&cad, &g, &volute, &vg, None).unwrap();
         assert!(warnings.is_empty(), "{warnings:?}");
         assert_eq!(joined.solid_count(), 1);
         assert!(joined.is_valid());
@@ -130,6 +138,17 @@ mod tests {
         let parts = cad.fluid.volume() + cad.side_chambers.as_ref().unwrap().volume();
         assert!(joined.volume() > parts);
         assert!(joined.volume() < parts + volute.fluid.volume() * 1.1);
+
+        // With the inlet duct, still one solid, larger by the duct.
+        use tp_design::impeller::duct::{self, DuctInput};
+        let built = duct::build(&g.contour, &g.basis, &DuctInput::default());
+        let shape = crate::build_inlet_duct(&built).unwrap();
+        let (joined_duct, warnings) = join_fluid(&cad, &g, &volute, &vg, Some(&shape)).unwrap();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(joined_duct.solid_count(), 1);
+        assert!(joined_duct.is_valid());
+        let duct = shape.volume();
+        assert!((joined_duct.volume() - joined.volume() - duct).abs() < 0.01 * duct);
 
         // A slanted outlet edge does not open the chambers at one radius.
         let mut slanted = g.clone();

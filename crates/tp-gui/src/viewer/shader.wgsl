@@ -6,6 +6,7 @@
 
 struct Uniforms {
     view_projection: mat4x4<f32>,
+    // The eye, or with w = 0 the direction toward it in a parallel view.
     eye: vec4<f32>,
     // Directions toward the key and fill lights, world space.
     key_light: vec4<f32>,
@@ -15,6 +16,17 @@ struct Uniforms {
     // Background at the top and at the bottom of the view.
     sky: vec4<f32>,
     ground: vec4<f32>,
+    // The cutting plane, normal · p = w, the side the normal points to removed; a zero
+    // normal when the model is whole.
+    clip: vec4<f32>,
+    // Gamma-encoded tint of the part under the pointer and of the one selected.
+    accent: vec4<f32>,
+    // Centre and radius of the model, which a cap covers.
+    cap: vec4<f32>,
+    // Linear color of each cap, by instance.
+    cap_colors: array<vec4<f32>, 8>,
+    // x: zebra stripes instead of shading when 1; y: stripes over a half turn.
+    style: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -55,6 +67,10 @@ fn vs_line(v: VertexIn) -> VertexOut {
     return out;
 }
 
+fn cut_away(p: vec3<f32>) -> bool {
+    return dot(u.clip.xyz, u.clip.xyz) > 0.25 && dot(u.clip.xyz, p) > u.clip.w;
+}
+
 fn gamma_from_linear(c: vec3<f32>) -> vec3<f32> {
     let cutoff = c < vec3<f32>(0.0031308);
     let lower = c * 12.92;
@@ -64,7 +80,10 @@ fn gamma_from_linear(c: vec3<f32>) -> vec3<f32> {
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-    let to_eye = normalize(u.eye.xyz - in.world);
+    if cut_away(in.world) {
+        discard;
+    }
+    let to_eye = select(normalize(u.eye.xyz - in.world), normalize(u.eye.xyz), u.eye.w == 0.0);
     var n = normalize(in.normal);
     // Open surfaces: light both faces.
     if dot(n, to_eye) < 0.0 {
@@ -81,9 +100,17 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let facing = max(dot(n, to_eye), 0.0);
     let rim = pow(1.0 - facing, 4.0);
     let base = in.color.rgb;
-    let rgb = base * (ambient + diffuse)
+    var rgb = base * (ambient + diffuse)
         + specular * mix(vec3<f32>(1.0), base * 2.0, 0.4)
         + vec3<f32>(rim * 0.08);
+    // Zebra: stripes of a far striped sky seen in the surface as a mirror. Where the
+    // stripes break, the surface turns (G0); where they kink, its curvature jumps (G1).
+    if u.style.x > 0.5 {
+        let mirrored = reflect(-to_eye, n);
+        let height = acos(clamp(dot(mirrored, normalize(u.up.xyz)), -1.0, 1.0));
+        let stripe = step(0.5, fract(height * u.style.y / 3.14159265));
+        rgb = mix(vec3<f32>(0.03), vec3<f32>(0.92), stripe) * (0.75 + 0.25 * facing);
+    }
     // Glass shows more at grazing angles.
     let alpha = select(in.color.a, clamp(in.color.a * (1.0 + 2.0 * rim), 0.0, 0.85), in.color.a < 1.0);
     return vec4<f32>(gamma_from_linear(clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0))), alpha);
@@ -91,7 +118,88 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
 
 @fragment
 fn fs_line(in: VertexOut) -> @location(0) vec4<f32> {
+    if cut_away(in.world) {
+        discard;
+    }
     return vec4<f32>(gamma_from_linear(in.color.rgb), 1.0);
+}
+
+// A closed volume counted into the stencil: only what the cut leaves counts.
+@fragment
+fn fs_mark(in: VertexOut) -> @location(0) vec4<f32> {
+    if cut_away(in.world) {
+        discard;
+    }
+    return vec4<f32>(0.0);
+}
+
+struct CapOut {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) @interpolate(flat) color: vec4<f32>,
+};
+
+// A square on the cutting plane round the model; the stencil keeps the part of it
+// inside the volume just counted, instance `part`.
+@vertex
+fn vs_cap(@builtin(vertex_index) i: u32, @builtin(instance_index) part: u32) -> CapOut {
+    let n = normalize(u.clip.xyz);
+    let origin = u.cap.xyz - n * (dot(n, u.cap.xyz) - u.clip.w);
+    let other = select(vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0, 1.0, 0.0), abs(n.x) > 0.9);
+    let a = normalize(cross(n, other));
+    let b = cross(n, a);
+    var corners = array<vec2<f32>, 6>(
+        vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, -1.0), vec2<f32>(1.0, 1.0),
+        vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, 1.0), vec2<f32>(-1.0, 1.0),
+    );
+    let k = corners[i] * u.cap.w * 1.05;
+    var out: CapOut;
+    out.clip = u.view_projection * vec4<f32>(origin + k.x * a + k.y * b, 1.0);
+    out.color = u.cap_colors[part];
+    return out;
+}
+
+// The cut face: flat, lit as the plane faces the eye, with a fine section hatch.
+@fragment
+fn fs_cap(in: CapOut) -> @location(0) vec4<f32> {
+    var n = normalize(u.clip.xyz);
+    let toward = select(u.eye.xyz - u.cap.xyz, u.eye.xyz, u.eye.w == 0.0);
+    if dot(n, toward) < 0.0 {
+        n = -n;
+    }
+    let key = normalize(u.key_light.xyz);
+    let fill = normalize(u.fill_light.xyz);
+    let light = 0.3 + 0.55 * max(dot(n, key), 0.0) + 0.2 * max(dot(n, fill), 0.0);
+    // Hatching at 45° on screen, a line every 7 px.
+    let hatch = fract((in.clip.x + in.clip.y) / 7.0) < 0.2;
+    let rgb = in.color.rgb * light * select(1.0, 0.72, hatch);
+    return vec4<f32>(gamma_from_linear(clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0))), 1.0);
+}
+
+struct HighlightOut {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) world: vec3<f32>,
+    @location(1) @interpolate(flat) strength: f32,
+};
+
+// A part drawn again over itself in the accent color: instance 0 is the part under
+// the pointer, instance 1 the selected one, more strongly.
+@vertex
+fn vs_highlight(v: VertexIn, @builtin(instance_index) i: u32) -> HighlightOut {
+    var out: HighlightOut;
+    out.clip = u.view_projection * vec4<f32>(v.position, 1.0);
+    // A hair toward the eye, so the tint wins the depth test on its own surface.
+    out.clip.z = out.clip.z - 0.0002 * out.clip.w;
+    out.world = v.position;
+    out.strength = select(0.22, 0.4, i == 1u);
+    return out;
+}
+
+@fragment
+fn fs_highlight(in: HighlightOut) -> @location(0) vec4<f32> {
+    if cut_away(in.world) {
+        discard;
+    }
+    return vec4<f32>(u.accent.rgb, in.strength);
 }
 
 struct BackgroundOut {

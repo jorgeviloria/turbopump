@@ -1,5 +1,5 @@
-//! CAD solids of Turbopump designs with Open CASCADE (OCCT 7.8.1, built statically by
-//! `occt-sys`), through a small C++ bridge (`cpp/tp_cad.cpp`) that turns every OCCT
+//! CAD solids of Turbopump designs with Open CASCADE (OCCT 8.0.1, built statically by
+//! `tp-occt-sys`), through a small C++ bridge (`cpp/tp_cad.cpp`) that turns every OCCT
 //! exception into an error.
 //!
 //! The CAD model is built in **millimetres**, the default unit of the OCCT STEP and
@@ -13,7 +13,9 @@ mod occ;
 mod volute;
 
 pub use diffuser::{DiffuserCad, build_diffuser};
-pub use impeller::{BalanceHoleOptions, BalanceHoles, CadOptions, ImpellerCad, build_impeller};
+pub use impeller::{
+    BalanceHoleOptions, BalanceHoles, CadOptions, ImpellerCad, build_impeller, build_inlet_duct,
+};
 pub use joined::{join_fluid, joining_ring};
 pub use occ::{Shape, read_step, write_iges, write_step, write_stl};
 pub use volute::{VoluteCad, VoluteCasing, build_volute, build_volute_casing};

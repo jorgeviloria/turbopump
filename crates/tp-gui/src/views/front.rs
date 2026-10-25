@@ -1,17 +1,80 @@
 //! Front view seen from the inlet looking downstream: blade outlines at hub and shroud,
-//! and the outlet, eye and hub circles.
+//! and the outlet, eye and hub circles. A second page shapes the cutwater of the volute
+//! (see [`super::cutwater`]).
 
 use std::f64::consts::PI;
 
-use eframe::egui::Ui;
+use eframe::egui::{self, Ui};
 use egui_plot::{Corner, Legend, Line, LineStyle, Plot, PlotPoints, Points};
 use tp_math::DVec3;
 use tp_project::ComponentId;
 use tp_units::{DisplayUnits, QuantityKind};
 
+use super::cutwater::CutwaterPage;
 use super::{Palette, unavailable};
+use crate::app::{EditCtx, Selection};
 use crate::derived::Derived;
 use crate::i18n::tr;
+use tp_project::DesignStep;
+
+/// The pages of the front view.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum FrontPage {
+    /// The whole stage from the inlet.
+    #[default]
+    Plan,
+    /// The cutwater of the volute, plane by plane.
+    Cutwater,
+}
+
+/// The front view between frames.
+#[derive(Debug, Default)]
+pub(crate) struct FrontView {
+    pub page: FrontPage,
+    pub cutwater: CutwaterPage,
+    /// The step the page last followed.
+    followed: Option<Selection>,
+}
+
+impl FrontView {
+    /// The view, clear of the `cover` px the floating properties panel hides on the
+    /// right. The cutwater step opens the cutwater page, the other steps the plan.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn show(
+        &mut self,
+        ui: &mut Ui,
+        cx: &mut EditCtx<'_>,
+        id: ComponentId,
+        stator: Option<ComponentId>,
+        volute: Option<ComponentId>,
+        units: &DisplayUnits,
+        cover: f32,
+    ) {
+        let selection = *cx.selection;
+        if self.followed != Some(selection) {
+            self.followed = Some(selection);
+            if let Selection::Step(_, step) = selection {
+                self.page = if step == DesignStep::CutWater {
+                    self.cutwater.frame = true;
+                    FrontPage::Cutwater
+                } else {
+                    FrontPage::Plan
+                };
+            }
+        }
+        match (self.page, volute) {
+            (FrontPage::Cutwater, Some(v)) => {
+                let area = ui.available_rect_before_wrap();
+                let right = (area.max.x - cover).max(area.min.x + 480.0);
+                let clear = egui::Rect::from_min_max(area.min, egui::pos2(right, area.max.y));
+                ui.scope_builder(egui::UiBuilder::new().max_rect(clear), |ui| {
+                    self.cutwater.show(ui, cx, id, v, units);
+                });
+            }
+            _ => plan(ui, cx.derived, id, stator, volute, units, cover),
+        }
+    }
+}
 
 /// Looking along +z the x axis points left, as in the SVG drawing.
 fn view(x: f64, y: f64, scale: f64) -> [f64; 2] {
@@ -27,13 +90,15 @@ fn circle(r: f64, scale: f64) -> PlotPoints<'static> {
         .collect()
 }
 
-pub(crate) fn show(
+/// The stage from the inlet.
+pub(crate) fn plan(
     ui: &mut Ui,
     derived: &Derived,
     id: ComponentId,
     stator: Option<ComponentId>,
     volute: Option<ComponentId>,
     units: &DisplayUnits,
+    cover: f32,
 ) {
     let stator = stator.and_then(|s| derived.diffuser(s));
     let volute = volute.and_then(|v| derived.volute(v));
@@ -72,7 +137,9 @@ pub(crate) fn show(
         ),
     ];
 
+    // Clear of the `cover` px the floating properties panel hides on the right.
     let response = Plot::new(("front", id.0))
+        .width((ui.available_width() - cover).max(200.0))
         .data_aspect(1.0)
         .x_axis_label(format!("x [{unit}]"))
         .y_axis_label(format!("y [{unit}]"))
@@ -212,12 +279,12 @@ pub(crate) fn show(
                         .color(palette.volute)
                         .width(2.0),
                 );
-                // The designed cutwater: its rounded nose, or the tip of the wedge.
-                let nose = v.cutwater.nose_outline();
+                // The designed cutwater: its rounded body, which runs into the walls, or
+                // the tip of the wedge.
+                let nose = v.cutwater_outline();
                 if !nose.is_empty() {
-                    let mut points: Vec<[f64; 2]> =
+                    let points: Vec<[f64; 2]> =
                         nose.iter().map(|p| view(p.x, p.y, scale)).collect();
-                    points.push(points[0]);
                     plot.line(
                         Line::new(tr("cutwater"), PlotPoints::from(points))
                             .color(palette.volute)
@@ -246,4 +313,48 @@ pub(crate) fn show(
             }
         });
     super::settle(ui, ("front", id.0), &response.transform);
+
+    // The diameters, spread round the view so that their texts stay apart, linked to
+    // their rows in the properties: the row under the pointer stands out here, and the
+    // value under the pointer here shades its row. Angles in the plot, degrees.
+    let b = &g.basis;
+    // The values of the diameters inside the impeller go out past its rim, clear of
+    // the blades.
+    let rim = b.outlet_diameter / 2.0 * 1.04;
+    let mut diameters = vec![
+        ("Outlet diameter d₂", "d₂", b.outlet_diameter, 0.0, 125f64),
+        ("Eye diameter d₁", "d₁", b.inlet_diameter, rim, 40.0),
+        ("Hub diameter d_n", "d_n", b.hub_diameter, rim, -35.0),
+    ];
+    if let Some(v) = volute {
+        diameters.push((
+            "Cutwater diameter d_z",
+            "d_z",
+            v.design.cutwater_diameter,
+            0.0,
+            160.0,
+        ));
+    }
+    let row = crate::widgets::hovered_row(ui.ctx());
+    let mut under = None;
+    for (label, symbol, diameter, reach, degrees) in diameters {
+        let label = tr(label);
+        let text = format!("{symbol} {}", units.show(QuantityKind::Length, diameter));
+        let angle = degrees.to_radians();
+        let hot = row.as_deref() == Some(label);
+        let response = super::paint_diameter(
+            ui,
+            &response.transform,
+            [0.0, 0.0],
+            diameter / 2.0 * scale,
+            reach * scale,
+            angle,
+            &text,
+            hot,
+        );
+        if response.hovered() {
+            under = Some(label.to_owned());
+        }
+    }
+    crate::widgets::set_drawing_hover(ui.ctx(), under);
 }

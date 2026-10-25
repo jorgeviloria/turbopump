@@ -208,25 +208,27 @@ fn kind_combo(
     let mut picked = None;
     let text = current.map_or_else(|| none.unwrap_or("").to_owned(), |k| k.label().to_owned());
     // Tall enough to list every kind without scrolling.
-    ComboBox::from_id_salt(salt)
-        .selected_text(text)
-        .height(400.0)
-        .show_ui(ui, |ui| {
-            if let Some(none) = none
-                && ui.selectable_label(current.is_none(), none).clicked()
-            {
-                picked = Some(None);
-            }
-            for &kind in kinds {
-                if ui
-                    .selectable_label(current == Some(kind), kind.label())
-                    .on_hover_text(kind.hint())
-                    .clicked()
+    crate::widgets::list(ui, |ui| {
+        ComboBox::from_id_salt(salt)
+            .selected_text(crate::widgets::noted(ui, text))
+            .height(400.0)
+            .show_ui(ui, |ui| {
+                if let Some(none) = none
+                    && ui.selectable_label(current.is_none(), none).clicked()
                 {
-                    picked = Some(Some(kind));
+                    picked = Some(None);
                 }
-            }
-        });
+                for &kind in kinds {
+                    if ui
+                        .selectable_label(current == Some(kind), kind.label())
+                        .on_hover_text(kind.hint())
+                        .clicked()
+                    {
+                        picked = Some(Some(kind));
+                    }
+                }
+            })
+    });
     picked
 }
 
@@ -319,172 +321,175 @@ pub(crate) fn step(
     let mut current = selected(ui.ctx(), id, count);
 
     // The definitions, one row each: active, angle and shape; click a row to edit it.
-    section(ui, tr("Sections"));
-    let mut remove = None;
-    for (i, d) in sections.iter_mut().enumerate() {
-        ui.horizontal(|ui| {
-            ui.checkbox(&mut d.active, "")
-                .on_hover_text(tr("Active: only active definitions shape the spiral"));
-            let trash = 26.0;
-            let width = ui.available_width() - trash - ui.spacing().item_spacing.x;
-            let text = format!("{}    {}", units.show(Angle, d.angle), kinds(&d.shape));
-            let row = Button::selectable(current == i, text)
-                .right_text("")
-                .min_size(vec2(width, 24.0));
-            if ui
-                .add(row)
-                .on_hover_text(tr("Edit this definition"))
-                .clicked()
-            {
-                current = i;
-            }
-            if ui
-                .add_enabled(count > 1, Button::new(icon::TRASH).frame(false))
-                .on_hover_text(tr("Delete this definition"))
-                .clicked()
-            {
-                remove = Some(i);
-            }
-        });
+    if section(ui, tr("Sections")) {
+        let mut remove = None;
+        for (i, d) in sections.iter_mut().enumerate() {
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut d.active, "")
+                    .on_hover_text(tr("Active: only active definitions shape the spiral"));
+                let trash = 26.0;
+                let width = ui.available_width() - trash - ui.spacing().item_spacing.x;
+                let text = format!("{}    {}", units.show(Angle, d.angle), kinds(&d.shape));
+                let row = Button::selectable(current == i, text)
+                    .right_text("")
+                    .min_size(vec2(width, 24.0));
+                if ui
+                    .add(row)
+                    .on_hover_text(tr("Edit this definition"))
+                    .clicked()
+                {
+                    current = i;
+                }
+                if ui
+                    .add_enabled(count > 1, Button::new(icon::TRASH).frame(false))
+                    .on_hover_text(tr("Delete this definition"))
+                    .clicked()
+                {
+                    remove = Some(i);
+                }
+            });
+        }
+        if let Some(i) = remove {
+            sections.remove(i);
+            current = current.min(sections.len() - 1);
+        }
+        if ui
+            .button(format!("{}  {}", icon::PLUS, tr("Add section")))
+            .on_hover_text(tr(
+                "A new definition in the largest gap round the spiral, as the selected one",
+            ))
+            .clicked()
+        {
+            let angles: Vec<f64> = sections.iter().map(|d| d.angle).collect();
+            let shape = sections[current].shape.clone();
+            sections.push(SectionDefinition {
+                angle: free_angle(&angles),
+                active: true,
+                shape,
+            });
+            current = sections.len() - 1;
+        }
+        select(ui.ctx(), id, current);
     }
-    if let Some(i) = remove {
-        sections.remove(i);
-        current = current.min(sections.len() - 1);
-    }
-    if ui
-        .button(format!("{}  {}", icon::PLUS, tr("Add section")))
-        .on_hover_text(tr(
-            "A new definition in the largest gap round the spiral, as the selected one",
-        ))
-        .clicked()
-    {
-        let angles: Vec<f64> = sections.iter().map(|d| d.angle).collect();
-        let shape = sections[current].shape.clone();
-        sections.push(SectionDefinition {
-            angle: free_angle(&angles),
-            active: true,
-            shape,
-        });
-        current = sections.len() - 1;
-    }
-    select(ui.ctx(), id, current);
-
     let definition = &mut sections[current];
-    section_info(
+
+    if section_info(
         ui,
         &tf("Section at {}", &[&units.show(Angle, definition.angle)]),
         tr(
             "Drag the control points of Bézier and line-segment sides in the cross-section \
              view; right-click there to add or remove a corner.",
         ),
-    );
-    props(ui, ("section_definition", current), |ui| {
-        label(
-            ui,
-            tr("Wrap angle φ"),
-            tr("Where round the spiral this shape applies, from the start of the spiral"),
-        );
-        quantity(
-            ui,
-            &mut definition.angle,
-            Angle,
-            &units,
-            1f64.to_radians()..=TAU,
-        );
-        ui.end_row();
-        let asymmetric = matches!(definition.shape, SectionShape::Sides { right: Some(_), .. });
-        label(
-            ui,
-            if asymmetric {
-                tr("−z side")
-            } else {
-                tr("Shape")
-            },
-            "",
-        );
-        let now = Kind::of_section(&definition.shape);
-        if let Some(Some(kind)) = kind_combo(
-            ui,
-            ("section_left", current),
-            Some(now),
-            &Kind::SECTION,
-            None,
-        ) {
-            definition.shape = kind.apply(&definition.shape);
-        }
-        ui.end_row();
-        if let SectionShape::Sides { right, .. } = &mut definition.shape {
+    ) {
+        props(ui, ("section_definition", current), |ui| {
             label(
                 ui,
-                tr("+z side"),
-                tr("Symmetric: the same shape as the −z side, mirrored"),
+                tr("Wrap angle φ"),
+                tr("Where round the spiral this shape applies, from the start of the spiral"),
             );
-            let now = right.as_ref().map(Kind::of_side);
-            if let Some(picked) = kind_combo(
+            quantity(
                 ui,
-                ("section_right", current),
-                now,
-                &Kind::SIDE,
-                Some(tr("symmetric")),
+                &mut definition.angle,
+                Angle,
+                &units,
+                1f64.to_radians()..=TAU,
+            );
+            ui.end_row();
+            let asymmetric = matches!(definition.shape, SectionShape::Sides { right: Some(_), .. });
+            label(
+                ui,
+                if asymmetric {
+                    tr("−z side")
+                } else {
+                    tr("Shape")
+                },
+                "",
+            );
+            let now = Kind::of_section(&definition.shape);
+            if let Some(Some(kind)) = kind_combo(
+                ui,
+                ("section_left", current),
+                Some(now),
+                &Kind::SECTION,
+                None,
             ) {
-                *right = picked.map(|k| k.side(right.as_ref()));
+                definition.shape = kind.apply(&definition.shape);
             }
             ui.end_row();
-        }
-    });
-    match &mut definition.shape {
-        SectionShape::Sides { left, right } => {
-            if right.is_some() {
-                ui.add_space(4.0);
-                ui.label(bold(tr("−z side")));
+            if let SectionShape::Sides { right, .. } = &mut definition.shape {
+                label(
+                    ui,
+                    tr("+z side"),
+                    tr("Symmetric: the same shape as the −z side, mirrored"),
+                );
+                let now = right.as_ref().map(Kind::of_side);
+                if let Some(picked) = kind_combo(
+                    ui,
+                    ("section_right", current),
+                    now,
+                    &Kind::SIDE,
+                    Some(tr("symmetric")),
+                ) {
+                    *right = picked.map(|k| k.side(right.as_ref()));
+                }
+                ui.end_row();
             }
-            side_editor(ui, ("left", current), left, b3, &units);
-            if let Some(right) = right {
-                ui.add_space(4.0);
-                ui.label(bold(tr("+z side")));
-                side_editor(ui, ("right", current), right, b3, &units);
+        });
+        match &mut definition.shape {
+            SectionShape::Sides { left, right } => {
+                if right.is_some() {
+                    ui.add_space(4.0);
+                    ui.label(bold(tr("−z side")));
+                }
+                side_editor(ui, ("left", current), left, b3, &units);
+                if let Some(right) = right {
+                    ui.add_space(4.0);
+                    ui.label(bold(tr("+z side")));
+                    side_editor(ui, ("right", current), right, b3, &units);
+                }
             }
-        }
-        SectionShape::RoundExternal(round) => external_editor(ui, round),
-        SectionShape::RoundInternal(round) => {
-            internal_editor(ui, round, g.map(|g| &g.design), &units);
-            // Every internal definition shares the bend and the neck.
-            let shared = *round;
-            for d in sections.iter_mut() {
-                if let SectionShape::RoundInternal(other) = &mut d.shape {
-                    *other = InternalRound {
-                        ellipse_ratio: other.ellipse_ratio,
-                        ..shared
-                    };
+            SectionShape::RoundExternal(round) => external_editor(ui, round),
+            SectionShape::RoundInternal(round) => {
+                internal_editor(ui, round, g.map(|g| &g.design), &units);
+                // Every internal definition shares the bend and the neck.
+                let shared = *round;
+                for d in sections.iter_mut() {
+                    if let SectionShape::RoundInternal(other) = &mut d.shape {
+                        *other = InternalRound {
+                            ellipse_ratio: other.ellipse_ratio,
+                            ..shared
+                        };
+                    }
                 }
             }
         }
-    }
 
-    if let Some(g) = g {
-        let d = &g.design;
-        section(ui, tr("Throat"));
-        props(ui, "volute_shape_results", |ui| {
-            value_row(ui, tr("Height"), units.show(Length, d.throat.height));
-            value_info(
-                ui,
-                tr("Width over height B/H"),
-                tr("Flat sections with B/H = 2 to 3 lose least (Gülich p. 414)"),
-                format!("{:.2}", d.throat_aspect),
-            );
-            value_row(ui, tr("Area A₃q"), units.show(Area, d.throat.area));
-            if let Some(side) = d.side_gap {
-                let text = match (side.reach, side.gap) {
-                    (Reach::Eye, _) => tr("into the suction eye").to_owned(),
-                    (_, Some(gap)) => tf(
-                        "{} (at least {})",
-                        &[&units.show(Length, gap), &units.show(Length, side.required)],
-                    ),
-                    _ => tr("clear: the spiral stays outside r₂").to_owned(),
-                };
-                value_row(ui, tr("Gap to the impeller"), text);
+        if let Some(g) = g {
+            let d = &g.design;
+            if section(ui, tr("Throat")) {
+                props(ui, "volute_shape_results", |ui| {
+                    value_row(ui, tr("Height"), units.show(Length, d.throat.height));
+                    value_info(
+                        ui,
+                        tr("Width over height B/H"),
+                        tr("Flat sections with B/H = 2 to 3 lose least (Gülich p. 414)"),
+                        format!("{:.2}", d.throat_aspect),
+                    );
+                    value_row(ui, tr("Area A₃q"), units.show(Area, d.throat.area));
+                    if let Some(side) = d.side_gap {
+                        let text = match (side.reach, side.gap) {
+                            (Reach::Eye, _) => tr("into the suction eye").to_owned(),
+                            (_, Some(gap)) => tf(
+                                "{} (at least {})",
+                                &[&units.show(Length, gap), &units.show(Length, side.required)],
+                            ),
+                            _ => tr("clear: the spiral stays outside r₂").to_owned(),
+                        };
+                        value_row(ui, tr("Gap to the impeller"), text);
+                    }
+                });
             }
-        });
+        }
     }
     "edit volute cross section"
 }
@@ -687,15 +692,20 @@ fn bezier_editor(ui: &mut Ui, id: &str, b: &mut BezierSide, b3: Option<f64>, uni
             ),
         );
         let before = b.position;
-        ComboBox::from_id_salt((id, "position"))
-            .selected_text(match b.position {
-                InnerPosition::Relative => tr("relative"),
-                InnerPosition::Absolute => tr("absolute"),
-            })
-            .show_ui(ui, |ui| {
-                ui.selectable_value(&mut b.position, InnerPosition::Relative, tr("relative"));
-                ui.selectable_value(&mut b.position, InnerPosition::Absolute, tr("absolute"));
-            });
+        crate::widgets::list(ui, |ui| {
+            ComboBox::from_id_salt((id, "position"))
+                .selected_text(crate::widgets::noted(
+                    ui,
+                    match b.position {
+                        InnerPosition::Relative => tr("relative"),
+                        InnerPosition::Absolute => tr("absolute"),
+                    },
+                ))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut b.position, InnerPosition::Relative, tr("relative"));
+                    ui.selectable_value(&mut b.position, InnerPosition::Absolute, tr("absolute"));
+                })
+        });
         ui.label("");
         ui.end_row();
         if b.position != before {
@@ -818,13 +828,15 @@ fn bend_combo(ui: &mut Ui, salt: &str, wall: &mut BendWall) {
             BendWall::Round => "quarter ellipse",
         })
     };
-    ComboBox::from_id_salt(salt)
-        .selected_text(text(*wall))
-        .show_ui(ui, |ui| {
-            for w in [BendWall::Sharp, BendWall::Straight, BendWall::Round] {
-                ui.selectable_value(wall, w, text(w));
-            }
-        });
+    crate::widgets::list(ui, |ui| {
+        ComboBox::from_id_salt(salt)
+            .selected_text(crate::widgets::noted(ui, text(*wall)))
+            .show_ui(ui, |ui| {
+                for w in [BendWall::Sharp, BendWall::Straight, BendWall::Round] {
+                    ui.selectable_value(wall, w, text(w));
+                }
+            })
+    });
 }
 
 fn internal_editor(

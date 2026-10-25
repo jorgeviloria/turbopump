@@ -1,4 +1,4 @@
-//! Builds OCCT (via occt-sys) and the C++ bridge of tp-cad, and links them statically.
+//! Builds OCCT (via tp-occt-sys) and the C++ bridge of tp-cad, and links them statically.
 
 /// OCCT toolkits used by the bridge, from high to low level, so single-pass linkers
 /// (GNU ld) resolve every symbol. The bridge creates OCCT's type registry in its own
@@ -32,8 +32,8 @@ const OCCT_LIBS: &[&str] = &[
 ];
 
 fn main() {
-    occt_sys::build_occt();
-    let occt = occt_sys::occt_path();
+    tp_occt_sys::build_occt();
+    let occt = tp_occt_sys::occt_path();
 
     cxx_build::bridge("src/bridge.rs")
         .file("cpp/tp_cad.cpp")

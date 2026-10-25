@@ -9,7 +9,7 @@
 
 use std::f64::consts::TAU;
 
-use eframe::egui::{Align2, CursorIcon, Sense, Ui};
+use eframe::egui::{self, Align2, CursorIcon, Sense, Ui};
 use egui_plot::{
     Corner, Legend, Line, LineStyle, Plot, PlotPoint, PlotPoints, PlotTransform, Points, Text,
 };
@@ -153,12 +153,6 @@ impl CrossSectionView {
                     &units.show(QuantityKind::Length, h),
                 ],
             ));
-            ui.weak("(?)").on_hover_text(tr(
-                "Drag the round handles to shape Bézier and line-segment sides; right-click \
-                 to add or remove a corner. Ctrl (⌘) keeps a corner's distance to the \
-                 previous one, Alt keeps it on its line; add Shift for the next one. Drag \
-                 the background to pan, scroll to zoom, double-click to fit.",
-            ));
         });
 
         let points = handles(&definition.shape, b3, h);
@@ -188,9 +182,20 @@ impl CrossSectionView {
                 .collect()
         };
 
+        // The right side of the selected definition, where its height is dimensioned.
+        let right = definition
+            .shape
+            .outline(b3, h)
+            .points
+            .iter()
+            .map(|p| p.x)
+            .fold(b3 / 2.0, f64::max);
+
         let response = Plot::new(("cross_section", id.0))
             .width((ui.available_width() - cover).max(200.0))
             .data_aspect(1.0)
+            // Room at the sides for the height dimension.
+            .set_margin_fraction(egui::vec2(0.15, 0.08))
             .allow_drag(active.is_none())
             .sense(Sense::click_and_drag())
             .x_axis_label(format!("B [{unit}]"))
@@ -330,6 +335,41 @@ impl CrossSectionView {
             });
 
         super::settle(ui, ("cross_section", id.0), &response.transform);
+
+        // The inlet width under the inlet, linked to its row in the properties, and the
+        // height of the selected definition beside it.
+        let row = crate::widgets::hovered_row(ui.ctx());
+        let label = tr("Inlet width b₃");
+        let hot = row.as_deref() == Some(label);
+        let inlet = super::paint_linear(
+            ui,
+            &response.transform,
+            [
+                at(DVec2::new(-b3 / 2.0, 0.0)),
+                at(DVec2::new(b3 / 2.0, 0.0)),
+            ],
+            egui::vec2(0.0, 22.0),
+            &format!("b₃ {}", units.show(QuantityKind::Length, b3)),
+            hot,
+        );
+        // At the end of the spiral the height is that of the throat.
+        let height_label = (definition.angle >= TAU - 1e-9).then(|| tr("Height"));
+        let height = super::paint_linear(
+            ui,
+            &response.transform,
+            [at(DVec2::new(right, 0.0)), at(DVec2::new(right, h))],
+            egui::vec2(28.0, 0.0),
+            &format!("H {}", units.show(QuantityKind::Length, h)),
+            height_label.is_some() && row.as_deref() == height_label,
+        );
+        let under = if inlet.hovered() {
+            Some(label)
+        } else if height.hovered() {
+            height_label
+        } else {
+            None
+        };
+        crate::widgets::set_drawing_hover(ui.ctx(), under.map(str::to_owned));
         self.transform = Some(response.transform);
         let plot_response = &response.response;
         let pointer = response.inner.map(|p| DVec2::new(p.x / scale, p.y / scale));

@@ -74,10 +74,6 @@ impl BladeView {
         let right = (area.max.x - cover).max(area.min.x + 320.0);
         let clear = egui::Rect::from_min_max(area.min, egui::pos2(right, area.max.y));
         ui.scope_builder(egui::UiBuilder::new().max_rect(clear), |ui| {
-            ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.page, BladePage::Plots, tr("Blade plots"));
-                ui.selectable_value(&mut self.page, BladePage::Edges, tr("Edges"));
-            });
             match self.page {
                 BladePage::Plots => content(ui, cx.derived, id, units),
                 BladePage::Edges => {

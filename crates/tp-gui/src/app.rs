@@ -13,22 +13,26 @@ use tp_units::DisplayUnits;
 use crate::derived::Derived;
 use crate::dialogs::{self, Choice};
 use crate::export::{self, Exports};
+use crate::floating;
+use crate::flow::FlowPanel;
 use crate::i18n::{self, Language, message, project_name, tf, tr};
 use crate::messages::{self, Message};
 use crate::new_project::{NewProjectForm, Outcome};
+use crate::objective;
 use crate::ribbon::{Command, Ribbon, RibbonCx};
+use crate::scene::{self, ScenePanel};
 use crate::settings::{self, Section, SettingsCx};
-use crate::steps::AcceptState;
 use crate::theme::{self, Palette, icon};
-use crate::tree::StageParts;
+use crate::tools::{self, ToolsCx};
 use crate::viewer::Viewer;
 use crate::views::cross_section::CrossSectionView;
+use crate::views::meridional::{MeridionalView, Scope};
 use crate::views::performance::PerformanceView;
-use crate::views::{blade, front, meridional::MeridionalView, report};
+use crate::views::{blade, front, report};
 use crate::{default_project, steps, tree};
 
 /// What the step panel shows.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Selection {
     /// Design point, fluid and units, shared by every component.
     Setup,
@@ -41,6 +45,16 @@ pub enum Selection {
 pub(crate) struct Status {
     pub text: String,
     pub error: bool,
+    /// More than the line holds, such as the whole path of a file: shown on hover.
+    pub detail: Option<String>,
+}
+
+/// The name of a file without its folders, for a status line that has room for it.
+pub(crate) fn file_name(path: &Path) -> String {
+    path.file_name().map_or_else(
+        || path.display().to_string(),
+        |n| n.to_string_lossy().into_owned(),
+    )
 }
 
 /// What the panels may change while they are drawn.
@@ -52,6 +66,9 @@ pub(crate) struct EditCtx<'a> {
     pub exports: &'a mut Exports,
     /// Whether the properties panel of the selected step is open.
     pub properties: &'a mut bool,
+    /// What the rows of the panel showed last, and for which place: an accept keeps
+    /// them.
+    pub shown: &'a mut Option<(Selection, tp_project::AcceptedRows)>,
 }
 
 impl EditCtx<'_> {
@@ -75,6 +92,7 @@ impl EditCtx<'_> {
         *self.status = Some(Status {
             text: text.into(),
             error: false,
+            detail: None,
         });
     }
 
@@ -82,6 +100,7 @@ impl EditCtx<'_> {
         *self.status = Some(Status {
             text: text.into(),
             error: true,
+            detail: None,
         });
     }
 
@@ -99,23 +118,23 @@ impl EditCtx<'_> {
 /// The views of the main area, one at a time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum View {
-    Meridional,
-    MeridianEditor,
-    CrossSection,
+    /// The meridional section, in one of its scopes.
+    Meridian,
     Blade,
     FrontView,
+    CrossSection,
     View3d,
     Performance,
     Report,
 }
 
 impl View {
-    pub const ALL: [View; 8] = [
-        View::Meridional,
-        View::MeridianEditor,
-        View::CrossSection,
+    /// The views in the order of their tabs.
+    pub const ALL: [View; 7] = [
+        View::Meridian,
         View::Blade,
         View::FrontView,
+        View::CrossSection,
         View::View3d,
         View::Performance,
         View::Report,
@@ -123,8 +142,7 @@ impl View {
 
     pub fn title(self) -> &'static str {
         tr(match self {
-            View::Meridional => "Meridional view",
-            View::MeridianEditor => "Meridian editor",
+            View::Meridian => "Meridional section",
             View::CrossSection => "Volute cross sections",
             View::Blade => "Blade",
             View::FrontView => "Front view",
@@ -134,11 +152,10 @@ impl View {
         })
     }
 
-    /// Name under a toolbar button.
+    /// Name on its tab.
     pub fn short_title(self) -> &'static str {
         tr(match self {
-            View::Meridional => "Meridional",
-            View::MeridianEditor => "Editor",
+            View::Meridian => "Meridian",
             View::CrossSection => "Section",
             View::Blade => "Blade",
             View::FrontView => "Front",
@@ -150,8 +167,7 @@ impl View {
 
     pub fn icon(self) -> &'static str {
         match self {
-            View::Meridional => icon::BEZIER_CURVE,
-            View::MeridianEditor => icon::PENCIL_RULER,
+            View::Meridian => icon::BEZIER_CURVE,
             View::CrossSection => icon::CIRCLE_HALF,
             View::Blade => icon::WAVE_SINE,
             View::FrontView => icon::FAN,
@@ -168,6 +184,17 @@ const LANGUAGE_KEY: &str = "language";
 const THEME_KEY: &str = "theme";
 const ZOOM_KEY: &str = "zoom";
 const FOLLOW_STEP_KEY: &str = "follow_step";
+/// Key of the components pinned open in the design flow, by project file.
+const PINS_KEY: &str = "pinned_components";
+/// Keys of the corner of the scene panel and whether it is folded.
+const SCENE_CORNER_KEY: &str = "scene_corner";
+const SCENE_FOLDED_KEY: &str = "scene_folded";
+/// Key of the parallel projection of the 3D view.
+const ORTHOGRAPHIC_KEY: &str = "orthographic";
+/// Key of the width the user gave the properties panel.
+const SIDEBAR_WIDTH_KEY: &str = "properties_width";
+/// Key of the saved views of the 3D view, one code each, separated by semicolons.
+const SAVED_VIEWS_KEY: &str = "saved_views";
 
 /// Code of a theme in the stored preferences.
 fn theme_code(theme: ThemePreference) -> &'static str {
@@ -202,7 +229,7 @@ fn system_language() -> Language {
 }
 
 /// Default width of the properties panel.
-const SIDEBAR_WIDTH: f32 = 420.0;
+const SIDEBAR_WIDTH: f32 = 460.0;
 /// Width of the folded properties panel.
 const SIDEBAR_STRIP: f32 = 30.0;
 /// Gap between the properties panel and the edges of the view.
@@ -246,34 +273,32 @@ fn folded_strip(ui: &mut Ui, rect: egui::Rect, p: &Palette) -> bool {
     response.clicked()
 }
 
-/// The view that suits a step best, if any.
-fn view_for(kind: ComponentKind, step: DesignStep) -> Option<View> {
+/// The view that suits a step best, if any, and for the Meridian view its scope.
+fn view_for(kind: ComponentKind, step: DesignStep) -> Option<(View, Option<Scope>)> {
     use DesignStep::*;
+    let view = |v| Some((v, None));
     match (kind, step) {
-        (_, ModelSettings) => Some(View::View3d),
-        (ComponentKind::Impeller, MeridionalContour) => Some(View::MeridianEditor),
+        (_, ModelSettings) => view(View::View3d),
+        // Drawn with the side chambers, which it reaches.
+        (ComponentKind::InletDuct, DuctDimensions) => Some((View::Meridian, Some(Scope::Chambers))),
+        (ComponentKind::Impeller, MeridionalContour) => {
+            Some((View::Meridian, Some(Scope::Channel)))
+        }
         (
             ComponentKind::Impeller,
             BladeProperties | BladeMeanLines | BladeProfiles | BladeEdges,
-        ) => Some(View::Blade),
-        (ComponentKind::Volute, CrossSection) => Some(View::CrossSection),
-        (ComponentKind::Volute, WallThickness) => Some(View::Meridional),
+        ) => view(View::Blade),
+        (ComponentKind::Volute, CrossSection) => view(View::CrossSection),
+        (ComponentKind::Volute, WallThickness) => Some((View::Meridian, Some(Scope::Stage))),
         (ComponentKind::Volute, VoluteSetup | SpiralDevelopment | Diffuser | CutWater) => {
-            Some(View::FrontView)
+            view(View::FrontView)
         }
         (ComponentKind::Stator { .. }, MainDimensions | MeridionalContour) => {
-            Some(View::Meridional)
+            Some((View::Meridian, Some(Scope::Stage)))
         }
-        (ComponentKind::Stator { .. }, _) => Some(View::FrontView),
+        (ComponentKind::Stator { .. }, _) => view(View::FrontView),
         _ => None,
     }
-}
-
-/// The trees of the left panel.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LeftTab {
-    Design,
-    Model,
 }
 
 /// An action that would discard unsaved changes, waiting for the user's answer.
@@ -305,6 +330,8 @@ pub struct TurbopumpApp {
     followed: Option<Selection>,
     /// The view shown last frame.
     shown: Option<View>,
+    /// What the rows of the properties panel showed last frame, and for which place.
+    shown_rows: Option<(Selection, tp_project::AcceptedRows)>,
     /// The main view changes to suit the step that opens.
     follow_step: bool,
     /// Whether the tree panel is open.
@@ -320,13 +347,18 @@ pub struct TurbopumpApp {
     cross_section: CrossSectionView,
     performance: PerformanceView,
     blade: blade::BladeView,
+    front: front::FrontView,
     viewer: Viewer,
+    /// The renderer of the window, for pictures of the 3D view.
+    render_state: Option<RenderState>,
     exports: Exports,
     status: Option<Status>,
     dialog: Option<Dialog>,
     ribbon: Ribbon,
-    /// Which tree the left panel shows.
-    left: LeftTab,
+    /// The design flow on the left, or its rail.
+    flow: FlowPanel,
+    /// The parts of the 3D view, floating over it.
+    scene: ScenePanel,
     /// Whether the messages panel is open.
     show_messages: bool,
     /// Fonts and styles are installed on the first frame.
@@ -371,6 +403,40 @@ impl TurbopumpApp {
             {
                 app.follow_step = follow;
             }
+            if let Some(pins) = storage.get_string(PINS_KEY) {
+                app.flow.load_pins(&pins);
+            }
+            if let Some(corner) = storage
+                .get_string(SCENE_CORNER_KEY)
+                .and_then(|c| scene::Corner::from_code(&c))
+            {
+                app.scene.corner = corner;
+            }
+            if let Some(folded) = storage
+                .get_string(SCENE_FOLDED_KEY)
+                .and_then(|f| f.parse().ok())
+            {
+                app.scene.folded = folded;
+            }
+            if let Some(orthographic) = storage
+                .get_string(ORTHOGRAPHIC_KEY)
+                .and_then(|o| o.parse().ok())
+            {
+                app.viewer.orthographic = orthographic;
+            }
+            if let Some(width) = storage
+                .get_string(SIDEBAR_WIDTH_KEY)
+                .and_then(|w| w.parse::<f32>().ok())
+                .filter(|w| w.is_finite())
+            {
+                app.sidebar_width = width;
+            }
+            if let Some(views) = storage.get_string(SAVED_VIEWS_KEY) {
+                app.viewer.saved = views
+                    .split(';')
+                    .filter_map(crate::viewer::SavedView::from_code)
+                    .collect();
+            }
         }
         i18n::set(app.language);
         if let Some(path) = path {
@@ -389,6 +455,7 @@ impl TurbopumpApp {
             sidebar_open: true,
             followed: None,
             shown: None,
+            shown_rows: None,
             follow_step: true,
             tree_open: true,
             language: Language::English,
@@ -399,12 +466,15 @@ impl TurbopumpApp {
             cross_section: CrossSectionView::default(),
             performance: PerformanceView::default(),
             blade: blade::BladeView::default(),
+            front: front::FrontView::default(),
             viewer: Viewer::default(),
+            render_state: None,
             exports: Exports::default(),
             status: None,
             dialog: None,
             ribbon: Ribbon::default(),
-            left: LeftTab::Design,
+            flow: FlowPanel::default(),
+            scene: ScenePanel::default(),
             show_messages: false,
             styled: false,
             allow_close: false,
@@ -437,9 +507,30 @@ impl TurbopumpApp {
         self.sidebar_open
     }
 
+    /// What the Meridian view shows and edits.
+    pub fn set_meridian_scope(&mut self, scope: Scope) {
+        self.meridional.set_scope(scope);
+    }
+
+    /// Opens or folds the properties panel.
+    pub fn set_sidebar_open(&mut self, open: bool) {
+        self.sidebar_open = open;
+    }
+
+    /// A PNG picture of the model as the 3D view shows it, twice as sharp and without
+    /// the view cube, axes or scale. `None` until the 3D view has been drawn.
+    pub fn picture_of_3d_view(&mut self, ctx: &egui::Context) -> Option<Vec<u8>> {
+        let state = self.render_state.as_ref()?;
+        let capture = self
+            .viewer
+            .capture(state, ctx.style_of(ctx.theme()).visuals.dark_mode)?;
+        export::png(&capture).ok()
+    }
+
     /// Draws the whole window. `render_state` enables the 3D view.
     pub fn show(&mut self, ui: &mut Ui, render_state: Option<&RenderState>) {
         let ctx = ui.ctx().clone();
+        self.render_state = render_state.cloned();
         if !self.styled {
             // Fonts load at the start of the next pass: draw nothing until then.
             theme::install(&ctx);
@@ -452,7 +543,9 @@ impl TurbopumpApp {
         self.zoom = ctx.zoom_factor();
         self.handle_shortcuts(&ctx);
         self.handle_close_request(&ctx);
-        self.derived.update(self.doc.project());
+        // While a drag edits a volute, only the volute follows it frame by frame.
+        let dragging = ctx.input(|i| i.pointer.primary_down());
+        self.derived.update_while(self.doc.project(), dragging);
         self.fix_selection();
         self.update_title(&ctx);
         self.exports.poll();
@@ -464,35 +557,67 @@ impl TurbopumpApp {
             .frame(Frame::new().fill(p.ribbon))
             .show_separator_line(false)
             .show(ui, |ui| {
-                let accept = match self.selection {
-                    Selection::Step(id, step) => {
-                        steps::accept_state(self.doc.project(), &self.derived, id, step)
-                    }
-                    Selection::Setup => AcceptState::NotApplicable,
-                };
                 let impeller = self.active_impeller();
                 let volute = self.active_volute();
                 let history = self.doc.history();
-                let mut cx = RibbonCx {
+                let tools = ToolsCx {
+                    has_geometry: impeller.is_some_and(|id| self.derived.geometry(id).is_some()),
+                    has_volute: volute.is_some_and(|id| self.derived.volute(id).is_some()),
+                };
+                let cx = RibbonCx {
                     project: self.doc.project(),
-                    selection: self.selection,
+                    view: self.view,
                     dirty: self.doc.is_dirty(),
                     can_undo: history.can_undo(),
                     can_redo: history.can_redo(),
                     undo_label: history.undo_label(),
                     redo_label: history.redo_label(),
-                    accept,
-                    has_geometry: impeller.is_some_and(|id| self.derived.geometry(id).is_some()),
-                    has_volute: volute.is_some_and(|id| self.derived.volute(id).is_some()),
-                    cad_running: self.exports.cad_running(),
-                    options: &mut self.viewer.options,
+                    has_geometry: tools.has_geometry,
+                    has_volute: tools.has_volute,
                     tree_open: self.tree_open,
-                    sidebar_open: self.sidebar_open,
-                    messages_open: self.show_messages,
-                    follow_step: self.follow_step,
                 };
-                command = self.ribbon.show(ui, &mut cx);
+                let units = self.doc.project().display_units.clone();
+                let view = self.view;
+                let meridional = &mut self.meridional;
+                let blade = &mut self.blade;
+                let front = &mut self.front;
+                let viewer = &mut self.viewer;
+                let performance = &mut self.performance;
+                command = self.ribbon.show(ui, &cx, |ui| match view {
+                    View::Meridian => tools::meridian(ui, meridional, &units, tools),
+                    View::Blade => tools::blade(ui, blade, tools),
+                    View::FrontView => tools::front(ui, front, tools),
+                    View::CrossSection => tools::section(ui, tools),
+                    View::View3d => tools::view3d(ui, viewer, tools),
+                    View::Performance => tools::curves(ui, performance),
+                    View::Report => tools::report(ui, tools),
+                });
             });
+        let mut objective = None;
+        Panel::top("objective")
+            .frame(
+                Frame::new()
+                    .fill(ui.visuals().panel_fill)
+                    .inner_margin(Margin::symmetric(8, 2)),
+            )
+            .show(ui, |ui| {
+                let units = self.doc.project().display_units.clone();
+                objective = objective::show(
+                    ui,
+                    self.doc.project(),
+                    &self.derived,
+                    self.active_impeller(),
+                    &units,
+                );
+            });
+        match objective {
+            Some(objective::Action::Setup) => self.edit_ctx().open(Selection::Setup),
+            Some(objective::Action::Curves) => self.view = View::Performance,
+            Some(objective::Action::Step(id, step)) => {
+                self.edit_ctx().open(Selection::Step(id, step));
+            }
+            None => {}
+        }
         Panel::bottom("status_bar")
             .frame(
                 Frame::new()
@@ -526,73 +651,86 @@ impl TurbopumpApp {
                     }
                 });
         }
-        Panel::left("component_bar")
-            .exact_size(62.0)
-            .resizable(false)
-            .frame(Frame::new().fill(p.strip))
-            .show(ui, |ui| {
-                let mut cx = self.edit_ctx();
-                tree::component_bar(ui, &mut cx);
-            });
-        let stage = StageParts {
-            stator: self
-                .active_stator()
-                .and_then(|id| self.doc.project().component(id))
-                .map(|c| matches!(c.kind(), ComponentKind::Stator { vaned: true })),
-            volute: self.active_volute().is_some(),
-        };
-        Panel::left("project_tree")
-            .default_size(250.0)
-            .size_range(200.0..=420.0)
-            .show_collapsible(ui, &mut self.tree_open, |ui| {
-                ui.add_space(6.0);
-                ui.columns(2, |columns| {
-                    let tabs = [
-                        (
-                            LeftTab::Design,
-                            format!("{}  {}", icon::TREE_STRUCTURE, tr("Design")),
-                        ),
-                        (
-                            LeftTab::Model,
-                            format!("{}  {}", icon::CUBE, tr("3D model")),
-                        ),
-                    ];
-                    for (ui, (tab, label)) in columns.iter_mut().zip(tabs) {
-                        let button = Button::selectable(self.left == tab, label)
-                            .min_size(egui::vec2(ui.available_width(), 24.0));
-                        if ui.add(button).clicked() {
-                            self.left = tab;
-                        }
-                    }
+        let stage = self.scene_stage();
+        self.flow.follow(self.selection);
+        let file = self
+            .doc
+            .path()
+            .map_or_else(String::new, |p| p.display().to_string());
+        let has_geometry = self
+            .active_impeller()
+            .is_some_and(|id| self.derived.geometry(id).is_some());
+        let has_volute = self
+            .active_volute()
+            .is_some_and(|id| self.derived.volute(id).is_some());
+        let mut flow_command = None;
+        if self.tree_open {
+            Panel::left("design_flow")
+                .default_size(270.0)
+                .size_range(220.0..=380.0)
+                .frame(
+                    Frame::new()
+                        .fill(ui.visuals().panel_fill)
+                        .inner_margin(Margin::symmetric(8, 6)),
+                )
+                .show(ui, |ui| {
+                    let mut cx = EditCtx {
+                        doc: &mut self.doc,
+                        derived: &self.derived,
+                        selection: &mut self.selection,
+                        status: &mut self.status,
+                        exports: &mut self.exports,
+                        properties: &mut self.sidebar_open,
+                        shown: &mut self.shown_rows,
+                    };
+                    flow_command = self.flow.show(ui, &mut cx, &file, has_geometry, has_volute);
                 });
-                ui.separator();
-                egui::ScrollArea::vertical().show(ui, |ui| match self.left {
-                    LeftTab::Design => {
-                        let mut cx = EditCtx {
-                            doc: &mut self.doc,
-                            derived: &self.derived,
-                            selection: &mut self.selection,
-                            status: &mut self.status,
-                            exports: &mut self.exports,
-                            properties: &mut self.sidebar_open,
-                        };
-                        tree::design_tree(ui, &mut cx);
-                    }
-                    LeftTab::Model => tree::model_tree(ui, &mut self.viewer.options, stage),
+        } else {
+            Panel::left("design_rail")
+                .exact_size(56.0)
+                .resizable(false)
+                .frame(Frame::new().fill(p.strip))
+                .show(ui, |ui| {
+                    let mut cx = EditCtx {
+                        doc: &mut self.doc,
+                        derived: &self.derived,
+                        selection: &mut self.selection,
+                        status: &mut self.status,
+                        exports: &mut self.exports,
+                        properties: &mut self.sidebar_open,
+                        shown: &mut self.shown_rows,
+                    };
+                    flow_command = self.flow.rail(ui, &mut cx);
                 });
-            });
+        }
+        command = command.or(flow_command);
         let mut main_area = ui.available_rect_before_wrap();
+        let mut scene_area = None;
+        let mut part_action = None;
         CentralPanel::no_frame().show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
-            self.view_bar(ui);
             main_area = ui.available_rect_before_wrap();
             // The width the floating properties panel hides on the right of the view.
             let cover = self.sidebar_extent(ui.ctx(), main_area) + SIDEBAR_MARGIN;
             let active = self.active_impeller();
-            // The editor opens on the meridian, framed, with its step in the panel.
-            if self.view == View::MeridianEditor && self.shown != Some(View::MeridianEditor) {
+            // The Meridian view opens framed. Outside the stage scope it edits the
+            // impeller channel, so the contour step comes into the panel, unless the
+            // step in it belongs to the Meridian already (the inlet duct).
+            if self.view == View::Meridian && self.shown != Some(View::Meridian) {
                 self.meridional.framed = false;
-                if let Some(id) = active {
+                let suits = match self.selection {
+                    Selection::Step(id, step) => self
+                        .doc
+                        .project()
+                        .component(id)
+                        .and_then(|c| view_for(c.kind(), step))
+                        .is_some_and(|(view, _)| view == View::Meridian),
+                    Selection::Setup => false,
+                };
+                if self.meridional.scope != Scope::Stage
+                    && !suits
+                    && let Some(id) = active
+                {
                     self.selection = Selection::Step(id, DesignStep::MeridionalContour);
                 }
             }
@@ -606,11 +744,12 @@ impl TurbopumpApp {
                 status: &mut self.status,
                 exports: &mut self.exports,
                 properties: &mut self.sidebar_open,
+                shown: &mut self.shown_rows,
             };
             let Some(id) = active else {
                 ui.centered_and_justified(|ui| {
                     ui.weak(tr(
-                        "Add an impeller to see its geometry (Home > Components).",
+                        "Add an impeller to see its geometry (the + of the component column).",
                     ));
                 });
                 return;
@@ -629,21 +768,35 @@ impl TurbopumpApp {
             ui.scope_builder(egui::UiBuilder::new().max_rect(target), |ui| {
                 ui.set_min_size(target.size());
                 match self.view {
-                    View::Meridional => {
-                        self.meridional.show(ui, &mut cx, id, stator, volute);
-                    }
-                    View::MeridianEditor => {
-                        self.meridional
-                            .show_editor(ui, &mut cx, id, stator, volute, cover);
+                    View::Meridian => {
+                        self.meridional.show(ui, &mut cx, id, stator, volute, cover);
                     }
                     View::CrossSection => self.cross_section.show(ui, &mut cx, volute, cover),
                     View::Blade => self.blade.show(ui, &mut cx, id, &units, cover),
                     View::FrontView => {
-                        front::show(ui, cx.derived, id, stator, volute, &units);
+                        self.front
+                            .show(ui, &mut cx, id, stator, volute, &units, cover);
                     }
-                    View::View3d => self.viewer.show(
+                    View::View3d => {
+                        scene_area = Some(target);
+                        part_action = self.viewer.show(
+                            ui,
+                            render_state,
+                            cx.derived,
+                            id,
+                            stator,
+                            volute,
+                            &units,
+                            (self.scene.left_cover(), cover),
+                        );
+                    }
+                    View::Performance => {
+                        self.performance
+                            .show(ui, cx.doc.project(), cx.derived, id, &units, cover);
+                    }
+                    View::Report => report::show(
                         ui,
-                        render_state,
+                        cx.doc.project(),
                         cx.derived,
                         id,
                         stator,
@@ -651,17 +804,24 @@ impl TurbopumpApp {
                         &units,
                         cover,
                     ),
-                    View::Performance => {
-                        self.performance
-                            .show(ui, cx.doc.project(), cx.derived, id, &units, cover);
-                    }
-                    View::Report => {
-                        report::show(ui, cx.doc.project(), cx.derived, id, stator, volute, &units)
-                    }
                 }
             });
         });
+        if let Some(area) = scene_area {
+            let cover = self.sidebar_extent(&ctx, main_area) + SIDEBAR_MARGIN;
+            let marked = [self.viewer.selected, self.viewer.hovered];
+            self.scene
+                .show(&ctx, area, cover, &mut self.viewer.options, &stage, marked);
+            if let Some(action) = part_action {
+                self.scene.apply(action, &mut self.viewer.options);
+            }
+        }
         self.properties_panel(&ctx, main_area);
+        // The cutwater page asked for the 3D view at one of its planes.
+        if let Some(z) = self.front.cutwater.open_3d.take() {
+            self.focus_view(View::View3d);
+            self.viewer.focus_cutwater(Some(z));
+        }
 
         if let Some(command) = command {
             self.run(command, &ctx);
@@ -682,9 +842,18 @@ impl TurbopumpApp {
             if self.follow_step
                 && let Selection::Step(id, step) = self.selection
                 && let Some(kind) = self.doc.project().component(id).map(|c| c.kind())
-                && let Some(view) = view_for(kind, step)
+                && let Some((view, scope)) = view_for(kind, step)
             {
                 self.view = view;
+                // The scope follows the step, but one picked by hand outside the stage
+                // stays while the channel is edited.
+                match scope {
+                    Some(Scope::Stage) => self.meridional.set_scope(Scope::Stage),
+                    Some(scope) if self.meridional.scope == Scope::Stage => {
+                        self.meridional.set_scope(scope);
+                    }
+                    _ => {}
+                }
             }
             self.followed = Some(self.selection);
         }
@@ -694,56 +863,6 @@ impl TurbopumpApp {
         if idle {
             self.doc.end_gesture();
         }
-    }
-
-    /// The strip above the main view: the tree toggle, the views and the dialog toggle.
-    fn view_bar(&mut self, ui: &mut Ui) {
-        let p = Palette::of(ui);
-        Frame::new()
-            .fill(p.strip)
-            .inner_margin(Margin::symmetric(6, 3))
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.horizontal(|ui| {
-                    let tip = if self.tree_open {
-                        tr("Hide the tree")
-                    } else {
-                        tr("Show the tree")
-                    };
-                    if ui
-                        .add(Button::selectable(
-                            self.tree_open,
-                            RichText::new(icon::SIDEBAR_SIMPLE).size(16.0),
-                        ))
-                        .on_hover_text(tip)
-                        .clicked()
-                    {
-                        self.tree_open = !self.tree_open;
-                    }
-                    const TAB: f32 = 104.0;
-                    let total = TAB * View::ALL.len() as f32;
-                    let free = ui.available_width() - total - 150.0;
-                    ui.add_space((free / 2.0).max(8.0));
-                    for view in View::ALL {
-                        let text = format!("{}  {}", view.icon(), view.short_title());
-                        let button = Button::selectable(self.view == view, text)
-                            .min_size(egui::vec2(TAB, 26.0));
-                        if ui.add(button).on_hover_text(view.title()).clicked() {
-                            self.view = view;
-                        }
-                    }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let text = format!("{}  {}", icon::SLIDERS_HORIZONTAL, tr("Properties"));
-                        if ui
-                            .add(Button::selectable(self.sidebar_open, text))
-                            .on_hover_text(tr("Show or hide the dialog of the selected step"))
-                            .clicked()
-                        {
-                            self.sidebar_open = !self.sidebar_open;
-                        }
-                    });
-                });
-            });
     }
 
     /// Width the properties panel takes this frame, animated between folded and open.
@@ -772,18 +891,18 @@ impl TurbopumpApp {
         );
         let style = ctx.style_of(ctx.theme());
         let p = Palette::for_dark(style.visuals.dark_mode);
-        let shadow = style.visuals.popup_shadow;
         let mut toggle = false;
         egui::Area::new(egui::Id::new("properties_panel"))
             .order(egui::Order::Middle)
             .fixed_pos(rect.min)
             .show(ctx, |ui| {
-                let frame = Frame::new()
-                    .fill(ui.visuals().window_fill)
-                    .stroke(egui::Stroke::new(1.0, p.border))
-                    .corner_radius(8)
-                    .shadow(shadow);
-                frame.show(ui, |ui| {
+                // The panel takes exactly its rectangle: its width is the user's, never
+                // what a wide row asks for, and nothing drawn spills out of it.
+                let (outer, _) = ui.allocate_exact_size(rect.size(), egui::Sense::hover());
+                let mut ui = ui.new_child(egui::UiBuilder::new().max_rect(outer));
+                ui.set_clip_rect(outer.expand(1.0));
+                let ui = &mut ui;
+                floating::frame(&style).show(ui, |ui| {
                     ui.set_min_size(rect.size());
                     ui.set_max_size(rect.size());
                     if width < SIDEBAR_STRIP + 40.0 {
@@ -803,29 +922,112 @@ impl TurbopumpApp {
                         )
                         .on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
                     if resize.dragged() {
-                        self.sidebar_width -= resize.drag_delta().x;
+                        self.sidebar_width =
+                            (self.sidebar_width - resize.drag_delta().x).clamp(300.0, 1200.0);
                     }
                     Frame::new()
                         .inner_margin(Margin::symmetric(12, 8))
                         .show(ui, |ui| {
                             ui.set_min_size(ui.available_size());
-                            ui.horizontal(|ui| {
-                                let title = steps::title(self.doc.project(), self.selection);
-                                ui.add(egui::Label::new(theme::bold(title).size(15.0)).truncate());
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        if ui
-                                            .add(Button::new(icon::CARET_RIGHT).frame(false))
-                                            .on_hover_text(tr("Fold the properties"))
-                                            .clicked()
-                                        {
-                                            toggle = true;
+                            if self.view == View::Performance {
+                                self.panel_pages(ui);
+                                if !self.performance.step_in_panel {
+                                    self.curve_settings(ui, &p, &mut toggle);
+                                    return;
+                                }
+                            }
+                            let (glyph, crumb, title) =
+                                steps::heading(self.doc.project(), self.selection);
+                            ui.label(RichText::new(crumb).size(11.5).color(p.weak));
+                            let mut reset = false;
+                            let mut complete_all = false;
+                            let mut fold_sections = None;
+                            let resettable = match self.selection {
+                                Selection::Step(id, step) => {
+                                    steps::accept_state(self.doc.project(), &self.derived, id, step)
+                                        != steps::AcceptState::NotApplicable
+                                }
+                                Selection::Setup => false,
+                            };
+                            let folded = steps::sections_folded(ui.ctx());
+                            floating::header(ui, glyph, &title, false, |ui| {
+                                if ui
+                                    .add(Button::new(icon::CARET_RIGHT).frame(false))
+                                    .on_hover_text(tr("Fold the properties"))
+                                    .clicked()
+                                {
+                                    toggle = true;
+                                }
+                                let more = ui.add(Button::new(icon::DOTS_THREE).frame(false));
+                                more.widget_info(|| {
+                                    egui::WidgetInfo::labeled(
+                                        egui::WidgetType::Button,
+                                        true,
+                                        tr("More actions of the step"),
+                                    )
+                                });
+                                egui::Popup::menu(&more).show(|ui| {
+                                    ui.set_min_width(240.0);
+                                    if ui
+                                        .add_enabled(
+                                            resettable,
+                                            Button::new(format!(
+                                                "{}  {}",
+                                                icon::ARROW_COUNTER_CLOCKWISE,
+                                                tr("Reset to automatic")
+                                            )),
+                                        )
+                                        .on_hover_text(tr(
+                                            "Return every value of this step to its automatic proposal",
+                                        ))
+                                        .clicked()
+                                    {
+                                        reset = true;
+                                    }
+                                    let (glyph, text) = if folded {
+                                        (icon::ARROWS_OUT_LINE_VERTICAL, tr("Open every section"))
+                                    } else {
+                                        (icon::ARROWS_IN_LINE_VERTICAL, tr("Fold every section"))
+                                    };
+                                    if ui.button(format!("{glyph}  {text}")).clicked() {
+                                        fold_sections = Some(!folded);
+                                    }
+                                    ui.separator();
+                                    let left = match self.selection {
+                                        Selection::Step(id, _) => {
+                                            steps::remaining(self.doc.project(), id)
                                         }
-                                    },
-                                );
+                                        Selection::Setup => 0,
+                                    };
+                                    if ui
+                                        .add_enabled(
+                                            left > 0,
+                                            Button::new(format!(
+                                                "{}  {}",
+                                                icon::CHECKS,
+                                                tr("Complete every step of the component")
+                                            )),
+                                        )
+                                        .on_hover_text(tf(
+                                            "Accept the {} steps left with the suggested values (⇧ {})",
+                                            &[&left, &steps::ACCEPT_SHORTCUT],
+                                        ))
+                                        .clicked()
+                                    {
+                                        complete_all = true;
+                                    }
+                                });
                             });
-                            ui.separator();
+                            if let Some(fold) = fold_sections {
+                                steps::fold_sections(ui.ctx(), fold);
+                            }
+                            if complete_all && let Selection::Step(id, _) = self.selection {
+                                steps::complete_all(&mut self.edit_ctx(), id);
+                            }
+                            if reset && let Selection::Step(id, step) = self.selection {
+                                let project = self.doc.project().clone();
+                                steps::reset(&mut self.edit_ctx(), &project, id, step);
+                            }
                             let mut cx = self.edit_ctx();
                             Panel::bottom("properties_footer")
                                 .frame(Frame::new().inner_margin(Margin::symmetric(0, 6)))
@@ -845,6 +1047,85 @@ impl TurbopumpApp {
         }
     }
 
+    /// While the curves are shown, the choice of what the properties panel shows: the
+    /// settings of the curves or the step.
+    fn panel_pages(&mut self, ui: &mut Ui) {
+        ui.horizontal(|ui| {
+            let width = (ui.available_width() - ui.spacing().item_spacing.x) / 2.0;
+            for (step, text) in [(false, tr("Curve settings")), (true, tr("Step"))] {
+                let selected = self.performance.step_in_panel == step;
+                if ui
+                    .add_sized([width, 24.0], Button::selectable(selected, text))
+                    .clicked()
+                {
+                    self.performance.step_in_panel = step;
+                }
+            }
+        });
+        ui.add_space(4.0);
+    }
+
+    /// The settings of the curves in the properties panel, under a header like that of
+    /// a step; `toggle` asks to fold the panel.
+    fn curve_settings(&mut self, ui: &mut Ui, p: &Palette, toggle: &mut bool) {
+        let impeller = self.active_impeller();
+        let name = impeller
+            .and_then(|id| self.doc.project().component(id))
+            .map_or("", |c| c.name.as_str());
+        let crumb = format!("{} › {}", crate::i18n::component_name(name), tr("Results"));
+        ui.label(RichText::new(crumb).size(11.5).color(p.weak));
+        let mut reset = false;
+        floating::header(
+            ui,
+            icon::SLIDERS_HORIZONTAL,
+            tr("Curve settings"),
+            false,
+            |ui| {
+                if ui
+                    .add(Button::new(icon::CARET_RIGHT).frame(false))
+                    .on_hover_text(tr("Fold the properties"))
+                    .clicked()
+                {
+                    *toggle = true;
+                }
+                let more = ui.add(Button::new(icon::DOTS_THREE).frame(false));
+                more.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::Button,
+                        true,
+                        tr("More actions of the curves"),
+                    )
+                });
+                egui::Popup::menu(&more).show(|ui| {
+                    ui.set_min_width(240.0);
+                    if ui
+                        .button(format!(
+                            "{}  {}",
+                            icon::ARROW_COUNTER_CLOCKWISE,
+                            tr("Reset to automatic")
+                        ))
+                        .on_hover_text(tr(
+                            "Every setting of the curves back to its automatic value",
+                        ))
+                        .clicked()
+                    {
+                        reset = true;
+                    }
+                });
+            },
+        );
+        if reset {
+            self.performance.reset_settings();
+        }
+        let Some(id) = impeller else {
+            ui.weak(tr("The performance prediction needs a pump impeller."));
+            return;
+        };
+        let units = self.doc.project().display_units.clone();
+        self.performance
+            .settings_panel(ui, self.doc.project(), &self.derived, id, &units);
+    }
+
     /// Carries out a toolbar command.
     fn run(&mut self, command: Command, ctx: &egui::Context) {
         match command {
@@ -859,9 +1140,14 @@ impl TurbopumpApp {
                 self.save_as();
             }
             Command::Quit => ctx.send_viewport_cmd(ViewportCommand::Close),
+            Command::CurveSettings(show) => {
+                self.performance.step_in_panel = !show;
+                if show {
+                    self.sidebar_open = true;
+                }
+            }
             Command::Undo => self.undo(),
             Command::Redo => self.redo(),
-            Command::GlobalSetup => self.edit_ctx().open(Selection::Setup),
             Command::UsUnits(us) => {
                 let preset = if us {
                     DisplayUnits::us()
@@ -883,14 +1169,6 @@ impl TurbopumpApp {
                         Ok(())
                     });
                 }
-            }
-            Command::Add(index) => tree::add_component(&mut self.edit_ctx(), index),
-            Command::Remove(id) => tree::remove_component(&mut self.edit_ctx(), id),
-            Command::Select(id, step) => self.edit_ctx().open(Selection::Step(id, step)),
-            Command::Accept(id, step) => steps::accept(&mut self.edit_ctx(), id, step),
-            Command::Reset(id, step) => {
-                let project = self.doc.project().clone();
-                steps::reset(&mut self.edit_ctx(), &project, id, step);
             }
             Command::ExportText(kind) => {
                 if let Some(g) = self
@@ -917,14 +1195,19 @@ impl TurbopumpApp {
                 }
             }
             Command::ExportCad => self.exports.open_cad(),
+            Command::Picture3d => match self.picture_of_3d_view(ctx) {
+                Some(png) => {
+                    let result = export::save_picture(png, &self.doc.project().info.name);
+                    self.report_export(result);
+                }
+                None => self.error(tr("The 3D view could not be captured.").to_owned()),
+            },
             Command::Focus(view) => self.focus_view(view),
             Command::Camera(view) => {
                 self.focus_view(View::View3d);
                 self.viewer.apply(view);
             }
             Command::ToggleTree => self.tree_open = !self.tree_open,
-            Command::ToggleDialog => self.sidebar_open = !self.sidebar_open,
-            Command::ToggleMessages => self.show_messages = !self.show_messages,
             Command::FollowStep => self.follow_step = !self.follow_step,
             Command::Theme(preference) => ctx.set_theme(preference),
             Command::Zoom(zoom) => ctx.set_zoom_factor(zoom),
@@ -942,7 +1225,10 @@ impl TurbopumpApp {
 
     fn report_export(&mut self, result: Result<Option<PathBuf>, String>) {
         match result {
-            Ok(Some(path)) => self.info(tf("Wrote {}", &[&path.display()])),
+            Ok(Some(path)) => {
+                let text = tf("Wrote {}", &[&file_name(&path)]);
+                self.about_file(false, text, &path);
+            }
             Ok(None) => {}
             Err(e) => self.error(e),
         }
@@ -956,6 +1242,7 @@ impl TurbopumpApp {
             status: &mut self.status,
             exports: &mut self.exports,
             properties: &mut self.sidebar_open,
+            shown: &mut self.shown_rows,
         }
     }
 
@@ -979,6 +1266,41 @@ impl TurbopumpApp {
             .iter()
             .find(|c| c.kind() == ComponentKind::Impeller)
             .map(|c| c.id())
+    }
+
+    /// The components of the active stage, as the scene lists them.
+    fn scene_stage(&self) -> scene::Stage {
+        let project = self.doc.project();
+        let name = |id: Option<ComponentId>| {
+            id.and_then(|id| project.component(id))
+                .map(|c| i18n::component_name(&c.name))
+        };
+        let impeller = self.active_impeller();
+        scene::Stage {
+            impeller: name(impeller).unwrap_or_default(),
+            blades: impeller
+                .and_then(|id| self.derived.geometry(id))
+                .map(|g| g.blade.count),
+            duct: impeller
+                .filter(|&id| self.derived.duct_before(id).is_some())
+                .and_then(|id| {
+                    let components = project.components();
+                    let index = components.iter().position(|c| c.id() == id)?;
+                    name(Some(components[index.checked_sub(1)?].id()))
+                }),
+            stator: self.active_stator().and_then(|id| {
+                let c = project.component(id)?;
+                Some((
+                    i18n::component_name(&c.name),
+                    matches!(c.kind(), ComponentKind::Stator { vaned: true }),
+                ))
+            }),
+            volute: name(self.active_volute()),
+            cutwater: self
+                .active_volute()
+                .and_then(|id| self.derived.volute(id))
+                .is_some_and(|g| !g.cutwater_outline().is_empty() || g.rib.is_some()),
+        }
     }
 
     /// The stator right after the active impeller, if any.
@@ -1053,6 +1375,9 @@ impl TurbopumpApp {
         let command_shift = Modifiers::COMMAND | Modifiers::SHIFT;
         // Text fields handle their own undo while the user types in them.
         let editing = ctx.text_edit_focused();
+        let mut step = 0;
+        let mut accept = false;
+        let mut complete = false;
         ctx.input_mut(|i| {
             if i.consume_shortcut(&shortcut(command_shift, Key::S)) {
                 self.save_as();
@@ -1068,7 +1393,17 @@ impl TurbopumpApp {
             if i.consume_shortcut(&shortcut(Modifiers::COMMAND, Key::Comma)) {
                 self.dialog = Some(Dialog::Settings(Section::default()));
             }
+            if i.consume_shortcut(&shortcut(command_shift, Key::Enter)) {
+                complete = true;
+            } else if i.consume_shortcut(&shortcut(Modifiers::COMMAND, Key::Enter)) {
+                accept = true;
+            }
             if !editing {
+                if i.consume_shortcut(&shortcut(Modifiers::ALT, Key::ArrowDown)) {
+                    step = 1;
+                } else if i.consume_shortcut(&shortcut(Modifiers::ALT, Key::ArrowUp)) {
+                    step = -1;
+                }
                 if i.consume_shortcut(&shortcut(command_shift, Key::Z))
                     || i.consume_shortcut(&shortcut(Modifiers::COMMAND, Key::Y))
                 {
@@ -1078,6 +1413,23 @@ impl TurbopumpApp {
                 }
             }
         });
+        if step != 0 {
+            self.step_by(step);
+        }
+        if accept {
+            steps::accept_and_continue(&mut self.edit_ctx());
+        }
+        if complete && let Selection::Step(id, _) = self.selection {
+            steps::complete_all(&mut self.edit_ctx(), id);
+        }
+    }
+
+    /// Opens the step `by` places after the selected one (before, if negative), across
+    /// components; the design point comes first.
+    fn step_by(&mut self, by: i32) {
+        if let Some(to) = steps::step_from(self.doc.project(), self.selection, by) {
+            self.edit_ctx().open(to);
+        }
     }
 
     fn handle_close_request(&mut self, ctx: &egui::Context) {
@@ -1106,6 +1458,7 @@ impl TurbopumpApp {
         self.status = Some(Status {
             text: text.into(),
             error: false,
+            detail: None,
         });
     }
 
@@ -1113,6 +1466,17 @@ impl TurbopumpApp {
         self.status = Some(Status {
             text: text.into(),
             error: true,
+            detail: None,
+        });
+    }
+
+    /// A message about the file at `path`: its name in the line, the whole path on
+    /// hover.
+    fn about_file(&mut self, error: bool, text: String, path: &Path) {
+        self.status = Some(Status {
+            text,
+            error,
+            detail: Some(path.display().to_string()),
         });
     }
 
@@ -1142,12 +1506,15 @@ impl TurbopumpApp {
             Ok(doc) => {
                 self.doc = doc;
                 self.select_first_step();
-                self.info(tf("Opened {}", &[&path.display()]));
+                self.about_file(false, tf("Opened {}", &[&file_name(path)]), path);
             }
-            Err(e) => self.error(tf(
-                "Could not open {}: {}",
-                &[&path.display(), &message(&e.to_string())],
-            )),
+            Err(e) => {
+                let text = tf(
+                    "Could not open {}: {}",
+                    &[&file_name(path), &message(&e.to_string())],
+                );
+                self.about_file(true, text, path);
+            }
         }
     }
 
@@ -1168,8 +1535,9 @@ impl TurbopumpApp {
         }
         match self.doc.save() {
             Ok(()) => {
-                let path = self.doc.path().map(|p| p.display().to_string());
-                self.info(tf("Saved {}", &[&path.unwrap_or_default()]));
+                if let Some(path) = self.doc.path().map(Path::to_path_buf) {
+                    self.about_file(false, tf("Saved {}", &[&file_name(&path)]), &path);
+                }
                 true
             }
             Err(e) => {
@@ -1194,7 +1562,7 @@ impl TurbopumpApp {
         };
         match self.doc.save_as(&path) {
             Ok(()) => {
-                self.info(tf("Saved {}", &[&path.display()]));
+                self.about_file(false, tf("Saved {}", &[&file_name(&path)]), &path);
                 true
             }
             Err(e) => {
@@ -1208,14 +1576,18 @@ impl TurbopumpApp {
         let p = Palette::of(ui);
         ui.horizontal(|ui| {
             match &self.status {
-                Some(Status { text, error: true }) => {
-                    ui.colored_label(
-                        ui.visuals().error_fg_color,
-                        format!("{}  {}", icon::X_CIRCLE, message(text)),
-                    );
-                }
-                Some(Status { text, .. }) => {
-                    ui.label(format!("{}  {}", icon::INFO, message(text)));
+                Some(status) => {
+                    let line = if status.error {
+                        ui.colored_label(
+                            ui.visuals().error_fg_color,
+                            format!("{}  {}", icon::X_CIRCLE, message(&status.text)),
+                        )
+                    } else {
+                        ui.label(format!("{}  {}", icon::INFO, message(&status.text)))
+                    };
+                    if let Some(detail) = &status.detail {
+                        line.on_hover_text(detail);
+                    }
                 }
                 None => {
                     ui.label(RichText::new(tr("Ready")).color(p.weak));
@@ -1262,18 +1634,6 @@ impl TurbopumpApp {
                 {
                     self.dialog = Some(Dialog::Settings(Section::Units));
                 }
-                ui.separator();
-                let source = match &self.derived.liquid {
-                    Some(Ok(l)) => match l.source {
-                        tp_fluids::PropertySource::CoolProp => tr("fluid properties: CoolProp"),
-                        tp_fluids::PropertySource::BuiltinWater => {
-                            tr("fluid properties: built-in water model")
-                        }
-                    },
-                    Some(Err(_)) => tr("fluid properties: unavailable"),
-                    None => "",
-                };
-                ui.label(RichText::new(source).color(p.weak));
                 if self.exports.cad_running() {
                     ui.separator();
                     ui.spinner();
@@ -1363,6 +1723,13 @@ impl eframe::App for TurbopumpApp {
         storage.set_string(THEME_KEY, theme_code(self.theme).to_owned());
         storage.set_string(ZOOM_KEY, self.zoom.to_string());
         storage.set_string(FOLLOW_STEP_KEY, self.follow_step.to_string());
+        storage.set_string(PINS_KEY, self.flow.pins_text());
+        storage.set_string(SCENE_CORNER_KEY, self.scene.corner.code().to_owned());
+        storage.set_string(SCENE_FOLDED_KEY, self.scene.folded.to_string());
+        storage.set_string(ORTHOGRAPHIC_KEY, self.viewer.orthographic.to_string());
+        storage.set_string(SIDEBAR_WIDTH_KEY, self.sidebar_width.to_string());
+        let views: Vec<String> = self.viewer.saved.iter().map(|v| v.code()).collect();
+        storage.set_string(SAVED_VIEWS_KEY, views.join(";"));
     }
 }
 
@@ -1399,7 +1766,7 @@ mod tests {
             .build_eframe(|cc| TurbopumpApp::new(cc, None));
         harness.run();
         // The dialog stays open: it does not block the views.
-        harness.state_mut().focus_view(View::Meridional);
+        harness.state_mut().focus_view(View::Meridian);
         harness.run();
         assert!(harness.state().sidebar_open);
         let id = harness.state().active_impeller().unwrap();
@@ -1467,7 +1834,7 @@ mod tests {
             .with_size([1440.0, 900.0])
             .build_eframe(|cc| TurbopumpApp::new(cc, None));
         harness.run();
-        harness.state_mut().focus_view(View::Meridional);
+        harness.state_mut().focus_view(View::Meridian);
         harness.run();
         let id = harness.state().active_impeller().unwrap();
         let segments = |app: &TurbopumpApp| {
@@ -1525,7 +1892,7 @@ mod tests {
             .with_size([1440.0, 900.0])
             .build_eframe(|cc| TurbopumpApp::new(cc, None));
         harness.run();
-        harness.state_mut().focus_view(View::MeridianEditor);
+        harness.state_mut().focus_view(View::Meridian);
         harness.run();
         let id = harness.state().active_impeller().unwrap();
         let app = harness.state();
@@ -1604,7 +1971,7 @@ mod tests {
             .with_size([1440.0, 900.0])
             .build_eframe(|cc| TurbopumpApp::new(cc, None));
         harness.run();
-        harness.state_mut().focus_view(View::MeridianEditor);
+        harness.state_mut().focus_view(View::Meridian);
         harness.run();
         let id = harness.state().active_impeller().unwrap();
         // A hub control point below the axis leaves no geometry.
@@ -1632,7 +1999,7 @@ mod tests {
             .with_size([1440.0, 900.0])
             .build_eframe(|cc| TurbopumpApp::new(cc, None));
         harness.run();
-        harness.state_mut().focus_view(View::MeridianEditor);
+        harness.state_mut().focus_view(View::Meridian);
         harness.run();
         let id = harness.state().active_impeller().unwrap();
         let on_screen = |app: &TurbopumpApp, p: tp_math::DVec2| {
@@ -1718,7 +2085,7 @@ mod tests {
             .with_size([1440.0, 900.0])
             .build_eframe(|cc| TurbopumpApp::new(cc, None));
         harness.run();
-        harness.state_mut().focus_view(View::Meridional);
+        harness.state_mut().focus_view(View::Meridian);
         harness.run();
         let id = harness.state().active_impeller().unwrap();
         let shape = |app: &TurbopumpApp| {
@@ -1824,12 +2191,121 @@ mod tests {
         assert_eq!(leading(harness.state()), EdgeShape::Ellipse { ratio: 4.0 });
     }
 
+    #[test]
+    fn the_cutwater_step_opens_its_page_and_its_points_drag() {
+        use crate::views::cutwater::{Grip, nose_frame};
+        use crate::views::front::FrontPage;
+        use tp_design::volute::CutwaterShape;
+        use tp_math::DVec2;
+        let mut harness = Harness::builder()
+            .with_size([1440.0, 900.0])
+            .build_eframe(|cc| TurbopumpApp::new(cc, None));
+        harness.run();
+        let volute = harness.state().active_volute().unwrap();
+        harness.state_mut().selection = Selection::Step(volute, DesignStep::CutWater);
+        harness.run();
+        harness.run();
+        assert_eq!(harness.state().view, View::FrontView);
+        assert_eq!(harness.state().front.page, FrontPage::Cutwater);
+        let scale = |app: &TurbopumpApp| {
+            app.doc
+                .project()
+                .display_units
+                .to_display(QuantityKind::Length, 1.0)
+        };
+        let input = |app: &TurbopumpApp| app.doc.project().volute_input(volute).unwrap();
+        let geometry = |app: &TurbopumpApp| app.derived.volute(volute).unwrap().clone();
+        // Screen points of the grip and of where it is dragged to.
+        let points = |app: &TurbopumpApp, grip: Grip, to: DVec2| {
+            let g = geometry(app);
+            let page = &app.front.cutwater;
+            (
+                page.grip_position(&g, grip, scale(app)).unwrap(),
+                page.screen(to, scale(app)).unwrap(),
+            )
+        };
+
+        // The innermost point of the nose, 3 mm outward: d_z grows by 6 mm.
+        let g = geometry(harness.state());
+        let (centre, radial, _, _, radius) = nose_frame(&g);
+        let before = g.design.cutwater_diameter;
+        let nose = centre - radial * radius;
+        let (from, to) = points(harness.state(), Grip::Nose, nose + radial * 0.003);
+        drag_by(&mut harness, from, to - from);
+        let after = geometry(harness.state()).design.cutwater_diameter;
+        assert!((after - before - 0.006).abs() < 0.001, "{before} → {after}");
+        assert!(matches!(
+            input(harness.state()).setup.cutwater_diameter,
+            tp_design::Param::Manual(_)
+        ));
+        // One drag, one undo step.
+        harness.state_mut().doc.undo();
+        harness.run();
+        assert_eq!(
+            input(harness.state()).setup.cutwater_diameter,
+            tp_design::Param::Auto
+        );
+
+        // The camber point turned 2° toward the outside: 2° of incidence.
+        let g = geometry(harness.state());
+        let (centre, radial, along, _, radius) = nose_frame(&g);
+        let turned = g.design.cutwater_angle + 2f64.to_radians();
+        let target = centre + (along * turned.cos() + radial * turned.sin()) * (6.0 * radius);
+        let (from, to) = points(harness.state(), Grip::Camber, target);
+        drag_by(&mut harness, from, to - from);
+        let d = geometry(harness.state()).design;
+        let incidence = d.cutwater_angle - d.cutwater_flow_angle;
+        assert!(
+            (incidence - 2f64.to_radians()).abs() < 0.3f64.to_radians(),
+            "{}",
+            incidence.to_degrees()
+        );
+
+        // The leading point of the nose pulled forward: a larger radius, the innermost
+        // point kept on d_z.
+        let g = geometry(harness.state());
+        let (centre, radial, _, camber, radius) = nose_frame(&g);
+        let fixed = centre - radial * radius;
+        let target = fixed + (radial - camber) * (1.5 * radius);
+        let (from, to) = points(harness.state(), Grip::Radius, target);
+        drag_by(&mut harness, from, to - from);
+        let CutwaterShape::Rounded {
+            radius: tp_design::Param::Manual(r),
+        } = input(harness.state()).cutwater.shape
+        else {
+            panic!("a radius set by hand");
+        };
+        assert!((r / radius - 1.5).abs() < 0.1, "{r} vs {radius}");
+        let after = geometry(harness.state());
+        assert!((after.cutwater.nose_distance - after.design.cutwater_diameter / 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn the_cutwater_page_opens_the_3d_view_on_its_plane() {
+        let mut harness = Harness::builder()
+            .with_size([1440.0, 900.0])
+            .build_eframe(|cc| TurbopumpApp::new(cc, None));
+        harness.run();
+        let volute = harness.state().active_volute().unwrap();
+        harness.state_mut().selection = Selection::Step(volute, DesignStep::CutWater);
+        harness.run();
+        harness.run();
+        harness.get_by_label_contains("View in 3D").click();
+        harness.run();
+        let app = harness.state();
+        assert_eq!(app.view, View::View3d);
+        // The midplane, as the page showed it; the view applies it when it draws.
+        let g = app.derived.volute(volute).unwrap();
+        let mid = g.cutwater_slices[g.cutwater_slices.len() / 2].z;
+        assert_eq!(app.viewer.pending_focus(), Some(Some(mid)));
+    }
+
     fn editor() -> Harness<'static, TurbopumpApp> {
         let mut harness = Harness::builder()
             .with_size([1440.0, 900.0])
             .build_eframe(|cc| TurbopumpApp::new(cc, None));
         harness.run();
-        harness.state_mut().focus_view(View::MeridianEditor);
+        harness.state_mut().focus_view(View::Meridian);
         harness.run();
         harness
     }
@@ -1887,7 +2363,7 @@ mod tests {
             harness.state().selection(),
             Selection::Step(id, DesignStep::MeridionalContour)
         );
-        assert_eq!(harness.state().view(), View::MeridianEditor);
+        assert_eq!(harness.state().view(), View::Meridian);
         assert!(harness.state().sidebar_open());
         harness.get_by_label("Check against Gülich");
         // Another step keeps the editor; from another view the meridional step opens it.
@@ -1897,7 +2373,7 @@ mod tests {
             .unwrap()
             .click();
         harness.run();
-        assert_eq!(harness.state().view(), View::MeridianEditor);
+        assert_eq!(harness.state().view(), View::Meridian);
         harness.state_mut().focus_view(View::Blade);
         harness.run();
         harness
@@ -1906,7 +2382,7 @@ mod tests {
             .unwrap()
             .click();
         harness.run();
-        assert_eq!(harness.state().view(), View::MeridianEditor);
+        assert_eq!(harness.state().view(), View::Meridian);
     }
 
     #[test]
@@ -2004,6 +2480,30 @@ mod tests {
         );
         let g = harness.state().derived.geometry(id).unwrap();
         assert!((g.basis.outlet_diameter - 0.18).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_dimensions_of_the_front_and_section_views_point_at_their_rows() {
+        let mut harness = editor();
+        for (view, symbol, row) in [
+            (View::FrontView, "d₂ ", "Outlet diameter d₂"),
+            (View::FrontView, "d_z ", "Cutwater diameter d_z"),
+            (View::CrossSection, "b₃ ", "Inlet width b₃"),
+        ] {
+            harness.state_mut().focus_view(view);
+            harness.run();
+            let at = harness.get_by_label_contains(symbol).rect().center();
+            harness.hover_at(at);
+            harness.run();
+            assert!(
+                crate::widgets::drawing_hovers(&harness.ctx, row),
+                "{view:?}: {row}"
+            );
+            harness.hover_at(egui::pos2(5.0, 5.0));
+            harness.run();
+            harness.run();
+            assert!(!crate::widgets::drawing_hovers(&harness.ctx, row));
+        }
     }
 
     /// Screen position of `p` ((z, r) in m) in the last frame of the diagram.
@@ -2151,6 +2651,7 @@ mod tests {
                 geometry: &geometry,
                 main: main.as_ref(),
                 semi_axial: false,
+                duct: None,
             },
         )
     }
@@ -2177,7 +2678,7 @@ mod tests {
             .with_size([1440.0, 900.0])
             .build_eframe(|cc| TurbopumpApp::new(cc, Some(&path)));
         harness.run();
-        harness.state_mut().focus_view(View::MeridianEditor);
+        harness.state_mut().focus_view(View::Meridian);
         harness.run();
         let id = harness.state().active_impeller().unwrap();
         let basis = |app: &TurbopumpApp| app.derived.geometry(id).unwrap().basis;
@@ -2334,15 +2835,222 @@ mod tests {
     }
 
     #[test]
+    fn status_lines_name_files_without_their_folders() {
+        let path = Path::new("/var/folders/tw/T/turbopump-meridian-kinds.tpj");
+        assert_eq!(file_name(path), "turbopump-meridian-kinds.tpj");
+        assert_eq!(file_name(Path::new("/")), "/");
+    }
+
+    #[test]
+    fn a_predicted_value_that_changes_flashes_its_way() {
+        use crate::objective::flashing;
+        let mut harness = editor();
+        let id = harness.state().active_impeller().unwrap();
+        assert_eq!(flashing(&harness.ctx, "head"), None);
+        // Another impeller: its head and power move, and the arrows point their way.
+        let predicted = |h: &Harness<'_, TurbopumpApp>| {
+            let p = h.state().derived.impeller(id).unwrap();
+            let design = &p.performance.as_ref().unwrap().design;
+            (design.head, design.power)
+        };
+        let before = predicted(&harness);
+        let mut input = harness
+            .state()
+            .doc
+            .project()
+            .pump_impeller_input(id)
+            .unwrap();
+        input.outlet_diameter = tp_project::Param::Manual(0.19);
+        harness
+            .state_mut()
+            .doc
+            .edit("larger d₂", |p| {
+                p.set_main_dimensions(id, tp_design::MainDimensionsInput::CentrifugalPump(input))
+            })
+            .unwrap();
+        // The arrow asks for one repaint, to go: the harness still settles.
+        harness.run();
+        let after = predicted(&harness);
+        assert_ne!(before, after);
+        assert_eq!(flashing(&harness.ctx, "head"), Some(after.0 > before.0));
+        assert_eq!(flashing(&harness.ctx, "power"), Some(after.1 > before.1));
+        // Gone after a while.
+        for _ in 0..3 {
+            harness.step();
+            std::thread::sleep(std::time::Duration::from_millis(600));
+        }
+        harness.run();
+        assert_eq!(flashing(&harness.ctx, "head"), None);
+        // Other units show the same head: no arrow.
+        harness
+            .state_mut()
+            .doc
+            .edit("units", |p| {
+                p.display_units = tp_units::DisplayUnits::us();
+                Ok(())
+            })
+            .unwrap();
+        harness.run();
+        assert_eq!(flashing(&harness.ctx, "head"), None);
+    }
+
+    #[test]
+    fn the_objective_strip_warns_of_a_small_npsh_margin() {
+        use egui_kittest::kittest::NodeT;
+        let npsh = |pressure: f64| {
+            let mut project = default_project();
+            let mut setup = project.setup().clone();
+            setup.inlet.total_pressure = pressure;
+            project.set_setup(setup).unwrap();
+            let mut harness = Harness::builder()
+                .with_size([1440.0, 900.0])
+                .build_eframe(move |_| TurbopumpApp::with_document(Document::new(project)));
+            harness.run();
+            harness.run();
+            harness
+                .get_all_by_label_contains("NPSHa")
+                .find_map(|n| n.accesskit_node().label())
+                .unwrap()
+        };
+        // About 10 m available: twice the NPSH₃, well above Table 6.2.
+        assert!(npsh(101_325.0).contains(icon::CHECK_CIRCLE));
+        // About 5 m: above the NPSH₃ of 4.4 m, short of the 1.25·NPSH₃ it asks.
+        let small = npsh(51_000.0);
+        assert!(small.contains(icon::WARNING), "{small}");
+        // Below the NPSH₃: the pump cavitates.
+        assert!(npsh(40_000.0).contains(icon::X_CIRCLE));
+    }
+
+    #[test]
+    fn the_inlet_duct_is_a_component_ahead_of_the_impeller() {
+        let mut harness = editor();
+        let id = harness.state().active_impeller().unwrap();
+        // Added from the flow, it goes first and opens its step on the side chambers.
+        harness
+            .get_all_by_label("Add component")
+            .next()
+            .unwrap()
+            .click();
+        harness.run();
+        harness.get_by_label_contains("Inlet duct").click();
+        harness.run();
+        let project = harness.state().doc.project();
+        let duct = project.components()[0].id();
+        assert_eq!(project.components()[0].kind(), ComponentKind::InletDuct);
+        assert_eq!(
+            harness.state().selection,
+            Selection::Step(duct, DesignStep::DuctDimensions)
+        );
+        assert_eq!(harness.state().view(), View::Meridian);
+        // Built on the impeller after it, which stays the active one.
+        assert_eq!(harness.state().active_impeller(), Some(id));
+        let built = harness.state().derived.duct(duct).unwrap();
+        assert!(built.warnings.is_empty(), "{:?}", built.warnings);
+        assert!(!built.outline.is_empty());
+        // The 3D scene lists it as a component of its own.
+        assert_eq!(
+            harness.state().scene_stage().duct.as_deref(),
+            Some("Inlet duct 1")
+        );
+        // Its step is accepted like any other.
+        harness.get_by_label_contains("Accept step").click();
+        harness.run();
+        assert!(harness.state().doc.project().components()[0].is_complete());
+    }
+
+    #[test]
+    fn the_inlet_duct_is_dimensioned_and_typed_in_the_meridian() {
+        use crate::views::meridional::{Dimension, duct_lines};
+        let mut harness = editor();
+        let id = harness.state().active_impeller().unwrap();
+        harness
+            .get_all_by_label("Add component")
+            .next()
+            .unwrap()
+            .click();
+        harness.run();
+        harness.get_by_label_contains("Inlet duct").click();
+        harness.run();
+        harness.run();
+        let duct_id = harness.state().doc.project().components()[0].id();
+        let middle = |harness: &Harness<'_, TurbopumpApp>, dimension: Dimension| {
+            let app = harness.state();
+            let g = app.derived.geometry(id).unwrap();
+            let line = duct_lines(app.derived.duct(duct_id).unwrap(), &g.basis)
+                .into_iter()
+                .find(|l| l.dimension == dimension)
+                .unwrap();
+            let p = line.from.lerp(line.to, 0.5);
+            let scale = app
+                .doc
+                .project()
+                .display_units
+                .to_display(QuantityKind::Length, 1.0);
+            app.meridional
+                .transform()
+                .unwrap()
+                .position_from_point(&PlotPoint::new(p.x * scale, p.y * scale))
+        };
+        // Framed again with the duct, its dimensions in sight.
+        let frame = *harness.state().meridional.transform().unwrap().frame();
+        for dimension in [Dimension::DuctLength, Dimension::DuctDiameter] {
+            let at = middle(&harness, dimension);
+            assert!(
+                frame.contains(at),
+                "{dimension:?} at {at:?}, out of {frame:?}"
+            );
+        }
+        // The value of the length under the pointer shades its row.
+        let at = middle(&harness, Dimension::DuctLength);
+        harness.hover_at(at);
+        harness.run();
+        harness.run();
+        assert!(crate::widgets::drawing_hovers(
+            &harness.ctx,
+            "Duct length L_t"
+        ));
+        // Typed on the dimension, it sets the duct by hand.
+        click_with(&mut harness, at, egui::PointerButton::Primary);
+        harness
+            .input_mut()
+            .events
+            .push(egui::Event::Text("120".into()));
+        harness.run();
+        harness.key_press(egui::Key::Enter);
+        harness.run();
+        let input = harness.state().doc.project().duct_input(duct_id).unwrap();
+        assert!(
+            input
+                .length
+                .manual_value()
+                .is_some_and(|l| (l - 0.12).abs() < 1e-12),
+            "{input:?}"
+        );
+        // The diameter is there too, and its row points at it.
+        let at = middle(&harness, Dimension::DuctDiameter);
+        harness.hover_at(at);
+        harness.run();
+        harness.run();
+        assert!(crate::widgets::drawing_hovers(
+            &harness.ctx,
+            "Duct diameter d_t"
+        ));
+    }
+
+    #[test]
     fn the_side_chambers_page_designs_and_shapes_the_casing_walls() {
-        use crate::views::meridional::{Page, Side};
+        use crate::views::meridional::Side;
         use tp_design::impeller::wall::WallPoint;
         let mut harness = editor();
         let id = harness.state().active_impeller().unwrap();
-        harness.state_mut().meridional.editor.page = Page::Chambers;
+        harness.state_mut().meridional.set_scope(Scope::Chambers);
         harness.run();
         harness.run();
-        harness.get_by_label("design the side chambers").click();
+        harness
+            .get_all_by_label("Design the side chambers")
+            .next()
+            .unwrap()
+            .click();
         harness.run();
         assert!(meridional(harness.state()).chambers.enabled);
 

@@ -10,6 +10,7 @@ use tp_project::{ComponentId, Project};
 
 use crate::derived::Derived;
 use crate::i18n::tr;
+use crate::viewer::Capture;
 
 /// Whether this build can make CAD solids (the `cad` feature).
 pub(crate) const CAD_AVAILABLE: bool = cfg!(feature = "cad");
@@ -202,6 +203,26 @@ pub(crate) fn save_volute(
     )
 }
 
+/// `capture` as a PNG file.
+pub(crate) fn png(capture: &Capture) -> Result<Vec<u8>, String> {
+    let mut bytes = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut bytes, capture.width, capture.height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
+        writer
+            .write_image_data(&capture.rgba)
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(bytes)
+}
+
+/// Asks where to save a PNG picture of the 3D view, and saves it.
+pub(crate) fn save_picture(png: Vec<u8>, project_name: &str) -> Result<Option<PathBuf>, String> {
+    save_file("3d", "png", tr("PNG image"), || Ok(png), project_name)
+}
+
 fn save_file(
     suffix: &str,
     extension: &str,
@@ -283,11 +304,12 @@ mod cad {
     use std::path::{Path, PathBuf};
     use std::sync::mpsc::{Receiver, TryRecvError, channel};
 
-    use eframe::egui::{self, Grid, Ui};
+    use eframe::egui::{self, Ui};
     use tp_cad::{BalanceHoleOptions, BalanceHoles, CadOptions, Shape};
     use tp_design::Param;
     use tp_design::diffuser::DiffuserDesign;
     use tp_design::impeller::ImpellerGeometry;
+    use tp_design::impeller::duct::InletDuct;
     use tp_design::volute::VoluteGeometry;
     use tp_project::{
         ComponentId, ComponentKind, DesignStep, Project, StepStatus, VANED_STEPS, VANELESS_STEPS,
@@ -296,7 +318,7 @@ mod cad {
     use tp_units::QuantityKind;
 
     use crate::derived::Derived;
-    use crate::widgets::{param_f64, quantity, value_row};
+    use crate::widgets::{label, param_f64, quantity, value_info, value_row};
 
     /// What a finished export produced.
     #[derive(Debug, Clone)]
@@ -354,8 +376,10 @@ mod cad {
         .map_err(|e| format!("{}: {e}", path.display()))
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn run(
         g: &ImpellerGeometry,
+        duct: Option<&InletDuct>,
         stator: Option<&DiffuserDesign>,
         volute: Option<&VoluteGeometry>,
         options: &CadOptions,
@@ -363,6 +387,14 @@ mod cad {
         formats: &[&str],
     ) -> Result<CadReport, String> {
         let cad = tp_cad::build_impeller(g, options).map_err(|e| e.to_string())?;
+        let mut problems_of_duct = Vec::new();
+        let duct = duct.and_then(|d| match tp_cad::build_inlet_duct(d) {
+            Ok(shape) => Some(shape),
+            Err(e) => {
+                problems_of_duct.push(e.to_string());
+                None
+            }
+        });
         let volute_geometry = volute;
         let volute = volute
             .map(|g| {
@@ -382,9 +414,11 @@ mod cad {
         let mut files = Vec::new();
         for format in formats {
             let chambers = cad.side_chambers.as_ref().map(|s| ("side-chambers", s));
+            let duct = duct.as_ref().map(|s| ("inlet-duct", s));
             for (stem, shape) in [("impeller", &cad.impeller), ("fluid", &cad.fluid)]
                 .into_iter()
                 .chain(chambers)
+                .chain(duct)
             {
                 let path = folder.join(format!("{stem}.{format}"));
                 write(shape, &path, format, deflection)?;
@@ -395,7 +429,7 @@ mod cad {
         let mut joined_warnings = Vec::new();
         if let (Some((v, _, _)), Some(vg), Some(_)) = (&volute, volute_geometry, &cad.side_chambers)
         {
-            match tp_cad::join_fluid(&cad, g, v, vg) {
+            match tp_cad::join_fluid(&cad, g, v, vg, duct.as_ref()) {
                 Ok((joined, warnings)) => {
                     joined_warnings = warnings;
                     for format in formats {
@@ -430,6 +464,7 @@ mod cad {
             }
         }
         let mut problems: Vec<String> = cad.warnings.clone();
+        problems.extend(problems_of_duct);
         problems.extend(joined_warnings);
         if let Some((_, casing, _)) = &volute {
             problems.extend(casing.warnings.iter().cloned());
@@ -493,10 +528,12 @@ mod cad {
             }
         }
 
+        #[allow(clippy::too_many_arguments)]
         fn start(
             &mut self,
             ctx: &egui::Context,
             g: ImpellerGeometry,
+            duct: Option<InletDuct>,
             stator: Option<DiffuserDesign>,
             volute: Option<VoluteGeometry>,
             holes: Option<BalanceHoleOptions>,
@@ -519,6 +556,7 @@ mod cad {
                 .spawn(move || {
                     let result = run(
                         &g,
+                        duct.as_ref(),
                         stator.as_ref(),
                         volute.as_ref(),
                         &options,
@@ -612,36 +650,33 @@ mod cad {
                 })
                 .and_then(|s| derived.diffuser(s));
 
-            Grid::new("cad_options")
-                .num_columns(3)
-                .spacing([10.0, 4.0])
-                .show(ui, |ui| {
-                    // The material comes from the meridional design.
-                    let m = g.contour.material;
-                    let hint = tr("Set in the meridional editor, Materials page");
-                    for (name, value) in [
-                        (tr("Wall thickness"), m.wall_thickness),
-                        (tr("Bore diameter"), m.bore_diameter),
-                        (tr("Boss diameter"), m.boss_diameter),
-                    ] {
-                        ui.label(name).on_hover_text(hint);
-                        ui.label(units.show(Length, value)).on_hover_text(hint);
-                        ui.end_row();
-                    }
-                    param_f64(
-                        ui,
-                        tr("Fillet radius"),
-                        tr("Where the blades meet hub and shroud; automatic: half the blade thickness; 0 for sharp edges"),
-                        &mut self.fillet,
-                        Length,
-                        Some(0.5 * g.basis.blade_thickness),
-                        &units,
-                        0.0..=0.05,
-                    );
-                    ui.label(tr("Material density"));
-                    quantity(ui, &mut self.density, Density, &units, 100.0..=30_000.0);
-                    ui.end_row();
-                });
+            crate::widgets::props(ui, "cad_options", |ui| {
+                // The material comes from the meridional design.
+                let m = g.contour.material;
+                let hint = tr("Set in the meridional editor, Materials page");
+                for (name, value) in [
+                    (tr("Wall thickness"), m.wall_thickness),
+                    (tr("Bore diameter"), m.bore_diameter),
+                    (tr("Boss diameter"), m.boss_diameter),
+                ] {
+                    value_info(ui, name, hint, units.show(Length, value));
+                }
+                param_f64(
+                    ui,
+                    tr("Fillet radius"),
+                    tr(
+                        "Where the blades meet hub and shroud; automatic: half the blade thickness; 0 for sharp edges",
+                    ),
+                    &mut self.fillet,
+                    Length,
+                    Some(0.5 * g.basis.blade_thickness),
+                    &units,
+                    0.0..=0.05,
+                );
+                label(ui, tr("Material density"), "");
+                quantity(ui, &mut self.density, Density, &units, 100.0..=30_000.0);
+                ui.end_row();
+            });
             ui.checkbox(&mut self.balance_holes, tr("Balance holes"))
                 .on_hover_text(tr(
                     "One per channel inside the rear seal, sized by Gülich Chap. 9.2.2",
@@ -690,6 +725,7 @@ mod cad {
                                 self.start(
                                     ui.ctx(),
                                     g.clone(),
+                                    derived.duct_before(id).cloned(),
                                     stator_design.cloned(),
                                     volute_geometry.cloned(),
                                     holes,
@@ -716,7 +752,7 @@ mod cad {
                             format!("{kg:.2} kg")
                         }
                     };
-                    Grid::new("cad_report").num_columns(2).show(ui, |ui| {
+                    crate::widgets::table(ui, "cad_report", |ui| {
                         value_row(ui, tr("Folder"), report.folder.display().to_string());
                         value_row(
                             ui,
@@ -830,7 +866,16 @@ mod cad {
             let folder = std::env::temp_dir().join(format!("tp-gui-cad-{}", std::process::id()));
             let volute = derived.volute(project.components()[1].id());
             assert!(volute.is_some());
-            let report = run(g, None, volute, &CadOptions::default(), &folder, &["step"]).unwrap();
+            let report = run(
+                g,
+                None,
+                None,
+                volute,
+                &CadOptions::default(),
+                &folder,
+                &["step"],
+            )
+            .unwrap();
             assert_eq!(report.files.len(), 4);
             assert!(report.volute_volume.is_some_and(|v| v > 0.0));
             assert!(report.casing.is_some_and(|(v, t)| v > 0.0 && t > 0.0));

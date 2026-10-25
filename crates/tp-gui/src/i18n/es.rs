@@ -6,6 +6,30 @@
 
 /// English text → Spanish text.
 pub(super) static TEXTS: &[(&str, &str)] = &[
+    ("Fillet over the cutwater", "Redondeo exterior"),
+    (
+        "Fills and rounds the outside of the casing where the back of the start of the spiral meets the diffuser, so no sharp groove is left over the cutwater; 0 leaves it. Automatic: the wall thickness",
+        "Rellena y redondea el exterior de la carcasa donde el dorso del inicio de la espiral se junta con el difusor, para que no quede una hendidura aguda sobre el corte de agua; 0 la deja. Automático: el espesor de pared",
+    ),
+    ("obliquity ε", "oblicuidad ε"),
+    ("Obliquity ε", "Oblicuidad ε"),
+    (
+        "Angle between the edge and the pump axis, unrolled onto d_z; Gülich Table 10.2 asks for more than 35° against pressure pulsations",
+        "Ángulo entre el borde y el eje de la bomba, desarrollado sobre d_z; la tabla 10.2 de Gülich pide más de 35° contra las pulsaciones de presión",
+    ),
+    (
+        "Angle between the edge of the cutwater and the pump axis, unrolled onto d_z; positive leans it downstream toward +z. Gülich Table 10.2 asks for more than 35° against pressure pulsations; the walls set how far it can lean. Automatic: 0",
+        "Ángulo entre el borde del corte de agua y el eje de la bomba, desarrollado sobre d_z; positivo lo inclina aguas abajo hacia +z. La tabla 10.2 de Gülich pide más de 35° contra las pulsaciones de presión; las paredes fijan cuánto puede inclinarse. Automático: 0",
+    ),
+    (
+        "more than 35° against pressure pulsations (Gülich Table 10.2); the walls set how far it can lean",
+        "más de 35° contra las pulsaciones de presión (tabla 10.2 de Gülich); las paredes fijan cuánto puede inclinarse",
+    ),
+    ("Within ±3°", "Dentro de ±3°"),
+    (
+        "the flow range over which the flow meets the cutwater within ±3°; it comes flatter at part load (Gülich Fig. 9.20)",
+        "el rango de caudal en que el flujo llega al corte de agua dentro de ±3°; a carga parcial llega más plano (Gülich, Fig. 9.20)",
+    ),
     ("Remove control point", "Quitar el punto de control"),
     ("Add control point", "Añadir un punto de control"),
     (
@@ -85,10 +109,17 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Las dimensiones principales d_n, d₁, d₂, b₂ y L. Haz clic en un valor para escribirlo.",
     ),
     ("Analysis", "Análisis"),
-    ("area and curvature charts", "gráficas de área y curvatura"),
     (
-        "Cross-section area along the channel and curvature along the walls, under the diagram: both should change smoothly",
-        "Área de paso a lo largo del canal y curvatura a lo largo de las paredes, bajo el dibujo: las dos deben variar con suavidad",
+        "area, static moment and curvature charts",
+        "gráficas de área, momento estático y curvatura",
+    ),
+    (
+        "Cross-section area along the channel, static moment S = ∫ r dm of the blade sections and curvature along the walls, under the diagram: all should change smoothly; the larger S, the less the slip (Pfleiderer)",
+        "Área de paso a lo largo del canal, momento estático S = ∫ r dm de las secciones del álabe y curvatura a lo largo de las paredes, bajo el dibujo: todas deben variar con suavidad; cuanto mayor es S, menor el deslizamiento (Pfleiderer)",
+    ),
+    (
+        "fraction of the blade length",
+        "fracción de la longitud del álabe",
     ),
     (
         "Drag a point to shape the meridian: hollow points are automatic, filled ones set by hand. Double-click a point to make it automatic again. Right-click a point or a wall for exact values, segments and joints. Click a dimension to type it. Hold Alt and drag to measure a distance.",
@@ -368,8 +399,8 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Extremo del cubo del borde de salida; d₂ es el extremo de la carcasa d₂a. Automático: Gülich, ec. 7.13–7.14 en un rodete semiaxial, d₂ en uno radial; fijado a mano en uno radial inclina el borde y el diseño usa el diámetro medio",
     ),
     (
-        "Export their fluid with the CAD model, alone and, with a volute after them, joined to the impeller and the volute in one flow domain for CFD; shape them on the Side chambers page of the editor",
-        "Exporta su fluido con el modelo CAD, solo y, con una voluta detrás, unido al rodete y a la voluta en un único dominio para CFD; se modelan en la página Cámaras laterales del editor",
+        "Export their fluid with the CAD model, alone and, with a volute after them, joined to the impeller and the volute in one flow domain for CFD; shape them in the Side chambers scope of the Meridian view",
+        "Exporta su fluido con el modelo CAD, solo y, con una voluta detrás, unido al rodete y a la voluta en un único dominio para CFD; se modelan en el ámbito Cámaras laterales de la vista Meridiano",
     ),
     (
         "the joined fluid needs a radial outlet edge parallel to the axis (d₂i = d₂): the chambers then open at one radius",
@@ -1265,6 +1296,7 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Redo", "Rehacer"),
     ("Setup", "Configuración"),
     ("Global setup", "Configuración global"),
+    ("Design point and fluid", "Punto de diseño y fluido"),
     (
         "Design point, fluid, inlet conditions and units",
         "Punto de diseño, fluido, condiciones de entrada y unidades",
@@ -1365,8 +1397,8 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "El acabado del modelo llega en la fase 9.",
     ),
     (
-        "Shared by every component. Changing it makes every step outdated.",
-        "Común a todos los componentes. Cambiarla deja desactualizados todos los pasos.",
+        "Shared by every component. Changing the design point or the fluid makes every step outdated; the acceptance does not.",
+        "Común a todos los componentes. Cambiar el punto de diseño o el fluido deja desactualizados todos los pasos; la aceptación, no.",
     ),
     ("Next", "Siguiente"),
     ("Back", "Atrás"),
@@ -1484,19 +1516,16 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Between blade and inflow at the leading edge (0°–4°)",
         "Entre el álabe y el flujo en el borde de ataque (0°–4°)",
     ),
-    (
-        "Suction specific speed nss",
-        "Velocidad específica de aspiración nss",
-    ),
+    ("Suction specific speed nss", "Vel. esp. de aspiración nss"),
     ("rpm, m³/s, m; sets NPSH3", "rpm, m³/s, m; fija el NPSH3"),
     ("edit main dimensions", "editar dimensiones principales"),
     ("Results", "Resultados"),
     ("Specific speed nq", "Velocidad específica nq"),
     ("Shaft power", "Potencia en el eje"),
-    ("Outlet blade angle β₂B", "Ángulo de salida del álabe β₂B"),
+    ("Outlet blade angle β₂B", "Ángulo de salida β₂B"),
     (
         "Inlet blade angle β₁B (mean)",
-        "Ángulo de entrada del álabe β₁B (medio)",
+        "Ángulo de entrada β₁B (medio)",
     ),
     ("Slip factor γ", "Factor de deslizamiento γ"),
     ("NPSH3", "NPSH3"),
@@ -1512,10 +1541,10 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "From the inlet plane to the hub at the outlet; default b₂ + (d₁ − d_n)/2",
         "Del plano de entrada al cubo en la salida; por defecto b₂ + (d₁ − d_n)/2",
     ),
-    ("Hub inlet tangent", "Tangente de entrada del cubo"),
-    ("Hub outlet tangent", "Tangente de salida del cubo"),
-    ("Shroud inlet tangent", "Tangente de entrada de la carcasa"),
-    ("Shroud outlet tangent", "Tangente de salida de la carcasa"),
+    ("Hub inlet tangent", "Tangente entrada cubo"),
+    ("Hub outlet tangent", "Tangente salida cubo"),
+    ("Shroud inlet tangent", "Tangente entrada carcasa"),
+    ("Shroud outlet tangent", "Tangente salida carcasa"),
     (
         "Length of the Bézier tangent as a fraction of the distance to the corner",
         "Longitud de la tangente de Bézier, en fracción de la distancia a la esquina",
@@ -1685,7 +1714,6 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Remove component", "Quitar componente"),
     ("Hide", "Ocultar"),
     ("Show", "Mostrar"),
-    ("See-through", "Translúcido"),
     ("3D MODEL", "MODELO 3D"),
     ("Blades", "Álabes"),
     ("Hub", "Cubo"),
@@ -1704,9 +1732,8 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ),
     ("All blades, or only one", "Todos los álabes, o solo uno"),
     (
-        "Drag: rotate\nRight-drag or Shift-drag: pan\nScroll or pinch: \
-                                 zoom\nDouble-click: fit\nView cube: click a face, edge or corner",
-        "Arrastrar: girar\nArrastrar con el botón derecho o con Mayús: desplazar\nRueda o pellizco: zoom\nDoble clic: encuadrar\nCubo de vistas: clic en una cara, arista o esquina",
+        "Drag: rotate\nRight-drag or Shift-drag: pan\nScroll or pinch: zoom\nDouble-click: fit\nClick a part: select it; right-click: hide, isolate, opacity\nEsc: clear the measure, then the selection\nView cube: click a face, edge or corner",
+        "Arrastrar: girar\nArrastrar con el botón derecho o con Mayús: desplazar\nRueda o pellizco: zoom\nDoble clic: encuadrar\nClic en una pieza: seleccionarla; botón derecho: ocultar, aislar, opacidad\nEsc: borra la medida y luego la selección\nCubo de vistas: clic en una cara, arista o esquina",
     ),
     ("Rear", "Trasera"),
     // Property rows: sources and recommended ranges behind the ⓘ.
@@ -1979,21 +2006,16 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ),
     ("axial length", "longitud axial"),
     ("vaned diffuser", "difusor con álabes"),
-    ("vaneless diffuser", "difusor sin álabes"),
     ("auto", "auto"),
     (
         "The performance prediction needs a pump impeller.",
         "La predicción de prestaciones necesita un rodete de bomba.",
     ),
-    ("Collector: {}", "Colector: {}"),
     (
         "From the component after the impeller; it sets the shut-off head",
         "Del componente tras el rodete; fija la altura a válvula cerrada",
     ),
-    (
-        "Recirculation below Q/Q_opt",
-        "Recirculación por debajo de Q/Q_opt",
-    ),
+    ("Recirculation below Q/Q_opt", "Recirculación bajo Q/Q_opt"),
     (
         "Flow ratio where recirculation sets in at the impeller inlet; below it \
                  the curve is an estimate",
@@ -2100,7 +2122,7 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "momento angular (ecs. 7.24–7.25)",
     ),
     ("Design flow Q_Le", "Caudal de diseño Q_Le"),
-    ("Cutwater diameter d_z", "Diámetro del corte de agua d_z"),
+    ("Cutwater diameter d_z", "Diám. del corte de agua d_z"),
     ("{} (minimum {}, Table 10.2)", "{} (mínimo {}, tabla 10.2)"),
     ("Cutwater thickness e₃", "Espesor del corte de agua e₃"),
     ("Cross sections", "Secciones transversales"),
@@ -2210,7 +2232,7 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Cada sección lleva el caudal que el rodete entrega hasta su ángulo. Las reglas de velocidad la dimensionan para una velocidad en la espiral; las geométricas fijan su tamaño directamente.",
     ),
     ("Design rule", "Regla de diseño"),
-    ("Wrap angle φ_wrap", "Ángulo de envolvimiento φ_wrap"),
+    ("Wrap angle φ_wrap", "Ángulo de envolv. φ_wrap"),
     (
         "From the start of the spiral to the throat. A shorter spiral starts past the cutwater, which becomes the casing between the throat and that start. Automatic: 360°",
         "Del inicio de la espiral a la garganta. Una espiral más corta empieza después del corte de agua, que pasa a ser la carcasa entre la garganta y ese inicio. Automático: 360°",
@@ -2318,10 +2340,7 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Ángulo desde el inicio de la espiral donde el radio interior empieza a subir; automático: 270°",
     ),
     ("Circular arcs", "Arcos de circunferencia"),
-    (
-        "Approximate by circular arcs",
-        "Aproximar con arcos de circunferencia",
-    ),
+    ("Use circular arcs", "Usar arcos"),
     (
         "For rectangular and trapezoidal sections: tangent circular arcs take the place of the outer contour, as volutes are laid out on the drawing board. They start at the start of the spiral and end at the throat.",
         "Para secciones rectangulares y trapezoidales: arcos de circunferencia tangentes sustituyen al contorno exterior, como se trazan las volutas en el tablero de dibujo. Empiezan en el inicio de la espiral y terminan en la garganta.",
@@ -2403,7 +2422,7 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ),
     (
         "Outlet face from the pump axis",
-        "Brida de salida desde el eje de la bomba",
+        "Brida de salida desde el eje",
     ),
     ("Outlet diameter", "Diámetro de salida"),
     (
@@ -2414,7 +2433,7 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Opening angle ϑ_eq", "Ángulo de apertura ϑ_eq"),
     (
         "Ideal pressure recovery c_p,id",
-        "Recuperación ideal de presión c_p,id",
+        "Recuperación ideal c_p,id",
     ),
     ("edit volute diffuser", "editar difusor de la voluta"),
     (
@@ -2803,8 +2822,8 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Bend turns", "Giro del codo"),
     ("Centerline length", "Longitud de la línea media"),
     (
-        "Tangent: the spiral starts where it clears the diffuser. Sharp: the spiral cuts the diffuser wall. Rounded: a nose of radius ρ on the cutwater circle (Gülich Fig. 7.41b)",
-        "Tangente: la espiral empieza donde deja libre el difusor. Afilado: la espiral corta la pared del difusor. Redondeado: una nariz de radio ρ sobre el círculo del corte de agua (Gülich Fig. 7.41b)",
+        "Tangent: the spiral starts where it clears the diffuser. Sharp: the spiral cuts the diffuser wall. Rounded: a nose of radius ρ on the cutwater circle, its body never thinner than the nose and running smoothly into both walls (Gülich Fig. 7.41b)",
+        "Tangente: la espiral empieza donde deja libre el difusor. Afilado: la espiral corta la pared del difusor. Redondeado: una nariz de radio ρ sobre el círculo del corte de agua, con un cuerpo nunca más fino que la nariz que se une suavemente a las dos paredes (Gülich Fig. 7.41b)",
     ),
     ("Nose radius ρ", "Radio de la nariz ρ"),
     (
@@ -2813,6 +2832,11 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ),
     ("Tip of the wedge", "Punta de la cuña"),
     ("Wedge angle", "Ángulo de la cuña"),
+    ("Tip across the width", "Punta a lo ancho"),
+    ("{} to {} from the axis", "de {} a {} del eje"),
+    ("Thinnest body", "Cuerpo más fino"),
+    ("Joins the walls", "Se une a las paredes"),
+    ("{} to {} past the tip", "de {} a {} pasada la punta"),
     (
         "{} from the cutwater, {} from the axis",
         "{} desde el corte de agua, {} desde el eje",
@@ -2848,10 +2872,7 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Pfleiderer: 5 to 7 for nq 10–120 (Gülich), 3 to 12 otherwise; the head rise picks 3 to 8 (Lobanoff & Ross Fig. 3-2)",
         "Pfleiderer: 5 a 7 para nq 10–120 (Gülich), 3 a 12 fuera de ese rango; la subida de altura elige de 3 a 8 (Lobanoff y Ross, fig. 3-2)",
     ),
-    (
-        "Head rise to shut-off",
-        "Subida de altura hasta caudal cero",
-    ),
+    ("Head rise to shut-off", "Subida de altura a Q = 0"),
     (
         "(H₀ − H)/H. Manual: sets the blades and β₂B (Lobanoff & Ross Figs. 3-2 and 3-13); fewer blades give a steeper curve",
         "(H₀ − H)/H. Manual: fija el número de álabes y β₂B (Lobanoff y Ross, figs. 3-2 y 3-13); con menos álabes la curva es más empinada",
@@ -2860,10 +2881,7 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Manual: d₂ follows from the head, or b₂ when d₂ is manual; 90° gives radial blades",
         "Manual: d₂ sale de la altura, o b₂ si d₂ es manual; 90° da álabes radiales",
     ),
-    (
-        "Inlet area ratio A_v/A_e",
-        "Relación de áreas de entrada A_v/A_e",
-    ),
+    ("Inlet area ratio A_v/A_e", "Relación de áreas A_v/A_e"),
     (
         "Area between the blades at the inlet over the eye area. Lobanoff & Ross (Fig. 3-12) give {}–{} at this nq for large eyes (β₁B ≈ 15–20°); the eye of minimum w₁ gives more",
         "Área entre álabes a la entrada sobre el área del ojo. Lobanoff y Ross (fig. 3-12) dan {}–{} a este nq para ojos grandes (β₁B ≈ 15–20°); el ojo de w₁ mínima da más",
@@ -2898,10 +2916,7 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("automatic: semi-axial", "automático: semiaxial"),
     ("automatic: radial", "automático: radial"),
     ("semi-axial (mixed flow)", "semiaxial (flujo mixto)"),
-    (
-        "Outlet hub diameter d₂i",
-        "Diámetro de salida en el cubo d₂i",
-    ),
+    ("Outlet hub diameter d₂i", "Diámetro en el cubo d₂i"),
     ("Outlet inclination ε_s", "Inclinación de la salida ε_s"),
     (
         "Angle of the outer streamline at the outlet to a normal to the axis: 0° radial, 90° axial (Gülich eq. 7.12, ±5° in executed pumps)",
@@ -3038,13 +3053,623 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Trailing edge at the shroud",
         "Borde de salida en la carcasa",
     ),
+    (
+        "The design point, the fluid and the inlet conditions: click to edit them",
+        "El punto de diseño, el fluido y las condiciones de entrada: clic para editarlos",
+    ),
+    ("TARGET", "OBJETIVO"),
+    (
+        "Add an impeller to see the prediction.",
+        "Añade un rodete para ver lo previsto.",
+    ),
+    ("PREDICTED · {}", "PREVISTO · {}"),
+    ("PER STAGE", "POR ETAPA"),
+    (
+        "One-dimensional model of the performance prediction: main dimensions and collector. Editing the mean lines or the profiles does not change it, and it is not a CFD result.",
+        "Modelo unidimensional de la predicción de prestaciones: dimensiones principales y colector. Editar las líneas medias o los perfiles no lo cambia, y no es un resultado de CFD.",
+    ),
+    ("no prediction", "sin predicción"),
+    (
+        "Predicted head at the design flow.",
+        "Altura prevista en el caudal de diseño.",
+    ),
+    (
+        "Predicted head at the design flow, {}, against the target {}: {} %. Tolerance ±{} % of class {} (Gülich Table 15.2, after ISO 9906), used here by analogy with an acceptance test. Change it under Design point › Acceptance.",
+        "Altura prevista en el caudal de diseño, {}, frente a la objetivo {}: {} %. Tolerancia ±{} % de la clase {} (Gülich, tabla 15.2, según ISO 9906), usada aquí por analogía con un ensayo de recepción. Se cambia en Punto de diseño › Aceptación.",
+    ),
+    ("stat.", "est."),
+    (
+        "Efficiency predicted from the losses at the design flow: {} %. The statistics of the main dimensions expect {} ± {} %.",
+        "Rendimiento previsto por las pérdidas en el caudal de diseño: {} %. La estadística de las dimensiones principales espera {} ± {} %.",
+    ),
+    (
+        "Shaft power at the design flow",
+        "Potencia en el eje en el caudal de diseño",
+    ),
+    (
+        "The NPSH₃ at the design flow is below the NPSH available of the inlet conditions.",
+        "El NPSH₃ en el caudal de diseño queda por debajo del NPSH disponible de las condiciones de entrada.",
+    ),
+    (
+        "The NPSH₃ at the design flow reaches the NPSH available of the inlet conditions: the pump cavitates.",
+        "El NPSH₃ en el caudal de diseño alcanza el NPSH disponible de las condiciones de entrada: la bomba cavita.",
+    ),
+    ("best at", "óptimo a"),
+    (
+        "Flow of the best efficiency over the design flow",
+        "Caudal del mejor rendimiento sobre el caudal de diseño",
+    ),
+    ("1 step to review", "1 paso sin revisar"),
+    ("{} steps to review", "{} pasos sin revisar"),
+    (
+        "An earlier change left these steps outdated: click to open the first",
+        "Un cambio anterior dejó estos pasos desactualizados: clic para abrir el primero",
+    ),
+    ("Acceptance", "Aceptación"),
+    (
+        "How the objective strip judges the predicted head against the design point. It is not a design input: changing it leaves every step as it is.",
+        "Cómo juzga la franja de objetivo la altura prevista frente al punto de diseño. No es una entrada del diseño: cambiarla deja todos los pasos como están.",
+    ),
+    ("Quality class", "Clase de calidad"),
+    (
+        "Gülich, Centrifugal Pumps, Table 15.2, after ISO 9906. Automatic: the most stringent of the outlet and inlet tip speeds, the head per stage at the best efficiency point and the power decides.",
+        "Gülich, Centrifugal Pumps, tabla 15.2, según ISO 9906. Automática: decide el criterio más exigente entre las velocidades periféricas de salida y de entrada, la altura por etapa en el punto óptimo y la potencia.",
+    ),
+    ("Head tolerance t_H", "Tolerancia de altura t_H"),
+    (
+        "G1 ±3 %, G2 ±5 %, G3 ±7 %. ISO 9906 sets them for acceptance tests, a measured pump against its guarantee; the objective strip uses them by analogy for the predicted head.",
+        "G1 ±3 %, G2 ±5 %, G3 ±7 %. ISO 9906 las fija para ensayos de recepción, una bomba medida frente a su garantía; la franja de objetivo las usa por analogía para la altura prevista.",
+    ),
+    (
+        "u₂ {} ({}), u₁ {} ({}), head per stage {} ({}), power {} ({}). Table 15.2: u₂ above 90 m/s G1, 40 to 90 G2; u₁ above 50 m/s G1, 15 to 50 G2; head above 400 m G1, 80 to 400 G2; power above 3000 kW G1, 300 to 3000 G2.",
+        "u₂ {} ({}), u₁ {} ({}), altura por etapa {} ({}), potencia {} ({}). Tabla 15.2: u₂ por encima de 90 m/s G1, de 40 a 90 G2; u₁ por encima de 50 m/s G1, de 15 a 50 G2; altura por encima de 400 m G1, de 80 a 400 G2; potencia por encima de 3000 kW G1, de 300 a 3000 G2.",
+    ),
+    ("Criteria", "Criterios"),
+    ("edit acceptance", "editar la aceptación"),
+    (
+        "The side chambers are not designed yet.",
+        "Las cámaras laterales aún no están diseñadas.",
+    ),
+    (
+        "Add an impeller to see its geometry (the + of the component column).",
+        "Añade un rodete para ver su geometría (el + de la columna de componentes).",
+    ),
+    ("Drawing", "Dibujo"),
+    ("Scope", "Ámbito"),
+    ("Adjacent components", "Componentes vecinos"),
+    (
+        "The diffuser or volute after the impeller; the Stage scope always shows them",
+        "El difusor o la voluta tras el rodete; el ámbito Etapa los muestra siempre",
+    ),
+    ("Legend", "Leyenda"),
+    ("References", "Referencias"),
+    (
+        "Curves drawn for comparison: pasted points or copies of a wall",
+        "Curvas dibujadas para comparar: puntos pegados o copias de una pared",
+    ),
+    ("Fit scope", "Encajar el ámbito"),
+    (
+        "Frame what the scope edits, with its dimensions",
+        "Encuadra lo que edita el ámbito, con sus cotas",
+    ),
+    ("Frame everything drawn", "Encuadra todo lo dibujado"),
+    ("Snap", "Imanes"),
+    ("How to edit", "Cómo editar"),
+    (
+        "Drag a point to shape the meridian: hollow points are automatic, filled ones set by hand. Double-click a point to make it automatic again. Right-click a point or a wall for exact values, segments and joints. Click a dimension to type it. Hold Alt and drag to measure a distance. Drag the background to pan, scroll to zoom, double-click to fit.",
+        "Arrastra un punto para dar forma al meridiano: los huecos son automáticos y los rellenos, fijados a mano. Doble clic en un punto lo vuelve automático. Clic derecho en un punto o una pared para valores exactos, tramos y uniones. Clic en una cota para escribirla. Alt y arrastrar mide una distancia. Arrastra el fondo para desplazar, la rueda para acercar y doble clic para encajar.",
+    ),
+    ("Page", "Página"),
+    (
+        "Angles, thickness and loading along the mean line",
+        "Ángulos, espesor y carga a lo largo de la línea media",
+    ),
+    (
+        "The shapes of the leading and trailing edges at the hub and the shroud",
+        "La forma de los bordes de ataque y de salida en el cubo y en la carcasa",
+    ),
+    ("Points (TXT)", "Puntos (TXT)"),
+    ("Mesh (STL)", "Malla (STL)"),
+    (
+        "Drag the green points: the shape goes to the values of the panel. Solid lines are the suction face, dashed ones the pressure face.",
+        "Arrastra los puntos verdes: la forma pasa a los valores del panel. Línea continua: cara de succión; discontinua: cara de presión.",
+    ),
+    (
+        "Fit the model in the view (double-click)",
+        "Encajar el modelo en la vista (doble clic)",
+    ),
+    (
+        "Oblique, from the inlet side; the view cube has the others",
+        "Oblicua, desde el lado de la entrada; el cubo de vista tiene las demás",
+    ),
+    ("Style", "Estilo"),
+    ("Shaded", "Sombreado"),
+    ("With edges", "Con aristas"),
+    ("Meshes", "Mallas"),
+    ("Gestures", "Gestos"),
+    (
+        "Recirculation, shut-off, liquid and operation in the system in the properties panel, or the step again",
+        "Recirculación, válvula cerrada, líquido y funcionamiento en la instalación en el panel de propiedades, o de nuevo el paso",
+    ),
+    (
+        "Losses, forces and the rest of the results; the report has them too",
+        "Pérdidas, fuerzas y el resto de resultados; también están en el informe",
+    ),
+    ("Show the tools", "Mostrar las herramientas"),
+    (
+        "Hide the tools; the tabs still pick the view",
+        "Ocultar las herramientas; las pestañas siguen eligiendo la vista",
+    ),
+    ("Impeller channel", "Canal del rodete"),
+    ("Meridional section", "Sección meridional"),
+    (
+        "The impeller with the diffuser or volute after it; the handles edit the impeller",
+        "El rodete con el difusor o la voluta que lo siguen; los puntos editan el rodete",
+    ),
+    (
+        "Hub, shroud and blade edges; click a dimension to type it",
+        "Cubo, carcasa y bordes del álabe; clic en una cota para escribirla",
+    ),
+    ("Fold the design flow", "Plegar el flujo de diseño"),
+    ("INLET", "ENTRADA"),
+    ("OUTLET", "SALIDA"),
+    (
+        "Pinned open: click to let it fold with the others",
+        "Fijado abierto: clic para que se pliegue con los demás",
+    ),
+    (
+        "Pin open: it stays open when another component is active",
+        "Fijar abierto: sigue abierto aunque otro componente esté activo",
+    ),
+    ("Pin open", "Fijar abierto"),
+    (
+        "Go to the first outdated step",
+        "Ir al primer paso desactualizado",
+    ),
+    ("planned", "previsto"),
+    ("Show the design flow", "Mostrar el flujo de diseño"),
+    ("Insert here", "Insertar aquí"),
+    ("RESULTS", "RESULTADOS"),
+    ("Drawings and meshes", "Dibujos y mallas"),
+    ("Fold {}", "Plegar {}"),
+    ("{} project · {}/{} steps", "proyecto de {} · {}/{} pasos"),
+    (
+        "Accept the design steps first: {}",
+        "Antes hay que aceptar los pasos del diseño: {}",
+    ),
+    ("SIZING", "DIMENSIONADO"),
+    ("MERIDIAN", "MERIDIANO"),
+    ("BLADING", "ÁLABES"),
+    ("MODEL", "MODELO"),
+    ("SETUP", "CONFIGURACIÓN"),
+    ("GEOMETRY", "GEOMETRÍA"),
+    ("WALL", "PARED"),
+    (
+        "Dock in a corner (or drag the header)",
+        "Acoplar en una esquina (o arrastrar la cabecera)",
+    ),
+    ("Fold the scene", "Plegar la escena"),
+    ("Hide all", "Ocultar todo"),
+    ("Isolate {}", "Aislar {}"),
+    ("Reset the scene", "Restablecer la escena"),
+    ("Scene menu", "Menú de la escena"),
+    ("Scene", "Escena"),
+    ("Show all", "Mostrar todo"),
+    ("Show only this part", "Mostrar solo esta pieza"),
+    (
+        "Show or hide the whole component",
+        "Mostrar u ocultar todo el componente",
+    ),
+    (
+        "Show or hide; Alt+click isolates it",
+        "Mostrar u ocultar; Alt+clic la aísla",
+    ),
+    (
+        "Show the other parts again",
+        "Volver a mostrar las demás piezas",
+    ),
+    ("Show the scene", "Mostrar la escena"),
+    ("{}/{} shown", "{}/{} visibles"),
+    ("Top left", "Arriba a la izquierda"),
+    ("Top right", "Arriba a la derecha"),
+    ("Bottom left", "Abajo a la izquierda"),
+    ("Bottom right", "Abajo a la derecha"),
+    ("Hub (disk)", "Cubo (disco)"),
+    ("Shroud (cover)", "Carcasa (tapa)"),
+    ("All parts of {}", "Todas las piezas de {}"),
+    ("Fold every section", "Plegar todas las secciones"),
+    ("Open every section", "Abrir todas las secciones"),
+    ("More actions of the step", "Más acciones del paso"),
+    ("Accept step and continue", "Aceptar paso y seguir"),
+    (
+        "Mark this step as done with the current values and open the next one",
+        "Marca el paso como hecho con los valores actuales y abre el siguiente",
+    ),
+    ("checks", "comprobación"),
+    ("results", "resultados"),
+    ("step {} of {}", "paso {} de {}"),
+    (
+        "Automatic: the program proposes the value and updates it when earlier inputs change. Type a value, or click the dot, to set it by hand.",
+        "Automático: el programa propone el valor y lo actualiza cuando cambian las entradas anteriores. Escribe un valor, o haz clic en el punto, para fijarlo a mano.",
+    ),
+    (
+        "Set by hand. Click the dot, or right-click the value, to make it automatic again.",
+        "Fijado a mano. Haz clic en el punto, o clic derecho en el valor, para volver a automático.",
+    ),
+    ("Sizing", "Dimensionado"),
+    (
+        "The 3D view could not be captured.",
+        "No se pudo capturar la vista 3D.",
+    ),
+    ("Orthographic", "Ortográfica"),
+    (
+        "Parallel projection: sizes do not shrink with depth, as on a drawing",
+        "Proyección paralela: los tamaños no disminuyen con la profundidad, como en un plano",
+    ),
+    ("Picture", "Imagen"),
+    (
+        "A PNG of the model as the view shows it, twice as sharp, without the cube, axes or scale",
+        "Un PNG del modelo tal como lo muestra la vista, con el doble de nitidez, sin el cubo, los ejes ni la escala",
+    ),
+    ("PNG image", "Imagen PNG"),
+    ("Opacity", "Opacidad"),
+    ("Opaque", "Opaco"),
+    ("Translucent", "Translúcido"),
+    ("Glass", "Cristal"),
+    ("Color and opacity", "Color y opacidad"),
+    ("Default color", "Color por defecto"),
+    ("Opacity of {}", "Opacidad: {}"),
+    ("Click for {}", "Con un clic: {}"),
+    ("Color of {}", "Color: {}"),
+    (
+        "1.25·NPSH₃, and at least NPSH₃ + 0.6 m",
+        "1,25·NPSH₃, y como mínimo NPSH₃ + 0,6 m",
+    ),
+    (
+        "The NPSH available is above the NPSH₃ at the design flow, but with a small margin: noise, vibration or erosion may follow.",
+        "El NPSH disponible supera el NPSH₃ al caudal de diseño, pero con poco margen: puede haber ruido, vibraciones o erosión.",
+    ),
+    (
+        "for water at u₁ = {}: σ_A ≥ σ₃ + 0.05 + 2·(u₁/100 m/s)³",
+        "para agua con u₁ = {}: σ_A ≥ σ₃ + 0,05 + 2·(u₁/100 m/s)³",
+    ),
+    (
+        "u₁ = {} is above 50 m/s: the cavity length or the noise must be checked against experience (Table 6.1)",
+        "u₁ = {} supera 50 m/s: hay que comprobar la longitud de la cavidad o el ruido con la experiencia (tabla 6.1)",
+    ),
+    (
+        "Margin F_NPSH = NPSHa/NPSH₃ = {}. Gülich's Table 6.2 asks for NPSHa of at least {}: {}.",
+        "Margen F_NPSH = NPSHa/NPSH₃ = {}. La tabla 6.2 de Gülich pide un NPSHa de al menos {}: {}.",
+    ),
+    ("Curve", "Curva"),
+    (
+        "They shape the curve but are seldom changed",
+        "Dan forma a la curva pero se cambian poco",
+    ),
+    ("Collector", "Colector"),
+    ("Losses and forces", "Pérdidas y fuerzas"),
+    ("Curve settings", "Ajustes de curvas"),
+    ("More actions of the curves", "Más acciones de las curvas"),
+    (
+        "Every setting of the curves back to its automatic value",
+        "Todos los ajustes de las curvas vuelven a su valor automático",
+    ),
+    ("Show the plane", "Mostrar el plano"),
+    (
+        "Outline the cutting plane over the model",
+        "Dibuja el contorno del plano de corte sobre el modelo",
+    ),
+    ("Position {} %", "Posición {} %"),
+    ("Position of the cut", "Posición del corte"),
+    (
+        "Moves the cut parallel to itself, in percent of the model's radius; 0 through the axis",
+        "Desplaza el corte paralelo a sí mismo, en porcentaje del radio del modelo; 0 por el eje",
+    ),
+    ("Error of the step", "Error del paso"),
+    ("Warnings of the step", "Avisos del paso"),
+    ("Click to list them", "Clic para verlos todos"),
+    ("Water", "Agua"),
+    ("Heavy water", "Agua pesada"),
+    ("Ethanol", "Etanol"),
+    ("Methanol", "Metanol"),
+    ("Acetone", "Acetona"),
+    ("Toluene", "Tolueno"),
+    ("n-Hexane", "n-Hexano"),
+    ("n-Heptane", "n-Heptano"),
+    ("n-Decane", "n-Decano"),
+    ("Ammonia", "Amoníaco"),
+    ("Propane", "Propano"),
+    ("CoolProp name: {}", "Nombre en CoolProp: {}"),
+    (
+        "{}: {} done with the suggested values",
+        "{}: {} con los valores sugeridos",
+    ),
+    (
+        "{} done; {} could not be done: {}",
+        "Hechos: {}; {} no se pudo hacer: {}",
+    ),
+    ("1 step", "1 paso"),
+    ("{} steps", "{} pasos"),
+    ("1 segment", "1 tramo"),
+    ("Views", "Vistas"),
+    (
+        "Views named after the pump, and the ones you save",
+        "Vistas con nombre de bomba, y las que guardes",
+    ),
+    ("From the inlet", "Desde la entrada"),
+    ("From behind", "Desde atrás"),
+    ("From the side", "De lado"),
+    ("From the other side", "Del otro lado"),
+    ("View {}", "Vista {}"),
+    ("Forget {}", "Olvidar {}"),
+    ("Save this view", "Guardar esta vista"),
+    (
+        "Keeps the direction, the zoom, the centre and the projection; remembered between sessions",
+        "Guarda la dirección, el zoom, el centro y la proyección; se recuerda entre sesiones",
+    ),
+    (
+        "{} changed since the step was accepted",
+        "{} cambió desde que se aceptó el paso",
+    ),
+    (
+        "Changed since the step was accepted, when it was {}",
+        "Cambió desde que se aceptó el paso; entonces era {}",
+    ),
+    ("All {} to automatic", "Los {} a automático"),
+    ("{} by hand", "{} a mano"),
+    (
+        "Values of this section set by hand; click to make them all automatic again",
+        "Valores de esta sección fijados a mano; un clic los vuelve todos automáticos",
+    ),
+    ("Inlet duct", "Tubería de entrada"),
+    (
+        "An axial duct ahead of the first impeller, for the inlet of a CFD domain: its outlet follows the inlet of the impeller, whose hub ends in a round nose. With the side chambers designed it ends an axial gap short of the neck tip, the notch beside the eye in the Meridian: the leakage through the annular seal returns into the eye there, inside the same domain. Drawn in the Side chambers scope of the Meridian view and in the 3D view, and exported with the CAD model.",
+        "Una tubería axial delante del primer rodete, para la entrada de un dominio CFD: su salida sigue a la entrada del rodete, cuyo cubo acaba en una nariz redondeada. Con las cámaras laterales diseñadas termina a una holgura axial de la punta del cuello, la ranura junto a la boca en el Meridiano: por ahí la fuga del anillo de cierre vuelve a la boca, dentro del mismo dominio. Se dibuja en el ámbito Cámaras laterales de la vista Meridiano y en la vista 3D, y se exporta con el modelo CAD.",
+    ),
+    ("Duct dimensions", "Dimensiones de la tubería"),
+    ("Duct", "Tubería"),
+    ("Built", "Construida"),
+    ("Ends at", "Termina en"),
+    (
+        "With the side chambers designed, an axial gap before the neck tip; without them, at the tip",
+        "Con las cámaras laterales diseñadas, a una holgura axial antes de la punta del cuello; sin ellas, en la punta",
+    ),
+    ("the seal exit", "la salida del anillo"),
+    ("the neck tip", "la punta del cuello"),
+    ("edit inlet duct", "editar la tubería de entrada"),
+    ("Duct length L_t", "Longitud de la tubería L_t"),
+    (
+        "Upstream of the eye; automatic: the eye diameter d₁ (our choice)",
+        "Aguas arriba de la boca; automático: el diámetro de la boca d₁ (elección nuestra)",
+    ),
+    ("Duct diameter d_t", "Diámetro de la tubería d_t"),
+    (
+        "Automatic: the shroud diameter at the inlet, so the wall carries straight on",
+        "Automático: el diámetro de la tapa en la entrada, para que la pared siga recta",
+    ),
+    ("Axial gap Δz", "Holgura axial Δz"),
+    (
+        "Between the suction cover at the end of the duct and the tip of the neck, where the leakage comes out; automatic: the axial gap of the side chambers",
+        "Entre la tapa de aspiración al final de la tubería y la punta del cuello, por donde sale la fuga; automático: la holgura axial de las cámaras laterales",
+    ),
+    ("Hub nose", "Nariz del cubo"),
+    (
+        "A half sphere of the hub radius at the inlet, tangent to the hub: how far it reaches upstream",
+        "Media esfera del radio del cubo en la entrada, tangente al cubo: cuánto se adelanta",
+    ),
+    (
+        "Complete every step of the component",
+        "Completar todos los pasos del componente",
+    ),
+    (
+        "Accept the {} steps left with the suggested values (⇧ {})",
+        "Acepta los {} pasos que faltan con los valores sugeridos (⇧ {})",
+    ),
+    (
+        "complete every step of {}",
+        "completar todos los pasos de {}",
+    ),
+    (
+        "Every step of {} is done already",
+        "Todos los pasos de {} ya están hechos",
+    ),
+    ("Every step is done", "Todos los pasos están hechos"),
+    (
+        "Complete every step with the suggested values",
+        "Completar todos los pasos con los valores sugeridos",
+    ),
+    (
+        "Complete every step of {}",
+        "Completar todos los pasos de {}",
+    ),
+    (
+        "Click the second point; Esc clears",
+        "Clic en el segundo punto; Esc borra",
+    ),
+    (
+        "Click two points of the model to measure between them",
+        "Clic en dos puntos del modelo para medir entre ellos",
+    ),
+    ("Show all parts", "Mostrar todas las piezas"),
+    ("Inspect", "Inspeccionar"),
+    ("Meridional cut", "Corte meridional"),
+    (
+        "Cut the model through its axis and remove the half toward the camera",
+        "Corta el modelo por su eje y quita la mitad que mira a la cámara",
+    ),
+    ("Open toward the view", "Abrir hacia la vista"),
+    (
+        "Turn the cutting plane so that the half facing the camera is the one removed: the section opens toward you. The camera does not move.",
+        "Gira el plano de corte para quitar la mitad que da a la cámara: la sección queda de frente. La cámara no se mueve.",
+    ),
+    ("Other half", "Otra mitad"),
+    ("Remove the other half instead", "Quita la otra mitad"),
+    ("Measure", "Medir"),
+    (
+        "Click two points of the model for the distance between them and its radial and axial parts; near a corner of the mesh the point snaps to it",
+        "Clic en dos puntos del modelo: da la distancia entre ellos y sus partes radial y axial; cerca de un vértice de la malla el punto se ajusta a él",
+    ),
+    ("No volute yet.", "Todavía no hay voluta."),
+    (
+        "This cutwater does not cut the diffuser wall: choose a sharp or rounded one to shape it here.",
+        "Este corte de agua no corta la pared del difusor: elige uno afilado o redondeado para darle forma aquí.",
+    ),
+    ("Plane", "Plano"),
+    ("Midplane", "Plano medio"),
+    ("All planes", "Todos los planos"),
+    ("spiral share", "reparto en la espiral"),
+    (
+        "Share of the missing thickness the spiral side of the body takes past the tip; the diffuser side takes the rest",
+        "Parte del espesor que falta pasada la punta que toma el lado de la espiral del cuerpo; el lado del difusor toma el resto",
+    ),
+    ("spiral wall", "pared de la espiral"),
+    ("diffuser wall", "pared del difusor"),
+    ("cutwater circle d_z", "círculo del corte de agua d_z"),
+    ("impeller outlet", "salida del rodete"),
+    ("tip of the wedge", "punta de la cuña"),
+    (
+        "Innermost point of the nose: drag outward or inward to set the cutwater circle d_z",
+        "Punto más interior de la nariz: arrástralo hacia fuera o hacia dentro para fijar el círculo del corte de agua d_z",
+    ),
+    (
+        "Leading point of the nose: drag to set its radius ρ",
+        "Punto delantero de la nariz: arrástralo para fijar su radio ρ",
+    ),
+    (
+        "Camber line: turn it to set the incidence i₃ against the flow",
+        "Línea de curvatura: gírala para fijar la incidencia i₃ frente al flujo",
+    ),
+    (
+        "Across the width: drag to turn",
+        "A lo ancho: arrastra para girar",
+    ),
+    ("Gap d_z/d₂ − 1", "Holgura d_z/d₂ − 1"),
+    ("Thickness e/d_z", "Espesor e/d_z"),
+    (
+        "up to 0.04 hardly affects the best efficiency (Gülich p. 421)",
+        "hasta 0,04 apenas afecta al rendimiento óptimo (Gülich p. 421)",
+    ),
+    ("Incidence i₃ at design", "Incidencia i₃ en el diseño"),
+    ("Wedge across the width", "Cuña a lo ancho"),
+    (
+        "angle between the spiral and the diffuser wall where they cross",
+        "ángulo entre la pared de la espiral y la del difusor donde se cruzan",
+    ),
+    (
+        "the throat enlarged for the blockage of the cutwater (eq. 7.28)",
+        "la garganta agrandada por el bloqueo del corte de agua (ec. 7.28)",
+    ),
+    (
+        "The incidence over the flow range needs the predicted characteristic.",
+        "La incidencia en todo el rango de caudal necesita la característica prevista.",
+    ),
+    (
+        "incidence i₃ on the cutwater",
+        "incidencia i₃ sobre el corte de agua",
+    ),
+    ("q* = Q/Q_design", "q* = Q/Q_diseño"),
+    ("designed d_z {}", "d_z de diseño {}"),
+    ("the nose {}: no neck", "la nariz {}: sin cuello"),
+    (
+        "α₃B {} against α₃′ {}; ±3° (eq. T7.7.6)",
+        "α₃B {} frente a α₃′ {}; ±3° (ec. T7.7.6)",
+    ),
+    ("Spiral share", "Reparto en la espiral"),
+    (
+        "Share of the thickness the wedge lacks past its tip that the spiral side of the body takes; the diffuser side takes the rest. Automatic: ½",
+        "Parte del espesor que le falta a la cuña pasada su punta que toma el lado de la espiral del cuerpo; el lado del difusor toma el resto. Automático: ½",
+    ),
+    ("Plan", "Planta"),
+    (
+        "The stage seen from the inlet",
+        "La etapa vista desde la entrada",
+    ),
+    (
+        "The cutwater of the volute in planes across its width, to shape it by hand",
+        "El corte de agua de la voluta en planos a lo ancho, para darle forma a mano",
+    ),
+    (
+        "Drag the green points: the innermost point of the nose sets the cutwater circle d_z, its leading point the nose radius, the point on the dashed camber line the incidence. The slider picks the plane across the width; drag the 3D view to turn it.",
+        "Arrastra los puntos verdes: el punto más interior de la nariz fija el círculo del corte de agua d_z, su punto delantero el radio de la nariz y el punto sobre la línea de curvatura discontinua la incidencia. El deslizador elige el plano a lo ancho; arrastra la vista 3D para girarla.",
+    ),
+    (
+        "at least {} against pulsations (Gülich Table 10.2); past 10 % it costs about 1 % of efficiency (p. 421)",
+        "al menos {} contra las pulsaciones (Gülich tabla 10.2); por encima del 10 % cuesta alrededor de un 1 % de rendimiento (p. 421)",
+    ),
+    ("View in 3D", "Ver en 3D"),
+    (
+        "The 3D view on the cutwater, cut across the axis at this plane",
+        "La vista 3D sobre el corte de agua, cortada a través del eje por este plano",
+    ),
+    (
+        "Frame the camera on the cutwater of the volute",
+        "Encuadra la cámara en el corte de agua de la voluta",
+    ),
+    ("Zebra", "Cebra"),
+    (
+        "Stripes reflected in the surfaces: where they break the surface has a corner, where they kink its curvature jumps",
+        "Franjas reflejadas en las superficies: donde se rompen la superficie tiene una arista, donde se quiebran su curvatura salta",
+    ),
+    ("Cut across", "Corte transversal"),
+    (
+        "Cut the model across its axis, by a plane z = const, and remove the side the camera looks from",
+        "Corta el modelo a través de su eje, por un plano z = cte, y quita el lado desde el que mira la cámara",
+    ),
 ];
 
 /// Messages of the design code, most specific first.
 pub(super) static MESSAGES: &[(&str, &str)] = &[
     (
-        "the joined fluid came out as {} solids{}; check the faces at r₂",
-        "el fluido unido salió en {} sólidos{}; revisa las caras en r₂",
+        "the fillet over the cutwater cannot be negative",
+        "el redondeo sobre el corte de agua no puede ser negativo",
+    ),
+    (
+        "the groove over the cutwater is rounded with {} mm, the most the CAD kernel takes there",
+        "la hendidura sobre el corte de agua queda redondeada con {} mm, lo más que acepta ahí el núcleo CAD",
+    ),
+    (
+        "the groove over the cutwater could not be rounded: it stays sharp",
+        "no se pudo redondear la hendidura sobre el corte de agua: queda aguda",
+    ),
+    (
+        "the obliquity of the cutwater must lie within ±{}°, got {}°",
+        "la oblicuidad del corte de agua debe quedar dentro de ±{}°, se pidió {}°",
+    ),
+    (
+        "the cutwater cannot lean {}°: past about {}° it gets thinner than its nose in some plane, where the walls leave it no room",
+        "el corte de agua no puede inclinarse {}°: pasados unos {}° queda más fino que su nariz en algún plano, donde las paredes no le dejan sitio",
+    ),
+    (
+        "the joined fluid came out as {} solids{}; check the faces at r₂ and, with the inlet duct, at the eye and the seal exit",
+        "el fluido unido salió en {} sólidos{}; revisa las caras en r₂ y, con la tubería de entrada, en la boca y en la salida del sello",
+    ),
+    (
+        "the inlet duct was not built: {}",
+        "no se construyó la tubería de entrada: {}",
+    ),
+    (
+        "its length must be positive",
+        "su longitud debe ser positiva",
+    ),
+    (
+        "its diameter must be larger than the hub diameter at the inlet",
+        "su diámetro debe ser mayor que el del cubo en la entrada",
+    ),
+    (
+        "the shroud cover does not reach upstream of the inlet",
+        "la tapa no llega aguas arriba de la entrada",
+    ),
+    (
+        "the axial gap must be positive",
+        "la holgura axial debe ser positiva",
+    ),
+    (
+        "the front chamber does not end at the tip of the neck",
+        "la cámara delantera no termina en la punta del cuello",
+    ),
+    (
+        "without the side chambers its diameter must lie between the inside and the outside of the neck",
+        "sin las cámaras laterales, su diámetro debe quedar entre el interior y el exterior del cuello",
     ),
     (
         "the joined fluid was not built: {}",

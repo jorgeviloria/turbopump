@@ -17,6 +17,7 @@ use super::center;
 pub use super::center::DesignMode;
 use super::chambers::{self, ChamberSettings, Chambers};
 use super::crossings::{Crossing, crossings};
+use super::duct::LegacyDuct;
 use super::material::{self, Material, MaterialSettings};
 use super::wall::{SegmentInput, Wall};
 use crate::{DesignError, Param};
@@ -62,6 +63,10 @@ pub struct MeridionalInput {
     pub shroud_material: Option<Vec<SegmentInput>>,
     /// The side chambers between the impeller and the casing.
     pub chambers: ChamberSettings,
+    /// The inlet duct as older files keep it here; the project moves it to a component
+    /// of its own as it loads them.
+    #[serde(skip_serializing)]
+    pub inlet_duct: LegacyDuct,
     /// Hub and shroud drawn, or following a center line.
     pub design_mode: DesignMode,
     /// Center line drawn segment by segment, from the middle of the inlet to the middle

@@ -19,6 +19,7 @@ use std::f64::consts::PI;
 
 use tp_design::impeller::ImpellerGeometry;
 use tp_design::impeller::blade::BladeSection;
+use tp_design::impeller::duct::InletDuct;
 use tp_design::impeller::wall::{SegmentKind, Wall};
 use tp_math::{DVec2, DVec3};
 
@@ -285,6 +286,20 @@ fn outline_chains(outline: &[DVec2]) -> Vec<Vec<DVec3>> {
 
 /// Fractions of the requested fillet radius tried in turn.
 const FILLET_RETRIES: [f64; 4] = [1.0, 0.75, 0.5, 0.25];
+
+/// The fluid of inlet `duct`, revolved from its outline; an error that says why when the
+/// duct could not be built.
+pub fn build_inlet_duct(duct: &InletDuct) -> Result<Shape, CadError> {
+    if duct.outline.is_empty() {
+        return Err(CadError::Input(
+            duct.warnings
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "the inlet duct was not built".into()),
+        ));
+    }
+    occ::revolve_z(&profile_face(&outline_chains(&duct.outline))?)
+}
 
 /// Builds blade, channel, flow domain and impeller solids from the geometry.
 pub fn build_impeller(g: &ImpellerGeometry, options: &CadOptions) -> Result<ImpellerCad, CadError> {
@@ -768,6 +783,32 @@ mod tests {
         let c = &with.contour.chambers;
         let pappus = revolved_volume(&c.front) + revolved_volume(&c.rear);
         assert_relative_eq!(chambers.volume() * 1e-9, pappus, max_relative = 5e-3);
+    }
+
+    #[test]
+    fn the_inlet_duct_is_revolved_into_its_fluid() {
+        use tp_design::impeller::duct::{self, DuctInput};
+        let mut input = tp_design::impeller::ImpellerGeometryInput::default();
+        input.meridional.chambers.enabled = true;
+        let g = reference();
+        let with = tp_design::impeller::build(&g.basis, &input).unwrap();
+        let built = duct::build(&with.contour, &with.basis, &DuctInput::default());
+        let shape = build_inlet_duct(&built).unwrap();
+        assert!(shape.is_valid());
+        assert_eq!(shape.solid_count(), 1);
+        let pappus = revolved_volume(&built.outline);
+        assert_relative_eq!(shape.volume() * 1e-9, pappus, max_relative = 5e-3);
+        // One that could not be built says why.
+        let broken = duct::build(
+            &with.contour,
+            &with.basis,
+            &DuctInput {
+                length: tp_design::Param::Manual(-1.0),
+                ..DuctInput::default()
+            },
+        );
+        let e = build_inlet_duct(&broken).unwrap_err().to_string();
+        assert!(e.contains("length"), "{e}");
     }
 
     #[test]

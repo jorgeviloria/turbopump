@@ -78,6 +78,7 @@ mod tests {
     use super::*;
     use crate::project::tests::pump;
     use crate::{ComponentKind, DesignStep};
+    use tp_design::acceptance::{AcceptanceInput, QualityClass};
 
     #[test]
     fn json_round_trip() {
@@ -91,10 +92,23 @@ mod tests {
         p.display_units
             .set(tp_units::QuantityKind::Head, "ft")
             .unwrap();
+        p.acceptance.class = tp_design::Param::Manual(QualityClass::G2);
 
         let text = p.to_json().unwrap();
         assert!(text.contains(r#""format": "turbopump-project""#));
         assert_eq!(Project::from_json(&text).unwrap(), p);
+    }
+
+    #[test]
+    fn files_without_acceptance_settings_load_them_automatic() {
+        let p = pump();
+        let mut value: serde_json::Value = serde_json::from_str(&p.to_json().unwrap()).unwrap();
+        value["project"]
+            .as_object_mut()
+            .unwrap()
+            .remove("acceptance");
+        let loaded = Project::from_json(&value.to_string()).unwrap();
+        assert_eq!(loaded.acceptance, AcceptanceInput::default());
     }
 
     #[test]

@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use tp_design::acceptance::AcceptanceInput;
 use tp_units::DisplayUnits;
 
 use crate::{
@@ -42,6 +43,10 @@ pub struct Project {
     setup: GlobalSetup,
     #[serde(default)]
     pub display_units: DisplayUnits,
+    /// How the predicted performance is judged against the design point. Not a design
+    /// input: changing it makes no step stale.
+    #[serde(default)]
+    pub acceptance: AcceptanceInput,
     components: Vec<Component>,
     next_id: u32,
 }
@@ -62,6 +67,7 @@ impl Project {
             machine,
             setup,
             display_units: DisplayUnits::default(),
+            acceptance: AcceptanceInput::default(),
             components: Vec::new(),
             next_id: 1,
         })
@@ -184,15 +190,58 @@ impl Project {
         if volute_inside {
             return Err(ProjectError::VoluteNotAtEnd);
         }
+        let kind = |i: usize| self.components.get(i).map(|c| c.kind());
+        let duct_misplaced = self.components.iter().enumerate().any(|(i, c)| {
+            c.kind() == ComponentKind::InletDuct
+                && (i != 0 || kind(1) != Some(ComponentKind::Impeller))
+        });
+        if duct_misplaced {
+            return Err(ProjectError::DuctNotBeforeImpeller);
+        }
         Ok(())
     }
 
     /// Restores invariants that a hand-edited file could break.
     pub(crate) fn repair_after_load(&mut self) -> Result<(), ProjectError> {
         self.setup.validate(self.machine)?;
-        self.check_composition()?;
         let max_id = self.components.iter().map(|c| c.id().0).max().unwrap_or(0);
         self.next_id = self.next_id.max(max_id + 1);
+        self.move_legacy_duct()?;
+        self.check_composition()?;
+        Ok(())
+    }
+
+    /// Older files keep the inlet duct inside the meridional contour of the impeller,
+    /// with a switch: a modelled one becomes a component of its own ahead of the first
+    /// impeller, and the switch goes.
+    fn move_legacy_duct(&mut self) -> Result<(), ProjectError> {
+        let mut found = None;
+        for (i, c) in self.components.iter_mut().enumerate() {
+            let Some(mut geometry) = c.geometry().cloned() else {
+                continue;
+            };
+            let legacy = std::mem::take(&mut geometry.meridional.inlet_duct);
+            if legacy != Default::default() {
+                // Clearing what is only read changes no step.
+                c.set_geometry_unchecked(geometry);
+            }
+            if let Some(input) = legacy.input()
+                && i == 0
+            {
+                found = Some(input);
+            }
+        }
+        let first_is_duct =
+            self.components.first().map(|c| c.kind()) == Some(ComponentKind::InletDuct);
+        if let Some(input) = found
+            && !first_is_duct
+        {
+            let id = ComponentId(self.next_id);
+            self.next_id += 1;
+            let mut duct = Component::new(id, "Inlet duct 1".into(), ComponentKind::InletDuct);
+            duct.set_duct(input)?;
+            self.components.insert(0, duct);
+        }
         Ok(())
     }
 

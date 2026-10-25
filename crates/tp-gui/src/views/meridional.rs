@@ -5,12 +5,12 @@
 
 use std::f64::consts::PI;
 
-use eframe::egui::containers::menu::{MenuButton, MenuConfig};
-use eframe::egui::{self, Color32, CursorIcon, DragValue, PopupCloseBehavior, RichText, Sense, Ui};
+use eframe::egui::{self, Color32, CursorIcon, DragValue, RichText, Sense, Ui};
 use egui_plot::{
     Corner, Legend, Line, LineStyle, MarkerShape, Plot, PlotBounds, PlotPoint, PlotPoints,
-    PlotTransform, Points, Text,
+    PlotTransform, Points, Polygon, Text,
 };
+use tp_design::impeller::duct::{DuctInput, InletDuct};
 use tp_design::impeller::meridian::{
     AxialReference, DesignMode, EdgeExtent, InletTilt, LeadingEdgeShape, MeridionalContour,
     MeridionalInput, chord_coordinates,
@@ -24,9 +24,10 @@ use tp_math::DVec2;
 use tp_project::ComponentId;
 use tp_units::{DisplayUnits, QuantityKind};
 
-use super::{Palette, unavailable};
+use super::Palette;
 use crate::app::EditCtx;
 use crate::i18n::{tf, tr};
+use crate::theme::icon;
 
 /// A wall of the meridional section: hub and shroud of the flow path, and the wires
 /// that close the hub disk and the shroud cover.
@@ -469,6 +470,8 @@ pub(crate) enum Change {
     Main(CentrifugalPumpInput),
     /// Both at once, as the hub end of a semi-axial outlet: L and d₂i.
     Both(Box<(ImpellerGeometryInput, CentrifugalPumpInput)>),
+    /// The inlet duct ahead of the impeller, a component of its own.
+    Duct(ComponentId, DuctInput),
 }
 
 impl Change {
@@ -484,6 +487,7 @@ impl Change {
                 p.set_main_dimensions(id, MainDimensionsInput::CentrifugalPump(main))?;
                 p.set_impeller_geometry(id, geometry)
             }),
+            Change::Duct(duct, input) => cx.edit(label, |p| p.set_duct(duct, input)),
         };
     }
 }
@@ -496,6 +500,8 @@ pub(crate) struct Inputs<'a> {
     pub main: Option<&'a CentrifugalPumpInput>,
     /// Whether the outlet is semi-axial: its hub end has a diameter d₂i of its own.
     pub semi_axial: bool,
+    /// The inlet duct ahead of the impeller, if there is one, and its inputs.
+    pub duct: Option<(ComponentId, DuctInput)>,
 }
 
 impl Inputs<'_> {
@@ -525,6 +531,14 @@ impl Inputs<'_> {
         let mut input = current.clone();
         edit(&mut input);
         (input != *current).then_some(Change::Main(input))
+    }
+
+    /// The inputs of the inlet duct changed by `edit`, if that changes them.
+    fn duct(&self, edit: impl FnOnce(&mut DuctInput)) -> Option<Change> {
+        let (id, current) = self.duct?;
+        let mut input = current;
+        edit(&mut input);
+        (input != current).then_some(Change::Duct(id, input))
     }
 }
 
@@ -721,25 +735,80 @@ impl Display {
     }
 }
 
+/// What the Meridian view shows and edits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scope {
+    /// The impeller with the diffuser or volute after it.
+    Stage,
+    /// Hub, shroud and blade edges of the impeller.
+    Channel,
+    /// The closed material of hub disk and shroud cover.
+    Materials,
+    /// The casing walls of the side chambers.
+    Chambers,
+}
+
+impl Scope {
+    pub(crate) const ALL: [Scope; 4] = [
+        Scope::Stage,
+        Scope::Channel,
+        Scope::Materials,
+        Scope::Chambers,
+    ];
+
+    pub(crate) fn title(self) -> &'static str {
+        tr(match self {
+            Scope::Stage => "Stage",
+            Scope::Channel => "Impeller channel",
+            Scope::Materials => "Materials",
+            Scope::Chambers => "Side chambers",
+        })
+    }
+
+    pub(crate) fn hint(self) -> &'static str {
+        tr(match self {
+            Scope::Stage => {
+                "The impeller with the diffuser or volute after it; the handles edit the impeller"
+            }
+            Scope::Channel => "Hub, shroud and blade edges; click a dimension to type it",
+            Scope::Materials => {
+                "The closed contours of the hub disk and the shroud cover: drag their points, right-click a wire for its segments"
+            }
+            Scope::Chambers => {
+                "The casing walls beside the impeller: the front chamber down to the annular seal, the rear one down to the shaft seal"
+            }
+        })
+    }
+
+    pub(crate) fn icon(self) -> &'static str {
+        match self {
+            Scope::Stage => icon::CIRCLES_THREE,
+            Scope::Channel => icon::BEZIER_CURVE,
+            Scope::Materials => icon::SQUARE_HALF,
+            Scope::Chambers => icon::BRACKETS_ROUND,
+        }
+    }
+
+    /// What the handles edit.
+    pub(crate) fn page(self) -> Page {
+        match self {
+            Scope::Stage | Scope::Channel => Page::FlowPath,
+            Scope::Materials => Page::Materials,
+            Scope::Chambers => Page::Chambers,
+        }
+    }
+
+    /// How a new scope frames the drawing.
+    pub(crate) fn fit(self) -> Fit {
+        match self {
+            Scope::Stage => Fit::All,
+            _ => Fit::Meridian,
+        }
+    }
+}
+
 impl Display {
-    const VIEW: Display = Display {
-        stream_lines: true,
-        quasi_orthogonals: false,
-        potential: false,
-        potential_view: PotentialView::DEFAULT,
-        dimensions: false,
-        curvature: false,
-        area_circles: false,
-        adjacent: true,
-        legend: true,
-        charts: false,
-        snap: 0.0,
-        snap_points: false,
-        snap_lines: false,
-        material_lines: false,
-        page: Page::FlowPath,
-    };
-    pub(crate) const EDITOR: Display = Display {
+    pub(crate) const DEFAULT: Display = Display {
         stream_lines: false,
         quasi_orthogonals: false,
         potential: false,
@@ -778,6 +847,9 @@ pub(crate) enum Dimension {
     OutletDiameter,
     /// Radius of the rounded corner of an arc segment of a wall.
     ArcRadius(Side, usize),
+    /// Length and diameter of the inlet duct ahead of the impeller.
+    DuctLength,
+    DuctDiameter,
     /// Axial position of a handle, from the inlet plane.
     Z(Handle),
     /// Radius of a handle, from the axis.
@@ -793,6 +865,8 @@ impl Dimension {
             Dimension::InletDiameter => tr("Eye diameter d₁").to_owned(),
             Dimension::OutletDiameter => tr("Outlet diameter d₂").to_owned(),
             Dimension::ArcRadius(..) => tr("Corner radius R").to_owned(),
+            Dimension::DuctLength => tr("Duct length L_t").to_owned(),
+            Dimension::DuctDiameter => tr("Duct diameter d_t").to_owned(),
             Dimension::Z(h) => tf("z of the {}", &[&h.label()]),
             Dimension::R(h) => tf("r of the {}", &[&h.label()]),
         }
@@ -807,6 +881,8 @@ impl Dimension {
             Dimension::InletDiameter => Some("d₁"),
             Dimension::OutletDiameter => Some("d₂"),
             Dimension::ArcRadius(..) => Some("R"),
+            Dimension::DuctLength => Some("L_t"),
+            Dimension::DuctDiameter => Some("d_t"),
             Dimension::Z(_) | Dimension::R(_) => None,
         }
     }
@@ -972,6 +1048,38 @@ pub(crate) fn dimension_lines(
     lines
 }
 
+/// The dimensions of the inlet `duct` ahead of the impeller: its length under the
+/// axis, where the axial dimensions of the impeller go, and its diameter left of its
+/// inlet (our own layout, as for the impeller).
+pub(crate) fn duct_lines(duct: &InletDuct, basis: &ImpellerBasis) -> Vec<DimensionLine> {
+    let Some(upstream) = duct.inlet_z() else {
+        return Vec::new();
+    };
+    let gap = 0.07 * basis.outlet_diameter / 2.0;
+    let v = duct.values;
+    let (end, r) = (upstream + v.length, v.diameter / 2.0);
+    let (y, x) = (-gap, upstream - gap);
+    vec![
+        DimensionLine {
+            dimension: Dimension::DuctLength,
+            from: DVec2::new(upstream, y),
+            to: DVec2::new(end, y),
+            extensions: vec![
+                [DVec2::new(upstream, 0.0), DVec2::new(upstream, y)],
+                [DVec2::new(end, 0.0), DVec2::new(end, y)],
+            ],
+            value: v.length,
+        },
+        DimensionLine {
+            dimension: Dimension::DuctDiameter,
+            from: DVec2::new(x, 0.0),
+            to: DVec2::new(x, r),
+            extensions: vec![[DVec2::new(upstream, r), DVec2::new(x, r)]],
+            value: v.diameter,
+        },
+    ]
+}
+
 /// The change that sets dimension `dimension` to `value` (m), if it changes anything.
 fn set_dimension(
     dimension: Dimension,
@@ -999,6 +1107,12 @@ fn set_dimension(
         }
         Dimension::OutletDiameter => {
             return inputs.main(|m| m.outlet_diameter = Param::Manual(length));
+        }
+        Dimension::DuctLength => {
+            return inputs.duct(|d| d.length = Param::Manual(length));
+        }
+        Dimension::DuctDiameter => {
+            return inputs.duct(|d| d.diameter = Param::Manual(length));
         }
         Dimension::ArcRadius(side, segment) => {
             return inputs.geometry(|input| {
@@ -1110,19 +1224,24 @@ fn paint_dimensions(
             painter.line_segment([screen(*a), screen(*b)], thin);
         }
         let (a, b) = (screen(d.from), screen(d.to));
-        painter.line_segment([a, b], solid);
+        let line = if hovered == Some(d.dimension) {
+            egui::Stroke::new(1.8, palette.dimension_active)
+        } else {
+            solid
+        };
+        painter.line_segment([a, b], line);
         let along = (b - a).normalized();
         let across = along.rot90();
         for (tip, back) in [(a, along), (b, -along)] {
             let base = tip + back * 7.0;
             painter.add(egui::Shape::convex_polygon(
                 vec![tip, base + across * 2.5, base - across * 2.5],
-                visuals.text_color(),
+                line.color,
                 egui::Stroke::NONE,
             ));
         }
         let color = if hovered == Some(d.dimension) {
-            palette.handle_active
+            palette.dimension_active
         } else if d.dimension.editable() {
             palette.handle
         } else {
@@ -1577,16 +1696,22 @@ pub(crate) struct MeridionalView {
     /// Plot transform of the last frame, used to find the handle under the pointer
     /// before the plot is drawn.
     transform: Option<PlotTransform>,
-    pub(crate) view: Display,
-    pub(crate) editor: Display,
+    /// What the diagram draws; the scope sets its page.
+    pub(crate) display: Display,
+    pub(crate) scope: Scope,
+    /// The scope shown last frame: a new one frames its drawing.
+    pub(crate) shown_scope: Option<Scope>,
     /// Framing asked for the next frame.
     pub(crate) fit: Option<Fit>,
     /// The dimension being typed.
     dimension_edit: Option<DimensionEdit>,
     /// Pointer position in the diagram, (z, r) in m.
     pub(crate) pointer: Option<DVec2>,
-    /// Whether the editor has framed the meridian since it was last opened.
+    /// Whether the view has framed its drawing since it was last opened.
     pub(crate) framed: bool,
+    /// Whether an inlet duct was drawn when it last framed: one coming or going frames
+    /// the drawing again.
+    pub(crate) framed_duct: bool,
     /// The distance being measured with Alt and a drag, from and to (z, r) in m.
     measure: Option<(DVec2, DVec2)>,
     /// Guide lines of the snap acting on the dragged point, (z, r) in m.
@@ -1605,12 +1730,14 @@ impl Default for MeridionalView {
             dragging: None,
             menu: None,
             transform: None,
-            view: Display::VIEW,
-            editor: Display::EDITOR,
+            display: Display::DEFAULT,
+            scope: Scope::Channel,
+            shown_scope: None,
             fit: None,
             dimension_edit: None,
             pointer: None,
             framed: false,
+            framed_duct: false,
             measure: None,
             guides: Vec::new(),
             references: Vec::new(),
@@ -1618,6 +1745,70 @@ impl Default for MeridionalView {
             potential: None,
         }
     }
+}
+
+/// Triangles covering the simple polygon `outline`, by ear clipping.
+fn triangulate(outline: &[DVec2]) -> Vec<[DVec2; 3]> {
+    let cross = |o: DVec2, a: DVec2, b: DVec2| (a - o).perp_dot(b - o);
+    let mut index: Vec<usize> = (0..outline.len()).collect();
+    // Counter-clockwise, so ears turn left.
+    let area: f64 = (0..outline.len())
+        .map(|i| outline[i].perp_dot(outline[(i + 1) % outline.len()]))
+        .sum();
+    if area < 0.0 {
+        index.reverse();
+    }
+    let mut triangles = Vec::new();
+    let mut guard = 0;
+    while index.len() > 3 && guard < 10_000 {
+        guard += 1;
+        let n = index.len();
+        let ear = (0..n).find(|&i| {
+            let (a, b, c) = (
+                outline[index[(i + n - 1) % n]],
+                outline[index[i]],
+                outline[index[(i + 1) % n]],
+            );
+            cross(a, b, c) > 1e-18
+                && index.iter().all(|&k| {
+                    let p = outline[k];
+                    p == a
+                        || p == b
+                        || p == c
+                        || !(cross(a, b, p) >= 0.0
+                            && cross(b, c, p) >= 0.0
+                            && cross(c, a, p) >= 0.0)
+                })
+        });
+        // A degenerate corner (straight on or doubled back) is dropped.
+        let i = ear.unwrap_or_else(|| {
+            (0..n)
+                .min_by(|&i, &j| {
+                    let turn = |i: usize| {
+                        cross(
+                            outline[index[(i + n - 1) % n]],
+                            outline[index[i]],
+                            outline[index[(i + 1) % n]],
+                        )
+                        .abs()
+                    };
+                    turn(i).total_cmp(&turn(j))
+                })
+                .unwrap_or(0)
+        });
+        if ear.is_some() {
+            triangles.push([
+                outline[index[(i + n - 1) % n]],
+                outline[index[i]],
+                outline[index[(i + 1) % n]],
+            ]);
+        }
+        index.remove(i);
+    }
+    if index.len() == 3 {
+        triangles.push([outline[index[0]], outline[index[1]], outline[index[2]]]);
+    }
+    triangles
 }
 
 fn line(points: impl IntoIterator<Item = DVec2>, scale: f64) -> PlotPoints<'static> {
@@ -1640,6 +1831,11 @@ pub(crate) struct Scene<'a> {
 }
 
 impl MeridionalView {
+    /// Shows `scope` from the next frame on.
+    pub(crate) fn set_scope(&mut self, scope: Scope) {
+        self.scope = scope;
+    }
+
     /// Plot transform of the last frame.
     #[cfg(test)]
     pub(crate) fn transform(&self) -> Option<&PlotTransform> {
@@ -1659,7 +1855,7 @@ impl MeridionalView {
         id: ComponentId,
         g: &ImpellerGeometry,
     ) -> Option<&Result<PotentialFlow, String>> {
-        let blades = self.view.potential_view.blades;
+        let blades = self.display.potential_view.blades;
         let key = (revision, id, blades);
         if self.potential.as_ref().is_none_or(|(k, _)| *k != key) {
             let mesh = PotentialMesh::default();
@@ -1672,114 +1868,6 @@ impl MeridionalView {
             self.potential = Some((key, solution));
         }
         self.potential.as_ref().map(|(_, s)| s)
-    }
-
-    pub(crate) fn show(
-        &mut self,
-        ui: &mut Ui,
-        cx: &mut EditCtx<'_>,
-        id: ComponentId,
-        stator: Option<ComponentId>,
-        volute: Option<ComponentId>,
-    ) {
-        let derived = cx.derived;
-        let stator = stator.and_then(|s| derived.diffuser(s));
-        let volute = volute.and_then(|v| derived.volute(v));
-        let Some(results) = derived.impeller(id) else {
-            return;
-        };
-        let g = match &results.geometry {
-            Ok(g) => g,
-            Err(e) => {
-                unavailable(ui, e);
-                return;
-            }
-        };
-        let units = cx.units();
-        // Back from the editor, whose framing includes its dimensions.
-        if self.framed {
-            self.fit = Some(Fit::All);
-        }
-        self.framed = false;
-
-        ui.horizontal_wrapped(|ui| {
-            let d = &mut self.view;
-            ui.checkbox(&mut d.stream_lines, tr("stream lines"));
-            ui.checkbox(&mut d.quasi_orthogonals, tr("quasi-orthogonals"));
-            ui.checkbox(&mut d.dimensions, tr("dimensions"));
-            ui.checkbox(&mut d.potential, tr("potential flow"))
-                .on_hover_text(tr(
-                    "Two-dimensional potential flow between hub and shroud: its stream \
-                     lines, and the meridional velocity along the walls against the \
-                     quasi-one-dimensional flow of the design",
-                ));
-            if d.potential {
-                let v = &mut d.potential_view;
-                MenuButton::new(format!("{} {}", crate::theme::icon::EYE, tr("Potential")))
-                    .config(
-                        MenuConfig::new().close_behavior(PopupCloseBehavior::CloseOnClickOutside),
-                    )
-                    .ui(ui, |ui| {
-                        ui.checkbox(&mut v.stream_lines, tr("stream lines"));
-                        ui.checkbox(&mut v.iso_lines, tr("c_m iso-lines"));
-                        ui.checkbox(&mut v.map, tr("c_m color map"));
-                        ui.checkbox(&mut v.vectors, tr("velocity vectors"));
-                        ui.separator();
-                        ui.checkbox(&mut v.blades, tr("blade blockage"))
-                            .on_hover_text(tr(
-                                "Solve with the thickness of the blades: among them only the \
-                                 open part of the circumference carries the flow (Gülich eqs. \
-                                 3.1.7 and 3.2.3)",
-                            ));
-                    });
-            }
-            ui.weak("(?)").on_hover_text(tr(
-                "Drag the round handles to shape the contour; right-click a point or a \
-                 wall to type exact values, split a wall into segments or join them. Drag \
-                 the background to pan, scroll to zoom, double-click to fit.",
-            ));
-        });
-
-        let current = cx
-            .doc
-            .project()
-            .impeller_geometry_input(id)
-            .unwrap_or_default();
-        let display = self.view;
-        let flow = display
-            .potential
-            .then(|| self.potential(derived.revision(), id, g).cloned())
-            .flatten();
-        let velocity_height = if flow.is_some() {
-            (ui.available_height() * 0.3).max(120.0)
-        } else {
-            0.0
-        };
-        let size = egui::vec2(
-            ui.available_width(),
-            (ui.available_height() - velocity_height).max(150.0),
-        );
-        self.diagram(
-            ui,
-            cx,
-            &Scene {
-                id,
-                g,
-                current: &current,
-                stator,
-                volute,
-                potential: flow.as_ref(),
-                display,
-                size,
-            },
-        );
-        match &flow {
-            Some(Ok(flow)) => wall_velocities(ui, flow, g, id, velocity_height, &units),
-            Some(Err(e)) => {
-                ui.colored_label(ui.visuals().error_fg_color, format!("Potential flow: {e}"));
-            }
-            None => {}
-        }
     }
 
     /// The meridional diagram with its handles, menus, dimensions and drags.
@@ -1798,11 +1886,18 @@ impl MeridionalView {
         let unit = units.get(QuantityKind::Length).symbol;
         let scale = units.to_display(QuantityKind::Length, 1.0);
         let palette = Palette::of(ui);
+        // The inlet duct ahead of the impeller, a component of its own.
+        let inlet_duct = cx.derived.duct_before(id).cloned();
         let main = cx.doc.project().pump_impeller_input(id).ok();
+        let duct_input = cx.derived.duct_id_before(id).and_then(|duct| {
+            let input = cx.doc.project().duct_input(duct).ok()?;
+            Some((duct, input))
+        });
         let inputs = Inputs {
             geometry: current,
             main: main.as_ref(),
             semi_axial: g.basis.outlet_inclination > 0.0,
+            duct: duct_input,
         };
 
         let center_mode = current.meridional.design_mode == DesignMode::CenterLine;
@@ -1836,7 +1931,27 @@ impl MeridionalView {
         // The main dimensions belong to the flow path; the material shows only the
         // point under the pointer.
         let permanent = display.dimensions && display.page == Page::FlowPath;
-        let dimensions = dimension_lines(&g.contour, &g.basis, permanent, active);
+        let mut dimensions = dimension_lines(&g.contour, &g.basis, permanent, active);
+        // The inlet duct is drawn on every page: its dimensions too.
+        let duct_dimensions = inlet_duct
+            .as_ref()
+            .map(|d| duct_lines(d, &g.basis))
+            .unwrap_or_default();
+        if display.dimensions {
+            dimensions.extend(duct_dimensions.iter().cloned());
+        }
+        // The property row under the pointer shows its dimension, drawn or not.
+        let row_dimension = crate::widgets::hovered_row(ui.ctx()).and_then(|row| {
+            dimension_lines(&g.contour, &g.basis, true, None)
+                .into_iter()
+                .chain(duct_dimensions.iter().cloned())
+                .find(|d| d.dimension.label() == row)
+        });
+        if let Some(line) = &row_dimension
+            && !dimensions.iter().any(|d| d.dimension == line.dimension)
+        {
+            dimensions.push(line.clone());
+        }
         // Dimension values as drawn, to find the one under the pointer.
         let font = egui::FontId::proportional(12.0);
         let texts: Vec<String> = dimensions
@@ -1859,6 +1974,8 @@ impl MeridionalView {
                 .map(|(d, _)| d.dimension),
             _ => None,
         };
+        crate::widgets::set_drawing_hover(ui.ctx(), hovered_dimension.map(|d| d.label()));
+        let hovered_dimension = hovered_dimension.or(row_dimension.map(|d| d.dimension));
         let fit = self.fit.take();
         // Extent of the contour with its permanent dimensions, and room for their
         // values. The dimensions are painted over the plot so they never move its bounds.
@@ -1888,6 +2005,10 @@ impl MeridionalView {
                 .iter()
                 .flat_map(|d| [d.from, d.to]),
         );
+        if let Some(duct) = &inlet_duct {
+            outline.extend(&duct.outline);
+            outline.extend(duct_dimensions.iter().flat_map(|d| [d.from, d.to]));
+        }
         let meridian_bounds = extent(&outline);
 
         let sections = &g.blade.sections;
@@ -2006,6 +2127,25 @@ impl MeridionalView {
                             .width(1.0),
                     );
                 }
+            }
+            // The inlet duct, when there is one: its fluid shaded, as it goes into the
+            // joined domain.
+            if let Some(duct) = &inlet_duct {
+                // A plot polygon fills as if convex: fill the duct triangle by triangle.
+                for t in triangulate(&duct.outline) {
+                    plot.polygon(
+                        Polygon::new("", line(t, scale))
+                            .fill_color(palette.stator.gamma_multiply(0.14))
+                            .stroke(egui::Stroke::NONE),
+                    );
+                }
+                let mut closed = duct.outline.clone();
+                closed.push(duct.outline[0]);
+                plot.line(
+                    Line::new("inlet duct", line(closed, scale))
+                        .color(palette.stator.gamma_multiply(0.8))
+                        .width(1.2),
+                );
             }
             if center_mode {
                 plot.line(
@@ -2639,15 +2779,15 @@ pub(crate) fn inlet_tilt(
             let mut degrees = angle.to_degrees();
             ui.horizontal(|ui| {
                 ui.label(tr("from the normal to the axis"));
-                if ui
-                    .add(
+                if crate::widgets::then_unit(ui, "°", |ui| {
+                    ui.add(
                         DragValue::new(&mut degrees)
                             .speed(0.2)
                             .range(-60.0..=60.0)
-                            .max_decimals(2)
-                            .suffix("°"),
+                            .max_decimals(2),
                     )
-                    .changed()
+                })
+                .changed()
                 {
                     *angle = degrees.to_radians();
                 }
@@ -2744,12 +2884,9 @@ fn length_field(ui: &mut Ui, label: &str, value: &mut f64, units: &DisplayUnits)
     let changed = ui
         .horizontal(|ui| {
             ui.label(label);
-            ui.add(
-                DragValue::new(&mut shown)
-                    .speed(0.1)
-                    .max_decimals(4)
-                    .suffix(format!(" {}", unit.symbol)),
-            )
+            crate::widgets::then_unit(ui, unit.symbol, |ui| {
+                ui.add(DragValue::new(&mut shown).speed(0.1).max_decimals(4))
+            })
             .changed()
         })
         .inner;
@@ -2777,16 +2914,16 @@ fn angle_field(ui: &mut Ui, label: &str, value: Option<f64>, current: f64) -> Op
         let mut fixed = value.is_some();
         let mut degrees = value.unwrap_or(current).to_degrees();
         let toggled = ui.checkbox(&mut fixed, label).changed();
-        let typed = ui
-            .add_enabled(
+        let typed = crate::widgets::then_unit(ui, "°", |ui| {
+            ui.add_enabled(
                 fixed,
                 DragValue::new(&mut degrees)
                     .speed(0.2)
                     .range(-180.0..=180.0)
-                    .max_decimals(2)
-                    .suffix("°"),
+                    .max_decimals(2),
             )
-            .changed();
+        })
+        .changed();
         (toggled || typed).then(|| fixed.then(|| degrees.to_radians()))
     })
     .inner
@@ -2967,13 +3104,14 @@ fn trailing_edge_menu(
         tilt = ui
             .horizontal(|ui| {
                 ui.label("ε_s");
-                ui.add(
-                    DragValue::new(&mut degrees)
-                        .speed(0.2)
-                        .range(0.5..=80.0)
-                        .max_decimals(2)
-                        .suffix("°"),
-                )
+                crate::widgets::then_unit(ui, "°", |ui| {
+                    ui.add(
+                        DragValue::new(&mut degrees)
+                            .speed(0.2)
+                            .range(0.5..=80.0)
+                            .max_decimals(2),
+                    )
+                })
                 .changed()
             })
             .inner;
@@ -3054,13 +3192,14 @@ fn edit_menu(
                 && ui
                     .horizontal(|ui| {
                         ui.label(tr("Position along the wall"));
-                        ui.add(
-                            DragValue::new(&mut percent)
-                                .speed(0.2)
-                                .range(0.0..=90.0)
-                                .max_decimals(2)
-                                .suffix(" %"),
-                        )
+                        crate::widgets::then_unit(ui, "%", |ui| {
+                            ui.add(
+                                DragValue::new(&mut percent)
+                                    .speed(0.2)
+                                    .range(0.0..=90.0)
+                                    .max_decimals(2),
+                            )
+                        })
                         .changed()
                     })
                     .inner;
@@ -3196,7 +3335,7 @@ fn edit_menu(
 
 /// Meridional velocity along hub and shroud: the potential flow against the uniform
 /// velocity of the quasi-one-dimensional flow.
-fn wall_velocities(
+pub(crate) fn wall_velocities(
     ui: &mut Ui,
     flow: &PotentialFlow,
     g: &tp_design::impeller::ImpellerGeometry,
@@ -3249,6 +3388,30 @@ fn wall_velocities(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_l_shaped_outline_is_covered_by_triangles() {
+        let p = |x: f64, y: f64| DVec2::new(x, y);
+        let outline = [
+            p(0.0, 0.0),
+            p(2.0, 0.0),
+            p(2.0, 1.0),
+            p(1.0, 1.0),
+            p(1.0, 2.0),
+            p(0.0, 2.0),
+        ];
+        let triangles = triangulate(&outline);
+        let area: f64 = triangles
+            .iter()
+            .map(|[a, b, c]| (*b - *a).perp_dot(*c - *a).abs() / 2.0)
+            .sum();
+        assert_eq!(triangles.len(), 4);
+        assert!((area - 3.0).abs() < 1e-12);
+        // Either way round.
+        let mut reversed = outline.to_vec();
+        reversed.reverse();
+        assert_eq!(triangulate(&reversed).len(), 4);
+    }
     use crate::default_project;
     use crate::derived::Derived;
 
@@ -3332,6 +3495,7 @@ mod tests {
             geometry: &input,
             main: Some(&main),
             semi_axial: false,
+            duct: None,
         };
         let drawn = tp_design::impeller::build(&g.basis, &input).unwrap();
         let joint = Handle::Point(Side::Hub, WallPoint::Joint { segment: 0 });
@@ -3376,6 +3540,7 @@ mod tests {
             geometry: &input,
             main: None,
             semi_axial: false,
+            duct: None,
         };
         assert_eq!(
             set_dimension(Dimension::OutletDiameter, 0.2, &drawn, geometry_only),
@@ -3392,6 +3557,7 @@ mod tests {
             geometry: &input,
             main: Some(&main),
             semi_axial: false,
+            duct: None,
         };
         // Dragged 5 mm outwards, the trailing edge sets d₂ 10 mm larger, by hand.
         let edge = handle_position(Handle::TrailingEdge, &g.contour);
@@ -3410,6 +3576,7 @@ mod tests {
             geometry: &input,
             main: Some(&dragged),
             semi_axial: false,
+            duct: None,
         };
         assert!(is_manual(Handle::TrailingEdge, after));
         assert_eq!(
@@ -3427,6 +3594,7 @@ mod tests {
             geometry: &moved,
             main: Some(&main),
             semi_axial: false,
+            duct: None,
         };
         assert!(is_manual(Handle::ShroudInlet, moved_inputs));
         assert_eq!(

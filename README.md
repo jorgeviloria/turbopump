@@ -37,7 +37,14 @@ Hace falta:
 - **cmake**;
 - un **compilador C++17** (Xcode Command Line Tools, GCC/Clang o Visual Studio).
 
-La primera compilación construye Open CASCADE 7.8.1 desde el código fuente y tarda de 5 a
+El código de Open CASCADE 8.0.1 viene como submódulo de git: clona con
+`git clone --recursive` o, en un clon ya hecho, ejecuta:
+
+```bash
+git submodule update --init
+```
+
+La primera compilación construye Open CASCADE desde el código fuente y tarda de 5 a
 15 minutos; las siguientes lo reutilizan. Para compilar sin CAD:
 
 ```bash
@@ -71,43 +78,102 @@ cargo run --release -p tp-gui -- bomba.tpj
 Arranca con una bomba de 100 m³/h, 32 m y 2900 rpm, con un rodete y una voluta, en tema
 claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada componente:
 
-- **Barra de herramientas** (arriba), por pestañas:
-  - *Home*: proyecto, deshacer, configuración global, unidades, añadir componentes y
-    exportar;
-  - la pestaña del componente seleccionado, con sus pasos de diseño, el estado de cada
-    uno y los botones para aceptar o restablecer el paso;
-  - *View*: vistas, cámara, modo de dibujo, paneles (árbol, propiedades y mensajes),
-    tema e idioma;
-  - *Help*.
+- **Barra de herramientas** (arriba). Sus pestañas son las vistas: *Meridian*,
+  *Blade*, *Front*, *Section*, *3D*, *Curves* y *Report*. Elegir una muestra esa vista
+  y, debajo, solo sus herramientas:
+  - *Meridian*: el ámbito (etapa, canal del rodete, materiales o cámaras laterales),
+    qué se dibuja (cotas, componentes vecinos, leyenda, el menú *Analysis* con el flujo
+    potencial y las curvas de referencia), el encuadre, los imanes y los dibujos;
+  - *Blade*: las páginas de gráficas y de bordes, y la exportación de puntos y malla;
+  - *Front* y *Section*: sus dibujos y exportaciones, y cómo se edita una sección;
+  - *3D*: cámara (encuadrar, vista inicial, el menú *Views* con las vistas desde la
+    entrada, desde atrás y de lado y las que se guardan, que se recuerdan entre
+    sesiones, proyección ortográfica y el enfoque en el corte de agua), estilo
+    (sombreado, con aristas, alambre o cebra), inspección (corte meridional, corte
+    transversal y medir), y sólidos CAD, mallas y una imagen PNG de la vista;
+  - *Curves*: los ajustes de la predicción (en el panel de propiedades) y el resto de
+    resultados.
 
-  El menú *File* abre, guarda y exporta.
-- **Columna de componentes** (izquierda): la configuración global y un pictograma por
-  componente, con un punto verde si está terminado o naranja si quedó desactualizado.
-  El botón + añade un rodete, un difusor con o sin álabes o una voluta, simple o doble
-  (con nervio de nariz redonda o elíptica, que reduce el empuje radial). La voluta
-  admite descarga radial (por defecto, central sobre la línea del eje de la bomba) o
-  tangencial, abierta a ambos lados o con una pared recta. Por defecto gira para que
-  la descarga quede vertical. El corte de agua puede ser tangente, afilado o redondeado con su
-  radio.
-- **Panel izquierdo**, que se pliega con un botón para dejar más sitio a la vista, con
-  dos pestañas:
-  - *Design*: los pasos de cada componente, con su estado (pendiente, hecho o
-    desactualizado porque cambió un dato anterior) y sus avisos;
-  - *3D model*: muestra u oculta cada pieza de la vista 3D o la vuelve translúcida.
-- **Vista principal**, una a la vez y a pantalla completa, elegida en la barra de
-  encima:
-  - vista meridional, con el contorno del rodete, las paredes del difusor y las
-    secciones de la voluta;
-  - *Editor* del meridiano, donde el contorno se dibuja sobre la vista (ver
-    [Editor del meridiano](#editor-del-meridiano));
+  A la izquierda de las pestañas están el menú *File* (abre, guarda, exporta y da los
+  ajustes) y el acceso rápido al flujo de diseño, guardar, deshacer y rehacer; a la derecha, los
+  ajustes, la ayuda y el botón que pliega las herramientas (las pestañas siguen
+  eligiendo la vista).
+- **Franja de objetivo** (bajo la barra): el punto de diseño pedido (Q, H, n, fluido y
+  nq) frente a lo previsto para el rodete (altura con su desviación y tolerancia,
+  rendimiento, potencia, NPSH₃ frente al NPSH disponible y caudal óptimo), siempre a la
+  vista. El NPSH lleva ✓ si el disponible cumple el margen de la tabla 6.2 de Gülich
+  (1,25·NPSH₃ y al menos NPSH₃ + 0,6 m; para agua con u₁ de 10 a 50 m/s,
+  σ_A ≥ σ₃ + 0,05 + 2·(u₁/100 m/s)³), ⚠ si supera el NPSH₃ con menos margen o con u₁ por
+  encima de 50 m/s, donde la tabla pide comprobar la cavidad, y ✕ si no llega al NPSH₃. Al
+  cambiar el diseño, un pequeño triángulo ▲ o ▼ junto a H, η, P y NPSH₃ dice hacia
+  dónde se movió cada valor, durante un segundo y medio, sin mover nada de la franja. La tolerancia de altura sale de la clase de calidad G1–G3 de ISO 9906 según
+  Gülich, tabla 15.2, y se cambia en *Design point and fluid › Acceptance* sin desactualizar
+  ningún paso. Un clic en el objetivo abre el punto de diseño; en lo previsto, las
+  curvas.
+- **Flujo de diseño** (izquierda): el recorrido del diseño de arriba abajo:
+  - el punto de diseño y el fluido, con su resumen;
+  - los componentes en el orden en que los atraviesa el fluido, de la entrada a la
+    salida, unidos por una línea del color de cada uno. Cada componente muestra sus
+    pasos agrupados en fases, el estado de cada paso (pendiente, hecho o
+    desactualizado porque cambió un dato anterior), una cifra clave de los pasos
+    hechos (d₂ y b₂, L, z y β₂B, b₃, el área de la garganta o d_z), la marca del
+    siguiente paso, y en la cabecera su avance, los avisos y los pasos por revisar;
+  - los resultados: curvas, informe, sólidos CAD (con candado mientras falten
+    pasos) y dibujos y mallas.
+
+  Funciona como un acordeón: solo queda abierto el componente activo, salvo los que
+  se fijan con la chincheta, que se recuerdan por proyecto. Junto a la chincheta, un
+  botón (también en el menú del botón derecho) acepta de una vez los pasos que le
+  faltan al componente con los valores sugeridos; si uno falla, se detiene ahí, y
+  todo se deshace con un solo Cmd/Ctrl+Z. Pasando el ratón entre
+  dos componentes aparece «Insertar aquí», que ofrece solo lo que admiten las reglas
+  de composición. Alt+↑ y Alt+↓ recorren los pasos de todos los componentes.
+
+  Plegado, el flujo deja un riel con el punto de diseño, un icono por componente con un
+  anillo de avance (naranja si hay pasos por revisar) y sus pasos al pasar el ratón,
+  las curvas y el botón para añadir. Se añade un rodete, un difusor con o sin álabes o
+  una voluta, simple o doble (con nervio de nariz redonda o elíptica, que reduce el
+  empuje radial). La voluta admite descarga radial (por defecto, central sobre la línea
+  del eje de la bomba) o tangencial, abierta a ambos lados o con una pared recta. Por
+  defecto gira para que la descarga quede vertical. El corte de agua puede ser tangente,
+  afilado o redondeado con su radio; el redondeado es un cuerpo con la nariz sobre d_z
+  y el ángulo α₃B, nunca más fino que la nariz, que se une suavemente a las dos paredes
+  y se calcula en nueve planos a lo ancho de la entrada.
+- **Vista principal**, una a la vez y a pantalla completa, elegida en las pestañas:
+  - sección meridional (ver [La vista Meridian](#la-vista-meridian)): la etapa
+    completa con el difusor y la voluta, o el rodete solo para dibujar su canal, sus
+    materiales o sus cámaras laterales;
   - secciones de la voluta: la definición en edición sobre la familia de secciones a lo
     largo de la espiral, con los puntos de control de los lados Bézier y de segmentos
-    para arrastrar y esquinas que se añaden o quitan con el botón derecho;
+    para arrastrar y esquinas que se añaden o quitan con el botón derecho, acotadas
+    con el ancho de entrada b₃ y la altura H;
   - gráficas del álabe (β, θ y espesor) y, en otra página, los bordes de ataque y de
     salida en verdadera forma, con sus puntos para arrastrar;
-  - vista frontal de la etapa, con los álabes del difusor y la espiral;
+  - vista frontal de la etapa, con los álabes del difusor, la espiral y las cotas de
+    los diámetros d₂, d₁, d_n y d_z;
   - vista 3D, con aristas de las piezas, secciones de la voluta, cubo de vistas (un clic
-    en una cara gira la cámara), ejes y barra de escala;
+    en una cara gira la cámara), ejes y barra de escala, en perspectiva o en proyección
+    ortográfica; la imagen PNG sale con el doble de resolución y sin el cubo, los ejes
+    ni la escala. La pieza bajo el ratón se tiñe y dice su nombre; un clic la
+    selecciona (también en la Escena) y el botón derecho la oculta, la aísla o cambia
+    su opacidad. El corte meridional quita la mitad del modelo que mira a la cámara
+    (o la otra); se desplaza paralelo a sí mismo con su posición, en porcentaje del
+    radio, y su plano se puede dibujar sobre el modelo. El corte transversal corta a
+    través del eje por un plano z = cte y quita el lado desde el que mira la cámara.
+    Donde corta una pieza opaca cerrada (los álabes del rodete y del difusor, cada canal
+    de la voluta, también en la doble y la interior, la tubería de entrada y el corte de
+    agua), la cara cortada sale maciza y rayada, como en un plano de taller. El corte de
+    agua redondeado es una pieza propia de la Escena, y la carcasa se dibuja sin los
+    trozos de pared que él sustituye; *Cutwater* encuadra la cámara en él. La cebra
+    refleja franjas en las superficies: donde se rompen hay una arista y donde se
+    quiebran salta la curvatura. Medir da la distancia
+    entre dos puntos del modelo y sus partes radial y axial, Δr y Δz; cerca de un
+    vértice de la malla el punto se ajusta a él;
+
+    | Corte con la carcasa opaca | Medida con la carcasa de vidrio |
+    |---|---|
+    | ![Corte meridional con las caras cortadas tapadas](docs/img/tapas-corte-3d.jpg) | ![Corte meridional y medida en la vista 3D](docs/img/medida-corte-3d.jpg) |
+
   - curvas: altura, rendimiento, potencia y NPSH₃ previstos frente al caudal (la altura
     a carga parcial según Gülich, cap. 4.3, y el NPSH₃ como banda de cinco métodos
     publicados), con la zona de recirculación estimada a trazos, el NPSH disponible y la pérdida en la
@@ -118,37 +184,84 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
     η = η_h·η_v·η_RR·η_m), el caudal en que la garganta de la voluta pone el punto
     óptimo, la corrección
     para líquidos viscosos y el punto de trabajo en la instalación, con otra velocidad
-    o el rodete recortado y el rango de funcionamiento continuo;
+    o el rodete recortado y el rango de funcionamiento continuo. Sus ajustes (el
+    rango de la curva, las pérdidas y fuerzas, el líquido y la instalación) van en el
+    panel de propiedades, con filas como las de un paso; dos botones arriba del panel
+    pasan de los ajustes al paso, para cambiar el diseño mirando la curva;
   - informe con las mismas cifras que la línea de comandos.
 
   La vista meridional muestra también, si se pide, el flujo potencial y la velocidad
   meridional en cubo y carcasa. La del álabe añade la velocidad relativa en sus dos
   caras.
 
-  Al abrir un paso, la vista cambia a la que mejor lo muestra (se puede desactivar en
-  la pestaña *View*).
-- **Panel de propiedades** (derecha): al elegir un paso o la configuración global se
-  abre con sus datos. Cada valor es automático (propuesto por una correlación) o
-  manual. *Accept step* marca el paso como hecho y pasa al siguiente, y los errores y
-  avisos salen en tarjetas. El panel flota sobre la vista sin reducirla: se pliega a una
-  franja estrecha (con su flecha, con Esc o con el botón *Properties*), se ensancha
-  arrastrando su borde izquierdo y no bloquea las vistas, así que con él abierto se
-  siguen arrastrando los puntos del contorno. La vista 3D centra la pieza en la parte
-  que queda libre.
+  Al abrir un paso, la vista cambia a la que mejor lo muestra, y en *Meridian* también
+  el ámbito (se puede desactivar en los ajustes, *Behavior*).
+- **Escena** (flota sobre la vista 3D): las piezas del modelo por componente, en el
+  orden del flujo. Cada pieza tiene un ojo que la muestra u oculta (Alt+clic la aísla),
+  su color (un clic abre el selector de color y opacidad), un botón que pasa por las
+  tres opacidades (opaca, translúcida y cristal) y otro que la aísla; los álabes,
+  además, uno o todos. El menú muestra u oculta todo, restablece la escena o la acopla a otra
+  esquina; también se acopla arrastrando su cabecera a la esquina más cercana, y se
+  pliega a una píldora. El modelo se centra en lo que dejan libre la Escena y el panel
+  de propiedades. La esquina y el plegado se recuerdan.
+- **Panel de propiedades** (derecha): al elegir un paso o el punto de diseño se abre
+  con sus datos:
+  - **arriba**, la ruta (componente › fase), el título, el estado, «paso n de m», la ⓘ
+    con lo que hace el paso y un menú ⋯ para devolver el paso a automático o plegar
+    todas sus secciones. El error del paso, o sus avisos, van al final de la misma
+    fila del estado, recortados al sitio que queda (enteros al pasar el ratón; un clic
+    los lista todos encima del formulario), así que al aparecer no mueven nada;
+  - **en medio**, secciones que se pliegan, marcadas como resultados o comprobación
+    cuando lo son. Cada valor que puede ser automático lleva un punto, como los del
+    editor del meridiano: hueco y en gris si lo propone el programa, relleno si está
+    fijado a mano. Las unidades van fuera del campo, en una columna propia a su
+    derecha, también en los resultados. Escribir en un valor automático lo fija; un
+    clic en el punto, o clic derecho en el valor, lo vuelve automático. La cabecera de cada sección dice
+    cuántos valores tiene fijados a mano («● 2 a mano»); un clic ahí los vuelve todos
+    automáticos de una vez, y un solo Cmd/Ctrl+Z los recupera. Cuando un paso ya
+    aceptado queda por revisar, una barra naranja en el margen marca las filas que
+    cambiaron desde que se aceptó (también las automáticas que movió un cambio aguas
+    arriba), y su ayuda dice cuánto valían. Lo que mostraba cada fila al aceptarse se
+    guarda con el proyecto: las marcas siguen ahí tras cerrar y volver a abrir, y no
+    las cambian otras unidades ni otro idioma. Con el ratón sobre una fila que es una
+    cota del dibujo (L, b₂, d_n, d₁ o d₂ en el meridiano, y L_t y d_t de la tubería
+    de entrada; d₂, d₁, d_n o d_z en la
+    vista frontal; b₃, o la altura de la garganta, en la de sección), esa cota se
+    resalta en el dibujo,
+    aunque las cotas estén ocultas; y con el ratón sobre el valor de una cota, su fila
+    se sombrea en el panel;
+  - **abajo**, la cifra clave del paso, *Back* y *Accept step and continue*
+    (Cmd/Ctrl+Intro), que marca el paso como hecho y abre el siguiente, también en
+    el componente siguiente. Con Mayús (o desde el menú ⋯), se completan todos los
+    pasos que le faltan al componente con los valores sugeridos.
+
+  El panel flota sobre la vista sin reducirla: se pliega a una franja estrecha (con su
+  flecha o con Esc) y tiene el mismo ancho en todas las vistas y pasos; solo cambia
+  arrastrando su borde izquierdo, y ese ancho se recuerda entre sesiones. Todas sus
+  filas comparten columnas: etiquetas, campos, listas y unidades quedan alineados de
+  arriba abajo. No bloquea las vistas, así que con él abierto se siguen arrastrando los puntos del contorno. La
+  vista 3D centra la pieza en la parte que queda libre.
 - **Barra de estado** (abajo): el último mensaje, las unidades y el contador de errores
   y avisos, que abre el panel de mensajes de todo el proyecto.
-- **Idioma:** inglés o español, en la pestaña *View*. La elección se guarda, y la
+- **Idioma:** inglés o español, en los ajustes (el engranaje de la barra). La elección se guarda, y la
   primera vez se toma la del sistema. Los avisos del diseño también se traducen.
 - **Edición:** todo se puede deshacer y rehacer (Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z). Un
   arrastre completo cuenta como un solo paso.
 - **Exportación:** puntos, malla STL, dibujos en SVG, DXF o DWG, y sólidos CAD STEP, IGES
   o STL, que se construyen en segundo plano.
 
-### Editor del meridiano
+### La vista Meridian
 
-La vista *Editor* edita el corte meridional del rodete sobre el propio dibujo, sin
-tablas. Tiene tres páginas: *Flow path* (el canal), *Materials* (el disco del cubo y la
-tapa) y *Side chambers* (las cámaras entre el rodete y la carcasa).
+La vista *Meridian* edita el corte meridional del rodete sobre el propio dibujo, sin
+tablas. Tiene cuatro ámbitos, elegidos en su pestaña de la barra:
+- *Stage*: la etapa completa, con el difusor y la voluta;
+- *Impeller channel*: el canal del rodete;
+- *Materials*: el disco del cubo y la tapa;
+- *Side chambers*: las cámaras entre el rodete y la carcasa.
+
+El ámbito sigue al paso abierto: el contorno meridional abre el canal, y el espesor de
+pared de la voluta o el difusor abren la etapa. Un ámbito elegido a mano se respeta
+mientras se edite el rodete.
 
 ![Editor del meridiano](docs/img/editor-meridiano.jpg)
 
@@ -184,16 +297,36 @@ tapa) y *Side chambers* (las cámaras entre el rodete y la carcasa).
   anillo de cierre (holgura según Gülich, ec. 3.12), y la trasera hasta el sello del
   eje. Sus sellos pasan al empuje axial y al análisis de pérdidas cuando estos están en
   automático.
+- **Tubería de entrada:** un componente propio, el primero del flujo y delante del
+  primer rodete (*Add component › Inlet duct*), con un paso, *Duct dimensions*. Es un
+  tramo axial para la entrada de un dominio de CFD, lleno hasta el eje, donde el cubo
+  acaba en una nariz semiesférica de su radio, de longitud L = d₁ y tan ancho como la
+  tapa en la entrada (valores nuestros, editables), construido sobre la entrada del
+  rodete, así que un
+  cambio en el contorno del rodete la deja por revisar. Con las cámaras laterales
+  diseñadas, termina a una holgura axial Δz (la misma s_ax) de la punta del cuello: la
+  fuga del anillo de cierre sale a ese hueco (la ranura junto a la boca) y vuelve a
+  ella dentro del mismo dominio. Se dibuja en el Meridiano con sus cotas L_t y d_t,
+  que se escriben encima como las del rodete, y aparece en la Escena del 3D como un
+  componente más. Un proyecto anterior que la tenía activada en el contorno del
+  rodete la convierte en componente al abrirse.
+
+  | Meridiano | 3D, con el corte meridional |
+  |---|---|
+  | ![Tubería de entrada en el meridiano](docs/img/tuberia-entrada-meridiano.jpg) | ![Tubería de entrada en 3D](docs/img/tuberia-entrada-3d.jpg) |
+
 - **Cruces:** si dos paredes se cruzan, o una se cruza consigo misma, el punto se
   marca en rojo y sale un aviso.
 - **Análisis:** la curvatura de las paredes, los círculos de área, las gráficas de área
-  y de curvatura a lo largo del canal y curvas de referencia.
+  y de curvatura a lo largo del canal, la del momento estático S = ∫ r dm de cada
+  sección del álabe (el de la fórmula de deslizamiento de Pfleiderer: cuanto mayor,
+  menos deslizamiento; Gülich, cap. 3.3) y curvas de referencia.
 - **Flujo potencial:** líneas de corriente, isolíneas y mapa de color de c_m y
   vectores de velocidad, con el bloqueo de los álabes o sin él.
 - **Comprobación:** el panel de propiedades compara el contorno con las
   recomendaciones de Gülich.
 
-![Cámaras laterales en el editor](docs/img/editor-camaras.jpg)
+![Cámaras laterales en la vista Meridiano](docs/img/editor-camaras.jpg)
 
 ### Bordes del álabe
 
@@ -214,6 +347,39 @@ El panel da el $c_{p,min}$ del borde de ataque (Gülich, ec. 7.1a), que es una e
 para las formas que no son elípticas.
 
 ![Bordes del álabe](docs/img/bordes-alabe.jpg)
+
+### Corte de agua
+
+La vista *Front* tiene una página *Cutwater*, que se abre con el paso *Cut-water*.
+Dibuja el corte de agua en uno de los nueve planos que lo cortan a lo ancho de la
+entrada (un deslizador elige el plano; los demás se ven en tenue), con la pared de la
+espiral, la del difusor, el círculo $d_z$ y la salida del rodete. Tres puntos se
+arrastran:
+
+- el **punto más interior de la nariz** mueve el círculo del corte de agua $d_z$;
+- el **punto delantero de la nariz** cambia su radio $\rho$, con el punto interior fijo
+  sobre $d_z$;
+- el **punto de la línea de curvatura** la gira y fija la incidencia $i_3$ frente al
+  ángulo del flujo $\alpha'_3$.
+
+Otro deslizador reparte entre el lado de la espiral y el del difusor el espesor que le
+falta a la cuña pasada la punta, y otro inclina el borde del corte de agua un ángulo
+$\varepsilon$ respecto del eje (la tabla 10.2 pide más de 35° contra las pulsaciones);
+no pasa de lo que las paredes permiten y dice hasta dónde llega. La nariz del nervio de
+una voluta doble se inclina igual. Al lado, las medidas frente a Gülich (diámetro
+efectivo, holgura de la tabla 10.2, cuerpo más fino, $e/d_z$, incidencia en el diseño,
+rango de caudal con $|i_3| \le 3°$, oblicuidad, cuña a lo ancho y corrección de la
+garganta de la ec. 7.28), el cuerpo en 3D, que se
+gira arrastrando, y la incidencia sobre el corte de agua en todo el rango de caudal.
+Mientras se arrastra solo se recalcula la voluta; el resto se pone al día al soltar.
+*View in 3D* abre la vista 3D encuadrada en el corte de agua y cortada a través del
+eje por el plano que se estaba mirando.
+
+![Corte de agua](docs/img/corte-de-agua.jpg)
+
+| El corte de agua en 3D, cortado por el plano medio | En cebra |
+|---|---|
+| ![Corte de agua en la vista 3D](docs/img/corte-de-agua-3d.jpg) | ![Corte de agua en cebra](docs/img/corte-de-agua-cebra.jpg) |
 
 Las pruebas de la interfaz usan [kittest](https://github.com/rerun-io/kittest) y no
 necesitan GPU. Las capturas con wgpu se generan a mano en `target/screenshots/`:
@@ -293,14 +459,21 @@ cargo run -p tp-cli -- cad bomba.tpj --format step,iges,stl --balance-holes
 |---|---|
 | ![rodete](docs/img/rodete-referencia-cad.jpg) | ![fluido](docs/img/fluido-referencia-cad.jpg) |
 
-Una bomba completa se crea con sus componentes de la entrada a la salida: rodete,
-estator con álabes (`stator`) o sin ellos (`vaneless-stator`) y voluta. Cada uno se
+Una bomba completa se crea con sus componentes de la entrada a la salida: tubería de
+entrada (`inlet-duct`), rodete, estator con álabes (`stator`) o sin ellos
+(`vaneless-stator`) y voluta. Cada uno se
 diseña con su orden, y `cad` construye los sólidos de todos; de la voluta salen el
 dominio fluido (`volute.step`) y la carcasa con su espesor de pared y la brida de
-salida (`volute-casing.step`). Con las cámaras laterales diseñadas salen también su
+salida (`volute-casing.step`); por fuera, la hendidura entre el dorso del comienzo de
+la espiral y la tobera, sobre el corte de agua, sale rellena y redondeada
+(`turbopump volute --set fillet=…`). El corte de agua redondeado del sólido es el que dibuja la
+vista 3D: un loft por sus contornos a lo ancho de la entrada, que una prueba compara con
+la malla de la vista. Con las cámaras laterales diseñadas salen también su
 fluido (`side-chambers.step`) y, si a continuación del rodete viene una voluta, un único
 fluido para CFD con rodete, cámaras y voluta (`fluid-joined.step`), unido por un anillo
-en la salida del rodete. Ese fluido necesita un borde de salida paralelo al eje
+en la salida del rodete. Con una tubería de entrada delante del rodete sale su fluido
+(`inlet-duct.step`), y el fluido unido empieza en ella: comparte la cara de entrada del
+rodete y la salida del sello. Ese fluido necesita un borde de salida paralelo al eje
 (d₂i = d₂). La altura de la cara de salida se puede fijar con
 `turbopump volute --set height=…`:
 
