@@ -101,7 +101,10 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
 - **Franja de objetivo** (bajo la barra): el punto de diseño pedido (Q, H, n, fluido y
   nq) frente a lo previsto para el rodete (altura con su desviación y tolerancia,
   rendimiento, potencia, NPSH₃ frente al NPSH disponible y caudal óptimo), siempre a la
-  vista. La tolerancia de altura sale de la clase de calidad G1–G3 de ISO 9906 según
+  vista. El NPSH lleva ✓ si el disponible cumple el margen de la tabla 6.2 de Gülich
+  (1,25·NPSH₃ y al menos NPSH₃ + 0,6 m; para agua con u₁ de 10 a 50 m/s,
+  σ_A ≥ σ₃ + 0,05 + 2·(u₁/100 m/s)³), ⚠ si supera el NPSH₃ con menos margen o con u₁ por
+  encima de 50 m/s, donde la tabla pide comprobar la cavidad, y ✕ si no llega al NPSH₃. La tolerancia de altura sale de la clase de calidad G1–G3 de ISO 9906 según
   Gülich, tabla 15.2, y se cambia en *Design point and fluid › Acceptance* sin desactualizar
   ningún paso. Un clic en el objetivo abre el punto de diseño; en lo previsto, las
   curvas.
