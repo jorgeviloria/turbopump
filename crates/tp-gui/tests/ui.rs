@@ -1845,6 +1845,7 @@ fn a_double_entry_impeller_hides_the_rear_seal() {
     });
     assert!(harness.get_all_by_label("Front seal").next().is_some());
     assert!(harness.query_by_label("Rear seal").is_none());
+    assert!(harness.query_by_label("Back vanes").is_none());
 }
 
 fn back_vanes(h: &Harness<'_, TurbopumpApp>) -> tp_design::impeller::back_vanes::BackVaneSettings {

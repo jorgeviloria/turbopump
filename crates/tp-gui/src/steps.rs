@@ -2343,15 +2343,18 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
             &units,
         );
     }
-    changed |= back_vanes_card(
-        ui,
-        &mut m.back_vanes,
-        // Offered while the rear seal is there to turn off.
-        (!double_entry).then_some(&mut m.seals.rear.enabled),
-        g.and_then(|g| g.contour.back_vanes.as_ref()),
-        g.and_then(|g| g.contour.chambers.values.rear_vane_gap),
-        &units,
-    );
+    // Nor does it have a rear shroud to carry back vanes.
+    if !double_entry {
+        changed |= back_vanes_card(
+            ui,
+            &mut m.back_vanes,
+            // Offered while the rear seal is there to turn off.
+            Some(&mut m.seals.rear.enabled),
+            g.and_then(|g| g.contour.back_vanes.as_ref()),
+            g.and_then(|g| g.contour.chambers.values.rear_vane_gap),
+            &units,
+        );
+    }
     if section_info(
         ui,
         tr("Side chambers"),

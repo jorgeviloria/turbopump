@@ -153,6 +153,7 @@ pub fn build(
     basis: &ImpellerBasis,
     material: &Material,
     rear: Option<&Seal>,
+    eyes: f64,
 ) -> Option<BackVanes> {
     if !settings.enabled {
         return None;
@@ -178,6 +179,24 @@ pub fn build(
         .tip_clearance
         .resolve(|| TIP_CLEARANCE_RATIO * height)
         .max(0.0);
+
+    if eyes > 1.5 {
+        // A double-entry impeller has no rear shroud to carry them: none is built.
+        warnings.push(
+            "a double-entry impeller has no rear shroud: the back vanes are left out".to_string(),
+        );
+        return Some(BackVanes {
+            count,
+            shape: settings.shape,
+            thickness,
+            tip_clearance,
+            band: Vec::new(),
+            inner_radius: 0.0,
+            outer_radius: 0.0,
+            height,
+            warnings,
+        });
+    }
 
     // The back face from the rim inwards, as the rear chamber takes it.
     let points = disk.sample(FACE_SAMPLES);
@@ -278,6 +297,25 @@ mod tests {
             ..vanes
         };
         input
+    }
+
+    #[test]
+    fn a_double_entry_impeller_gets_no_back_vanes() {
+        let c = MeridionalContour::build(
+            &basis(),
+            &with_vanes(false, BackVaneSettings::default()),
+            2.0,
+        )
+        .unwrap();
+        // The vanes are not built (no band) and the contour says why.
+        assert!(c.back_vanes.as_ref().is_none_or(|v| v.band.is_empty()));
+        assert!(
+            c.material_warnings
+                .iter()
+                .any(|w| w.contains("double-entry impeller has no rear shroud")),
+            "{:?}",
+            c.material_warnings
+        );
     }
 
     #[test]

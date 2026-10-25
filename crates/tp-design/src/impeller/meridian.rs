@@ -647,6 +647,7 @@ impl MeridionalContour {
             basis,
             &settings,
             seals.rear.as_ref(),
+            eyes,
         );
         if let Some(v) = &vanes {
             wires.warnings.extend(v.warnings.iter().cloned());
