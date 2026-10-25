@@ -268,8 +268,9 @@ pub(crate) fn ring_spans(g: &ImpellerGeometry) -> (Vec<RingSpan>, Vec<String>) {
             }
         }
     }
-    // A ring shorter than its seal (the front casing ring by the axial gap, the rear rings
-    // by the slope of the back face) shortens the leak path the seal length stands for.
+    // The front casing ring (L − s_ax) and the rear rings (the slope of the back face) are
+    // shorter than their seals by design; only a ring under half the seal is no longer a
+    // working seal.
     for span in &spans {
         let seal = match span.kind {
             RingKind::FrontImpeller | RingKind::FrontCasing => c.seals.front,
@@ -277,7 +278,7 @@ pub(crate) fn ring_spans(g: &ImpellerGeometry) -> (Vec<RingSpan>, Vec<String>) {
         };
         if let Some(seal) = seal {
             let length = span.z_high - span.z_low;
-            if length < 0.95 * seal.length {
+            if length < 0.5 * seal.length {
                 warnings.push(format!(
                     "the {} is {:.1} mm long, shorter than the {:.1} mm of its seal",
                     span.kind.label().to_lowercase(),
@@ -1186,12 +1187,8 @@ mod tests {
                 "rear-casing-ring"
             ]
         );
-        // Only the rings shorter than their seals are noted.
-        assert!(
-            cad.warnings.iter().all(|w| w.contains("shorter than")),
-            "{:?}",
-            cad.warnings
-        );
+        // A default design builds without a warning.
+        assert!(cad.warnings.is_empty(), "{:?}", cad.warnings);
     }
 
     #[test]
@@ -1246,7 +1243,7 @@ mod tests {
             assert!(s.z_low >= face - 1e-12, "{kind:?}: {} < {face}", s.z_low);
             // The shortening is reported.
             let name = kind.label().to_lowercase();
-            let short = s.z_high - s.z_low < 0.95 * rear.length;
+            let short = s.z_high - s.z_low < 0.5 * rear.length;
             assert_eq!(
                 warnings
                     .iter()

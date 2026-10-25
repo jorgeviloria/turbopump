@@ -917,10 +917,7 @@ mod cad {
             }
             // Only a fillet radius reduced to fit the outlet corner may be reported.
             assert!(
-                report
-                    .problems
-                    .iter()
-                    .all(|p| p.contains("did not fit") || p.contains("shorter than")),
+                report.problems.iter().all(|p| p.contains("did not fit")),
                 "{:?}",
                 report.problems
             );
