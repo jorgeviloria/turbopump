@@ -213,6 +213,7 @@ impl Project {
                 volute: Some(VoluteLossGeometry::from_design(&design)),
                 double_volute_wrap: design.rib.map(|r| r.wrap),
                 throat_integral: Some(design.throat_integral()?),
+                cutwater: Some((design.cutwater_flow_angle, design.cutwater_angle)),
             })
         };
         let kind = |at: usize| components.get(at).map(|c| c.kind());
@@ -228,6 +229,7 @@ impl Project {
                     volute: None,
                     double_volute_wrap: None,
                     throat_integral: None,
+                    cutwater: None,
                 }
             }
             Some(ComponentKind::Stator { vaned: false })
