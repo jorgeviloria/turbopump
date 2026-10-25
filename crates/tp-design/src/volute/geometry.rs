@@ -13,8 +13,8 @@ use super::cutwater::CutwaterSlice;
 use super::section::Bend;
 use super::stress::WallStress;
 use super::{
-    CrossSections, CutwaterShape, DischargeShape, SectionSize, StraightWall, VoluteDesign,
-    VoluteInput,
+    CrossSections, CutwaterShape, DiffuserGrowth, DischargeShape, SectionSize, StraightWall,
+    VoluteDesign, VoluteInput,
 };
 use crate::outlet::ImpellerOutlet;
 use crate::{DesignError, Param};
@@ -516,7 +516,16 @@ impl VoluteGeometry {
             return None;
         }
         let sign = self.basis.rotation_sign;
-        let mean = |p: Vec<DVec3>| p.iter().copied().sum::<DVec3>() / p.len() as f64;
+        // Centroid of the area of a planar outline, by a fan of triangles.
+        let mean = |p: Vec<DVec3>| {
+            let (mut sum, mut area) = (DVec3::ZERO, 0.0);
+            for w in p[1..].windows(2) {
+                let a = (w[0] - p[0]).cross(w[1] - p[0]).length();
+                sum += a * (p[0] + w[0] + w[1]) / 3.0;
+                area += a;
+            }
+            sum / area
+        };
         let n = self.sections.len();
         let before: Vec<(DVec3, f64)> = self.sections[n - 3..]
             .iter()
@@ -526,7 +535,21 @@ impl VoluteGeometry {
             .iter()
             .map(|s| (mean(s.points.clone()), s.area))
             .collect();
-        let slope = |a: (DVec3, f64), b: (DVec3, f64)| (b.1 - a.1) / (b.0 - a.0).length();
+        // Derivative of the parabola through three (path length, area) samples at `at`.
+        let slope = |samples: &[(DVec3, f64)], at: usize| {
+            let x: Vec<f64> = samples
+                .iter()
+                .map(|s| (s.0 - samples[0].0).length())
+                .collect();
+            (0..3)
+                .map(|i| {
+                    let (j, k) = ((i + 1) % 3, (i + 2) % 3);
+                    let weight =
+                        ((x[at] - x[j]) + (x[at] - x[k])) / ((x[i] - x[j]) * (x[i] - x[k]));
+                    samples[i].1 * weight
+                })
+                .sum::<f64>()
+        };
         // Curvature of the circle through three points.
         let curvature = |p: [DVec3; 3]| {
             let (u, v) = (p[1] - p[0], p[2] - p[1]);
@@ -537,7 +560,7 @@ impl VoluteGeometry {
             (after[1].0 - after[0].0).normalize(),
         );
         Some(ThroatJunction {
-            area_slope_ratio: slope(after[0], after[1]) / slope(before[1], before[2]),
+            area_slope_ratio: slope(&after, 0) / slope(&before, 2),
             curvature_before: curvature([before[0].0, before[1].0, before[2].0]),
             curvature_after: curvature([after[0].0, after[1].0, after[2].0]),
             direction_turn: last.dot(first).clamp(-1.0, 1.0).acos(),
@@ -755,7 +778,11 @@ impl VoluteGeometry {
             }
         }
         let clear_start = start + 2f64.to_radians();
-        let (nozzle, nozzle_bend, nozzle_length) = nozzle(&design, &throat, sign, axis)?;
+        // Growth of the area of the spiral per metre of the centroid path at the throat.
+        let spiral_slope = (throat.size.area - before.area)
+            / (position(TAU, &throat.size) - position(TAU - 0.02, &before)).length();
+        let (nozzle, nozzle_bend, nozzle_length) =
+            nozzle(&design, &throat, sign, axis, spiral_slope)?;
         let nozzle_axis = nozzle.last().map_or(axis, |n| n.tangent);
         // A sharp or rounded cutwater: the spiral starts at the cutwater and cuts the
         // inner wall of the diffuser. When the wall turns away instead (a radial
@@ -1459,6 +1486,7 @@ fn nozzle(
     throat: &VoluteSection,
     sign: f64,
     axis: DVec3,
+    spiral_slope: f64,
 ) -> Result<(Vec<NozzleSection>, f64, f64), DesignError> {
     let theta = sign * TAU;
     let radial = DVec3::new(theta.cos(), theta.sin(), 0.0);
@@ -1513,7 +1541,16 @@ fn nozzle(
                 .zip(&circle)
                 .map(|(t, c)| t.lerp(*c, w))
                 .collect();
-            let radius = r1 + (r2 - r1) * s;
+            let radius = match design.diffuser.growth {
+                DiffuserGrowth::Linear => r1 + (r2 - r1) * s,
+                DiffuserGrowth::Matched => {
+                    // Quadratic area A₀ + a·s + (A₁ − A₀ − a)·s², with the slope of the
+                    // spiral at the throat, as far as the outlet area allows.
+                    let (a0, a1) = (PI * r1 * r1, PI * r2 * r2);
+                    let a = (spiral_slope * length).clamp(0.0, (a1 - a0).max(0.0));
+                    ((a0 + a * s + (a1 - a0 - a) * s * s) / PI).sqrt()
+                }
+            };
             let scale = radius / r1 * (circle_area / polygon_area(&blend).abs()).sqrt();
             let lowest = blend.iter().map(|p| p.x).fold(f64::INFINITY, f64::min) * scale;
             let highest = blend.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max) * scale;
@@ -1679,17 +1716,71 @@ mod tests {
         }
     }
 
+    /// The cases of `junction_cases` with the given growth law of the diffuser.
+    fn junction_cases_with(growth: DiffuserGrowth) -> Vec<(String, VoluteGeometry)> {
+        let mut cases = Vec::new();
+        for (name, shape) in [
+            ("trapezoid", SectionShape::default()),
+            ("rectangle", SectionShape::rectangular()),
+            ("round", SectionShape::round()),
+        ] {
+            for radial in [false, true] {
+                let mut input = unturned();
+                input.cross_section = CrossSectionInput::single(shape.clone());
+                input.diffuser.growth = growth;
+                if radial {
+                    input.diffuser.shape = DischargeShape::default();
+                }
+                let g = VoluteGeometry::build(&reference_basis(), &input).unwrap();
+                cases.push((
+                    format!("{name} {}", if radial { "radial" } else { "tangential" }),
+                    g,
+                ));
+            }
+        }
+        cases
+    }
+
     #[test]
-    #[ignore = "phase 1 of the throat plan: the diffuser still grows its area from the throat \
-                with a slope several times that of the spiral"]
-    fn the_area_law_has_no_break_at_the_throat() {
-        for (name, g) in junction_cases() {
+    fn the_matched_law_has_no_break_in_the_area_at_the_throat() {
+        for (name, g) in junction_cases_with(DiffuserGrowth::Matched) {
             let j = g.throat_junction().expect("a single volute");
+            // The break of the linear law is ×4.9 to ×5.5.
             assert!(
-                (0.8..=1.2).contains(&j.area_slope_ratio),
+                (0.9..=1.1).contains(&j.area_slope_ratio),
                 "{name}: the area slope jumps ×{:.2} at the throat",
                 j.area_slope_ratio
             );
+        }
+    }
+
+    #[test]
+    fn both_laws_start_at_the_throat_and_end_at_the_outlet_area() {
+        let linear = junction_cases_with(DiffuserGrowth::Linear);
+        let matched = junction_cases_with(DiffuserGrowth::Matched);
+        for ((name, a), (_, b)) in linear.iter().zip(&matched) {
+            for g in [a, b] {
+                let (first, last) = (&g.nozzle[0], g.nozzle.last().unwrap());
+                assert_relative_eq!(first.area, g.design.throat.area, max_relative = 1e-9);
+                let outlet = PI * g.design.diffuser.outlet_diameter.powi(2) / 4.0;
+                assert_relative_eq!(last.area, outlet, max_relative = 1e-9);
+                assert!(
+                    g.nozzle.windows(2).all(|w| w[1].area > w[0].area),
+                    "{name}: the area must grow along the diffuser"
+                );
+            }
+            // Same inlet, same outlet, same length: only the law between them differs.
+            assert_relative_eq!(a.nozzle_length, b.nozzle_length, max_relative = 1e-12);
+            assert_eq!(a.nozzle.len(), b.nozzle.len());
+        }
+    }
+
+    #[test]
+    fn the_default_law_is_the_linear_one() {
+        let default = geometry(SectionShape::default());
+        let linear = junction_cases_with(DiffuserGrowth::Linear).remove(0).1;
+        for (a, b) in default.nozzle.iter().zip(&linear.nozzle) {
+            assert_eq!(a.points, b.points);
         }
     }
 

@@ -40,7 +40,7 @@ use crate::{DesignError, Param};
 use tp_units::STANDARD_GRAVITY;
 
 pub use cutwater::CutwaterSlice;
-pub use geometry::{NozzleSection, RibPlane, VoluteGeometry, VoluteSection};
+pub use geometry::{NozzleSection, RibPlane, ThroatJunction, VoluteGeometry, VoluteSection};
 pub use section::{
     BendWall, BezierBase, BezierSide, CrossSectionInput, CrossSections, DEFAULT_CONE_ANGLE_DEG,
     ExternalRound, InnerPosition, InternalRound, Measure, RadiusSide, SectionDefinition,
@@ -313,6 +313,21 @@ impl Default for DischargeShape {
     }
 }
 
+/// How the area of the discharge diffuser grows from the throat to the outlet. Gülich
+/// (Eqs. 1.44 and 1.45) limits the opening angle but does not give the law between the
+/// two areas, so both laws are our choice.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiffuserGrowth {
+    /// The equivalent radius grows linearly, so the area gains slope from the first
+    /// step: several times that of the last section of the spiral, a break at the throat.
+    #[default]
+    Linear,
+    /// The area is quadratic along the centerline, starts with the slope of the spiral
+    /// at the throat and reaches the outlet area: no break at the throat.
+    Matched,
+}
+
 /// Inputs of the discharge-diffuser step.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -334,6 +349,8 @@ pub struct DischargeInput {
     /// x axis, counter-clockwise about z, rad. Automatic: the discharge points along +y,
     /// vertically up in the front view.
     pub rotation: Param<f64>,
+    /// Law of the area from the throat to the outlet.
+    pub growth: DiffuserGrowth,
 }
 
 /// Shape of the cutwater where the spiral meets the discharge diffuser (Gülich Chap.
@@ -588,6 +605,8 @@ pub struct SectionSize {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DischargeDiffuser {
     pub shape: DischargeShape,
+    /// Law of the area from the throat to the outlet.
+    pub growth: DiffuserGrowth,
     /// Mean radius of the bend of a radial discharge; 0 for a straight one, m.
     pub bend_radius: f64,
     /// Length along the centerline from the throat, m: the bend of a radial discharge
@@ -1618,6 +1637,7 @@ impl VoluteDesign {
         let opening_angle = (r1 / length * (area_ratio.sqrt() - 1.0)).atan();
         Ok(DischargeDiffuser {
             shape: input.shape,
+            growth: input.growth,
             bend_radius,
             length,
             inlet_area: throat_area,

@@ -9,9 +9,9 @@ use tp_design::outlet::Reach;
 use tp_design::volute::stress::StressPlace;
 use tp_design::volute::{
     AreaLaw, BendWall, BezierBase, BezierSide, CutwaterShape, DEFAULT_CONE_ANGLE_DEG,
-    DischargeShape, ExternalRound, InnerPosition, InternalRound, Progression, RadiusSide,
-    SectionDefinition, SectionShape, SegmentPoint, SideShape, StraightWall, VoluteGeometry,
-    VoluteInput, VoluteKind,
+    DiffuserGrowth, DischargeShape, ExternalRound, InnerPosition, InternalRound, Progression,
+    RadiusSide, SectionDefinition, SectionShape, SegmentPoint, SideShape, StraightWall,
+    VoluteGeometry, VoluteInput, VoluteKind,
 };
 use tp_project::{ComponentId, ComponentKind, Project, VOLUTE_STEPS};
 use tp_units::{DisplayUnits, QuantityKind, parse_quantity_or};
@@ -63,7 +63,7 @@ pub(crate) struct VoluteArgs {
     /// semicircle), channel_ratio (outlet area of the outer channel over the first
     /// throat), discharge (radial, the default, with the outlet on the pump centerline,
     /// or radial:DEGREES from the line through the pump axis; tangential, opening to both
-    /// sides; tangential:inner or tangential:outer with that wall straight), bend (bend radius of a radial discharge), rotation (angle
+    /// sides; tangential:inner or tangential:outer with that wall straight), bend (bend radius of a radial discharge), growth (area of the diffuser from the throat: linear, the default, or matched, which starts with the slope of the spiral), rotation (angle
     /// of the cutwater from the x axis; auto turns the discharge vertically up), cutwater
     /// (tangent, sharp or rounded), nose (radius of a rounded cutwater), height (H, the
     /// outlet face from the pump axis, which sets the diffuser length), dn (on: round the
@@ -716,6 +716,13 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
         "rib_comp_start" => input.setup.rib_compensation_start = quantity(Angle)?,
         "discharge" => input.diffuser.shape = parse_discharge(value)?,
         "bend" => input.diffuser.bend_radius = quantity(Length)?,
+        "growth" => {
+            input.diffuser.growth = match value {
+                "linear" => DiffuserGrowth::Linear,
+                "matched" => DiffuserGrowth::Matched,
+                _ => return Err(format!("growth must be linear or matched, got {value:?}")),
+            }
+        }
         "rotation" => input.diffuser.rotation = quantity(Angle)?,
         "cutwater" => {
             input.cutwater.shape = match value {
