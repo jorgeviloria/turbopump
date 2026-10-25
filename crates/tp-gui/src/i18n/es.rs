@@ -3292,6 +3292,26 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Opacity of {}", "Opacidad: {}"),
     ("Click for {}", "Con un clic: {}"),
     ("Color of {}", "Color: {}"),
+    (
+        "1.25·NPSH₃, and at least NPSH₃ + 0.6 m",
+        "1,25·NPSH₃, y como mínimo NPSH₃ + 0,6 m",
+    ),
+    (
+        "The NPSH available is above the NPSH₃ at the design flow, but with a small margin: noise, vibration or erosion may follow.",
+        "El NPSH disponible supera el NPSH₃ al caudal de diseño, pero con poco margen: puede haber ruido, vibraciones o erosión.",
+    ),
+    (
+        "for water at u₁ = {}: σ_A ≥ σ₃ + 0.05 + 2·(u₁/100 m/s)³",
+        "para agua con u₁ = {}: σ_A ≥ σ₃ + 0,05 + 2·(u₁/100 m/s)³",
+    ),
+    (
+        "u₁ = {} is above 50 m/s: the cavity length or the noise must be checked against experience (Table 6.1)",
+        "u₁ = {} supera 50 m/s: hay que comprobar la longitud de la cavidad o el ruido con la experiencia (tabla 6.1)",
+    ),
+    (
+        "Margin F_NPSH = NPSHa/NPSH₃ = {}. Gülich's Table 6.2 asks for NPSHa of at least {}: {}.",
+        "Margen F_NPSH = NPSHa/NPSH₃ = {}. La tabla 6.2 de Gülich pide un NPSHa de al menos {}: {}.",
+    ),
     ("Curve", "Curva"),
     (
         "They shape the curve but are seldom changed",

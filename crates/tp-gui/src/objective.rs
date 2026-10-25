@@ -324,39 +324,73 @@ fn prediction(
         ));
     }
 
-    // Cavitation: the NPSH₃ against the NPSH available.
+    // Cavitation: the NPSH₃ against the NPSH available, and the margin Gülich's Table
+    // 6.2 asks of it.
     dot(ui, p);
-    let enough = perf.npsh_available > perf.design.npsh_required;
-    let (glyph, color) = if enough {
-        (icon::CHECK_CIRCLE, p.done)
-    } else {
+    use tp_design::npsh::{MarginRule, available_need};
+    let (npsh3, npsha) = (perf.design.npsh_required, perf.npsh_available);
+    let u1 = main.inlet_shroud.triangle.u;
+    let water = matches!(project.setup().fluid.as_str(), "Water" | "HeavyWater");
+    let need = available_need(npsh3, u1, water);
+    let cavitates = npsha <= npsh3;
+    let small = !cavitates && (npsha < need.required || need.rule == MarginRule::CheckCavity);
+    let (glyph, color) = if cavitates {
         (icon::X_CIRCLE, error)
+    } else if small {
+        (icon::WARNING, warn)
+    } else {
+        (icon::CHECK_CIRCLE, p.done)
     };
     let mut line = Line::new();
     if detail == Detail::Compact {
         line.text("NPSH ", p.text);
     } else {
-        line.value(
-            "NPSH₃",
-            &units.show(QuantityKind::Head, perf.design.npsh_required),
-            p,
-        )
-        .text(" / ", p.weak)
-        .value(
-            "NPSHa",
-            &units.show(QuantityKind::Head, perf.npsh_available),
-            p,
-        );
+        line.value("NPSH₃", &units.show(QuantityKind::Head, npsh3), p)
+            .text(" / ", p.weak)
+            .value("NPSHa", &units.show(QuantityKind::Head, npsha), p);
     }
     line.text(&format!(" {glyph}"), color);
-    let tip = if enough {
-        tr("The NPSH₃ at the design flow is below the NPSH available of the inlet conditions.")
+    let speed = units.show(QuantityKind::Velocity, u1);
+    let rule = match need.rule {
+        MarginRule::Minimum => tr("1.25·NPSH₃, and at least NPSH₃ + 0.6 m").to_owned(),
+        MarginRule::Water => tf(
+            "for water at u₁ = {}: σ_A ≥ σ₃ + 0.05 + 2·(u₁/100 m/s)³",
+            &[&speed],
+        ),
+        MarginRule::CheckCavity => tf(
+            "u₁ = {} is above 50 m/s: the cavity length or the noise must be checked against experience (Table 6.1)",
+            &[&speed],
+        ),
+    };
+    let margin = tf(
+        "Margin F_NPSH = NPSHa/NPSH₃ = {}. Gülich's Table 6.2 asks for NPSHa of at least {}: {}.",
+        &[
+            &format!("{:.2}", npsha / npsh3.max(f64::EPSILON)),
+            &units.show(QuantityKind::Head, need.required),
+            &rule,
+        ],
+    );
+    let tip = if cavitates {
+        format!(
+            "{}\n{margin}",
+            tr(
+                "The NPSH₃ at the design flow reaches the NPSH available of the inlet conditions: the pump cavitates."
+            )
+        )
+    } else if small {
+        format!(
+            "{}\n{margin}",
+            tr(
+                "The NPSH available is above the NPSH₃ at the design flow, but with a small margin: noise, vibration or erosion may follow."
+            )
+        )
     } else {
-        tr(
-            "The NPSH₃ at the design flow reaches the NPSH available of the inlet conditions: the pump cavitates.",
+        format!(
+            "{}\n{margin}",
+            tr("The NPSH₃ at the design flow is below the NPSH available of the inlet conditions.")
         )
     };
-    curves(chip(ui, "npsh", &mut line, tip));
+    curves(chip(ui, "npsh", &mut line, &tip));
 
     // Where the best efficiency is.
     if detail == Detail::Full && perf.design.flow > 0.0 {

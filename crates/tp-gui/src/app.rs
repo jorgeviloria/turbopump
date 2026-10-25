@@ -2718,6 +2718,33 @@ mod tests {
     }
 
     #[test]
+    fn the_objective_strip_warns_of_a_small_npsh_margin() {
+        use egui_kittest::kittest::NodeT;
+        let npsh = |pressure: f64| {
+            let mut project = default_project();
+            let mut setup = project.setup().clone();
+            setup.inlet.total_pressure = pressure;
+            project.set_setup(setup).unwrap();
+            let mut harness = Harness::builder()
+                .with_size([1440.0, 900.0])
+                .build_eframe(move |_| TurbopumpApp::with_document(Document::new(project)));
+            harness.run();
+            harness.run();
+            harness
+                .get_all_by_label_contains("NPSHa")
+                .find_map(|n| n.accesskit_node().label())
+                .unwrap()
+        };
+        // About 10 m available: twice the NPSH₃, well above Table 6.2.
+        assert!(npsh(101_325.0).contains(icon::CHECK_CIRCLE));
+        // About 5 m: above the NPSH₃ of 4.4 m, short of the 1.25·NPSH₃ it asks.
+        let small = npsh(51_000.0);
+        assert!(small.contains(icon::WARNING), "{small}");
+        // Below the NPSH₃: the pump cavitates.
+        assert!(npsh(40_000.0).contains(icon::X_CIRCLE));
+    }
+
+    #[test]
     fn the_inlet_duct_is_a_component_ahead_of_the_impeller() {
         let mut harness = editor();
         let id = harness.state().active_impeller().unwrap();

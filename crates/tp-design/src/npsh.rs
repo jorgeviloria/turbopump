@@ -365,6 +365,60 @@ pub fn npsh3_band(omega: f64, flow_per_eye: f64, cm1: f64, w1: f64, nss: (f64, f
     }
 }
 
+/// Which rule of Gülich's Table 6.2 sets the NPSH available a pump needs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum MarginRule {
+    /// The minimum for any pump: NPSH_A ≥ 1.25·NPSH₃, and at least NPSH₃ + 0.6 m.
+    Minimum,
+    /// Water at u₁ = 10 to 50 m/s, to limit noise, vibration and erosion:
+    /// σ_A ≥ σ₃ + F_R·F_F·{0.05 + 2·(u₁/u_Ref)³}, u_Ref = 100 m/s.
+    Water,
+    /// Water at u₁ above 50 m/s: past the margins of the table, the cavity length or
+    /// noise must be checked against experience (Table 6.1); the minimum still holds.
+    CheckCavity,
+}
+
+/// The NPSH available a pump needs to run safely at its design flow, after Gülich 2nd
+/// ed., Table 6.2 (Chap. 6.7, p. 326), and the rule that set it.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct AvailableNeed {
+    /// NPSH_A needed, m.
+    pub required: f64,
+    pub rule: MarginRule,
+}
+
+/// Peripheral speed u_Ref of Table 6.2, m/s.
+const REFERENCE_SPEED: f64 = 100.0;
+
+/// What Gülich's Table 6.2 asks of the NPSH available, from the NPSH₃ at the design
+/// flow (m), the peripheral speed u₁ at the impeller inlet (m/s) and whether the liquid
+/// is water. For water the fluid factor F_F is 1 (dissolved gas above 5 ppm, below
+/// 200 °C) and the risk factor F_R is 1 (operation at 0.8 < q* < 1.1); σ = 2g·NPSH/u₁²
+/// (eq. 6.5). Other liquids take the minimum only.
+pub fn available_need(npsh3: f64, u1: f64, water: bool) -> AvailableNeed {
+    let minimum = (1.25 * npsh3).max(npsh3 + 0.6);
+    let head = u1 * u1 / (2.0 * G);
+    if water && u1 > 50.0 {
+        return AvailableNeed {
+            required: minimum,
+            rule: MarginRule::CheckCavity,
+        };
+    }
+    if water && u1 >= 10.0 {
+        let water = npsh3 + head * (0.05 + 2.0 * (u1 / REFERENCE_SPEED).powi(3));
+        if water > minimum {
+            return AvailableNeed {
+                required: water,
+                rule: MarginRule::Water,
+            };
+        }
+    }
+    AvailableNeed {
+        required: minimum,
+        rule: MarginRule::Minimum,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -569,5 +623,27 @@ mod tests {
         let q = curve.cavitation_flow(available, 1.5 * flow).unwrap();
         assert_relative_eq!(q, 1.1 * flow, max_relative = 1e-6);
         assert!(curve.cavitation_flow(100.0, 1.5 * flow).is_none());
+    }
+
+    #[test]
+    fn the_available_npsh_needs_the_margin_of_table_6_2() {
+        // Small NPSH₃: 0.6 m over it rules; large: a quarter of it.
+        let small = available_need(1.0, 5.0, true);
+        assert_eq!(small.rule, MarginRule::Minimum);
+        assert_relative_eq!(small.required, 1.6);
+        assert_relative_eq!(available_need(8.0, 5.0, false).required, 10.0);
+        // Water at 30 m/s: σ_A ≥ σ₃ + 0.05 + 2·0.3³ = σ₃ + 0.104, or 4.77 m over NPSH₃,
+        // more than the minimum.
+        let water = available_need(4.0, 30.0, true);
+        assert_eq!(water.rule, MarginRule::Water);
+        let head = 30.0 * 30.0 / (2.0 * G);
+        assert_relative_eq!(water.required, 4.0 + head * 0.104, max_relative = 1e-12);
+        // The same pump on another liquid takes the minimum.
+        assert_eq!(available_need(4.0, 30.0, false).rule, MarginRule::Minimum);
+        // Past 50 m/s the table asks for the cavity to be checked.
+        assert_eq!(
+            available_need(4.0, 60.0, true).rule,
+            MarginRule::CheckCavity
+        );
     }
 }
