@@ -30,3 +30,40 @@ pub enum CadError {
     #[error("{0}")]
     Io(String),
 }
+
+/// At most two CAD tests build at once on the machine, across test threads, test
+/// binaries and checkouts: cargo runs one test per core, and each holds large shapes
+/// and runs OCCT on several threads. All at once froze a 16 GB laptop.
+#[cfg(test)]
+pub(crate) mod test_slot {
+    use std::fs::File;
+    use std::time::Duration;
+
+    const SLOTS: usize = 2;
+
+    /// Holds a slot until dropped (the lock goes with the file).
+    pub(crate) struct Slot {
+        _lock: Option<File>,
+    }
+
+    pub(crate) fn take() -> Slot {
+        loop {
+            for k in 0..SLOTS {
+                let path = std::env::temp_dir().join(format!("turbopump-cad-slot-{k}.lock"));
+                let Ok(file) = File::options()
+                    .create(true)
+                    .truncate(false)
+                    .write(true)
+                    .open(path)
+                else {
+                    // No lock files here: run unthrottled rather than fail.
+                    return Slot { _lock: None };
+                };
+                if file.try_lock().is_ok() {
+                    return Slot { _lock: Some(file) };
+                }
+            }
+            std::thread::sleep(Duration::from_millis(250));
+        }
+    }
+}

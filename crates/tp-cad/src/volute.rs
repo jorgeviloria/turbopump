@@ -211,7 +211,7 @@ pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
     let ring_volume = ring.volume_with_tolerance(0.0);
     let whole = |channel: &Shape| channel.volume_with_tolerance(0.0) > 0.9 * pieces;
     let joined = first_sound(
-        |fuzzy| fuse_all(&lofts, fuzzy),
+        |fuzzy| occ::fuse_all_fuzzy(&lofts, fuzzy),
         |channel| channel.is_valid() && channel.solid_count() == 1 && whole(channel),
         |channel| channel.fixed().ok(),
     )?;
@@ -224,7 +224,7 @@ pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
     // ring), the rib's take something away. The body may cut the start of a spiral
     // that starts small off the rest of the channel: the ring joins them again.
     let carve = |shape: &Shape, ring: bool| -> Result<Shape, CadError> {
-        let mut carved = shape.rotated_z(0.0)?;
+        let mut carved = shape.copied()?;
         for (tool, faces, noses) in &tools {
             let probes = if ring { noses } else { faces };
             let before = carved.volume_with_tolerance(0.0);
@@ -530,8 +530,7 @@ pub fn build_volute_casing(g: &VoluteGeometry, cad: &VoluteCad) -> Result<Volute
     // the fillet only adds material outside, so it cannot reach the flow.
     let radius = g.design.cutwater_fillet * MM;
     let enclose = |fuzzy: f64| -> Result<(Shape, f64, Option<f64>), CadError> {
-        let space = cad.fluid.fuse_fuzzy(&impeller, fuzzy)?;
-        let mut whole = fuse_all(&outer, fuzzy)?;
+        let mut whole = occ::fuse_all_fuzzy(&outer, fuzzy)?;
         // The radius it took; 0 when asked for none.
         let mut rounded = Some(0.0);
         if radius > 0.0 && !g.cutwater_slices.is_empty() {
@@ -541,7 +540,9 @@ pub fn build_volute_casing(g: &VoluteGeometry, cad: &VoluteCad) -> Result<Volute
             });
         }
         let gross = whole.volume_with_tolerance(0.0);
-        Ok((whole.cut_fuzzy(&space, fuzzy)?, gross, rounded))
+        // The flow and the space of the impeller come out together.
+        let solid = whole.cut_all_fuzzy(&[&cad.fluid, &impeller], fuzzy)?;
+        Ok((solid, gross, rounded))
     };
     let sound = |(solid, gross, _): &(Shape, f64, Option<f64>)| {
         solid.is_valid()
@@ -703,16 +704,6 @@ fn flange(g: &VoluteGeometry, f: &tp_design::volute::Flange) -> Result<Shape, Ca
     disk.cut(&bore)?.cut(&occ::compound(&holes)?)
 }
 
-/// The union of `pieces`.
-fn fuse_all(pieces: &[Shape], fuzzy: f64) -> Result<Shape, CadError> {
-    // A turn by zero copies the first piece for this attempt.
-    let mut whole = pieces[0].rotated_z(0.0)?;
-    for piece in &pieces[1..] {
-        whole = whole.fuse_fuzzy(piece, fuzzy)?;
-    }
-    Ok(whole)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -797,6 +788,7 @@ mod tests {
 
     #[test]
     fn volute_channel_and_fluid_domain_are_valid_solids() {
+        let _slot = crate::test_slot::take();
         for sections in every_cross_section() {
             let input = VoluteInput {
                 cross_section: sections,
@@ -1081,6 +1073,7 @@ mod tests {
 
     #[test]
     fn the_casing_wraps_the_flow_domain_in_one_solid() {
+        let _slot = crate::test_slot::take();
         use tp_design::volute::VoluteKind;
         // The trapezoidal default, rectangles whose flat sides meet in the throat, and
         // a double volute.
@@ -1119,6 +1112,7 @@ mod tests {
 
     #[test]
     fn the_casing_fills_and_rounds_the_groove_over_the_cutwater() {
+        let _slot = crate::test_slot::take();
         // Round sections take a smaller radius there.
         for (shape, whole_radius) in [
             (SectionShape::default(), true),
@@ -1137,7 +1131,7 @@ mod tests {
             let (whole, (filled, took)) = FUZZY_GAPS
                 .into_iter()
                 .find_map(|fuzzy| {
-                    let whole = fuse_all(&pieces, fuzzy).ok()?;
+                    let whole = occ::fuse_all_fuzzy(&pieces, fuzzy).ok()?;
                     let filled = fill_groove(&whole, &pieces, &g, radius)?;
                     Some((whole, filled))
                 })
@@ -1174,6 +1168,7 @@ mod tests {
 
     #[test]
     fn a_double_volute_is_one_valid_solid() {
+        let _slot = crate::test_slot::take();
         let double = |edit: &dyn Fn(&mut VoluteInput)| {
             let mut input = VoluteInput::default();
             input.setup.kind = tp_design::volute::VoluteKind::Double;
@@ -1240,6 +1235,7 @@ mod tests {
 
     #[test]
     fn an_internal_volute_is_one_solid_with_its_bend() {
+        let _slot = crate::test_slot::take();
         use tp_design::volute::{InternalRound, SectionShape};
         for open_to_right in [true, false] {
             let input = VoluteInput {
@@ -1285,6 +1281,7 @@ mod tests {
 
     #[test]
     fn polygons_split_at_their_corners() {
+        let _slot = crate::test_slot::take();
         // A unit square with the corner at (1, 1) rounded by a quarter circle of 12
         // segments: the rounded side, tangent at both ends, is one curved run.
         let mut points = vec![DVec2::new(0.0, 0.0), DVec2::new(1.0, 0.0)];
@@ -1306,6 +1303,7 @@ mod tests {
 
     #[test]
     fn common_volute_options_give_one_valid_flow_domain() {
+        let _slot = crate::test_slot::take();
         use tp_design::volute::{CutwaterShape, DischargeShape, StraightWall};
         for shape in [SectionShape::default(), SectionShape::rectangular()] {
             for discharge in [
@@ -1339,6 +1337,7 @@ mod tests {
 
     #[test]
     fn spiral_development_options_give_one_valid_flow_domain() {
+        let _slot = crate::test_slot::take();
         use tp_design::Param;
         use tp_design::volute::AreaLaw;
         type Setting = fn(&mut VoluteInput);
@@ -1371,6 +1370,7 @@ mod tests {
 
     #[test]
     fn cutwater_and_discharge_shapes_give_valid_solids() {
+        let _slot = crate::test_slot::take();
         use tp_design::Param;
         use tp_design::volute::{CutwaterShape, DischargeShape, StraightWall};
         let fluid = |cutwater: CutwaterShape, discharge: DischargeShape| -> f64 {

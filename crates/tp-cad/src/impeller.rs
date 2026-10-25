@@ -617,6 +617,7 @@ mod tests {
     /// the build is shared), then one finished with fillets and balance holes.
     #[test]
     fn reference_impeller_solids() {
+        let _slot = crate::test_slot::take();
         let g = reference();
         let sharp = CadOptions {
             fillet_radius: Some(0.0),
@@ -727,6 +728,7 @@ mod tests {
 
     #[test]
     fn the_material_contours_set_the_impeller_solid() {
+        let _slot = crate::test_slot::take();
         // The material as Pappus sees it: hub disk and shroud regions revolved.
         let pappus = |g: &ImpellerGeometry| {
             let region = |wall: &tp_design::impeller::wall::Wall, wire: &Wall| {
@@ -759,6 +761,7 @@ mod tests {
 
     #[test]
     fn designed_side_chambers_are_revolved_into_their_fluid() {
+        let _slot = crate::test_slot::take();
         let g = reference();
         assert!(
             build_impeller(&g, &CadOptions::default())
@@ -784,6 +787,7 @@ mod tests {
 
     #[test]
     fn a_modelled_inlet_duct_is_revolved_into_its_fluid() {
+        let _slot = crate::test_slot::take();
         let mut input = tp_design::impeller::ImpellerGeometryInput::default();
         input.meridional.chambers.enabled = true;
         input.meridional.inlet_duct.enabled = true;
@@ -803,6 +807,7 @@ mod tests {
 
     #[test]
     fn shaped_edges_loft_a_valid_blade() {
+        let _slot = crate::test_slot::take();
         use tp_design::impeller::blade::EdgeShape;
         let plain = blade_solid(&reference(), 0.0).unwrap();
         let mut input = tp_design::impeller::ImpellerGeometryInput::default();
@@ -830,6 +835,7 @@ mod tests {
 
     #[test]
     fn rejects_bad_options() {
+        let _slot = crate::test_slot::take();
         let g = reference();
         // Holes that do not fit between boss and rear seal.
         let big_holes = CadOptions {

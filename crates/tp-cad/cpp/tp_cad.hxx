@@ -38,8 +38,9 @@ std::unique_ptr<Shape> loft_solid(const ShapeList &wires);
 std::unique_ptr<Shape> prism_z(const Shape &face, double height);
 std::unique_ptr<Shape> rotate_z(const Shape &shape, double angle);
 std::unique_ptr<Shape> fix_shape(const Shape &shape);
-std::unique_ptr<Shape> boolean_op(const Shape &a, const Shape &b, std::uint8_t op,
-                                  double fuzzy);
+std::unique_ptr<Shape> boolean_op(const ShapeList &arguments, const ShapeList &tools,
+                                  std::uint8_t op, double fuzzy);
+std::unique_ptr<Shape> copy_shape(const Shape &shape);
 std::unique_ptr<Shape> make_compound(const ShapeList &shapes);
 
 std::unique_ptr<Shape> cylinder(const P3 &base, const P3 &direction, double radius,

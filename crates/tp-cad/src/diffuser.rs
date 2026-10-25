@@ -124,6 +124,7 @@ mod tests {
 
     #[test]
     fn diffuser_solids_are_valid() {
+        let _slot = crate::test_slot::take();
         for vaned in [false, true] {
             let d = DiffuserDesign::new(&outlet(), &DiffuserInput::default(), vaned).unwrap();
             let cad = build_diffuser(&d).unwrap();
