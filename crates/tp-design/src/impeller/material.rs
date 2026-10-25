@@ -209,8 +209,8 @@ pub fn automatic_shroud(
     // The face runs from the rim down to the eye. The shoulder stands where it comes
     // down to the seal radius, the seat goes upstream from there. The seat must stay
     // clear of the flow: the shoulder is no further downstream than where the shroud
-    // rises to within a twentieth of a wall of the seat (that margin is our own choice).
-    let clear = seal.impeller_seat - 0.05 * m.wall_thickness;
+    // rises to within a tenth of a wall of the seat (that margin is our own choice).
+    let clear = seal.impeller_seat - 0.1 * m.wall_thickness;
     let x_limit = shroud
         .sample(OFFSET_SAMPLES)
         .windows(2)
@@ -242,7 +242,13 @@ pub fn automatic_shroud(
             (back, eye)
         }
     };
-    if corner.y < seal.radius * (1.0 - 1e-9) {
+    // A shortfall of up to a tenth of the ring thickness is taken by the ring's entry
+    // chamfer (our own choice); with no ring, up to a tenth of the wall.
+    let short = match seal.impeller_ring {
+        Some(e_r) => corner.y - seal.impeller_seat < 0.9 * e_r,
+        None => corner.y < seal.radius - 0.1 * m.wall_thickness,
+    };
+    if short {
         warnings.push(format!(
             "the front seal shoulder reaches only {:.1} mm on the shroud, below the seal radius of {:.1} mm: the shoulder is made on the face",
             corner.y * 1e3,
