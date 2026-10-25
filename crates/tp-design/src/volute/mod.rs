@@ -385,6 +385,11 @@ pub struct CutwaterInput {
     /// every plane across the inlet width. Automatic: 3°, or the latest start the walls
     /// allow if that is too late.
     pub spiral_start: Param<f64>,
+    /// Radius of the side endings of a rounded cutwater: toward each side wall of the
+    /// channel its body widens with this round between its faces and the wall, m; 0
+    /// leaves the sharp corner. Automatic: the nose radius ρ in a single volute with
+    /// sections of straight side walls (rectangular or trapezoidal), 0 for the others.
+    pub side_radius: Param<f64>,
 }
 
 /// Inputs of the wall-thickness step.
@@ -651,6 +656,8 @@ pub struct VoluteDesign {
     pub cutwater_share: f64,
     /// Obliquity ε of a rounded cutwater and of the rib nose, rad.
     pub cutwater_obliquity: f64,
+    /// Radius of the side endings of a rounded cutwater, m.
+    pub cutwater_side_radius: f64,
     pub diffuser: DischargeDiffuser,
     pub wall_thickness: f64,
     /// Radius of the fillet on the outside of the casing over the cutwater, m.
@@ -1267,6 +1274,20 @@ impl VoluteDesign {
         require((0.0..=1.0).contains(&cutwater_share), || {
             "the share of the spiral side of the cutwater must lie between 0 and 1".into()
         })?;
+        // Automatic only where the side walls are straight, in a single volute, so far:
+        // a double volute does not carve them reliably yet.
+        let straight = rib_wrap.is_none()
+            && cross_sections
+                .definitions()
+                .iter()
+                .all(|d| d.shape.straight_sided());
+        let cutwater_side_radius = input
+            .cutwater
+            .side_radius
+            .resolve(|| if straight { nose_radius } else { 0.0 });
+        require(cutwater_side_radius >= 0.0, || {
+            "the radius of the side endings of the cutwater cannot be negative".into()
+        })?;
         let cutwater_obliquity = input.cutwater.obliquity.resolve(|| 0.0);
         require(cutwater_obliquity.abs() <= MAX_OBLIQUITY, || {
             format!(
@@ -1476,6 +1497,7 @@ impl VoluteDesign {
             nose_radius,
             cutwater_share,
             cutwater_obliquity,
+            cutwater_side_radius,
             diffuser,
             wall_thickness,
             cutwater_fillet,
