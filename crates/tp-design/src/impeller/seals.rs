@@ -117,7 +117,7 @@ impl Seals {
         let front_d = self.front.diameter.resolve(|| {
             d_base
                 + if self.front.impeller_ring.enabled {
-                    2.0 * ring
+                    2.0 * self.front.impeller_ring.thickness.resolve(|| ring)
                 } else {
                     0.0
                 }
@@ -310,12 +310,23 @@ mod tests {
     fn a_ring_too_thick_for_the_eye_is_trimmed_with_a_warning() {
         let b = basis();
         let mut s = Seals::default();
-        s.front.impeller_ring.thickness = Param::Manual(0.5);
+        s.front.diameter = Param::Manual(b.inlet_diameter + 2.0 * WALL);
         let r = s.resolve(&b, WALL, 1.0);
         let f = r.front.unwrap();
         assert!((f.impeller_seat - (b.inlet_diameter / 2.0 + WALL)).abs() < 1e-12);
-        assert!(f.impeller_ring.unwrap() > 0.0);
         assert!(!r.warnings.is_empty());
+    }
+
+    #[test]
+    fn a_manual_ring_thickness_widens_the_automatic_seal() {
+        let b = basis();
+        let mut s = Seals::default();
+        s.front.impeller_ring.thickness = Param::Manual(0.01);
+        let r = s.resolve(&b, WALL, 1.0);
+        let f = r.front.unwrap();
+        assert!((f.radius - (b.inlet_diameter / 2.0 + WALL + 0.01)).abs() < 1e-12);
+        assert!((f.impeller_seat - (b.inlet_diameter / 2.0 + WALL)).abs() < 1e-12);
+        assert!(r.warnings.is_empty(), "{:?}", r.warnings);
     }
 
     #[test]
