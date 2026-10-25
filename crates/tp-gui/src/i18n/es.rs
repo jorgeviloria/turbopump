@@ -6,6 +6,40 @@
 
 /// English text → Spanish text.
 pub(super) static TEXTS: &[(&str, &str)] = &[
+    ("Nose shape", "Forma de la nariz"),
+    (
+        "As a blade edge on a body as thick as the nose: elliptic (round by default; Gülich asks for an elliptic profile), tapered, Bézier or blunt. Its pressure face is the diffuser side",
+        "Como un borde de álabe sobre un cuerpo tan grueso como la nariz: elíptica (redonda por defecto; Gülich pide un perfil elíptico), afilada, Bézier o roma. Su cara de presión es el lado del difusor",
+    ),
+    ("Join to the walls", "Unión con las paredes"),
+    (
+        "How the faces run into the spiral and diffuser walls: G1 tangent, G2 with the curvature of the wall too",
+        "Cómo entran las caras en las paredes de la espiral y del difusor: G1 tangente, G2 también con la curvatura de la pared",
+    ),
+    ("G1, tangent", "G1, tangente"),
+    ("G2, same curvature", "G2, misma curvatura"),
+    ("Side endings R", "Remates laterales R"),
+    (
+        "Toward each side wall of the channel the body widens with this round between its faces and the wall, so it meets the wall without a sharp corner; 0 leaves the corner. Automatic: the nose radius ρ for rectangular and trapezoidal sections, 0 for the others",
+        "Hacia cada pared lateral del canal el cuerpo se ensancha con este redondeo entre sus caras y la pared, para llegar a ella sin canto vivo; 0 deja el canto. Automático: el radio de la nariz ρ en las secciones rectangulares y trapeciales, 0 en las demás",
+    ),
+    ("Spiral start", "Inicio de la espiral"),
+    (
+        "Where the spiral starts, before its wall crosses the diffuser's in every plane: from {} to {} here. Automatic: 3°",
+        "Dónde empieza la espiral, antes de que su pared cruce la del difusor en todos los planos: de {} a {} aquí. Automático: 3°",
+    ),
+    (
+        "Where the spiral starts. Its wall does not cross the diffuser's in every plane: it starts where it clears it",
+        "Dónde empieza la espiral. Su pared no cruza la del difusor en todos los planos: empieza donde la deja libre",
+    ),
+    (
+        "before the walls cross in every plane: from {} to {}",
+        "antes de que las paredes se crucen en todos los planos: de {} a {}",
+    ),
+    (
+        "the walls do not cross in every plane: the spiral starts where it clears the diffuser",
+        "las paredes no se cruzan en todos los planos: la espiral empieza donde deja libre el difusor",
+    ),
     ("Fillet over the cutwater", "Redondeo exterior"),
     (
         "Fills and rounds the outside of the casing where the back of the start of the spiral meets the diffuser, so no sharp groove is left over the cutwater; 0 leaves it. Automatic: the wall thickness",
@@ -4004,6 +4038,18 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
         "un rodete de doble entrada no tiene disco trasero: sus álabes de rebombeo quedan fuera del empuje axial y de la potencia",
     ),
     (
+        "the radius of the side endings of the cutwater cannot be negative",
+        "el radio de los remates laterales del corte de agua no puede ser negativo",
+    ),
+    (
+        "the spiral must start between {}° and {}° for its wall to cross the diffuser's in every plane, got {}°",
+        "la espiral debe empezar entre {}° y {}° para que su pared cruce la del difusor en todos los planos, se pidió {}°",
+    ),
+    (
+        "the walls of the spiral and the diffuser do not cross in every plane: leave the start of the spiral automatic",
+        "las paredes de la espiral y del difusor no se cruzan en todos los planos: deja automático el inicio de la espiral",
+    ),
+    (
         "the fillet over the cutwater cannot be negative",
         "el redondeo sobre el corte de agua no puede ser negativo",
     ),
@@ -4014,6 +4060,10 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
     (
         "the groove over the cutwater could not be rounded: it stays sharp",
         "no se pudo redondear la hendidura sobre el corte de agua: queda aguda",
+    ),
+    (
+        "the cutwater of the CAD solid lies up to {} mm off its design: the CAD kernel could not cut it cleanly",
+        "el corte de agua del sólido CAD se aparta hasta {} mm de su diseño: el núcleo CAD no pudo recortarlo limpio",
     ),
     (
         "the obliquity of the cutwater must lie within ±{}°, got {}°",

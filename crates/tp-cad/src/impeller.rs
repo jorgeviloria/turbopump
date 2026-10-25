@@ -1071,6 +1071,7 @@ mod tests {
     /// the build is shared), then one finished with fillets and balance holes.
     #[test]
     fn reference_impeller_solids() {
+        let _slot = crate::test_slot::take();
         let g = reference();
         let sharp = CadOptions {
             fillet_radius: Some(0.0),
@@ -1181,6 +1182,7 @@ mod tests {
 
     #[test]
     fn the_material_contours_set_the_impeller_solid() {
+        let _slot = crate::test_slot::take();
         // The material as Pappus sees it: hub disk and shroud regions revolved.
         let pappus = |g: &ImpellerGeometry| {
             let region = |wall: &tp_design::impeller::wall::Wall, wire: &Wall| {
@@ -1213,6 +1215,7 @@ mod tests {
 
     #[test]
     fn designed_side_chambers_are_revolved_into_their_fluid() {
+        let _slot = crate::test_slot::take();
         let g = reference();
         assert!(
             build_impeller(&g, &CadOptions::default())
@@ -1240,6 +1243,7 @@ mod tests {
 
     #[test]
     fn the_inlet_duct_is_revolved_into_its_fluid() {
+        let _slot = crate::test_slot::take();
         use tp_design::impeller::duct::{self, DuctInput};
         let mut input = tp_design::impeller::ImpellerGeometryInput::default();
         input.meridional.chambers.enabled = true;
@@ -1266,6 +1270,7 @@ mod tests {
 
     #[test]
     fn shaped_edges_loft_a_valid_blade() {
+        let _slot = crate::test_slot::take();
         use tp_design::impeller::blade::EdgeShape;
         let plain = blade_solid(&reference(), 0.0).unwrap();
         let mut input = tp_design::impeller::ImpellerGeometryInput::default();
@@ -1293,6 +1298,7 @@ mod tests {
 
     #[test]
     fn balance_holes_sit_inside_the_collar() {
+        let _slot = crate::test_slot::take();
         let g = reference();
         let c = &g.contour;
         let rear = c.seals.rear.expect("the default design has a rear seal");
@@ -1326,6 +1332,7 @@ mod tests {
 
     #[test]
     fn rejects_bad_options() {
+        let _slot = crate::test_slot::take();
         let g = reference();
         // Holes that do not fit between boss and rear seal.
         let big_holes = CadOptions {
@@ -1358,6 +1365,7 @@ mod tests {
 
     #[test]
     fn four_rings_are_built_by_default() {
+        let _slot = crate::test_slot::take();
         let cad = build_impeller(&reference(), &sharp()).unwrap();
         let kinds: Vec<RingKind> = cad.rings.iter().map(|r| r.kind).collect();
         assert_eq!(kinds, RingKind::ALL);
@@ -1380,6 +1388,7 @@ mod tests {
 
     #[test]
     fn the_ring_volume_is_its_annulus() {
+        let _slot = crate::test_slot::take();
         let g = changed(|i| i.meridional.chambers.enabled = true);
         let cad = build_impeller(&g, &sharp()).unwrap();
         let (spans, _) = ring_spans(&g);
@@ -1415,6 +1424,7 @@ mod tests {
 
     #[test]
     fn a_ring_trimmed_to_nothing_builds_without_that_ring() {
+        let _slot = crate::test_slot::take();
         let base = reference();
         let wall = tp_design::impeller::default_wall_thickness(base.basis.outlet_diameter);
         let g = changed(|i| {
@@ -1428,6 +1438,7 @@ mod tests {
 
     #[test]
     fn the_rear_rings_sit_on_the_collar_and_clear_of_the_disk() {
+        let _slot = crate::test_slot::take();
         let g = reference();
         let rear = g.contour.seals.rear.unwrap();
         let (spans, warnings) = ring_spans(&g);
@@ -1456,6 +1467,7 @@ mod tests {
 
     #[test]
     fn a_front_casing_ring_without_a_run_on_the_seat_says_so() {
+        let _slot = crate::test_slot::take();
         use tp_design::impeller::wall::{SegmentInput, SegmentKind};
         // A casing wall drawn straight to its end, never running on the casing seat.
         let end = changed(|i| i.meridional.chambers.enabled = true)
@@ -1483,6 +1495,7 @@ mod tests {
 
     #[test]
     fn rings_do_not_overlap_the_impeller() {
+        let _slot = crate::test_slot::take();
         let cad = build_impeller(&reference(), &sharp()).unwrap();
         for ring in &cad.rings {
             let shared = cad
@@ -1499,6 +1512,7 @@ mod tests {
 
     #[test]
     fn impeller_plus_its_rings_fills_the_solid_seat() {
+        let _slot = crate::test_slot::take();
         use tp_design::Param;
         // The identity is exact at a seal radius where the shoulder stands on the face
         // for both seats (the 4 mm ring is trimmed to leave the neck a wall).
@@ -1544,6 +1558,7 @@ mod tests {
 
     #[test]
     fn a_drawn_wire_leaves_its_rings_out_with_a_warning() {
+        let _slot = crate::test_slot::take();
         let g = reference();
         let shroud = g.contour.shroud_material.to_input();
         let hub = g.contour.hub_material.to_input();
@@ -1574,6 +1589,7 @@ mod tests {
 
     #[test]
     fn the_chamber_fluid_and_the_rings_share_no_volume() {
+        let _slot = crate::test_slot::take();
         let g = changed(|i| i.meridional.chambers.enabled = true);
         let cad = build_impeller(&g, &sharp()).unwrap();
         let chambers = cad.side_chambers.as_ref().unwrap();
@@ -1629,6 +1645,7 @@ mod tests {
 
     #[test]
     fn radial_back_vanes_have_their_strip_volume() {
+        let _slot = crate::test_slot::take();
         use tp_design::impeller::back_vanes::VaneShape;
         let g = with_vanes(VaneShape::Radial, false);
         let v = g.contour.back_vanes.as_ref().unwrap();
@@ -1646,6 +1663,7 @@ mod tests {
 
     #[test]
     fn no_back_vanes_when_they_are_off() {
+        let _slot = crate::test_slot::take();
         assert!(
             build_impeller(&reference(), &sharp())
                 .unwrap()
@@ -1656,6 +1674,7 @@ mod tests {
 
     #[test]
     fn back_vanes_join_the_impeller() {
+        let _slot = crate::test_slot::take();
         use tp_design::impeller::back_vanes::VaneShape;
         let without = build_impeller(&reference(), &sharp()).unwrap();
         let cad = build_impeller(&with_vanes(VaneShape::Radial, false), &sharp()).unwrap();
@@ -1673,6 +1692,7 @@ mod tests {
 
     #[test]
     fn curved_back_vanes_build() {
+        let _slot = crate::test_slot::take();
         use tp_design::impeller::back_vanes::VaneShape;
         let radial = build_impeller(&with_vanes(VaneShape::Radial, false), &sharp()).unwrap();
         let curved = VaneShape::Curved {
@@ -1695,6 +1715,7 @@ mod tests {
 
     #[test]
     fn the_chamber_fluid_and_the_back_vanes_share_no_volume() {
+        let _slot = crate::test_slot::take();
         use tp_design::impeller::back_vanes::VaneShape;
         let cad = build_impeller(&with_vanes(VaneShape::Radial, true), &sharp()).unwrap();
         let chambers = cad.side_chambers.as_ref().unwrap();
@@ -1712,6 +1733,7 @@ mod tests {
 
     #[test]
     fn curved_back_vanes_lean_like_the_blades() {
+        let _slot = crate::test_slot::take();
         use tp_design::impeller::back_vanes::VaneShape;
         let curved = VaneShape::Curved {
             angle: 40f64.to_radians(),

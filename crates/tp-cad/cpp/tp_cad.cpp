@@ -5,6 +5,7 @@
 #include "tp-cad/cpp/tp_cad.hxx"
 #include "tp-cad/src/bridge.rs.h"
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 #include <string>
@@ -13,6 +14,7 @@
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
+#include <BRepBuilderAPI_Copy.hxx>
 #include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
@@ -38,6 +40,8 @@
 #include <NCollection_IndexedMap.hxx>
 #include <NCollection_List.hxx>
 #include <NCollection_Sequence.hxx>
+#include <OSD_Parallel.hxx>
+#include <OSD_ThreadPool.hxx>
 #include <Poly_Triangulation.hxx>
 #include <TopLoc_Location.hxx>
 #include <IGESControl_Controller.hxx>
@@ -64,12 +68,23 @@
 namespace tp_cad {
 namespace {
 
+constexpr int MAX_OCCT_THREADS = 4;
+
 // Statically linked, OCCT's type registry (a function-local static in Standard_Type)
 // can be created after global objects of the data-exchange toolkits; those then
 // outlive it and crash the process at exit when they release their type handles.
 // The bridge is linked before OCCT, so this initializer runs first and creates the
 // registry before any other OCCT global object, which makes it the last destroyed.
 const occ::handle<Standard_Type> registry_anchor = STANDARD_TYPE(Standard_Transient);
+
+// Every parallel OCCT algorithm (booleans, meshing) draws from the default thread pool,
+// which is sized on first use. Cap it so a boolean leaves the machine responsive: with
+// all cores per boolean, a few CAD builds at once froze a 10-core laptop.
+const int occt_threads = [] {
+  const int threads = std::min(MAX_OCCT_THREADS, OSD_Parallel::NbLogicalProcessors());
+  OSD_ThreadPool::DefaultPool(threads);
+  return threads;
+}();
 
 template <typename F> auto guard(const char *what, F &&f) -> decltype(f()) {
   try {
@@ -299,20 +314,28 @@ std::unique_ptr<Shape> fix_shape(const Shape &shape) {
 
 // `fuzzy` is the gap in model units below which faces and edges count as touching
 // (0: the exact algorithm).
-std::unique_ptr<Shape> boolean_op(const Shape &a, const Shape &b, std::uint8_t op,
-                                  double fuzzy) {
+// All the tools act on all the arguments in one operation, which intersects every
+// pair once instead of building each intermediate result.
+std::unique_ptr<Shape> boolean_op(const ShapeList &arguments, const ShapeList &tools,
+                                  std::uint8_t op, double fuzzy) {
   return guard("boolean", [&] {
     auto run = [&](BRepAlgoAPI_BooleanOperation &algo, const char *what) {
-      NCollection_List<TopoDS_Shape> arguments, tools;
-      arguments.Append(a.shape);
-      tools.Append(b.shape);
-      algo.SetArguments(arguments);
-      algo.SetTools(tools);
+      NCollection_List<TopoDS_Shape> args, tls;
+      for (const auto &s : arguments.items) {
+        args.Append(s);
+      }
+      for (const auto &s : tools.items) {
+        tls.Append(s);
+      }
+      algo.SetArguments(args);
+      algo.SetTools(tls);
       if (fuzzy > 0.0) {
         algo.SetFuzzyValue(fuzzy);
       }
+      // Not in the non-destructive mode: it made fusions come out empty that work
+      // without it (the ring and channel of a compensated spiral).
       // Oriented bounding boxes skip far pairs of faces sooner; the intersections run
-      // on every core.
+      // in parallel.
       algo.SetUseOBB(true);
       algo.SetRunParallel(true);
       algo.Build();
@@ -338,6 +361,15 @@ std::unique_ptr<Shape> boolean_op(const Shape &a, const Shape &b, std::uint8_t o
       fail("boolean", "unknown operation");
     }
     return std::unique_ptr<Shape>();
+  });
+}
+
+// A copy with its own geometry: a boolean may widen the tolerances of its inputs in
+// place, which must not carry over from one attempt to the next.
+std::unique_ptr<Shape> copy_shape(const Shape &shape) {
+  return guard("copy", [&] {
+    BRepBuilderAPI_Copy copy(shape.shape, true);
+    return wrap(copy.Shape(), "copy");
   });
 }
 

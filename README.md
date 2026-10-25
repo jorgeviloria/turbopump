@@ -366,7 +366,11 @@ Otro deslizador reparte entre el lado de la espiral y el del difusor el espesor 
 falta a la cuña pasada la punta, y otro inclina el borde del corte de agua un ángulo
 $\varepsilon$ respecto del eje (la tabla 10.2 pide más de 35° contra las pulsaciones);
 no pasa de lo que las paredes permiten y dice hasta dónde llega. La nariz del nervio de
-una voluta doble se inclina igual. Al lado, las medidas frente a Gülich (diámetro
+una voluta doble se inclina igual. El paso *Cut-water* fija también dónde empieza la espiral,
+dentro del rango en que su pared cruza la del difusor en todos los planos, que se
+muestra con las medidas. En una voluta simple de secciones rectangulares o
+trapeciales el cuerpo se ensancha hacia cada pared lateral con un redondeo del radio de
+la nariz, para llegar a ella sin canto vivo (*Side endings R*; 0 deja el canto). Al lado, las medidas frente a Gülich (diámetro
 efectivo, holgura de la tabla 10.2, cuerpo más fino, $e/d_z$, incidencia en el diseño,
 rango de caudal con $|i_3| \le 3°$, oblicuidad, cuña a lo ancho y corrección de la
 garganta de la ec. 7.28), el cuerpo en 3D, que se

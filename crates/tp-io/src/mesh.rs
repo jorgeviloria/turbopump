@@ -660,18 +660,34 @@ pub(crate) mod tests {
             CrossSectionInput::default(),
             CrossSectionInput::single(SectionShape::round()),
         ] {
-            let g = reference_volute(|v| v.cross_section = sections.clone());
+            let volume = |triangles: &[Triangle]| {
+                triangles
+                    .iter()
+                    .map(|t| t[0].dot(t[1].cross(t[2])))
+                    .sum::<f64>()
+                    .abs()
+                    / 6.0
+            };
+            // With its side endings the body is closed and a little larger; round
+            // sections have none by default.
+            let ended = reference_volute(|v| v.cross_section = sections.clone());
+            let with_endings = cutwater_triangles(&ended);
+            assert!(closed(&with_endings));
+            let g = reference_volute(|v| {
+                v.cross_section = sections.clone();
+                v.cutwater.side_radius = tp_design::Param::Manual(0.0);
+            });
             let body = cutwater_triangles(&g);
             assert!(!body.is_empty());
             assert!(closed(&body));
-            // Its volume: about the area of the midplane outline times the width of the
-            // planes.
-            let volume = body
-                .iter()
-                .map(|t| t[0].dot(t[1].cross(t[2])))
-                .sum::<f64>()
-                .abs()
-                / 6.0;
+            if ended.design.cutwater_side_radius > 0.0 {
+                assert!(volume(&with_endings) > volume(&body));
+            } else {
+                assert!((volume(&with_endings) - volume(&body)).abs() < 1e-15);
+            }
+            // Without them, about the area of the midplane outline times the width of
+            // the planes.
+            let volume = volume(&body);
             let mid = &g.cutwater_slices[g.cutwater_slices.len() / 2];
             let n = mid.outline.len();
             let area = 0.5

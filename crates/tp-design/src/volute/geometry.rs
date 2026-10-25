@@ -153,6 +153,11 @@ const CUTWATER_START: f64 = 3.0 * std::f64::consts::PI / 180.0;
 /// Smallest angle between the spiral and the diffuser wall for a sharp cutwater; below
 /// it the two only graze and the spiral starts where it clears the wall, rad.
 const MIN_WEDGE: f64 = 4.0 * std::f64::consts::PI / 180.0;
+/// Earliest start of the spiral of a sharp or rounded cutwater, rad.
+const MIN_START: f64 = 1.0 * std::f64::consts::PI / 180.0;
+/// The spiral starts at least this much before its wall crosses the diffuser's in every
+/// plane, rad.
+const START_MARGIN: f64 = 0.5 * std::f64::consts::PI / 180.0;
 /// Wrap of the spiral past its start in which the cutwater planes look for the walls,
 /// rad.
 const CUTWATER_SPAN: f64 = 60.0 * std::f64::consts::PI / 180.0;
@@ -164,6 +169,10 @@ pub struct VoluteGeometry {
     pub design: VoluteDesign,
     /// Wrap angle of the first section, rad; the cutwater fills the space before it.
     pub start_angle: f64,
+    /// Starts of the spiral of a sharp or rounded cutwater that see its wall cross the
+    /// diffuser's in every plane across the inlet width, rad; `None` when no start does
+    /// or the cutwater is of another kind.
+    pub start_range: Option<(f64, f64)>,
     /// Sections from the start angle to the throat (2π); for a double volute, to the
     /// rib nose.
     pub sections: Vec<VoluteSection>,
@@ -202,6 +211,9 @@ pub struct VoluteGeometry {
     /// A sharp or rounded cutwater in planes across the inlet width, from −z to +z;
     /// empty for a tangent one, a shorter spiral or an internal volute.
     pub cutwater_slices: Vec<CutwaterSlice>,
+    /// The body of a rounded cutwater as outlines from −z to +z, between its planes
+    /// too and widening into the side walls ([`super::cutwater::body_outlines`]).
+    cutwater_body: Vec<Vec<DVec3>>,
     /// Internal sections: the bend and the neck from the inlet to the spiral, in the
     /// plane of a section (s, h), the same all round.
     pub bend: Option<Bend>,
@@ -229,9 +241,24 @@ impl VoluteGeometry {
     }
 
     /// Outlines of the body of a rounded cutwater from −z to +z, between its planes
-    /// too (see [`super::cutwater::fine_outlines`]), for meshes. Empty unless rounded.
+    /// too and widening into the side walls (see [`super::cutwater::body_outlines`]), for
+    /// the meshes and the CAD model. Empty unless rounded.
     pub fn cutwater_body(&self) -> Vec<Vec<DVec3>> {
-        super::cutwater::fine_outlines(&self.cutwater_slices, BODY_STEPS)
+        self.cutwater_body.clone()
+    }
+
+    /// The outlines of the body in the planes of the cutwater, as built: with the side
+    /// endings where a plane lies close to a side wall. Empty unless rounded.
+    pub fn cutwater_planes(&self) -> Vec<Vec<DVec3>> {
+        self.cutwater_slices
+            .iter()
+            .filter_map(|s| {
+                self.cutwater_body
+                    .iter()
+                    .find(|o| o.first().is_some_and(|p| (p.z - s.z).abs() < 1e-9))
+                    .cloned()
+            })
+            .collect()
     }
 
     /// The pieces of the flow channel, each a sequence of outlines in 3D to loft
@@ -683,6 +710,7 @@ impl VoluteGeometry {
         // inner wall of the diffuser. When the wall turns away instead (a radial
         // discharge), the spiral starts where it clears the wall and the cutwater sits
         // there.
+        let mut start_range = None;
         let (start, cutwater) = match design.cutwater_shape {
             // An internal spiral starts beside the face of the neck, inside the diffuser:
             // the cutwater is where the two cut each other, with no nose of its own.
@@ -723,15 +751,56 @@ impl VoluteGeometry {
                 cutwater(&design, &nozzle, sign, zm, clear_start)?,
             ),
             _ => {
-                let early = cutwater(&design, &nozzle, sign, zm, CUTWATER_START)?;
-                if early.angle > CUTWATER_START && early.wedge > MIN_WEDGE {
-                    (CUTWATER_START, early)
-                } else {
-                    (
-                        clear_start,
-                        cutwater(&design, &nozzle, sign, zm, clear_start)?,
-                    )
-                }
+                // Where the walls cross in each plane across the inlet width, with the
+                // spiral from its earliest start: its sections do not depend on where it
+                // starts. The spiral must start before every crossing. Near the side walls
+                // of round sections the walls may not cross at all, at any start; there
+                // the cutwater has no wedge, as at a tangent one. The midplane needs a true
+                // wedge, and so does every plane where a sharp cutwater crosses; the body
+                // of a rounded one fills the planes where the walls barely cross.
+                let early: Vec<(f64, Vec<DVec2>)> = (0..=CUTWATER_SPAN.to_degrees() as usize)
+                    .filter_map(|i| {
+                        let angle = MIN_START + (i as f64).to_radians();
+                        make(angle).ok().map(|s| (angle, s.outline))
+                    })
+                    .collect();
+                let crossings = super::cutwater::crossings(&design, &early, &nozzle, sign, zm);
+                let sharp = matches!(design.cutwater_shape, CutwaterShape::Sharp);
+                let wedged = |c: &Option<(f64, f64)>| c.is_some_and(|(_, w)| w > MIN_WEDGE);
+                let crosses = wedged(&crossings[crossings.len() / 2])
+                    && (!sharp || crossings.iter().all(|c| c.is_none() || wedged(c)));
+                let latest = crossings
+                    .iter()
+                    .flatten()
+                    .map(|(angle, _)| *angle)
+                    .fold(f64::INFINITY, f64::min)
+                    - START_MARGIN;
+                let earliest = early.first().map_or(MIN_START, |(angle, _)| *angle);
+                start_range = (crosses && latest > earliest).then_some((earliest, latest));
+                let chosen = match (input.cutwater.spiral_start.manual_value(), start_range) {
+                    (Some(s), Some((lo, hi))) if (lo..=hi).contains(&s) => s,
+                    (Some(s), Some((lo, hi))) => {
+                        return Err(DesignError::InvalidInput(format!(
+                            "the spiral must start between {:.1}° and {:.1}° for its wall to \
+                             cross the diffuser's in every plane, got {:.1}°",
+                            lo.to_degrees(),
+                            hi.to_degrees(),
+                            s.to_degrees()
+                        )));
+                    }
+                    (Some(_), None) => {
+                        return Err(DesignError::InvalidInput(
+                            "the walls of the spiral and the diffuser do not cross in every \
+                             plane: leave the start of the spiral automatic"
+                                .into(),
+                        ));
+                    }
+                    (None, Some((lo, hi))) => CUTWATER_START.clamp(lo, hi),
+                    // They part at once (a radial discharge): where the spiral clears the
+                    // diffuser.
+                    (None, None) => clear_start,
+                };
+                (chosen, cutwater(&design, &nozzle, sign, zm, chosen)?)
             }
         };
 
@@ -755,7 +824,7 @@ impl VoluteGeometry {
         let cuts_the_diffuser = bend.is_none()
             && first <= 0.0
             && !matches!(design.cutwater_shape, CutwaterShape::Tangent);
-        let cutwater_slices = if cuts_the_diffuser {
+        let (cutwater_slices, cutwater_body) = if cuts_the_diffuser {
             let end = (start + CUTWATER_SPAN).min(design.rib.as_ref().map_or(TAU, |r| r.start));
             let near = wall_outlines.partition_point(|(angle, _)| *angle <= end);
             let walls = &wall_outlines[..near];
@@ -810,9 +879,18 @@ impl VoluteGeometry {
                     cutwater.nose_distance = mid.nose_distance;
                 }
             }
-            slices
+            let body = super::cutwater::body_outlines(
+                &design,
+                &slices,
+                (walls, &nozzle),
+                sign,
+                zm,
+                design.cutwater_side_radius,
+                BODY_STEPS,
+            );
+            (slices, body)
         } else {
-            Vec::new()
+            (Vec::new(), Vec::new())
         };
 
         // Sections spread over their wrap in proportion to the single spiral.
@@ -942,8 +1020,13 @@ impl VoluteGeometry {
                 outline: s.outline.into_iter().map(turn).collect(),
                 spiral_wall: s.spiral_wall.into_iter().map(turn).collect(),
                 diffuser_wall: s.diffuser_wall.into_iter().map(turn).collect(),
+                nose_centre: turn(s.nose_centre),
                 ..s
             })
+            .collect();
+        let cutwater_body: Vec<Vec<DVec3>> = cutwater_body
+            .into_iter()
+            .map(|o| o.into_iter().map(turn).collect())
             .collect();
         let rib = rib.map(|r| RibGeometry {
             inner_face: r.inner_face.into_iter().map(turn).collect(),
@@ -980,6 +1063,7 @@ impl VoluteGeometry {
             basis: *basis,
             design,
             start_angle: start,
+            start_range,
             sections,
             inner_sections,
             outer_channel,
@@ -996,6 +1080,7 @@ impl VoluteGeometry {
             wall_stress: WallStress::default(),
             cutwater,
             cutwater_slices,
+            cutwater_body,
             bend,
             warnings,
         };

@@ -587,6 +587,78 @@ la pared interior de la tobera. Entonces empieza donde la deja libre, como en el
 corte de agua tangente, y la punta de la cuña está ahí. Lo mismo ocurre cuando las dos
 paredes solo se rozan (cuña de menos de 4°).
 
+**Inicio de la espiral con todos los planos** (`--set spiral_start=…`; elección propia
+sobre el punto 7 del cap. 7.8.1). Con un corte de agua afilado o redondeado, la espiral
+empieza por defecto 3° después del corte de agua. Ese inicio vale si va antes de que su
+pared cruce la del difusor en los 9 planos a lo ancho de la entrada. Las secciones de
+la espiral no dependen de dónde empieza, así que los cruces se buscan una sola vez,
+con la espiral desde 1°. De ahí sale el rango válido: desde 1° hasta medio grado antes
+del primer cruce. En la bomba de referencia, con la sección trapecial, va de 1° a 11°
+(descarga radial) o a 40° (tangencial con la pared exterior recta).
+
+- Se puede fijar a mano dentro del rango; fuera de él, el diseño da error y dice el
+  rango.
+- Con el automático, si 3° no cabe, se toma el inicio más tardío que cabe.
+- El plano medio necesita una cuña de verdad (4°).
+- Un corte de agua afilado también la necesita en cada plano donde las paredes se
+  cruzan. Si no la hay, quedaría un filo, y la espiral empieza donde deja libre el
+  difusor. Le pasa a la sección redonda con la pared interior recta. El redondeado no
+  tiene ese límite, porque su cuerpo rellena la cuña.
+- Cerca de las paredes laterales de las secciones redondas, las paredes pueden no
+  cruzarse con ningún inicio. Esos planos no limitan el inicio, y en ellos el corte de
+  agua queda sin cuña, como uno tangente.
+
+**Remates laterales** (`--set side_radius=…`; construcción propia). Sin remates, el
+cuerpo del corte de agua llega a las paredes laterales del canal con su sección
+constante y deja con ellas un canto vivo. Con un radio $R$, en cada plano $z$ cerca de
+una pared lateral, cada punto del contorno del cuerpo se separa de la cara, por su
+normal, lo que pide un redondeo de radio $R$ entre la cara y esa pared:
+
+- **La pared se mide en el canal al que mira el punto:**
+  - los puntos de la cara de la espiral, en las secciones de la espiral en su ángulo;
+  - los de la cara del difusor, en las secciones de la tobera a uno y otro lado;
+  - los de la nariz, en las paredes laterales de la entrada, $z_m \pm b_3/2$.
+
+  En cada caso se toman la altura de la pared encima o debajo del punto y su
+  pendiente $\beta$ al alejarse de la cara hacia el flujo.
+- **El perfil es el de un círculo de radio $R$** tangente a la cara y a la pared. La
+  cara lo toca a una altura $v_t = v_w + R\tan\beta - R/\cos\beta$, con $v_w$ la
+  altura de la pared, contada hacia ella. A la altura $v$, el cuerpo se separa
+  $\delta = R - \sqrt{R^2 - (v - v_t)^2}$ para $v_t < v < v_t + R$, y $R$ más allá.
+  En una pared horizontal (sección rectangular), el cuerpo llega a la pared
+  separado $R$ de su cara.
+- **El ensanche se desvanece donde una cara corre ya por su pared,** junto a la unión
+  con la espiral o con el difusor: ahí no hay esquina con la pared lateral. Cada punto
+  toma $3x^2 - 2x^3$ del redondeo, con $x$ su distancia a la pared sobre $R$, sin pasar
+  de 1.
+- **Nada del cuerpo queda más cerca del eje que $d_z$:** alrededor de la nariz, el
+  remate va sobre ese círculo.
+- **Planos:** con remates, todos van a la misma distancia, a no más de $R/2$, hasta
+  donde el cuerpo se ha ensanchado el radio entero. En la bomba de referencia, el
+  cuerpo llega a ±14,1 mm del plano medio con la sección rectangular y a ±16,4 mm con
+  la trapecial ($b_3/2$ = 13,8 mm). Un loft suave por secciones repartidas de forma
+  desigual se ondula entre ellas: con planos densos solo junto a las paredes, las caras
+  se separaban 0,9 mm del modelo en el CAD.
+- **Valor por defecto:** el radio de la nariz $\rho$ (1,72 mm en la bomba de referencia),
+  solo en una voluta simple con secciones de paredes rectas (rectangulares y
+  trapeciales). En las demás, 0 por ahora. En la voluta doble la booleana del cuerpo con
+  remates no sale fiable: ninguna holgura deja bien a la vez la cara de la espiral y la
+  del difusor.
+- **La altura de la pared** sobre un punto es la del flujo en conjunto: el anillo de
+  entrada, la espiral y la tobera. La pendiente se mide a lo ancho de un radio, para que
+  un escalón de un canal a otro no se lea como una pared inclinada.
+
+En el CAD el cuerpo con remates sigue siendo un loft que se resta del canal. Antes se
+probó a redondear en el sólido del fluido, con Open CASCADE, las aristas donde el
+cuerpo encuentra las paredes laterales, y no salió en ninguna sección: junto a cada
+pared el fluido queda partido en aristas de 0,1 a 0,6 mm.
+
+En la sección trapecial, construir el cuerpo tarda unos 5 s y cada corte unos 3 s. Junto
+a una pared lateral, parte de un contorno puede quedar fuera del flujo, más allá de la
+pared. Por eso las comprobaciones del corte con puntos del modelo usan solo los planos
+a más de $1{,}5R$ de las paredes laterales. Alrededor del cuerpo, el CAD se sigue
+comparando con la malla de la vista, que dibuja los mismos contornos.
+
 El informe da la posición de la punta, el ángulo de la cuña y el **diámetro efectivo del
 corte de agua**: el doble de la distancia del eje al punto más cercano del corte de agua.
 También da, a lo ancho, entre qué radios queda la punta y entre qué ángulos la cuña, y

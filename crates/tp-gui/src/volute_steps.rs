@@ -1130,6 +1130,81 @@ fn cutwater(
                     &units,
                     -tp_design::volute::MAX_OBLIQUITY..=tp_design::volute::MAX_OBLIQUITY,
                 );
+                label(
+                    ui,
+                    tr("Nose shape"),
+                    tr(
+                        "As a blade edge on a body as thick as the nose: elliptic (round by default; Gülich asks for an elliptic profile), tapered, Bézier or blunt. Its pressure face is the diffuser side",
+                    ),
+                );
+                crate::steps::edge_shape(
+                    ui,
+                    "volute_cutwater_nose",
+                    &mut input.cutwater.nose_shape,
+                );
+                label(
+                    ui,
+                    tr("Join to the walls"),
+                    tr(
+                        "How the faces run into the spiral and diffuser walls: G1 tangent, G2 with the curvature of the wall too",
+                    ),
+                );
+                crate::widgets::list(ui, |ui| {
+                    ComboBox::from_id_salt("volute_cutwater_join")
+                        .selected_text(match input.cutwater.join {
+                            tp_design::volute::Continuity::G1 => "G1",
+                            tp_design::volute::Continuity::G2 => "G2",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut input.cutwater.join,
+                                tp_design::volute::Continuity::G1,
+                                tr("G1, tangent"),
+                            );
+                            ui.selectable_value(
+                                &mut input.cutwater.join,
+                                tp_design::volute::Continuity::G2,
+                                tr("G2, same curvature"),
+                            );
+                        })
+                });
+                ui.end_row();
+                param_f64(
+                    ui,
+                    tr("Side endings R"),
+                    tr(
+                        "Toward each side wall of the channel the body widens with this round between its faces and the wall, so it meets the wall without a sharp corner; 0 leaves the corner. Automatic: the nose radius ρ for rectangular and trapezoidal sections, 0 for the others",
+                    ),
+                    &mut input.cutwater.side_radius,
+                    Length,
+                    g.map(|g| g.design.cutwater_side_radius),
+                    &units,
+                    0.0..=0.02,
+                );
+            }
+            if !matches!(input.cutwater.shape, CutwaterShape::Tangent) {
+                // The starts that see the walls cross in every plane.
+                let range = g.and_then(|g| g.start_range);
+                let hint = match range {
+                    Some((lo, hi)) => tf(
+                        "Where the spiral starts, before its wall crosses the diffuser's in every plane: from {} to {} here. Automatic: 3°",
+                        &[&units.show(Angle, lo), &units.show(Angle, hi)],
+                    ),
+                    None => tr(
+                        "Where the spiral starts. Its wall does not cross the diffuser's in every plane: it starts where it clears it",
+                    )
+                    .to_owned(),
+                };
+                param_f64(
+                    ui,
+                    tr("Spiral start"),
+                    &hint,
+                    &mut input.cutwater.spiral_start,
+                    Angle,
+                    g.map(|g| g.start_angle),
+                    &units,
+                    0.0..=std::f64::consts::FRAC_PI_2,
+                );
             }
             let incidence = input.cutwater.incidence.resolve(|| 0.0);
             param_f64(

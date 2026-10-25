@@ -158,19 +158,56 @@ impl Shape {
 
     /// Boolean intersection.
     pub fn common(&self, other: &Shape) -> Result<Shape, CadError> {
-        op("boolean common", ffi::boolean_op(&self.0, &other.0, 2, 0.0))
+        boolean(&[self], &[other], 2, 0.0)
     }
 
     /// Boolean difference treating gaps below `fuzzy` (model units) as contact, for
     /// faces that run nearly coincident.
     pub fn cut_fuzzy(&self, tool: &Shape, fuzzy: f64) -> Result<Shape, CadError> {
-        op("boolean cut", ffi::boolean_op(&self.0, &tool.0, 0, fuzzy))
+        self.cut_all_fuzzy(&[tool], fuzzy)
+    }
+
+    /// A copy with its own geometry, for an attempt that must not touch the original:
+    /// a boolean may widen the tolerances of its inputs in place.
+    pub fn copied(&self) -> Result<Shape, CadError> {
+        op("copy", ffi::copy_shape(&self.0))
+    }
+
+    /// `self` less all the `tools`, in one operation.
+    pub fn cut_all_fuzzy(&self, tools: &[&Shape], fuzzy: f64) -> Result<Shape, CadError> {
+        boolean(&[self], tools, 0, fuzzy)
     }
 
     /// Boolean union treating gaps below `fuzzy` (model units) as contact.
     pub fn fuse_fuzzy(&self, other: &Shape, fuzzy: f64) -> Result<Shape, CadError> {
-        op("boolean fuse", ffi::boolean_op(&self.0, &other.0, 1, fuzzy))
+        boolean(&[self], &[other], 1, fuzzy)
     }
+}
+
+/// `op` (0 cut, 1 fuse, 2 common) of all the `tools` with all the `arguments`.
+fn boolean(
+    arguments: &[&Shape],
+    tools: &[&Shape],
+    code: u8,
+    fuzzy: f64,
+) -> Result<Shape, CadError> {
+    let what = ["boolean cut", "boolean fuse", "boolean common"][usize::from(code)];
+    op(
+        what,
+        ffi::boolean_op(&list(arguments), &list(tools), code, fuzzy),
+    )
+}
+
+/// The union of all the `pieces`, in one operation.
+pub fn fuse_all_fuzzy(pieces: &[Shape], fuzzy: f64) -> Result<Shape, CadError> {
+    let Some((first, rest)) = pieces.split_first() else {
+        return Err(CadError::Input("nothing to fuse".into()));
+    };
+    if rest.is_empty() {
+        return first.copied();
+    }
+    let rest: Vec<&Shape> = rest.iter().collect();
+    boolean(&[first], &rest, 1, fuzzy)
 }
 
 /// Compound grouping several shapes without merging them.

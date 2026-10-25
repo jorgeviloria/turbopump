@@ -110,6 +110,7 @@ mod tests {
 
     #[test]
     fn the_chambers_join_the_impeller_and_the_volute_in_one_fluid() {
+        let _slot = crate::test_slot::take();
         let mut input = ImpellerGeometryInput::default();
         input.meridional.chambers.enabled = true;
         let (g, main, duty) = reference_with(&input);

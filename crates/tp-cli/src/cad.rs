@@ -329,6 +329,10 @@ pub(crate) fn run(args: CadArgs) -> CliResult {
         println!("{name} ({id}): building CAD solids…");
         let cad = tp_cad::build_volute(&geometry).map_err(|e| e.to_string())?;
         println!("  Volute flow domain {:.1} cm³", cad.fluid_volume() * 1e6);
+        for w in &cad.warnings {
+            println!("  warning: {w}");
+            warned = true;
+        }
         let casing = tp_cad::build_volute_casing(&geometry, &cad).map_err(|e| e.to_string())?;
         let material = casing.volume();
         println!(

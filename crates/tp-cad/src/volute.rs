@@ -10,6 +10,7 @@
 //! walls beside the vaneless ring stay as material; the casing ends flat at the outlet
 //! of the diffuser and is open toward the impeller.
 
+use tp_design::impeller::edge::EdgeShape;
 use tp_design::volute::VoluteGeometry;
 use tp_math::{DVec2, DVec3};
 
@@ -27,6 +28,8 @@ pub struct VoluteCad {
     pub channel: Shape,
     /// The channel plus the ring between impeller outlet and cutwater circle.
     pub fluid: Shape,
+    /// What the CAD kernel could not build as designed.
+    pub warnings: Vec<String>,
 }
 
 impl VoluteCad {
@@ -211,7 +214,7 @@ pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
     let ring_volume = ring.volume_with_tolerance(0.0);
     let whole = |channel: &Shape| channel.volume_with_tolerance(0.0) > 0.9 * pieces;
     let joined = first_sound(
-        |fuzzy| fuse_all(&lofts, fuzzy),
+        |fuzzy| occ::fuse_all_fuzzy(&lofts, fuzzy),
         |channel| channel.is_valid() && channel.solid_count() == 1 && whole(channel),
         |channel| channel.fixed().ok(),
     )?;
@@ -221,22 +224,34 @@ pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
     // union, while it does out of each piece. Each tool finds its own gap. A cut that
     // fails may still give one valid solid, even one a little smaller: the body's cut
     // must leave its points on the surface (the faces on the channel, the nose on the
-    // ring), the rib's take something away. The body may cut the start of a spiral
-    // that starts small off the rest of the channel: the ring joins them again.
-    let carve = |shape: &Shape, ring: bool| -> Result<Shape, CadError> {
-        let mut carved = shape.rotated_z(0.0)?;
+    // ring, both on the flow domain), the rib's take something away. The body may cut
+    // the start of a spiral that starts small off the rest of the channel: the ring
+    // joins them again.
+    #[derive(Clone, Copy, PartialEq)]
+    enum Part {
+        Channel,
+        Ring,
+        Domain,
+    }
+    let carve = |shape: &Shape, part: Part| -> Result<Shape, CadError> {
+        let mut carved = shape.copied()?;
         for (tool, faces, noses) in &tools {
-            let probes = if ring { noses } else { faces };
+            let probes: Vec<DVec3> = match part {
+                Part::Channel => faces.clone(),
+                Part::Ring => noses.clone(),
+                Part::Domain => faces.iter().chain(noses).copied().collect(),
+            };
             let before = carved.volume_with_tolerance(0.0);
             let next = first_sound(
                 |fuzzy| carved.cut_fuzzy(tool, fuzzy),
                 |cut| {
                     cut.is_valid()
-                        && (cut.solid_count() == 1 || !ring && cut.solid_count() > 1)
+                        && (cut.solid_count() == 1
+                            || part == Part::Channel && cut.solid_count() > 1)
                         && if probes.is_empty() {
                             cut.volume_with_tolerance(0.0) < before
                         } else {
-                            on_surface(cut, probes)
+                            on_surface(cut, &probes)
                         }
                 },
                 |cut| cut.fixed().ok(),
@@ -245,40 +260,114 @@ pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
         }
         Ok(carved)
     };
-    let channel = carve(&joined, false)?;
-    let inlet = carve(&ring, true)?;
-    // The flow domain is what gets exported.
-    let fluid = first_sound(
-        |fuzzy| inlet.fuse_fuzzy(&channel, fuzzy),
-        |fluid| {
-            fluid.is_valid()
-                && fluid.solid_count() == 1
-                && fluid.volume_with_tolerance(0.0)
-                    > channel.volume_with_tolerance(0.0) + 0.5 * ring_volume
+    let channel = carve(&joined, Part::Channel)?;
+    let inlet = carve(&ring, Part::Ring)?;
+    // The flow domain is what gets exported. A fuzzy fusion may move the cut body
+    // again (a tapered nose, a compensated spiral), so its points must still lie on the
+    // surface.
+    let probes: Vec<DVec3> = tools
+        .iter()
+        .flat_map(|(_, faces, noses)| faces.iter().chain(noses))
+        .copied()
+        .collect();
+    let domain = |fluid: &Shape| {
+        fluid.is_valid()
+            && fluid.solid_count() == 1
+            && fluid.volume_with_tolerance(0.0)
+                > channel.volume_with_tolerance(0.0) + 0.5 * ring_volume
+    };
+    // The first fusion that keeps the cut on the surface; else the first that is
+    // only a sound flow domain, and the first that built at all.
+    let (mut plain, mut built) = (None, None);
+    for fuzzy in FUZZY_GAPS {
+        let Ok(fused) = inlet.fuse_fuzzy(&channel, fuzzy) else {
+            continue;
+        };
+        for fluid in std::iter::once(fused.copied()?).chain(fused.fixed().ok()) {
+            if domain(&fluid) {
+                if on_surface(&fluid, &probes) {
+                    return Ok(VoluteCad {
+                        channel,
+                        fluid,
+                        warnings: Vec::new(),
+                    });
+                }
+                plain.get_or_insert(fluid);
+            } else {
+                built.get_or_insert(fluid);
+            }
+        }
+    }
+    // Else the tools come out of the union of the uncut ring and channel, which works
+    // where the carved pieces do not join.
+    let united = first_sound(
+        |fuzzy| ring.fuse_fuzzy(&joined, fuzzy),
+        |union| {
+            union.is_valid()
+                && union.solid_count() == 1
+                && union.volume_with_tolerance(0.0) > 0.9 * pieces + 0.5 * ring_volume
         },
-        |fluid| fluid.fixed().ok(),
-    )?;
-
-    Ok(VoluteCad { channel, fluid })
+        |union| union.fixed().ok(),
+    );
+    if let Ok(fluid) = united.and_then(|union| carve(&union, Part::Domain))
+        && domain(&fluid)
+    {
+        if on_surface(&fluid, &probes) {
+            return Ok(VoluteCad {
+                channel,
+                fluid,
+                warnings: Vec::new(),
+            });
+        }
+        plain.get_or_insert(fluid);
+    }
+    // Else a sound domain whose cut lies off the design, and says by how much.
+    let fluid = plain
+        .or(built)
+        .ok_or_else(|| CadError::Operation("the flow domain of the volute failed".into()))?;
+    let off = fluid
+        .boundary_distances(&probes)
+        .map_or(f64::INFINITY, |d| {
+            d.into_iter()
+                .map(|d| if d.is_nan() { f64::INFINITY } else { d })
+                .fold(0.0, f64::max)
+        });
+    let warnings = vec![format!(
+        "the cutwater of the CAD solid lies up to {off:.1} mm off its design: the CAD \
+         kernel could not cut it cleanly"
+    )];
+    Ok(VoluteCad {
+        channel,
+        fluid,
+        warnings,
+    })
 }
 
 /// Deviation from the outlines of the cutwater body that its splines may take, m.
 const OUTLINE_TOLERANCE: f64 = 1e-5;
+
+/// Points kept round the nose of the body, evenly spread.
+const NOSE_POINTS: usize = 24;
 
 /// Longest gap between the points a spline through an outline of the body passes, m.
 const OUTLINE_SPACING: f64 = 2e-3;
 
 /// The points of the outlines `outlines`, which correspond one to one, that are needed
 /// to follow every one of them within [`OUTLINE_TOLERANCE`] by straight segments
-/// (Douglas–Peucker over all of them at once), no more than [`OUTLINE_SPACING`] apart. The outlines are sampled densely along
+/// (Douglas–Peucker over all of them at once), no more than [`OUTLINE_SPACING`] apart,
+/// and the points `always`. The outlines are sampled densely along
 /// the walls; a spline through every point would make heavy surfaces and slow booleans,
 /// and the same points in every plane keep the lofted surface light.
-fn outline_points(outlines: &[&[DVec3]]) -> Vec<usize> {
+fn outline_points(outlines: &[&[DVec3]], always: &[usize]) -> Vec<usize> {
     let n = outlines[0].len();
     let mut keep = vec![false; n];
     keep[0] = true;
     keep[n - 1] = true;
-    let mut spans = vec![(0, n - 1)];
+    for &i in always {
+        keep[i.min(n - 1)] = true;
+    }
+    let kept: Vec<usize> = (0..n).filter(|&i| keep[i]).collect();
+    let mut spans: Vec<(usize, usize)> = kept.windows(2).map(|w| (w[0], w[1])).collect();
     while let Some((a, b)) = spans.pop() {
         // The point farthest from its chord, over every outline.
         let far = (a + 1..b)
@@ -316,16 +405,43 @@ fn outline_points(outlines: &[&[DVec3]]) -> Vec<usize> {
 
 /// Closed wire through the points `points` of one outline of the cutwater body at the
 /// height `z`, mm: its smooth outline and the chord that closes it inside the wedge.
-fn cutwater_wire(outline: &[DVec3], points: &[usize], z: f64) -> Result<Shape, CadError> {
-    let points: Vec<DVec3> = points
-        .iter()
-        .map(|&i| DVec3::new(outline[i].x * MM, outline[i].y * MM, z))
-        .collect();
-    let (first, last) = (points[0], points[points.len() - 1]);
-    occ::wire(&[
-        occ::spline_edge(&points, false)?,
-        occ::line_edge(last, first)?,
-    ])
+fn cutwater_wire(
+    outline: &[DVec3],
+    points: &[usize],
+    corners: &[usize],
+    z: f64,
+) -> Result<Shape, CadError> {
+    let at = |i: usize| DVec3::new(outline[i].x * MM, outline[i].y * MM, z);
+    // One spline from corner to corner.
+    let mut edges = Vec::new();
+    let mut run = vec![at(points[0])];
+    for &i in &points[1..] {
+        run.push(at(i));
+        if corners.contains(&i) || i == points[points.len() - 1] {
+            edges.push(if run.len() == 2 {
+                occ::line_edge(run[0], run[1])?
+            } else {
+                occ::spline_edge(&run, false)?
+            });
+            run = vec![at(i)];
+        }
+    }
+    edges.push(occ::line_edge(at(points[points.len() - 1]), at(points[0]))?);
+    occ::wire(&edges)
+}
+
+/// The points of `outline` where it turns by more than 10° from one point to the next:
+/// the corners of a nose that does not run smoothly into the faces (a taper, a blunt
+/// edge).
+fn outline_corners(outline: &[DVec3]) -> Vec<usize> {
+    let n = outline.len();
+    (1..n.saturating_sub(1))
+        .filter(|&i| {
+            let a = (outline[i] - outline[i - 1]).truncate().normalize_or_zero();
+            let b = (outline[i + 1] - outline[i]).truncate().normalize_or_zero();
+            a.dot(b) < 10f64.to_radians().cos()
+        })
+        .collect()
 }
 
 /// The body of a rounded cutwater, mm: lofted smoothly through its outlines in the
@@ -343,13 +459,45 @@ fn cutwater_body(g: &VoluteGeometry, z_lo: f64, z_hi: f64) -> Result<Option<Shap
         ));
     }
     let outlines: Vec<&[DVec3]> = body.iter().map(Vec::as_slice).collect();
-    let points = outline_points(&outlines);
+    // Points spread evenly round a tapered or Bézier nose: a spline through only those
+    // Douglas–Peucker keeps swings around its small tip. A round or elliptic nose needs
+    // none, and forced points there, close to the kept ones, make the spline wavy.
+    let mid = &body[body.len() / 2];
+    let innermost = mid
+        .iter()
+        .min_by(|a, b| a.truncate().length().total_cmp(&b.truncate().length()))
+        .copied()
+        .unwrap_or(mid[0]);
+    let profile = tp_design::impeller::edge::EdgeProfile::new(
+        g.design.cutwater_nose,
+        2.0 * g.design.nose_radius,
+    )
+    .map_or(0.0, |p| p.length());
+    let reach = profile + 2.0 * g.design.nose_radius;
+    let round: Vec<usize> = (0..mid.len())
+        .filter(|&i| mid[i].distance(innermost) < reach)
+        .collect();
+    let pointed = matches!(
+        g.design.cutwater_nose,
+        EdgeShape::Taper { .. } | EdgeShape::Bezier { .. }
+    );
+    let round = if pointed { round } else { Vec::new() };
+    let step = (round.len() / NOSE_POINTS).max(1);
+    // The corners of the shape split the spline, the same in every plane.
+    let corners = outline_corners(mid);
+    let always: Vec<usize> = round
+        .iter()
+        .copied()
+        .step_by(step)
+        .chain(corners.iter().copied())
+        .collect();
+    let points = outline_points(&outlines, &always);
     let wires = body
         .iter()
-        .map(|o| cutwater_wire(o, &points, o[0].z * MM))
+        .map(|o| cutwater_wire(o, &points, &corners, o[0].z * MM))
         .collect::<Result<Vec<_>, _>>()?;
     let extend = |outline: &[DVec3], from: f64, to: f64| -> Result<Shape, CadError> {
-        let face = occ::planar_face(&cutwater_wire(outline, &points, from.min(to))?)?;
+        let face = occ::planar_face(&cutwater_wire(outline, &points, &corners, from.min(to))?)?;
         occ::prism_z(&face, (to - from).abs())
     };
     let below = extend(first, first[0].z * MM, z_lo)?;
@@ -415,41 +563,55 @@ const PROBE_TOLERANCE: f64 = 0.02;
 
 /// Points of the body of a rounded cutwater in each of its planes that a cut leaves on
 /// the surface, mm: the middle of each face beyond the inlet ring, on the channel, and
-/// the innermost point of the nose, on the ring.
+/// the innermost point of the nose, on the ring; in the planes clear of the side
+/// endings ([`clear_planes`]).
 fn cutwater_probes(g: &VoluteGeometry) -> (Vec<DVec3>, Vec<DVec3>) {
     // Clear of the inlet ring, which reaches 2 % of b₃ past r'_z.
     let clear = g.design.stagnation_radius + 0.03 * g.design.inlet_width;
     let mut faces = Vec::new();
     let mut noses = Vec::new();
-    for s in g.cutwater_slices.iter().filter(|s| s.outline.len() > 2) {
+    for outline in clear_planes(g).iter().filter(|o| o.len() > 2) {
         let radius = |p: &DVec3| p.truncate().length();
-        let Some((nose, _)) = s
-            .outline
+        let Some((nose, _)) = outline
             .iter()
             .enumerate()
             .min_by(|a, b| radius(a.1).total_cmp(&radius(b.1)))
         else {
             continue;
         };
-        noses.push(s.outline[nose] * MM);
+        noses.push(outline[nose] * MM);
         // Each face from its join to where it reaches the ring.
-        let spiral = s.outline[..nose]
+        let spiral = outline[..nose]
             .iter()
             .take_while(|p| radius(p) > clear)
             .count();
-        let diffuser = s.outline[nose..]
+        let diffuser = outline[nose..]
             .iter()
             .rev()
             .take_while(|p| radius(p) > clear)
             .count();
         if spiral > 0 {
-            faces.push(s.outline[spiral / 2] * MM);
+            faces.push(outline[spiral / 2] * MM);
         }
         if diffuser > 0 {
-            faces.push(s.outline[s.outline.len() - 1 - diffuser / 2] * MM);
+            faces.push(outline[outline.len() - 1 - diffuser / 2] * MM);
         }
     }
     (faces, noses)
+}
+
+/// The outlines of the body in the planes of the cutwater clear of its side endings:
+/// next to a side wall part of an outline may lie outside the flow, beyond the wall.
+fn clear_planes(g: &VoluteGeometry) -> Vec<Vec<DVec3>> {
+    let reach = 0.5 * g.design.inlet_width - 1.5 * g.design.cutwater_side_radius;
+    let zm = g.basis.midplane;
+    g.cutwater_planes()
+        .into_iter()
+        .filter(|o| {
+            o.first()
+                .is_some_and(|p| (p.z - zm).abs() <= reach.max(1e-9))
+        })
+        .collect()
 }
 
 /// Whether every one of `points` lies on the surface of `shape`.
@@ -516,8 +678,7 @@ pub fn build_volute_casing(g: &VoluteGeometry, cad: &VoluteCad) -> Result<Volute
     // the fillet only adds material outside, so it cannot reach the flow.
     let radius = g.design.cutwater_fillet * MM;
     let enclose = |fuzzy: f64| -> Result<(Shape, f64, Option<f64>), CadError> {
-        let space = cad.fluid.fuse_fuzzy(&impeller, fuzzy)?;
-        let mut whole = fuse_all(&outer, fuzzy)?;
+        let mut whole = occ::fuse_all_fuzzy(&outer, fuzzy)?;
         // The radius it took; 0 when asked for none.
         let mut rounded = Some(0.0);
         if radius > 0.0 && !g.cutwater_slices.is_empty() {
@@ -527,7 +688,9 @@ pub fn build_volute_casing(g: &VoluteGeometry, cad: &VoluteCad) -> Result<Volute
             });
         }
         let gross = whole.volume_with_tolerance(0.0);
-        Ok((whole.cut_fuzzy(&space, fuzzy)?, gross, rounded))
+        // The flow and the space of the impeller come out together.
+        let solid = whole.cut_all_fuzzy(&[&cad.fluid, &impeller], fuzzy)?;
+        Ok((solid, gross, rounded))
     };
     let sound = |(solid, gross, _): &(Shape, f64, Option<f64>)| {
         solid.is_valid()
@@ -689,16 +852,6 @@ fn flange(g: &VoluteGeometry, f: &tp_design::volute::Flange) -> Result<Shape, Ca
     disk.cut(&bore)?.cut(&occ::compound(&holes)?)
 }
 
-/// The union of `pieces`.
-fn fuse_all(pieces: &[Shape], fuzzy: f64) -> Result<Shape, CadError> {
-    // A turn by zero copies the first piece for this attempt.
-    let mut whole = pieces[0].rotated_z(0.0)?;
-    for piece in &pieces[1..] {
-        whole = whole.fuse_fuzzy(piece, fuzzy)?;
-    }
-    Ok(whole)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -783,6 +936,7 @@ mod tests {
 
     #[test]
     fn volute_channel_and_fluid_domain_are_valid_solids() {
+        let _slot = crate::test_slot::take();
         for sections in every_cross_section() {
             let input = VoluteInput {
                 cross_section: sections,
@@ -911,17 +1065,18 @@ mod tests {
     /// How the flow domain `cad` departs from what the viewer shows around the body of
     /// the cutwater; `None` without a body.
     fn departure_from_the_view(g: &VoluteGeometry, cad: &VoluteCad) -> Option<Departure> {
-        let outlines: Vec<DVec3> = g
-            .cutwater_slices
+        let outlines: Vec<DVec3> = clear_planes(g)
             .iter()
-            .filter(|s| s.outline.len() > 2)
-            .flat_map(|s| s.outline.iter().map(|p| *p * MM))
+            .filter(|o| o.len() > 2)
+            .flat_map(|o| o.iter().map(|p| *p * MM))
             .collect();
-        // Between the end planes of the body.
-        let (lo, hi) = outlines
+        // Between the end planes of the body, side endings included.
+        let (lo, hi) = g
+            .cutwater_planes()
             .iter()
+            .flatten()
             .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| {
-                (lo.min(p.z), hi.max(p.z))
+                (lo.min(p.z * MM), hi.max(p.z * MM))
             });
         if outlines.is_empty() {
             return None;
@@ -1035,8 +1190,9 @@ mod tests {
             d.solid,
             d.walls
         );
+        // Within the deflection of the triangles.
         assert!(
-            d.nearest > nose - 0.01,
+            d.nearest > nose - 0.02,
             "{case}: {} vs {nose} mm",
             d.nearest
         );
@@ -1065,6 +1221,7 @@ mod tests {
 
     #[test]
     fn the_casing_wraps_the_flow_domain_in_one_solid() {
+        let _slot = crate::test_slot::take();
         use tp_design::volute::VoluteKind;
         // The trapezoidal default, rectangles whose flat sides meet in the throat, and
         // a double volute.
@@ -1103,6 +1260,7 @@ mod tests {
 
     #[test]
     fn the_casing_fills_and_rounds_the_groove_over_the_cutwater() {
+        let _slot = crate::test_slot::take();
         // Round sections take a smaller radius there.
         for (shape, whole_radius) in [
             (SectionShape::default(), true),
@@ -1121,7 +1279,7 @@ mod tests {
             let (whole, (filled, took)) = FUZZY_GAPS
                 .into_iter()
                 .find_map(|fuzzy| {
-                    let whole = fuse_all(&pieces, fuzzy).ok()?;
+                    let whole = occ::fuse_all_fuzzy(&pieces, fuzzy).ok()?;
                     let filled = fill_groove(&whole, &pieces, &g, radius)?;
                     Some((whole, filled))
                 })
@@ -1157,7 +1315,40 @@ mod tests {
     }
 
     #[test]
+    fn nose_shapes_and_g2_joins_give_the_body_the_view_shows() {
+        let _slot = crate::test_slot::take();
+        type Setting = fn(&mut VoluteInput);
+        let edits: [(&str, Setting); 3] = [
+            ("elliptic 3:1", |v| {
+                v.cutwater.nose_shape = EdgeShape::Ellipse { ratio: 3.0 }
+            }),
+            ("tapered", |v| v.cutwater.nose_shape = EdgeShape::TAPER),
+            ("G2", |v| {
+                v.cutwater.join = tp_design::volute::Continuity::G2
+            }),
+        ];
+        for (case, edit) in edits {
+            let mut input = VoluteInput::default();
+            edit(&mut input);
+            let g = VoluteGeometry::build(&basis(), &input).unwrap();
+            let cad = build_volute(&g).unwrap();
+            assert!(
+                cad.fluid.is_valid() && cad.fluid.solid_count() == 1,
+                "{case}"
+            );
+            // The tapered nose may not cut cleanly; then the CAD says how far off it is.
+            if case == "tapered" && !cad.warnings.is_empty() {
+                assert!(cad.warnings[0].contains("mm off its design"), "{case}");
+                continue;
+            }
+            assert!(cad.warnings.is_empty(), "{case}: {:?}", cad.warnings);
+            assert_matches_the_view(&g, &cad, case);
+        }
+    }
+
+    #[test]
     fn a_double_volute_is_one_valid_solid() {
+        let _slot = crate::test_slot::take();
         let double = |edit: &dyn Fn(&mut VoluteInput)| {
             let mut input = VoluteInput::default();
             input.setup.kind = tp_design::volute::VoluteKind::Double;
@@ -1224,6 +1415,7 @@ mod tests {
 
     #[test]
     fn an_internal_volute_is_one_solid_with_its_bend() {
+        let _slot = crate::test_slot::take();
         use tp_design::volute::{InternalRound, SectionShape};
         for open_to_right in [true, false] {
             let input = VoluteInput {
@@ -1269,6 +1461,7 @@ mod tests {
 
     #[test]
     fn polygons_split_at_their_corners() {
+        let _slot = crate::test_slot::take();
         // A unit square with the corner at (1, 1) rounded by a quarter circle of 12
         // segments: the rounded side, tangent at both ends, is one curved run.
         let mut points = vec![DVec2::new(0.0, 0.0), DVec2::new(1.0, 0.0)];
@@ -1290,6 +1483,7 @@ mod tests {
 
     #[test]
     fn common_volute_options_give_one_valid_flow_domain() {
+        let _slot = crate::test_slot::take();
         use tp_design::volute::{CutwaterShape, DischargeShape, StraightWall};
         for shape in [SectionShape::default(), SectionShape::rectangular()] {
             for discharge in [
@@ -1323,6 +1517,7 @@ mod tests {
 
     #[test]
     fn spiral_development_options_give_one_valid_flow_domain() {
+        let _slot = crate::test_slot::take();
         use tp_design::Param;
         use tp_design::volute::AreaLaw;
         type Setting = fn(&mut VoluteInput);
@@ -1355,6 +1550,7 @@ mod tests {
 
     #[test]
     fn cutwater_and_discharge_shapes_give_valid_solids() {
+        let _slot = crate::test_slot::take();
         use tp_design::Param;
         use tp_design::volute::{CutwaterShape, DischargeShape, StraightWall};
         let fluid = |cutwater: CutwaterShape, discharge: DischargeShape| -> f64 {

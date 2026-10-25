@@ -6,15 +6,17 @@
 //!
 //! - its camber line leaves the nose at the blade angle α₃B = α₃′ + i₃ to the
 //!   circumferential direction (eq. T7.7.6);
-//! - the nose is a circle of radius ρ whose centre M lies on the stagnation radius
-//!   r′_z on the x axis, moved radially so that the innermost point of the cutwater lies
-//!   on the cutwater circle d_z;
+//! - the nose is shaped as a blade edge on a body e = 2ρ thick (round by default, or
+//!   elliptic, tapered, Bézier or blunt), with the end of its shape M on the stagnation
+//!   radius r′_z on the x axis, moved radially so that the innermost point of the
+//!   cutwater lies on the cutwater circle d_z;
 //! - from the nose to the tip of the wedge the body keeps the nose thickness e = 2ρ
 //!   about a cubic Bézier camber line, tangent to α₃B at the nose and to the middle of
 //!   the walls at the tip;
 //! - past the tip each face is its wall moved into the flow by its share (½ by default)
-//!   of what the wedge lacks of e, through a quadratic smooth maximum, so that it runs tangentially into
-//!   the wall where the wedge has grown to e + k.
+//!   of what the wedge lacks of e, through a smooth maximum, so that it runs into the
+//!   wall where the wedge has grown to e + k: quadratic, tangent to it (G1), or quartic,
+//!   with its curvature too (G2).
 //!
 //! So the cutwater is nowhere thinner than e, and takes no more of the flow than that
 //! needs (our construction: Gülich asks for a short, thick profile, except the nose
@@ -29,8 +31,8 @@
 use tp_math::{Bezier, DVec2, DVec3};
 
 use super::NozzleSection;
-use super::{CutwaterShape, VoluteDesign};
-use crate::impeller::edge::{EdgeProfile, EdgeShape};
+use super::{Continuity, CutwaterShape, VoluteDesign};
+use crate::impeller::edge::EdgeProfile;
 
 /// Planes across the inlet width, an odd number so that one is the midplane.
 pub const SLICES: usize = 9;
@@ -71,6 +73,8 @@ pub struct CutwaterSlice {
     pub spiral_wall: Vec<DVec3>,
     /// The inner wall of the diffuser in this plane, from the throat downstream.
     pub diffuser_wall: Vec<DVec3>,
+    /// Centre of the nose circle in this plane; the tip for a sharp cutwater.
+    pub nose_centre: DVec3,
 }
 
 /// The cutwater in planes across the inlet width, from −z to +z. `outlines` are the
@@ -132,6 +136,33 @@ pub fn oblique(point: DVec2, obliquity: f64, sign: f64, dz: f64) -> DVec2 {
     DVec2::from_angle(sign * dz * obliquity.tan() / r).rotate(point)
 }
 
+/// Where the outer wall of the spiral crosses the inner wall of the diffuser in each of
+/// the planes across the inlet width: the wrap angle of the tip from the cutwater
+/// (rad) and the wedge between the walls there; `None` in a plane where they do not
+/// cross. `outlines` are the fitted sections of the spiral from an early start, which do
+/// not depend on where the spiral really starts.
+pub(super) fn crossings(
+    design: &VoluteDesign,
+    outlines: &[(f64, Vec<DVec2>)],
+    nozzle: &[NozzleSection],
+    sign: f64,
+    midplane: f64,
+) -> Vec<Option<(f64, f64)>> {
+    let half = 0.5 * design.inlet_width * (1.0 - EDGE_MARGIN);
+    (0..SLICES)
+        .map(|k| {
+            let z = midplane - half + 2.0 * half * k as f64 / (SLICES - 1) as f64;
+            let walls = Walls::at(outlines, nozzle, sign, z)?;
+            let (s, d) = walls.crossing()?;
+            let ts = direction(&walls.spiral, s.segment);
+            let td = direction(&walls.diffuser, d.segment);
+            let wedge = ts.dot(td).clamp(-1.0, 1.0).acos();
+            let angle = (sign * s.point.y.atan2(s.point.x)).rem_euclid(std::f64::consts::TAU);
+            Some((angle, wedge))
+        })
+        .collect()
+}
+
 /// The two walls in one plane, as polylines (x, y) downstream.
 struct Walls {
     spiral: Vec<DVec2>,
@@ -173,12 +204,27 @@ impl Walls {
     /// they never cross (the diffuser wall turns away at once), the start of the spiral
     /// and the nearest point of the diffuser wall to it.
     fn tip(&self) -> (Station, Station) {
+        self.crossing().unwrap_or_else(|| {
+            let start = self.spiral[0];
+            let (segment, point) = nearest_on(&self.diffuser, start);
+            (
+                Station {
+                    segment: 0,
+                    point: start,
+                },
+                Station { segment, point },
+            )
+        })
+    }
+
+    /// Where the spiral wall first crosses the diffuser wall, on each polyline.
+    fn crossing(&self) -> Option<(Station, Station)> {
         for i in 0..self.spiral.len() - 1 {
             let (a, b) = (self.spiral[i], self.spiral[i + 1]);
             for j in 0..self.diffuser.len() - 1 {
                 let (c, d) = (self.diffuser[j], self.diffuser[j + 1]);
                 if let Some(p) = segment_crossing(a, b, c, d) {
-                    return (
+                    return Some((
                         Station {
                             segment: i,
                             point: p,
@@ -187,19 +233,11 @@ impl Walls {
                             segment: j,
                             point: p,
                         },
-                    );
+                    ));
                 }
             }
         }
-        let start = self.spiral[0];
-        let (segment, point) = nearest_on(&self.diffuser, start);
-        (
-            Station {
-                segment: 0,
-                point: start,
-            },
-            Station { segment, point },
-        )
+        None
     }
 
     /// The nose centre M of the midplane: on the stagnation radius on the x axis,
@@ -247,6 +285,7 @@ impl Walls {
                 join_length: 0.0,
                 spiral_wall,
                 diffuser_wall,
+                nose_centre: at(s.point),
             });
         };
         let body = self.body(design, sign, centre)?;
@@ -264,6 +303,7 @@ impl Walls {
             join_length: body.join_length,
             spiral_wall,
             diffuser_wall,
+            nose_centre: at(centre),
         })
     }
 
@@ -280,7 +320,7 @@ impl Walls {
         let (sa, ca) = design.cutwater_angle.sin_cos();
         let camber = along * ca + radial * sa;
         let normal = radial * ca - along * sa;
-        let profile = EdgeProfile::new(EdgeShape::Ellipse { ratio: 1.0 }, 2.0 * h).ok()?;
+        let profile = EdgeProfile::new(design.cutwater_nose, 2.0 * h).ok()?;
         let lead = centre - camber * profile.length();
         let [outer_nose, inner_nose] = profile.faces().map(|face| -> Vec<DVec2> {
             face.iter()
@@ -320,7 +360,12 @@ impl Walls {
                 } else if g <= -k {
                     0.0
                 } else {
-                    (g + k) * (g + k) / (4.0 * k)
+                    match design.cutwater_join {
+                        // Quadratic: C¹, the faces tangent to the walls.
+                        Continuity::G1 => (g + k) * (g + k) / (4.0 * k),
+                        // Quartic: C², the curvature of the walls carried on too.
+                        Continuity::G2 => (g + k).powi(3) * (3.0 * k - g) / (16.0 * k.powi(3)),
+                    }
                 }
             };
             let join = if gap(longest) < target + k {
@@ -549,6 +594,280 @@ pub fn fine_outlines(slices: &[CutwaterSlice], steps: usize) -> Vec<Vec<DVec3>> 
     }
     out.push(rings[m - 1].to_vec());
     out
+}
+
+/// The planes of a body with side endings lie no farther apart than its radius over this.
+const ENDING_PLANES: f64 = 2.0;
+
+/// What a point of the outline of the body faces.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Facing {
+    /// The spiral, along the inner face.
+    Spiral,
+    /// The flow ahead of the cutwater, round the nose.
+    Nose,
+    /// The diffuser, along the outer face.
+    Diffuser,
+}
+
+/// The side walls of the channels around the cutwater, before the volute is turned.
+struct SideWalls<'a> {
+    /// The fitted sections (r, z) of the spiral at their wrap angles.
+    outlines: &'a [(f64, Vec<DVec2>)],
+    nozzle: &'a [NozzleSection],
+    sign: f64,
+    /// The side walls of the inlet: the heights of the bottom and the top, m.
+    inlet: (f64, f64),
+    /// How far out the inlet ring reaches, m.
+    ring: f64,
+}
+
+impl SideWalls<'_> {
+    /// Heights of the bottom and the top side walls straight below and above `p` (m):
+    /// those of the flow there, the inlet ring, the spiral and the diffuser together;
+    /// `None` where none of them reaches.
+    fn at(&self, p: DVec2) -> Option<(f64, f64)> {
+        let inlet = (p.length() <= self.ring).then_some(self.inlet);
+        [inlet, self.spiral(p), self.diffuser(p)]
+            .into_iter()
+            .flatten()
+            .reduce(|(lo, hi), (a, b)| (lo.min(a), hi.max(b)))
+    }
+
+    /// In the spiral, from its sections either side of the point.
+    fn spiral(&self, p: DVec2) -> Option<(f64, f64)> {
+        let theta = (self.sign * p.y.atan2(p.x)).rem_euclid(std::f64::consts::TAU);
+        let k = self.outlines.partition_point(|(angle, _)| *angle < theta);
+        if k == 0 || k >= self.outlines.len() {
+            return None;
+        }
+        let ((a0, o0), (a1, o1)) = (&self.outlines[k - 1], &self.outlines[k]);
+        let r = p.length();
+        let (lo0, hi0) = span_at(o0, r)?;
+        let (lo1, hi1) = span_at(o1, r)?;
+        let t = (theta - a0) / (a1 - a0);
+        Some((lo0 + (lo1 - lo0) * t, hi0 + (hi1 - hi0) * t))
+    }
+
+    /// In the diffuser, from its sections either side of the point, each seen in its
+    /// own plane (across the diffuser, z).
+    fn diffuser(&self, p: DVec2) -> Option<(f64, f64)> {
+        let ahead = |n: &NozzleSection| {
+            (DVec3::new(p.x, p.y, n.center.z) - n.center).dot(n.tangent.normalize())
+        };
+        let k = (0..self.nozzle.len().saturating_sub(1))
+            .find(|&k| ahead(&self.nozzle[k]) >= 0.0 && ahead(&self.nozzle[k + 1]) < 0.0)?;
+        let span = |n: &NozzleSection| {
+            let u = n.tangent.cross(DVec3::Z).normalize();
+            let at = DVec3::new(p.x, p.y, n.center.z);
+            let flat: Vec<DVec2> = n
+                .points
+                .iter()
+                .map(|q| DVec2::new((*q - n.center).dot(u), q.z))
+                .collect();
+            span_at(&flat, (at - n.center).dot(u))
+        };
+        let (a, b) = (&self.nozzle[k], &self.nozzle[k + 1]);
+        let ((lo0, hi0), (lo1, hi1)) = (span(a)?, span(b)?);
+        let t = ahead(a) / (ahead(a) - ahead(b));
+        Some((lo0 + (lo1 - lo0) * t, hi0 + (hi1 - hi0) * t))
+    }
+}
+
+/// The lowest and the highest point where the closed polygon `outline` (x, y) crosses
+/// the line x = `x`.
+fn span_at(outline: &[DVec2], x: f64) -> Option<(f64, f64)> {
+    let n = outline.len();
+    let crossings = (0..n).filter_map(|i| {
+        let (p, q) = (outline[i], outline[(i + 1) % n]);
+        if (p.x - x) * (q.x - x) > 0.0 || (q.x - p.x).abs() < 1e-15 {
+            return None;
+        }
+        Some(p.y + (q.y - p.y) * (x - p.x) / (q.x - p.x))
+    });
+    crossings.fold(None, |span, y| match span {
+        None => Some((y, y)),
+        Some((lo, hi)) => Some((f64::min(lo, y), f64::max(hi, y))),
+    })
+}
+
+/// How far the body stands out from its face at the height `v` so that it rounds into
+/// a side wall at the height `wall` with the radius `radius`; the wall rises by the
+/// angle `slope` away from the face, into the flow. All measured toward the wall: the
+/// face meets the round where the circle of the round touches it, and past the top of
+/// the circle the body stands out by the radius.
+fn flare(v: f64, wall: f64, slope: f64, radius: f64) -> f64 {
+    let touch = wall + radius * slope.tan() - radius / slope.cos();
+    let w = (v - touch).clamp(0.0, radius);
+    radius - (radius * radius - w * w).max(0.0).sqrt()
+}
+
+/// The outlines of the body of a rounded cutwater from −z to +z, with the side endings:
+/// toward each side wall of the channel the body widens with the round of `radius`
+/// between its face and the wall, the height and the slope of the wall taken in the
+/// channel each point of the outline faces (the spiral, the diffuser, or the inlet
+/// round the nose). Where a face runs into its wall the body has no corner with the
+/// side wall, so the widening fades out there. `steps` outlines lie between two planes,
+/// on a Catmull–Rom spline through theirs ([`fine_outlines`]), and all of them no
+/// farther apart than `radius` / [`ENDING_PLANES`], on to where the body has widened by
+/// the whole radius. The channels are the fitted sections of the spiral at their wrap
+/// angles and the sections of the diffuser. Before the volute is turned.
+pub(super) fn body_outlines(
+    design: &VoluteDesign,
+    slices: &[CutwaterSlice],
+    (outlines, nozzle): (&[(f64, Vec<DVec2>)], &[NozzleSection]),
+    sign: f64,
+    midplane: f64,
+    radius: f64,
+    steps: usize,
+) -> Vec<Vec<DVec3>> {
+    let fine = fine_outlines(slices, steps);
+    let rounded: Vec<&CutwaterSlice> = slices.iter().filter(|s| s.outline.len() > 2).collect();
+    let (Some(first), Some(last)) = (rounded.first(), rounded.last()) else {
+        return fine;
+    };
+    if radius <= 0.0 || fine.len() < 2 {
+        return fine;
+    }
+    let b3 = design.inlet_width;
+    let rz = design.cutwater_diameter / 2.0;
+    let walls = SideWalls {
+        outlines,
+        nozzle,
+        sign,
+        inlet: (midplane - 0.5 * b3, midplane + 0.5 * b3),
+        // As the ring of the flow domain (VoluteGeometry::inlet_profile).
+        ring: design.stagnation_radius + 0.02 * b3,
+    };
+    // What each point faces and where it stands from its wall: in the outer planes,
+    // the bottom one for the bottom wall and the top one for the top wall.
+    let nose = design.nose_radius * (1.0 + 1e-6);
+    struct Point {
+        normal: DVec2,
+        /// Height of the wall and its slope away from the face.
+        wall: f64,
+        slope: f64,
+        /// How much of the round the point takes, 0 where the face runs into its wall.
+        share: f64,
+    }
+    let points = |s: &CutwaterSlice, top: bool| -> Vec<Point> {
+        let o: Vec<DVec2> = s.outline.iter().map(|p| p.truncate()).collect();
+        let n = o.len();
+        let centre = s.nose_centre.truncate();
+        let (Some(i0), Some(i1)) = (
+            o.iter().position(|p| p.distance(centre) <= nose),
+            o.iter().rposition(|p| p.distance(centre) <= nose),
+        ) else {
+            return Vec::new();
+        };
+        let ccw = (0..n).map(|i| o[i].perp_dot(o[(i + 1) % n])).sum::<f64>() > 0.0;
+        let spiral: Vec<DVec2> = s.spiral_wall.iter().map(|p| p.truncate()).collect();
+        let diffuser: Vec<DVec2> = s.diffuser_wall.iter().map(|p| p.truncate()).collect();
+        (0..n)
+            .map(|i| {
+                let facing = if i < i0 {
+                    Facing::Spiral
+                } else if i <= i1 {
+                    Facing::Nose
+                } else {
+                    Facing::Diffuser
+                };
+                let t = (o[(i + 1).min(n - 1)] - o[i.saturating_sub(1)]).normalize_or_zero();
+                let normal = if ccw {
+                    DVec2::new(t.y, -t.x)
+                } else {
+                    DVec2::new(-t.y, t.x)
+                };
+                let height = |q: DVec2| walls.at(q).map(|(lo, hi)| if top { hi } else { -lo });
+                // The slope over the width of the round, which steps of the wall from one
+                // channel to the next do not tilt much.
+                let (wall, slope) = match (height(o[i]), height(o[i] + normal * radius)) {
+                    (Some(h), Some(further)) => (h, ((further - h) / radius).atan()),
+                    (Some(h), None) => (h, 0.0),
+                    _ => {
+                        let (lo, hi) = walls.inlet;
+                        (if top { hi } else { -lo }, 0.0)
+                    }
+                };
+                let off = match facing {
+                    Facing::Spiral => distance_to(&spiral, o[i]),
+                    Facing::Diffuser => distance_to(&diffuser, o[i]),
+                    Facing::Nose => radius,
+                };
+                let x = (off / radius).clamp(0.0, 1.0);
+                Point {
+                    normal,
+                    wall,
+                    slope: slope.clamp(-1.0, 1.0),
+                    share: x * x * (3.0 - 2.0 * x),
+                }
+            })
+            .collect()
+    };
+    let (below, above) = (points(first, false), points(last, true));
+    let n = first.outline.len();
+    if below.len() != n || above.len() != n || fine.iter().any(|o| o.len() != n) {
+        return fine;
+    }
+    // Where the round starts on the face, toward each wall, and where it reaches its
+    // radius. The planes keep one spacing over the whole height, no more than half the
+    // radius: a smooth loft through unevenly spaced sections swings between them.
+    let touch = |p: &Point| p.wall + radius * p.slope.tan() - radius / p.slope.cos();
+    let reach = |ps: &[Point]| {
+        ps.iter()
+            .map(|p| touch(p) + radius)
+            .fold(f64::NEG_INFINITY, f64::max)
+    };
+    let (z0, z1) = (fine[0][0].z, fine[fine.len() - 1][0].z);
+    let gap = fine[1][0].z - z0;
+    let step = gap / (gap / (radius / ENDING_PLANES)).ceil();
+    let (below_to, above_to) = (-reach(&below), reach(&above));
+    let before = ((z0 - below_to) / step).ceil().max(0.0) as usize;
+    let after = ((above_to - z1) / step).ceil().max(0.0) as usize;
+    let count = ((z1 - z0) / step).round() as usize;
+    let levels: Vec<f64> = (0..=before + count + after)
+        .map(|k| z0 + (k as f64 - before as f64) * step)
+        .collect();
+    // The plain outline at a height: between the planes on the spline, beyond them the
+    // outer one.
+    let plain = |z: f64| -> Vec<DVec3> {
+        let k = fine.partition_point(|o| o[0].z < z);
+        if k == 0 {
+            return fine[0].iter().map(|p| DVec3::new(p.x, p.y, z)).collect();
+        }
+        if k >= fine.len() {
+            return fine[fine.len() - 1]
+                .iter()
+                .map(|p| DVec3::new(p.x, p.y, z))
+                .collect();
+        }
+        let (a, b) = (&fine[k - 1], &fine[k]);
+        let t = (z - a[0].z) / (b[0].z - a[0].z);
+        a.iter().zip(b).map(|(p, q)| p.lerp(*q, t)).collect()
+    };
+    levels
+        .into_iter()
+        .map(|z| {
+            plain(z)
+                .into_iter()
+                .enumerate()
+                .map(|(i, p)| {
+                    let (b, a) = (&below[i], &above[i]);
+                    let out = a.share * flare(z, a.wall, a.slope, radius) * a.normal
+                        + b.share * flare(-z, b.wall, b.slope, radius) * b.normal;
+                    // Nothing nearer the axis than the cutwater circle: round the nose the
+                    // ending rides on it.
+                    let q = p.truncate() + out;
+                    let q = if q.length() < rz {
+                        q * (rz / q.length())
+                    } else {
+                        q
+                    };
+                    DVec3::new(q.x, q.y, z)
+                })
+                .collect()
+        })
+        .collect()
 }
 
 /// A centripetal Catmull–Rom spline through `points`, `n` points per span.
@@ -966,6 +1285,213 @@ mod tests {
                 .iter()
                 .all(|s| s.nose_distance > rz - 1e-9)
         );
+    }
+
+    #[test]
+    fn the_spiral_starts_before_its_wall_crosses_the_diffuser_in_every_plane() {
+        let g = build(|_| {});
+        let (lo, hi) = g.start_range.unwrap();
+        // Automatic: 3°, within the range, and before the tip in every plane.
+        assert!((g.start_angle - 3f64.to_radians()).abs() < 1e-12);
+        assert!(lo <= g.start_angle && g.start_angle <= hi);
+        let sign = g.basis.rotation_sign;
+        let unturned = |p: &DVec3| {
+            let a = sign * p.y.atan2(p.x) - sign * g.cutwater.tip.y.atan2(g.cutwater.tip.x);
+            a.rem_euclid(std::f64::consts::TAU)
+        };
+        let tip = g.cutwater.angle;
+        for s in &g.cutwater_slices {
+            assert!(
+                tip + unturned(&s.tip) > hi,
+                "{}",
+                (tip + unturned(&s.tip)).to_degrees()
+            );
+        }
+        // By hand within the range: the spiral starts there and the cutwater is built.
+        let late = 0.5 * (g.start_angle + hi);
+        let moved = build(|v| v.cutwater.spiral_start = Param::Manual(late));
+        assert!((moved.start_angle - late).abs() < 1e-12);
+        assert_eq!(moved.start_range, g.start_range);
+        assert!(sound(
+            &moved.cutwater_slices,
+            2.0 * moved.design.nose_radius
+        ));
+        // Past the range it says where the range is.
+        let err = VoluteGeometry::build(&reference_basis(), &{
+            let mut v = VoluteInput::default();
+            v.cutwater.spiral_start = Param::Manual(hi + 1f64.to_radians());
+            v
+        })
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("must start between"), "{err}");
+    }
+
+    #[test]
+    fn a_sharp_cutwater_needs_a_true_wedge_in_every_plane() {
+        // In round sections with the inner wall of the diffuser straight the walls only
+        // graze near the side walls: a sharp cutwater would be a knife there, so the
+        // spiral starts where it clears the diffuser. A rounded one fills them.
+        let round = |shape: crate::volute::CutwaterShape| {
+            build(|v| {
+                v.cross_section = CrossSectionInput::single(SectionShape::round());
+                v.diffuser.shape = DischargeShape::Tangential {
+                    straight_wall: StraightWall::Inner,
+                };
+                v.cutwater.shape = shape;
+            })
+        };
+        let sharp = round(crate::volute::CutwaterShape::Sharp);
+        assert!(sharp.start_range.is_none());
+        assert!(sharp.start_angle > 10f64.to_radians());
+        let rounded = round(crate::volute::CutwaterShape::default());
+        assert!(rounded.start_range.is_some());
+        assert!((rounded.start_angle - 3f64.to_radians()).abs() < 1e-12);
+    }
+
+    #[test]
+    fn the_body_rounds_into_the_side_walls() {
+        let rectangles = |edit: &dyn Fn(&mut VoluteInput)| {
+            build(|v| {
+                v.cross_section = CrossSectionInput::single(SectionShape::rectangular());
+                edit(v);
+            })
+        };
+        let g = rectangles(&|_| {});
+        let plain = rectangles(&|v| v.cutwater.side_radius = Param::Manual(0.0));
+        let radius = g.design.cutwater_side_radius;
+        assert!((radius - g.design.nose_radius).abs() < 1e-12);
+        let (body, flat) = (g.cutwater_body(), plain.cutwater_body());
+        let zm = g.basis.midplane;
+        let wall = zm + 0.5 * g.design.inlet_width;
+        // The planes keep one spacing, no more than half the radius, past the walls.
+        let gaps: Vec<f64> = body.windows(2).map(|w| w[1][0].z - w[0][0].z).collect();
+        assert!(
+            gaps.iter()
+                .all(|g| (g - gaps[0]).abs() < 1e-9 && *g <= 0.5 * radius + 1e-12)
+        );
+        assert!(body.last().unwrap()[0].z >= wall);
+        // Away from the walls the body is the same; at a flat side wall it stands out by
+        // the whole radius where it does not run along a wall already.
+        let at = |outlines: &[Vec<DVec3>], z: f64| {
+            outlines
+                .iter()
+                .min_by(|a, b| (a[0].z - z).abs().total_cmp(&(b[0].z - z).abs()))
+                .unwrap()
+                .clone()
+        };
+        let (mid, mid_flat) = (at(&body, zm), at(&flat, zm));
+        assert!(
+            mid.iter()
+                .zip(&mid_flat)
+                .all(|(p, q)| p.distance(*q) < 1e-12)
+        );
+        let top = at(&body, wall);
+        let end = flat.last().unwrap();
+        let moved: Vec<f64> = top
+            .iter()
+            .zip(end)
+            .map(|(p, q)| p.truncate().distance(q.truncate()))
+            .collect();
+        let most = moved.iter().copied().fold(0.0, f64::max);
+        assert!((most - radius).abs() < 0.05 * radius, "{most} vs {radius}");
+        // Where the faces join the walls it does not stand out.
+        assert!(moved[0] < 1e-9 && moved[moved.len() - 1] < 1e-9);
+        // Nowhere nearer the axis than the cutwater circle.
+        let rz = g.design.cutwater_diameter / 2.0;
+        assert!(
+            body.iter()
+                .flatten()
+                .all(|p| p.truncate().length() > rz - 1e-9)
+        );
+        // Automatic only for straight side walls in a single volute.
+        let round = build(|v| v.cross_section = CrossSectionInput::single(SectionShape::round()));
+        assert_eq!(round.design.cutwater_side_radius, 0.0);
+        let double = build(|v| v.setup.kind = crate::volute::VoluteKind::Double);
+        assert_eq!(double.design.cutwater_side_radius, 0.0);
+    }
+
+    #[test]
+    fn the_nose_takes_any_edge_shape() {
+        use crate::impeller::edge::EdgeShape;
+        let round = build(|_| {});
+        let e = 2.0 * round.design.nose_radius;
+        let rz = round.design.cutwater_diameter / 2.0;
+        // How far upstream the nose reaches, along the cutwater circle.
+        let sign = round.basis.rotation_sign;
+        let reach = |g: &VoluteGeometry| {
+            let s = &g.cutwater_slices[SLICES / 2];
+            let ahead = |p: &DVec3| -sign * p.y.atan2(p.x);
+            rz * s
+                .outline
+                .iter()
+                .map(ahead)
+                .fold(f64::NEG_INFINITY, f64::max)
+        };
+        for shape in [
+            EdgeShape::Ellipse { ratio: 3.0 },
+            EdgeShape::TAPER,
+            EdgeShape::BEZIER,
+            EdgeShape::Cut,
+        ] {
+            let g = build(|v| v.cutwater.nose_shape = shape);
+            assert_eq!(g.cutwater_slices.len(), SLICES, "{shape:?}");
+            for s in &g.cutwater_slices {
+                assert!(
+                    (s.nose_distance - rz).abs() < 1e-6,
+                    "{shape:?}: {}",
+                    s.nose_distance
+                );
+                assert!(
+                    s.min_thickness > e * (1.0 - 1e-3),
+                    "{shape:?}: {}",
+                    s.min_thickness
+                );
+            }
+            if matches!(shape, EdgeShape::Ellipse { .. }) {
+                // Two half thicknesses longer than the round one, at the flow angle.
+                let longer = reach(&g) - reach(&round);
+                let expected = 2.0 * round.design.nose_radius * g.design.cutwater_angle.cos();
+                assert!(
+                    (longer / expected - 1.0).abs() < 0.25,
+                    "{longer} vs {expected}"
+                );
+            }
+        }
+        // A shape that cannot be built says so.
+        let err = VoluteGeometry::build(&reference_basis(), &{
+            let mut v = VoluteInput::default();
+            v.cutwater.nose_shape = EdgeShape::Ellipse { ratio: -1.0 };
+            v
+        })
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("nose of the cutwater"), "{err}");
+    }
+
+    #[test]
+    fn a_g2_join_carries_the_curvature_of_the_wall() {
+        // The gap between the spiral face and its wall along the stations of the face:
+        // its second difference jumps at the join with a G1 face, fades with a G2 one.
+        let jump = |join: crate::volute::Continuity| {
+            let g = build(|v| v.cutwater.join = join);
+            let s = &g.cutwater_slices[SLICES / 2];
+            let wall: Vec<DVec2> = s.spiral_wall.iter().map(|p| p.truncate()).collect();
+            // The spiral face runs from its join (the first point) toward the nose.
+            let gaps: Vec<f64> = s.outline[..FACE_POINTS]
+                .iter()
+                .map(|p| distance_to(&wall, p.truncate()))
+                .collect();
+            let second: Vec<f64> = gaps.windows(3).map(|w| w[0] - 2.0 * w[1] + w[2]).collect();
+            let largest = second.iter().map(|d| d.abs()).fold(0.0, f64::max);
+            // At the join, against the largest bend along the face.
+            second[0].abs() / largest
+        };
+        let (g1, g2) = (
+            jump(crate::volute::Continuity::G1),
+            jump(crate::volute::Continuity::G2),
+        );
+        assert!(g2 < 0.5 * g1, "G1 {g1}, G2 {g2}");
     }
 
     #[test]
