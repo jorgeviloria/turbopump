@@ -3830,14 +3830,8 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
         "the {} seal diameter {} mm is below the neck wall ({} mm): the seal cuts into the neck",
         "el diámetro {} del sello, de {} mm, queda por debajo de la pared del cuello ({} mm): el sello corta el cuello",
     ),
-    (
-        "front",
-        "delantero",
-    ),
-    (
-        "rear",
-        "trasero",
-    ),
+    ("front", "delantero"),
+    ("rear", "trasero"),
     (
         "the rear seal collar (inner radius {} mm) would sit on the boss ({} mm): the collar is left out",
         "el collar del sello trasero (radio interior {} mm) quedaría sobre el cubo ({} mm): se omite el collar",
@@ -3946,50 +3940,20 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
         "the {} wear ring is left out: it has no {} extent",
         "el anillo de desgaste {} se omite: no tiene extensión {}",
     ),
-    (
-        "radial",
-        "radial",
-    ),
-    (
-        "axial",
-        "axial",
-    ),
+    ("radial", "radial"),
+    ("axial", "axial"),
     (
         "the {} is {} mm long, shorter than the {} mm of its seal",
         "el {} mide {} mm, menos que los {} mm de su sello",
     ),
-    (
-        "front impeller",
-        "delantero del rodete",
-    ),
-    (
-        "front casing",
-        "delantero de la carcasa",
-    ),
-    (
-        "rear impeller",
-        "trasero del rodete",
-    ),
-    (
-        "rear casing",
-        "trasero de la carcasa",
-    ),
-    (
-        "front impeller ring",
-        "anillo delantero del rodete",
-    ),
-    (
-        "front casing ring",
-        "anillo delantero de la carcasa",
-    ),
-    (
-        "rear impeller ring",
-        "anillo trasero del rodete",
-    ),
-    (
-        "rear casing ring",
-        "anillo trasero de la carcasa",
-    ),
+    ("front impeller", "delantero del rodete"),
+    ("front casing", "delantero de la carcasa"),
+    ("rear impeller", "trasero del rodete"),
+    ("rear casing", "trasero de la carcasa"),
+    ("front impeller ring", "anillo delantero del rodete"),
+    ("front casing ring", "anillo delantero de la carcasa"),
+    ("rear impeller ring", "anillo trasero del rodete"),
+    ("rear casing ring", "anillo trasero de la carcasa"),
     (
         "the curved back vanes need an angle above 0 and up to 90 degrees",
         "los álabes de rebombeo curvos necesitan un ángulo mayor que 0 y de hasta 90 grados",
