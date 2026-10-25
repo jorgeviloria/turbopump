@@ -425,8 +425,11 @@ cargo run -p tp-cli -- geometry bomba.tpj --export salida
 ```
 
 Con `--set` se fija también el borde de ataque por puntos (`le-points=Z,R;Z,R`), la
-velocidad de entrada uniforme en todas las secciones (`inlet-velocity=uniform`) y el
-envolvimiento (`wrap=linear`, común o libre).
+velocidad de entrada uniforme en todas las secciones (`inlet-velocity=uniform`), el
+envolvimiento (`wrap=linear`, común o libre) y la distribución de β: `beta=linear`,
+`beta=smooth:0.3,0.3` o por carga del álabe, `beta=loading` con la forma inicial o
+`beta=loading:L,F,A,S/L,F,A,S` en el cubo y en la carcasa (carga en el borde de ataque,
+fin del tramo delantero, inicio del trasero y pendiente central de $d(r c_u)/d\bar m$).
 
 Los bordes del álabe (`le`, `te`) pueden ser cortados, elípticos (`ellipse:4`), con un
 afilado que acaba en un redondeo tangente y una asimetría opcional
@@ -510,7 +513,9 @@ Curva característica prevista, de válvula cerrada a sobrecarga, también en CS
 cargo run -p tp-cli -- performance bomba.tpj --csv curva.csv
 ```
 
-Flujo potencial meridional y velocidades en las caras del álabe:
+Flujo potencial meridional, velocidades en las caras del álabe e indicadores de calidad
+del álabe (de Haller, pico de succión, carga máxima y en el borde de ataque, cara de
+presión e impulso del flujo secundario):
 
 ```bash
 cargo run -p tp-cli -- analysis bomba.tpj

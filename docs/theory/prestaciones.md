@@ -322,6 +322,50 @@ se avisa. Lo provoca el envolvimiento común: el cubo, que por sí solo envolver
 sube β a mitad del álabe para quedarse en 120°, y gira el flujo más deprisa. Con el
 cálculo cuasi-1D y cada sección con su envolvimiento, el mínimo era +0,043.
 
+### Indicadores de calidad del álabe
+
+De las mismas velocidades salen unos indicadores
+([`quality.rs`](../../crates/tp-design/src/impeller/quality.rs)). Comparan diseños; no
+predicen pérdidas, porque el flujo sigue al álabe sin deslizamiento.
+
+- **Desaceleración $w_2/w_1$:** con el flujo siguiendo al álabe en los dos bordes,
+  $w = c_m/\sin\beta_B$, sin bloqueo. El deslizamiento solo subiría $w_2$. Gülich (cap.
+  7.2.1, p. 346) pide no bajar de 0,7 en la línea de corriente exterior (criterio de de
+  Haller); se juzga en la carcasa, porque en el cubo $w_1$ es pequeña y el flujo puede
+  incluso acelerar.
+- **Pico de succión sobre la salida:** $w_{SS,max}/\bar w_2$, cuánto desacelera la cara
+  de succión hasta el borde de salida.
+- **Carga máxima** $\Delta w/\bar w$ y dónde está. Por encima de 2, $w_{PS} = 0$.
+- **Carga en el borde de ataque:** $\Delta w/\bar w$ medio en el primer 10 % (elección
+  propia). Un borde cargado baja la presión donde empieza la cavitación.
+- **Menor $w_{PS}/u_2$:** negativo, el flujo de la cara de presión retrocede.
+- **Impulso del flujo secundario** (construcción propia): con rotalpía uniforme, la
+  presión reducida $p_{red} = p - \tfrac12\rho u^2 = \text{cte} - \tfrac12\rho w^2$, así
+  que la diferencia entre carcasa y cubo en la cara de succión, sobre
+  $\tfrac12\rho u_2^2$, es
+
+  $$\Delta C_p = \frac{w_{SS,carcasa}^2 - w_{SS,cubo}^2}{u_2^2}$$
+
+  Se da su máximo a lo largo del álabe, con las estaciones de la carcasa interpoladas en
+  las $\bar m$ del cubo. Positivo: la carcasa queda a menor presión y arrastra el fluido
+  de baja energía de la cara de succión a la esquina de la carcasa, donde se forma la
+  estela. Gülich (cap. 8.9.4, punto 3) cuantifica el flujo secundario por los gradientes
+  de presión transversales al flujo principal, y Zangeneh, Goto y Harada (1998) diseñan
+  para que esta diferencia sea pequeña.
+
+En el último 5 % del álabe no se mira ni la carga máxima ni la cara de presión ni el
+flujo secundario.
+
+**Bomba de referencia**, envolvimiento común:
+
+| Distribución | $w_2/w_1$ carcasa | $\Delta w/\bar w$ máx. | $w_{PS,min}/u_2$ | $\Delta C_p$ |
+|---|---|---|---|---|
+| Lineal | 0,64 | 2,53 (cubo) | −0,062 (cubo) | 0,35 en $\bar m$ 0,69 |
+| Por carga, forma inicial | 0,64 | 2,34 | −0,06 | 0,34 |
+
+Las dos quedan por debajo de 0,7 en la carcasa: $w_2/w_1$ depende solo de los triángulos
+de los bordes, no de la distribución.
+
 ## 4. NPSH₃ frente al caudal
 
 El procedimiento es el del capítulo 6.3.3 de Gülich. La entrada se supone sin
