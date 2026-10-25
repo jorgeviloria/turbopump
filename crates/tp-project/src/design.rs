@@ -298,7 +298,16 @@ impl Project {
         id: ComponentId,
         input: &PerformanceInput,
     ) -> Result<PumpPerformance, ProjectError> {
-        let input = &self.with_contour_seals(id, input);
+        let mut input = self.with_contour_seals(id, input);
+        // The balance holes open into the rear seal's gap: without it they are left out.
+        let no_rear_seal = input.axial.balance_holes
+            && self
+                .compute_impeller_geometry(id)
+                .is_ok_and(|g| g.contour.seals.rear.is_none());
+        if no_rear_seal {
+            input.axial.balance_holes = false;
+        }
+        let input = &input;
         let duty = self.pump_duty(id)?;
         let design = self.compute_main_dimensions(id)?;
         let (collector, problem) = match self.collector_data_after(id) {
@@ -306,6 +315,11 @@ impl Project {
             Err(e) => (CollectorData::default(), Some(e)),
         };
         let mut curve = performance::predict(&duty, &design, input, &collector)?;
+        if no_rear_seal {
+            curve
+                .warnings
+                .push("balance holes need the rear seal; they are left out".to_string());
+        }
         if let Some(e) = problem {
             curve.warnings.push(format!(
                 "the collector after the impeller is left out of the prediction: {e}"
@@ -1118,6 +1132,29 @@ mod tests {
                 .axial
                 .rear_seal_diameter
                 .is_auto()
+        );
+    }
+
+    #[test]
+    fn balance_holes_without_a_rear_seal_are_left_out_with_a_warning() {
+        let (mut p, impeller, _) = pump_with_volute();
+        let mut base = p.performance_input(impeller).unwrap();
+        base.axial.balance_holes = true;
+        let with = p.compute_performance(impeller, &base).unwrap();
+        assert!(with.axial.law.rear_seal_diameter.is_some());
+        assert!(!with.warnings.iter().any(|w| w.contains("balance holes")));
+        let mut input = p.impeller_geometry_input(impeller).unwrap();
+        input.meridional.seals.rear.enabled = false;
+        p.set_impeller_geometry(impeller, input).unwrap();
+        let without = p.compute_performance(impeller, &base).unwrap();
+        assert!(without.axial.law.rear_seal_diameter.is_none());
+        assert!(
+            without
+                .warnings
+                .iter()
+                .any(|w| w.contains("balance holes need the rear seal")),
+            "{:?}",
+            without.warnings
         );
     }
 

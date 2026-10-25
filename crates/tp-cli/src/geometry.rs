@@ -38,7 +38,10 @@ pub(crate) struct GeometryArgs {
     /// bezier[:START,PULL] or bezier:START_P,START_S,PULL_P,PULL_S,TIP, lengths in blade
     /// thicknesses; at the hub, or on every span), le-shroud-shape and te-shroud-shape
     /// (the shape at the shroud, blended linearly from the hub; uniform: none),
-    /// e-le, e-te (thickness).
+    /// e-le, e-te (thickness), and for each side (front or rear) the seal and its wear
+    /// rings: front-seal and rear-seal (on or off), front-seal-d, front-seal-length,
+    /// front-seal-s (a length or auto), front-impeller-ring and front-casing-ring (on or
+    /// off), front-impeller-ring-e and front-casing-ring-e (radial thickness).
     #[arg(long = "set", value_name = "KEY=VALUE")]
     settings: Vec<String>,
     /// Write impeller.txt (points), impeller.stl (mesh), and the meridional and front
@@ -427,12 +430,67 @@ fn apply(
         "te" => input.edges.trailing = parse_edge(value)?,
         "le-shroud-shape" => input.edges.leading_shroud = parse_shroud_edge(value)?,
         "te-shroud-shape" => input.edges.trailing_shroud = parse_shroud_edge(value)?,
+        _ if seal_key(key).is_some() => apply_seal(&mut m.seals, key, value, &quantity)?,
         _ => {
             return Err(format!(
-                "unknown key {key:?}; valid keys: axial-length, hub-in, hub-out, shroud-in, \
+                "unknown key {key:?}; valid keys: front-seal, rear-seal (and -d, -length, -s), \
+                 front-impeller-ring, front-casing-ring, rear-impeller-ring, rear-casing-ring \
+                 (and -e), axial-length, hub-in, hub-out, shroud-in, \
                  shroud-out, le-hub, le-shroud, le-points, spans, flow, inlet-velocity, wrap, shape, points, beta, e-le, e-te, le, te, le-shroud-shape, te-shroud-shape"
             ));
         }
+    }
+    Ok(())
+}
+
+/// The side and the setting of a seal key such as `front-seal-d`, or `None` if `key` is
+/// not one.
+fn seal_key(key: &str) -> Option<(bool, &str)> {
+    let (front, rest) = if let Some(rest) = key.strip_prefix("front-") {
+        (true, rest)
+    } else {
+        (false, key.strip_prefix("rear-")?)
+    };
+    const SETTINGS: [&str; 8] = [
+        "seal",
+        "seal-d",
+        "seal-length",
+        "seal-s",
+        "impeller-ring",
+        "impeller-ring-e",
+        "casing-ring",
+        "casing-ring-e",
+    ];
+    SETTINGS.contains(&rest).then_some((front, rest))
+}
+
+/// Applies a seal or wear-ring key (`front-seal-d`, `rear-casing-ring`, …).
+fn apply_seal(
+    seals: &mut tp_design::impeller::seals::Seals,
+    key: &str,
+    value: &str,
+    quantity: &dyn Fn(QuantityKind) -> Result<Param<f64>, String>,
+) -> Result<(), String> {
+    let (front, setting) = seal_key(key).ok_or_else(|| format!("unknown key {key:?}"))?;
+    let seal = if front {
+        &mut seals.front
+    } else {
+        &mut seals.rear
+    };
+    let on = || match value.to_ascii_lowercase().as_str() {
+        "on" => Ok(true),
+        "off" => Ok(false),
+        _ => Err(format!("{key} must be on or off, got {value:?}")),
+    };
+    match setting {
+        "seal" => seal.enabled = on()?,
+        "seal-d" => seal.diameter = quantity(QuantityKind::Length)?,
+        "seal-length" => seal.length = quantity(QuantityKind::Length)?,
+        "seal-s" => seal.clearance = quantity(QuantityKind::Length)?,
+        "impeller-ring" => seal.impeller_ring.enabled = on()?,
+        "impeller-ring-e" => seal.impeller_ring.thickness = quantity(QuantityKind::Length)?,
+        "casing-ring" => seal.casing_ring.enabled = on()?,
+        _ => seal.casing_ring.thickness = quantity(QuantityKind::Length)?,
     }
     Ok(())
 }
@@ -456,6 +514,21 @@ fn print_report(
         s(Length, g.contour.hub_length()),
         s(Length, g.contour.shroud_length())
     );
+    for (label, seal) in [
+        ("Front seal", &g.contour.seals.front),
+        ("Rear seal ", &g.contour.seals.rear),
+    ] {
+        let Some(seal) = seal else { continue };
+        let ring = |e: Option<f64>| e.map_or("none".to_string(), |e| s(Length, e));
+        println!(
+            "{label}  d {}   L {}   s {}   impeller ring {}   casing ring {}",
+            s(Length, 2.0 * seal.radius),
+            s(Length, seal.length),
+            s(Length, seal.clearance),
+            ring(seal.impeller_ring),
+            ring(seal.casing_ring)
+        );
+    }
     println!(
         "Flow        cm {} → {}   area {} → {}   max local rise of cm {:.1} %",
         s(Velocity, inlet.cm),
@@ -524,4 +597,61 @@ fn print_report(
         }
     }
     println!();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn set(input: &mut ImpellerGeometryInput, setting: &str) -> Result<(), String> {
+        apply(input, &DisplayUnits::si(), setting)
+    }
+
+    #[test]
+    fn front_seal_keys_set_the_seal() {
+        let mut input = ImpellerGeometryInput::default();
+        for s in [
+            "front-seal-d=120 mm",
+            "front-seal-length=15 mm",
+            "front-seal-s=auto",
+            "front-impeller-ring-e=5 mm",
+            "rear-casing-ring-e=6 mm",
+        ] {
+            set(&mut input, s).unwrap();
+        }
+        let seals = &input.meridional.seals;
+        assert_eq!(seals.front.diameter, Param::Manual(0.12));
+        assert_eq!(seals.front.length, Param::Manual(0.015));
+        assert!(seals.front.clearance.is_auto());
+        assert_eq!(seals.front.impeller_ring.thickness, Param::Manual(0.005));
+        assert_eq!(seals.rear.casing_ring.thickness, Param::Manual(0.006));
+        assert!(seals.rear.diameter.is_auto());
+    }
+
+    #[test]
+    fn ring_switches_accept_on_and_off() {
+        let mut input = ImpellerGeometryInput::default();
+        for s in [
+            "front-seal=OFF",
+            "rear-seal=Off",
+            "front-impeller-ring=off",
+            "rear-casing-ring=off",
+        ] {
+            set(&mut input, s).unwrap();
+        }
+        let seals = &input.meridional.seals;
+        assert!(!seals.front.enabled && !seals.rear.enabled);
+        assert!(!seals.front.impeller_ring.enabled && seals.front.casing_ring.enabled);
+        assert!(!seals.rear.casing_ring.enabled && seals.rear.impeller_ring.enabled);
+        set(&mut input, "front-seal=on").unwrap();
+        assert!(input.meridional.seals.front.enabled);
+    }
+
+    #[test]
+    fn an_unknown_switch_value_is_an_error() {
+        let mut input = ImpellerGeometryInput::default();
+        let e = set(&mut input, "front-seal=x").unwrap_err();
+        assert_eq!(e, "front-seal must be on or off, got \"x\"");
+        assert!(set(&mut input, "front-seal-q=1").is_err());
+    }
 }

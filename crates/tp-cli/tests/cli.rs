@@ -347,6 +347,23 @@ fn geometry_overrides() {
 
     let bad = turbopump(&["geometry", file_arg, "--set", "le=pointy"]);
     assert_eq!(bad.status.code(), Some(2));
+    // Seals: the report lists the active ones.
+    assert!(text.contains("Front seal  d "), "{text}");
+    let out = turbopump(&[
+        "geometry",
+        file_arg,
+        "--dry-run",
+        "--set",
+        "front-seal=off",
+        "--set",
+        "rear-casing-ring=off",
+    ]);
+    let seals = stdout(&out);
+    assert_eq!(out.status.code(), Some(0), "{seals}");
+    assert!(!seals.contains("Front seal"), "{seals}");
+    assert!(seals.contains("casing ring none"), "{seals}");
+    let bad = turbopump(&["geometry", file_arg, "--set", "front-seal=x"]);
+    assert_eq!(bad.status.code(), Some(2));
     // β from a blade loading, the starting shapes or one given at hub and shroud.
     for beta in ["beta=loading", "beta=loading:0.3,0.3,0.9,2/0,0.3,0.9,1"] {
         let out = turbopump(&["geometry", file_arg, "--set", beta]);
