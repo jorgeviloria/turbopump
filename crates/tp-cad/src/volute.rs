@@ -415,41 +415,55 @@ const PROBE_TOLERANCE: f64 = 0.02;
 
 /// Points of the body of a rounded cutwater in each of its planes that a cut leaves on
 /// the surface, mm: the middle of each face beyond the inlet ring, on the channel, and
-/// the innermost point of the nose, on the ring.
+/// the innermost point of the nose, on the ring; in the planes clear of the side
+/// endings ([`clear_planes`]).
 fn cutwater_probes(g: &VoluteGeometry) -> (Vec<DVec3>, Vec<DVec3>) {
     // Clear of the inlet ring, which reaches 2 % of b₃ past r'_z.
     let clear = g.design.stagnation_radius + 0.03 * g.design.inlet_width;
     let mut faces = Vec::new();
     let mut noses = Vec::new();
-    for s in g.cutwater_slices.iter().filter(|s| s.outline.len() > 2) {
+    for outline in clear_planes(g).iter().filter(|o| o.len() > 2) {
         let radius = |p: &DVec3| p.truncate().length();
-        let Some((nose, _)) = s
-            .outline
+        let Some((nose, _)) = outline
             .iter()
             .enumerate()
             .min_by(|a, b| radius(a.1).total_cmp(&radius(b.1)))
         else {
             continue;
         };
-        noses.push(s.outline[nose] * MM);
+        noses.push(outline[nose] * MM);
         // Each face from its join to where it reaches the ring.
-        let spiral = s.outline[..nose]
+        let spiral = outline[..nose]
             .iter()
             .take_while(|p| radius(p) > clear)
             .count();
-        let diffuser = s.outline[nose..]
+        let diffuser = outline[nose..]
             .iter()
             .rev()
             .take_while(|p| radius(p) > clear)
             .count();
         if spiral > 0 {
-            faces.push(s.outline[spiral / 2] * MM);
+            faces.push(outline[spiral / 2] * MM);
         }
         if diffuser > 0 {
-            faces.push(s.outline[s.outline.len() - 1 - diffuser / 2] * MM);
+            faces.push(outline[outline.len() - 1 - diffuser / 2] * MM);
         }
     }
     (faces, noses)
+}
+
+/// The outlines of the body in the planes of the cutwater clear of its side endings:
+/// next to a side wall part of an outline may lie outside the flow, beyond the wall.
+fn clear_planes(g: &VoluteGeometry) -> Vec<Vec<DVec3>> {
+    let reach = 0.5 * g.design.inlet_width - 1.5 * g.design.cutwater_side_radius;
+    let zm = g.basis.midplane;
+    g.cutwater_planes()
+        .into_iter()
+        .filter(|o| {
+            o.first()
+                .is_some_and(|p| (p.z - zm).abs() <= reach.max(1e-9))
+        })
+        .collect()
 }
 
 /// Whether every one of `points` lies on the surface of `shape`.
@@ -911,17 +925,18 @@ mod tests {
     /// How the flow domain `cad` departs from what the viewer shows around the body of
     /// the cutwater; `None` without a body.
     fn departure_from_the_view(g: &VoluteGeometry, cad: &VoluteCad) -> Option<Departure> {
-        let outlines: Vec<DVec3> = g
-            .cutwater_slices
+        let outlines: Vec<DVec3> = clear_planes(g)
             .iter()
-            .filter(|s| s.outline.len() > 2)
-            .flat_map(|s| s.outline.iter().map(|p| *p * MM))
+            .filter(|o| o.len() > 2)
+            .flat_map(|o| o.iter().map(|p| *p * MM))
             .collect();
-        // Between the end planes of the body.
-        let (lo, hi) = outlines
+        // Between the end planes of the body, side endings included.
+        let (lo, hi) = g
+            .cutwater_planes()
             .iter()
+            .flatten()
             .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| {
-                (lo.min(p.z), hi.max(p.z))
+                (lo.min(p.z * MM), hi.max(p.z * MM))
             });
         if outlines.is_empty() {
             return None;
@@ -1035,8 +1050,9 @@ mod tests {
             d.solid,
             d.walls
         );
+        // Within the deflection of the triangles.
         assert!(
-            d.nearest > nose - 0.01,
+            d.nearest > nose - 0.02,
             "{case}: {} vs {nose} mm",
             d.nearest
         );
