@@ -641,7 +641,8 @@ pub(crate) mod tests {
                     .abs()
                     / 6.0
             };
-            // With its side endings the body is closed and a little larger.
+            // With its side endings the body is closed and a little larger; round
+            // sections have none by default.
             let ended = reference_volute(|v| v.cross_section = sections.clone());
             let with_endings = cutwater_triangles(&ended);
             assert!(closed(&with_endings));
@@ -652,7 +653,11 @@ pub(crate) mod tests {
             let body = cutwater_triangles(&g);
             assert!(!body.is_empty());
             assert!(closed(&body));
-            assert!(volume(&with_endings) > volume(&body));
+            if ended.design.cutwater_side_radius > 0.0 {
+                assert!(volume(&with_endings) > volume(&body));
+            } else {
+                assert!((volume(&with_endings) - volume(&body)).abs() < 1e-15);
+            }
             // Without them, about the area of the midplane outline times the width of
             // the planes.
             let volume = volume(&body);
