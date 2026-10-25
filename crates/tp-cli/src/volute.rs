@@ -48,7 +48,9 @@ pub(crate) struct VoluteArgs {
     /// by comp_e from comp_start to the throat), comp_e, comp_start, arcs (off or the
     /// number of circular arcs of the outer contour), sections, correction (on or off),
     /// length (along the diffuser centerline) and
-    /// outlet (discharge diffuser), incidence (cutwater), wall, type (single or double),
+    /// outlet (discharge diffuser), incidence (cutwater), obliquity (of a rounded
+    /// cutwater and the rib nose: the angle of the edge to the pump axis), wall, type
+    /// (single or double),
     /// rib_wrap (wrap of the inner volute of a double volute), rib (rib thickness),
     /// rib_comp (on or off: the first partial volute grows by the rib from rib_comp_start
     /// to the nose, so the outer channel starts with the area of the rule), rib_comp_start,
@@ -679,6 +681,7 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
         }
         "outlet" => input.diffuser.outlet_diameter = quantity(Length)?,
         "incidence" => input.cutwater.incidence = quantity(Angle)?,
+        "obliquity" => input.cutwater.obliquity = quantity(Angle)?,
         "wall" => input.wall.thickness = quantity(Length)?,
         "pressure" => input.wall.pressure = quantity(Pressure)?,
         "allowable" => input.wall.allowable_stress = quantity(Pressure)?,
@@ -725,7 +728,8 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
                 "unknown key {key:?}; valid keys: flow-factor, dz, b3, e3, shape, law, \
                  wrap, x, k3, cu4, qi, q0, end_height, end_area, end_area_radius, \
                  progression, compensation, comp_e, comp_start, arcs, \
-                 sections, correction, length, outlet, incidence, wall, type, rib_wrap, rib, \
+                 sections, correction, length, outlet, incidence, obliquity, wall, type, \
+                 rib_wrap, rib, \
                  rib_nose, channel_ratio, discharge, bend, rotation, cutwater, nose, height, \
                  dn, flange, flange_d, flange_t, bolt_circle, bolt_hole, bolts, pressure, \
                  allowable"
@@ -804,9 +808,17 @@ fn print_report(name: &str, id: ComponentId, g: &VoluteGeometry, units: &Display
         s(Length, d.inlet_width)
     );
     println!(
-        "           flow angle α3' {}   cutwater angle α3B {}",
+        "           flow angle α3' {}   cutwater angle α3B {}{}",
         s(Angle, d.cutwater_flow_angle),
-        s(Angle, d.cutwater_angle)
+        s(Angle, d.cutwater_angle),
+        if d.cutwater_obliquity == 0.0 {
+            String::new()
+        } else {
+            format!(
+                "   obliquity ε {} (Table 10.2: over 35°)",
+                s(Angle, d.cutwater_obliquity)
+            )
+        }
     );
     let c = &g.cutwater;
     match d.cutwater_shape {
