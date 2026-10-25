@@ -1070,6 +1070,7 @@ mod tests {
     /// checked several ways (booleans on seven B-spline blades take a few seconds, so
     /// the build is shared), then one finished with fillets and balance holes.
     #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
     fn reference_impeller_solids() {
         let _slot = crate::test_slot::take();
         let g = reference();
@@ -1181,6 +1182,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
     fn the_material_contours_set_the_impeller_solid() {
         let _slot = crate::test_slot::take();
         // The material as Pappus sees it: hub disk and shroud regions revolved.
@@ -1673,6 +1675,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
     fn back_vanes_join_the_impeller() {
         let _slot = crate::test_slot::take();
         use tp_design::impeller::back_vanes::VaneShape;
@@ -1691,6 +1694,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
     fn curved_back_vanes_build() {
         let _slot = crate::test_slot::take();
         use tp_design::impeller::back_vanes::VaneShape;
@@ -1732,6 +1736,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
     fn curved_back_vanes_lean_like_the_blades() {
         let _slot = crate::test_slot::take();
         use tp_design::impeller::back_vanes::VaneShape;

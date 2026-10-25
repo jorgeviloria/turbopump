@@ -935,6 +935,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
     fn volute_channel_and_fluid_domain_are_valid_solids() {
         let _slot = crate::test_slot::take();
         for sections in every_cross_section() {
@@ -1220,6 +1221,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
     fn the_casing_wraps_the_flow_domain_in_one_solid() {
         let _slot = crate::test_slot::take();
         use tp_design::volute::VoluteKind;
@@ -1259,6 +1261,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
     fn the_casing_fills_and_rounds_the_groove_over_the_cutwater() {
         let _slot = crate::test_slot::take();
         // Round sections take a smaller radius there.
@@ -1315,6 +1318,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
     fn nose_shapes_and_g2_joins_give_the_body_the_view_shows() {
         let _slot = crate::test_slot::take();
         type Setting = fn(&mut VoluteInput);
@@ -1347,6 +1351,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
     fn a_double_volute_is_one_valid_solid() {
         let _slot = crate::test_slot::take();
         let double = |edit: &dyn Fn(&mut VoluteInput)| {
@@ -1414,6 +1419,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
     fn an_internal_volute_is_one_solid_with_its_bend() {
         let _slot = crate::test_slot::take();
         use tp_design::volute::{InternalRound, SectionShape};
@@ -1482,6 +1488,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
     fn common_volute_options_give_one_valid_flow_domain() {
         let _slot = crate::test_slot::take();
         use tp_design::volute::{CutwaterShape, DischargeShape, StraightWall};
@@ -1516,6 +1523,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
     fn spiral_development_options_give_one_valid_flow_domain() {
         let _slot = crate::test_slot::take();
         use tp_design::Param;
@@ -1549,6 +1557,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
     fn cutwater_and_discharge_shapes_give_valid_solids() {
         let _slot = crate::test_slot::take();
         use tp_design::Param;
