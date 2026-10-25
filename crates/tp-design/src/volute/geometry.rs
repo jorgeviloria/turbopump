@@ -9,6 +9,7 @@ use std::f64::consts::{PI, TAU};
 
 use tp_math::{DVec2, DVec3};
 
+use super::cutwater::CutwaterSlice;
 use super::section::Bend;
 use super::stress::WallStress;
 use super::{
@@ -69,38 +70,11 @@ pub struct CutwaterGeometry {
     pub wedge: f64,
     /// Radius of the nose, m; 0 for a sharp or tangent cutwater.
     pub radius: f64,
-    /// Centre of the rounded nose (the tip when sharp), m.
+    /// Centre of the circle of the rounded nose (the tip when sharp), m.
     pub nose_center: DVec3,
     /// Distance from the pump axis to the nearest point of the cutwater: half the
     /// effective cutwater diameter, m.
     pub nose_distance: f64,
-}
-
-impl CutwaterGeometry {
-    /// Outline in the midplane of the material a rounded cutwater adds to the sharp
-    /// wedge: the nose circle and the tangents from it to the tip, closed. Empty
-    /// unless rounded.
-    pub fn nose_outline(&self) -> Vec<DVec3> {
-        if self.radius <= 0.0 {
-            return Vec::new();
-        }
-        let c = self.nose_center;
-        let to_tip = self.tip - c;
-        let d = to_tip.truncate().length();
-        let beta = (self.radius / d).clamp(-1.0, 1.0).acos();
-        let base = to_tip.y.atan2(to_tip.x);
-        // The arc runs on the far side from the tip, between the two tangent points.
-        let (from, to) = (base + beta, base - beta + std::f64::consts::TAU);
-        let n = 24;
-        let mut out: Vec<DVec3> = (0..=n)
-            .map(|i| {
-                let a = from + (to - from) * i as f64 / n as f64;
-                c + DVec3::new(a.cos(), a.sin(), 0.0) * self.radius
-            })
-            .collect();
-        out.push(self.tip);
-        out
-    }
 }
 
 /// The rib of a double volute in the midplane: a band as thick as the rib between the
@@ -124,6 +98,33 @@ pub struct RibGeometry {
     pub nose_angle: f64,
     /// Distance from the pump axis to the nearest point of the rib, m.
     pub nose_distance: f64,
+    /// The rib in planes z = const across its height, from −z to +z: the nose turns
+    /// from plane to plane with the obliquity of the cutwater, the tail stays.
+    pub planes: Vec<RibPlane>,
+}
+
+/// The rib of a double volute in one plane z = const; each plane has as many points on
+/// each part as the others.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RibPlane {
+    pub z: f64,
+    pub inner_face: Vec<DVec3>,
+    pub outer_face: Vec<DVec3>,
+    pub nose: Vec<DVec3>,
+    pub tail: Vec<DVec3>,
+}
+
+impl RibPlane {
+    /// Closed outline: nose, inner face, tail and outer face back to the nose, without
+    /// repeating the first point.
+    pub fn outline(&self) -> Vec<DVec3> {
+        let mut out = self.nose.clone();
+        out.extend(&self.inner_face[1..]);
+        out.extend(&self.tail[1..]);
+        out.extend(self.outer_face.iter().rev().skip(1));
+        out.pop();
+        out
+    }
 }
 
 impl RibGeometry {
@@ -143,6 +144,8 @@ impl RibGeometry {
 const RIB_FACE_POINTS: usize = 48;
 /// Points on the nose and on the tail of the rib, an even number.
 const RIB_NOSE_POINTS: usize = 16;
+/// Planes across the height of the rib.
+pub const RIB_PLANES: usize = 9;
 
 /// Spiral start of a sharp or rounded cutwater, rad: the spiral overlaps the diffuser
 /// from there to the cutwater.
@@ -150,6 +153,9 @@ const CUTWATER_START: f64 = 3.0 * std::f64::consts::PI / 180.0;
 /// Smallest angle between the spiral and the diffuser wall for a sharp cutwater; below
 /// it the two only graze and the spiral starts where it clears the wall, rad.
 const MIN_WEDGE: f64 = 4.0 * std::f64::consts::PI / 180.0;
+/// Wrap of the spiral past its start in which the cutwater planes look for the walls,
+/// rad.
+const CUTWATER_SPAN: f64 = 60.0 * std::f64::consts::PI / 180.0;
 
 /// Complete volute geometry.
 #[derive(Debug, Clone)]
@@ -193,17 +199,41 @@ pub struct VoluteGeometry {
     /// Membrane stresses in the casing wall.
     pub wall_stress: WallStress,
     pub cutwater: CutwaterGeometry,
+    /// A sharp or rounded cutwater in planes across the inlet width, from −z to +z;
+    /// empty for a tangent one, a shorter spiral or an internal volute.
+    pub cutwater_slices: Vec<CutwaterSlice>,
     /// Internal sections: the bend and the neck from the inlet to the spiral, in the
     /// plane of a section (s, h), the same all round.
     pub bend: Option<Bend>,
     pub warnings: Vec<String>,
 }
 
+/// Outlines of the body of the cutwater per gap between two of its planes, for meshes.
+const BODY_STEPS: usize = 4;
+
 /// Turn by which the channels of a double volute reach into the discharge diffuser, so
 /// that the solids overlap where they meet, rad.
 const CHANNEL_OVERLAP: f64 = 1.5 * std::f64::consts::PI / 180.0;
 
 impl VoluteGeometry {
+    /// Smooth outline in the midplane of the material a rounded cutwater adds to the
+    /// sharp wedge: from where it joins the spiral wall, round the nose, to where it
+    /// joins the diffuser wall, the chord back closing it inside the wedge. Empty unless
+    /// rounded.
+    pub fn cutwater_outline(&self) -> &[DVec3] {
+        let zm = self.basis.midplane;
+        self.cutwater_slices
+            .iter()
+            .find(|s| (s.z - zm).abs() < 1e-12)
+            .map_or(&[], |s| s.outline.as_slice())
+    }
+
+    /// Outlines of the body of a rounded cutwater from −z to +z, between its planes
+    /// too (see [`super::cutwater::fine_outlines`]), for meshes. Empty unless rounded.
+    pub fn cutwater_body(&self) -> Vec<Vec<DVec3>> {
+        super::cutwater::fine_outlines(&self.cutwater_slices, BODY_STEPS)
+    }
+
     /// The pieces of the flow channel, each a sequence of outlines in 3D to loft
     /// through, for surface meshes. A single volute is one piece from the start of the
     /// spiral to the diffuser outlet. A double volute has three: the first partial
@@ -705,6 +735,86 @@ impl VoluteGeometry {
             }
         };
 
+        // The fitted outlines of the spiral every degree or less from its start: the
+        // outer wall for drawing, and the spiral wall in the planes of the cutwater.
+        let steps = (((TAU - start) / 1f64.to_radians()).ceil() as usize).max(2);
+        let wall_outlines = (0..=steps)
+            .map(|i| {
+                let angle = start + (TAU - start) * i as f64 / steps as f64;
+                let section = match &design.rib {
+                    Some(rib) if angle > rib.start => whole(angle)?,
+                    _ => make(angle)?,
+                };
+                Ok((angle, section.outline))
+            })
+            .collect::<Result<Vec<_>, DesignError>>()?;
+
+        // A sharp or rounded cutwater that cuts the diffuser wall, in planes across the
+        // inlet width.
+        let mut cutwater = cutwater;
+        let cuts_the_diffuser = bend.is_none()
+            && first <= 0.0
+            && !matches!(design.cutwater_shape, CutwaterShape::Tangent);
+        let cutwater_slices = if cuts_the_diffuser {
+            let end = (start + CUTWATER_SPAN).min(design.rib.as_ref().map_or(TAU, |r| r.start));
+            let near = wall_outlines.partition_point(|(angle, _)| *angle <= end);
+            let walls = &wall_outlines[..near];
+            let (slices, centre) = super::cutwater::slices(&design, walls, &nozzle, sign, zm);
+            let e = 2.0 * design.nose_radius;
+            let oblique = design.cutwater_obliquity;
+            if centre.is_some() && oblique != 0.0 && !super::cutwater::sound(&slices, e) {
+                // The most it can lean, by bisection.
+                let leans = |obliquity: f64| {
+                    let mut leaning = design.clone();
+                    leaning.cutwater_obliquity = obliquity;
+                    let (slices, _) = super::cutwater::slices(&leaning, walls, &nozzle, sign, zm);
+                    super::cutwater::sound(&slices, e)
+                };
+                let (mut lo, mut hi) = (0.0, oblique);
+                for _ in 0..12 {
+                    let mid = 0.5 * (lo + hi);
+                    if leans(mid) {
+                        lo = mid;
+                    } else {
+                        hi = mid;
+                    }
+                }
+                return Err(DesignError::Infeasible(format!(
+                    "the cutwater cannot lean {:.0}°: past about {:.0}° it gets thinner than \
+                     its nose in some plane, where the walls leave it no room",
+                    oblique.to_degrees(),
+                    lo.to_degrees().trunc()
+                )));
+            }
+            if let Some(centre) = centre {
+                let mid = slices
+                    .iter()
+                    .find(|s| (s.z - zm).abs() < 1e-12 && !s.outline.is_empty())
+                    .ok_or_else(|| {
+                        DesignError::Infeasible(
+                            "the rounded cutwater does not reach the walls in the midplane: use \
+                             a sharp or tangent cutwater"
+                                .into(),
+                        )
+                    })?;
+                cutwater.nose_center = DVec3::new(centre.x, centre.y, zm);
+                cutwater.nose_distance = mid.nose_distance;
+            }
+            // The tip and the wedge where the walls really cross in the midplane.
+            if let Some(mid) = slices.iter().find(|s| (s.z - zm).abs() < 1e-12) {
+                cutwater.tip = mid.tip;
+                cutwater.angle = (sign * mid.tip.y.atan2(mid.tip.x)).rem_euclid(TAU);
+                cutwater.wedge = mid.wedge;
+                if cutwater.radius <= 0.0 {
+                    cutwater.nose_center = mid.tip;
+                    cutwater.nose_distance = mid.nose_distance;
+                }
+            }
+            slices
+        } else {
+            Vec::new()
+        };
+
         // Sections spread over their wrap in proportion to the single spiral.
         let spread = |from: f64, to: f64| -> Vec<f64> {
             let n = ((f64::from(count) * (to - from) / (TAU - start)).round() as u32).max(4);
@@ -748,27 +858,27 @@ impl VoluteGeometry {
                 )
             }
         };
-        let rib = rib(&design, sign, zm)?;
+        // The rib across the height of the sections.
+        let heights = wall_outlines
+            .iter()
+            .flat_map(|(_, o)| o.iter().map(|p| p.y));
+        let height = heights.fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), z| {
+            (lo.min(z), hi.max(z))
+        });
+        let rib = rib(&design, sign, zm, height)?;
 
-        // The outer wall for drawing: the outermost point of each fitted outline, every
-        // degree or less.
-        let steps = (((TAU - start) / 1f64.to_radians()).ceil() as usize).max(2);
-        let outer_wall = (0..=steps)
-            .map(|i| {
-                let angle = start + (TAU - start) * i as f64 / steps as f64;
-                let section = match &design.rib {
-                    Some(rib) if angle > rib.start => whole(angle)?,
-                    _ => make(angle)?,
-                };
-                let r = section
-                    .outline
+        // The outer wall for drawing: the outermost point of each fitted outline.
+        let outer_wall: Vec<DVec3> = wall_outlines
+            .iter()
+            .map(|(angle, outline)| {
+                let r = outline
                     .iter()
                     .map(|p| p.x)
                     .fold(f64::NEG_INFINITY, f64::max);
                 let theta = sign * angle;
-                Ok(DVec3::new(r * theta.cos(), r * theta.sin(), zm))
+                DVec3::new(r * theta.cos(), r * theta.sin(), zm)
             })
-            .collect::<Result<Vec<_>, DesignError>>()?;
+            .collect();
         let inner_wall = match design.development.compensation {
             None => Vec::new(),
             Some(c) => {
@@ -825,12 +935,33 @@ impl VoluteGeometry {
             nose_center: turn(cutwater.nose_center),
             ..cutwater
         };
+        let cutwater_slices = cutwater_slices
+            .into_iter()
+            .map(|s| CutwaterSlice {
+                tip: turn(s.tip),
+                outline: s.outline.into_iter().map(turn).collect(),
+                spiral_wall: s.spiral_wall.into_iter().map(turn).collect(),
+                diffuser_wall: s.diffuser_wall.into_iter().map(turn).collect(),
+                ..s
+            })
+            .collect();
         let rib = rib.map(|r| RibGeometry {
             inner_face: r.inner_face.into_iter().map(turn).collect(),
             outer_face: r.outer_face.into_iter().map(turn).collect(),
             nose: r.nose.into_iter().map(turn).collect(),
             tail: r.tail.into_iter().map(turn).collect(),
             nose_tip: turn(r.nose_tip),
+            planes: r
+                .planes
+                .into_iter()
+                .map(|p| RibPlane {
+                    inner_face: p.inner_face.into_iter().map(turn).collect(),
+                    outer_face: p.outer_face.into_iter().map(turn).collect(),
+                    nose: p.nose.into_iter().map(turn).collect(),
+                    tail: p.tail.into_iter().map(turn).collect(),
+                    ..p
+                })
+                .collect(),
             ..r
         });
         let outer_wall: Vec<DVec3> = outer_wall.into_iter().map(turn).collect();
@@ -864,6 +995,7 @@ impl VoluteGeometry {
             inner_wall,
             wall_stress: WallStress::default(),
             cutwater,
+            cutwater_slices,
             bend,
             warnings,
         };
@@ -882,17 +1014,62 @@ impl VoluteGeometry {
     }
 }
 
-/// The rib of a double volute in the midplane. Its inner face follows the outer wall
-/// of the inner volute from r'_z at the start of the inner volute, its outer face lies
-/// one rib thickness beyond. The nose and the tail are half ellipses on the conjugate
-/// semi-diameters across the rib and along its mid line, so they meet both faces
-/// tangentially: the leading edge points along the inner volute's wall, which leaves
-/// r'_z at the flow angle α₃' (Gülich Chap. 7.8.1, item 7, asks the cutwater to match
-/// the approach flow).
-fn rib(design: &VoluteDesign, sign: f64, zm: f64) -> Result<Option<RibGeometry>, DesignError> {
+/// The rib of a double volute. Its inner face follows the outer wall of the inner volute
+/// from r'_z at the start of the inner volute, its outer face lies one rib thickness
+/// beyond. The nose and the tail are half ellipses on the conjugate semi-diameters
+/// across the rib and along its mid line, so they meet both faces tangentially: the
+/// leading edge points along the inner volute's wall, which leaves r'_z at the flow
+/// angle α₃' (Gülich Chap. 7.8.1, item 7, asks the cutwater to match the approach
+/// flow). It is the same in the planes across the height `height` (from −z to +z) but
+/// for the obliquity of the cutwater, which turns its nose about the pump axis from
+/// plane to plane as the cutwater's ([`super::cutwater::oblique`]).
+fn rib(
+    design: &VoluteDesign,
+    sign: f64,
+    zm: f64,
+    height: (f64, f64),
+) -> Result<Option<RibGeometry>, DesignError> {
     let Some(rib) = design.rib else {
         return Ok(None);
     };
+    let mid = rib_plane(design, &rib, sign, zm, rib.start)?;
+    // The nose turns on the circle through its middle.
+    let r = design.stagnation_radius + rib.thickness / 2.0;
+    let planes = (0..RIB_PLANES)
+        .map(|k| {
+            let z = height.0 + (height.1 - height.0) * k as f64 / (RIB_PLANES - 1) as f64;
+            let lean = (z - zm) * design.cutwater_obliquity.tan() / r;
+            rib_plane(design, &rib, sign, z, rib.start + lean)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let nose_tip = mid.nose[RIB_NOSE_POINTS / 2];
+    let nose_distance = mid
+        .nose
+        .iter()
+        .chain(&mid.inner_face)
+        .map(|p| p.truncate().length())
+        .fold(f64::INFINITY, f64::min);
+    let nose_angle = (sign * nose_tip.y.atan2(nose_tip.x)).rem_euclid(TAU);
+    Ok(Some(RibGeometry {
+        inner_face: mid.inner_face,
+        outer_face: mid.outer_face,
+        nose: mid.nose,
+        tail: mid.tail,
+        nose_tip,
+        nose_angle,
+        nose_distance,
+        planes,
+    }))
+}
+
+/// The rib in the plane `z`, its faces from the wrap angle `start` to the throat.
+fn rib_plane(
+    design: &VoluteDesign,
+    rib: &super::Rib,
+    sign: f64,
+    z: f64,
+    start: f64,
+) -> Result<RibPlane, DesignError> {
     let t = rib.thickness;
     let inner = |angle: f64| -> Result<f64, DesignError> {
         let a = if angle > rib.start {
@@ -904,12 +1081,12 @@ fn rib(design: &VoluteDesign, sign: f64, zm: f64) -> Result<Option<RibGeometry>,
     };
     let at = |r: f64, angle: f64| {
         let theta = sign * angle;
-        DVec3::new(r * theta.cos(), r * theta.sin(), zm)
+        DVec3::new(r * theta.cos(), r * theta.sin(), z)
     };
     let n = RIB_FACE_POINTS;
     let (mut inner_face, mut outer_face) = (Vec::with_capacity(n + 1), Vec::with_capacity(n + 1));
     for i in 0..=n {
-        let angle = rib.start + (TAU - rib.start) * i as f64 / n as f64;
+        let angle = start + (TAU - start) * i as f64 / n as f64;
         let r = inner(angle)?;
         inner_face.push(at(r, angle));
         outer_face.push(at(r + t, angle));
@@ -917,7 +1094,7 @@ fn rib(design: &VoluteDesign, sign: f64, zm: f64) -> Result<Option<RibGeometry>,
     // Downstream direction of the mid line at both ends.
     let mid = |angle: f64| -> Result<DVec3, DesignError> { Ok(at(inner(angle)? + t / 2.0, angle)) };
     let step = 1e-4;
-    let lead = (mid(rib.start + step)? - mid(rib.start)?).normalize();
+    let lead = (mid(start + step)? - mid(start)?).normalize();
     let trail = (mid(TAU)? - mid(TAU - step)?).normalize();
     let length = rib.nose_length();
     let half_ellipse = |inner: DVec3, outer: DVec3, along: DVec3, from: f64, to: f64| {
@@ -933,25 +1110,17 @@ fn rib(design: &VoluteDesign, sign: f64, zm: f64) -> Result<Option<RibGeometry>,
         // The ends are the corners of the faces, exactly.
         points[0] = if from == 0.0 { outer } else { inner };
         points[m] = if from == 0.0 { inner } else { outer };
-        (points, centre + along * length)
+        points
     };
-    let (nose, nose_tip) = half_ellipse(inner_face[0], outer_face[0], -lead, 0.0, PI);
-    let (tail, _) = half_ellipse(inner_face[n], outer_face[n], trail, PI, 0.0);
-    let nose_distance = nose
-        .iter()
-        .chain(&inner_face)
-        .map(|p| p.truncate().length())
-        .fold(f64::INFINITY, f64::min);
-    let nose_angle = (sign * nose_tip.y.atan2(nose_tip.x)).rem_euclid(TAU);
-    Ok(Some(RibGeometry {
+    let nose = half_ellipse(inner_face[0], outer_face[0], -lead, 0.0, PI);
+    let tail = half_ellipse(inner_face[n], outer_face[n], trail, PI, 0.0);
+    Ok(RibPlane {
+        z,
         inner_face,
         outer_face,
         nose,
         tail,
-        nose_tip,
-        nose_angle,
-        nose_distance,
-    }))
+    })
 }
 
 /// The cutwater in the midplane: where the outer wall of the spiral meets the inner
@@ -1572,6 +1741,51 @@ mod tests {
     }
 
     #[test]
+    fn the_rib_nose_leans_with_the_cutwater_across_its_height() {
+        let double = |obliquity: f64| {
+            let mut input = unturned();
+            input.setup.kind = crate::volute::VoluteKind::Double;
+            input.cutwater.obliquity = crate::Param::Manual(obliquity);
+            VoluteGeometry::build(&reference_basis(), &input).unwrap()
+        };
+        let straight = double(0.0);
+        let r = straight.rib.as_ref().unwrap();
+        assert_eq!(r.planes.len(), RIB_PLANES);
+        // Without obliquity every plane is the midplane outline at its own height.
+        let mid = r.outline();
+        for p in &r.planes {
+            for (a, b) in p.outline().iter().zip(&mid) {
+                assert!(a.truncate().distance(b.truncate()) < 1e-9);
+                assert!((a.z - p.z).abs() < 1e-12);
+            }
+        }
+        // Across the height of the sections.
+        let (lo, hi) = (r.planes[0].z, r.planes[RIB_PLANES - 1].z);
+        assert!(hi - lo > straight.design.inlet_width);
+        // Leaning, the nose turns downstream toward +z by the obliquity unrolled onto
+        // its circle, and the tail stays.
+        let obliquity = 30f64.to_radians();
+        let g = double(obliquity);
+        let r = g.rib.as_ref().unwrap();
+        let sign = g.basis.rotation_sign;
+        let angle = |p: &DVec3| sign * p.y.atan2(p.x);
+        let tip = |p: &RibPlane| p.nose[RIB_NOSE_POINTS / 2];
+        let (first, last) = (&r.planes[0], &r.planes[RIB_PLANES - 1]);
+        let radius = g.design.stagnation_radius + g.design.rib.unwrap().thickness / 2.0;
+        let turn = (angle(&tip(last)) - angle(&tip(first)) + PI).rem_euclid(TAU) - PI;
+        let expected = (last.z - first.z) * obliquity.tan() / radius;
+        assert!((turn / expected - 1.0).abs() < 0.05, "{turn} vs {expected}");
+        assert!(
+            first
+                .tail
+                .iter()
+                .zip(&last.tail)
+                .all(|(a, b)| a.truncate().distance(b.truncate()) < 1e-9)
+        );
+        assert!(r.planes.iter().all(|p| p.outline().len() == mid.len()));
+    }
+
+    #[test]
     fn the_rib_splits_whole_sections_and_has_an_elliptic_nose() {
         let g = double(None);
         let rib = g.design.rib.unwrap();
@@ -1862,8 +2076,11 @@ mod tests {
         let (c, d) = (g.cutwater, &g.design);
         // Default: rounded with ρ = e₃/2, so the nose is centred on r'_z.
         assert_relative_eq!(c.radius, d.cutwater_thickness / 2.0);
-        assert_relative_eq!(c.nose_distance, d.cutwater_diameter / 2.0);
-        assert_relative_eq!(c.nose_center.x, d.stagnation_radius, epsilon = 1e-12);
+        assert_relative_eq!(c.nose_distance, d.cutwater_diameter / 2.0, epsilon = 1e-9);
+        // The nose circle moves off r'_z only as far as its innermost point needs to
+        // reach d_z.
+        assert_relative_eq!(c.nose_center.y, 0.0, epsilon = 1e-12);
+        assert!((c.nose_center.x - d.stagnation_radius).abs() < 0.1 * c.radius);
         // The spiral starts at the cutwater and leaves the diffuser past it, at the
         // tip of the sharp wedge, a few millimetres outside r'_z.
         assert!(g.start_angle < 5f64.to_radians());
@@ -1872,13 +2089,10 @@ mod tests {
         let tip = c.tip.truncate().length();
         assert!(tip > d.stagnation_radius && tip < 1.08 * d.stagnation_radius);
         assert!(c.wedge > 1f64.to_radians() && c.wedge < 20f64.to_radians());
-        // The nose outline: an arc on the far side from the tip, then the tip.
-        let outline = c.nose_outline();
-        assert_eq!(*outline.last().unwrap(), c.tip);
-        for p in &outline[..outline.len() - 1] {
-            assert_relative_eq!((*p - c.nose_center).length(), c.radius, epsilon = 1e-12);
-        }
-        assert!(sharp.cutwater.nose_outline().is_empty());
+        // The body of the nose in the midplane; a sharp cutwater adds none.
+        assert!(!g.cutwater_outline().is_empty());
+        assert!(sharp.cutwater_outline().is_empty());
+        assert_eq!(sharp.cutwater_slices.len(), super::super::cutwater::SLICES);
         // Too large a radius reaches the tip.
         input.cutwater.shape = CutwaterShape::Rounded {
             radius: crate::Param::Manual(0.02),

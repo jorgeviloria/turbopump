@@ -13,6 +13,8 @@
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
+#include <BRepBuilderAPI_MakeVertex.hxx>
+#include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakeSolid.hxx>
@@ -36,6 +38,8 @@
 #include <NCollection_IndexedMap.hxx>
 #include <NCollection_List.hxx>
 #include <NCollection_Sequence.hxx>
+#include <Poly_Triangulation.hxx>
+#include <TopLoc_Location.hxx>
 #include <IGESControl_Controller.hxx>
 #include <Message.hxx>
 #include <Message_Messenger.hxx>
@@ -406,6 +410,58 @@ rust::Vec<P3> edge_samples(const Shape &shape, std::size_t samples) {
     }
   }
   return out;
+}
+
+rust::Vec<P3> triangles(const Shape &shape, double deflection) {
+  return guard("triangulation", [&] {
+    BRepMesh_IncrementalMesh mesh(shape.shape, deflection, false, 0.2, true);
+    if (!mesh.IsDone()) {
+      fail("triangulation", "meshing failed");
+    }
+    rust::Vec<P3> out;
+    for (TopExp_Explorer f(shape.shape, TopAbs_FACE); f.More(); f.Next()) {
+      const TopoDS_Face &face = TopoDS::Face(f.Current());
+      TopLoc_Location location;
+      const occ::handle<Poly_Triangulation> facets = BRep_Tool::Triangulation(face, location);
+      if (facets.IsNull()) {
+        continue;
+      }
+      const gp_Trsf place = location.Transformation();
+      // A reversed face runs its triangles the other way, so that they face out.
+      const bool reversed = face.Orientation() == TopAbs_REVERSED;
+      for (int i = 1; i <= facets->NbTriangles(); ++i) {
+        int a, b, c;
+        facets->Triangle(i).Get(a, b, c);
+        if (reversed) {
+          std::swap(b, c);
+        }
+        for (int k : {a, b, c}) {
+          const gp_Pnt p = facets->Node(k).Transformed(place);
+          out.push_back(P3{p.X(), p.Y(), p.Z()});
+        }
+      }
+    }
+    return out;
+  });
+}
+
+rust::Vec<double> boundary_distances(const Shape &shape, rust::Slice<const P3> points) {
+  return guard("distance", [&] {
+    // To the faces of the shape: measured to a solid, a point inside it is at zero.
+    TopoDS_Compound faces;
+    BRep_Builder builder;
+    builder.MakeCompound(faces);
+    for (TopExp_Explorer f(shape.shape, TopAbs_FACE); f.More(); f.Next()) {
+      builder.Add(faces, f.Current());
+    }
+    rust::Vec<double> out;
+    for (const P3 &p : points) {
+      const TopoDS_Vertex vertex = BRepBuilderAPI_MakeVertex(gp_Pnt(p.x, p.y, p.z)).Vertex();
+      BRepExtrema_DistShapeShape distance(faces, vertex);
+      out.push_back(distance.IsDone() ? distance.Value() : std::nan(""));
+    }
+    return out;
+  });
 }
 
 std::unique_ptr<Shape> fillet_edges(const Shape &shape, rust::Slice<const std::uint32_t> edges,

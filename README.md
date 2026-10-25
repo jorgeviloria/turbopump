@@ -88,9 +88,9 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
   - *Front* y *Section*: sus dibujos y exportaciones, y cómo se edita una sección;
   - *3D*: cámara (encuadrar, vista inicial, el menú *Views* con las vistas desde la
     entrada, desde atrás y de lado y las que se guardan, que se recuerdan entre
-    sesiones, y proyección ortográfica), estilo
-    (sombreado, con aristas o alambre), inspección (corte meridional y medir), y
-    sólidos CAD, mallas y una imagen PNG de la vista;
+    sesiones, proyección ortográfica y el enfoque en el corte de agua), estilo
+    (sombreado, con aristas, alambre o cebra), inspección (corte meridional, corte
+    transversal y medir), y sólidos CAD, mallas y una imagen PNG de la vista;
   - *Curves*: los ajustes de la predicción (en el panel de propiedades) y el resto de
     resultados.
 
@@ -136,7 +136,9 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
   empuje radial). La voluta admite descarga radial (por defecto, central sobre la línea
   del eje de la bomba) o tangencial, abierta a ambos lados o con una pared recta. Por
   defecto gira para que la descarga quede vertical. El corte de agua puede ser tangente,
-  afilado o redondeado con su radio.
+  afilado o redondeado con su radio; el redondeado es un cuerpo con la nariz sobre d_z
+  y el ángulo α₃B, nunca más fino que la nariz, que se une suavemente a las dos paredes
+  y se calcula en nueve planos a lo ancho de la entrada.
 - **Vista principal**, una a la vez y a pantalla completa, elegida en las pestañas:
   - sección meridional (ver [La vista Meridian](#la-vista-meridian)): la etapa
     completa con el difusor y la voluta, o el rodete solo para dibujar su canal, sus
@@ -156,10 +158,15 @@ claro (también hay tema oscuro). El trabajo sigue los pasos de diseño de cada 
     selecciona (también en la Escena) y el botón derecho la oculta, la aísla o cambia
     su opacidad. El corte meridional quita la mitad del modelo que mira a la cámara
     (o la otra); se desplaza paralelo a sí mismo con su posición, en porcentaje del
-    radio, y su plano se puede dibujar sobre el modelo. Donde corta una pieza opaca
-    cerrada (los álabes del rodete y del difusor, cada canal de la voluta, también en la
-    doble y la interior, y la tubería de entrada), la cara
-    cortada sale maciza y rayada, como en un plano de taller. Medir da la distancia
+    radio, y su plano se puede dibujar sobre el modelo. El corte transversal corta a
+    través del eje por un plano z = cte y quita el lado desde el que mira la cámara.
+    Donde corta una pieza opaca cerrada (los álabes del rodete y del difusor, cada canal
+    de la voluta, también en la doble y la interior, la tubería de entrada y el corte de
+    agua), la cara cortada sale maciza y rayada, como en un plano de taller. El corte de
+    agua redondeado es una pieza propia de la Escena, y la carcasa se dibuja sin los
+    trozos de pared que él sustituye; *Cutwater* encuadra la cámara en él. La cebra
+    refleja franjas en las superficies: donde se rompen hay una arista y donde se
+    quiebran salta la curvatura. Medir da la distancia
     entre dos puntos del modelo y sus partes radial y axial, Δr y Δz; cerca de un
     vértice de la malla el punto se ajusta a él;
 
@@ -341,6 +348,39 @@ para las formas que no son elípticas.
 
 ![Bordes del álabe](docs/img/bordes-alabe.jpg)
 
+### Corte de agua
+
+La vista *Front* tiene una página *Cutwater*, que se abre con el paso *Cut-water*.
+Dibuja el corte de agua en uno de los nueve planos que lo cortan a lo ancho de la
+entrada (un deslizador elige el plano; los demás se ven en tenue), con la pared de la
+espiral, la del difusor, el círculo $d_z$ y la salida del rodete. Tres puntos se
+arrastran:
+
+- el **punto más interior de la nariz** mueve el círculo del corte de agua $d_z$;
+- el **punto delantero de la nariz** cambia su radio $\rho$, con el punto interior fijo
+  sobre $d_z$;
+- el **punto de la línea de curvatura** la gira y fija la incidencia $i_3$ frente al
+  ángulo del flujo $\alpha'_3$.
+
+Otro deslizador reparte entre el lado de la espiral y el del difusor el espesor que le
+falta a la cuña pasada la punta, y otro inclina el borde del corte de agua un ángulo
+$\varepsilon$ respecto del eje (la tabla 10.2 pide más de 35° contra las pulsaciones);
+no pasa de lo que las paredes permiten y dice hasta dónde llega. La nariz del nervio de
+una voluta doble se inclina igual. Al lado, las medidas frente a Gülich (diámetro
+efectivo, holgura de la tabla 10.2, cuerpo más fino, $e/d_z$, incidencia en el diseño,
+rango de caudal con $|i_3| \le 3°$, oblicuidad, cuña a lo ancho y corrección de la
+garganta de la ec. 7.28), el cuerpo en 3D, que se
+gira arrastrando, y la incidencia sobre el corte de agua en todo el rango de caudal.
+Mientras se arrastra solo se recalcula la voluta; el resto se pone al día al soltar.
+*View in 3D* abre la vista 3D encuadrada en el corte de agua y cortada a través del
+eje por el plano que se estaba mirando.
+
+![Corte de agua](docs/img/corte-de-agua.jpg)
+
+| El corte de agua en 3D, cortado por el plano medio | En cebra |
+|---|---|
+| ![Corte de agua en la vista 3D](docs/img/corte-de-agua-3d.jpg) | ![Corte de agua en cebra](docs/img/corte-de-agua-cebra.jpg) |
+
 Las pruebas de la interfaz usan [kittest](https://github.com/rerun-io/kittest) y no
 necesitan GPU. Las capturas con wgpu se generan a mano en `target/screenshots/`:
 
@@ -424,7 +464,11 @@ entrada (`inlet-duct`), rodete, estator con álabes (`stator`) o sin ellos
 (`vaneless-stator`) y voluta. Cada uno se
 diseña con su orden, y `cad` construye los sólidos de todos; de la voluta salen el
 dominio fluido (`volute.step`) y la carcasa con su espesor de pared y la brida de
-salida (`volute-casing.step`). Con las cámaras laterales diseñadas salen también su
+salida (`volute-casing.step`); por fuera, la hendidura entre el dorso del comienzo de
+la espiral y la tobera, sobre el corte de agua, sale rellena y redondeada
+(`turbopump volute --set fillet=…`). El corte de agua redondeado del sólido es el que dibuja la
+vista 3D: un loft por sus contornos a lo ancho de la entrada, que una prueba compara con
+la malla de la vista. Con las cámaras laterales diseñadas salen también su
 fluido (`side-chambers.step`) y, si a continuación del rodete viene una voluta, un único
 fluido para CFD con rodete, cámaras y voluta (`fluid-joined.step`), unido por un anillo
 en la salida del rodete. Con una tubería de entrada delante del rodete sale su fluido

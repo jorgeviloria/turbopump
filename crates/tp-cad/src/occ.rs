@@ -115,6 +115,27 @@ impl Shape {
             .collect()
     }
 
+    /// Triangles of the faces, facing out, no farther than `deflection` from them.
+    pub fn triangles(&self, deflection: f64) -> Result<Vec<[DVec3; 3]>, CadError> {
+        let flat = ffi::triangles(&self.0, deflection)
+            .map_err(|e| CadError::Operation(e.what().to_owned()))?;
+        Ok(flat
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .map(|t| t.map(|p| DVec3::new(p.x, p.y, p.z)))
+            .collect())
+    }
+
+    /// Distance from each of `points` to the nearest face of the shape: to its surface,
+    /// whether the point lies inside or outside. Slow on large shapes: tens of
+    /// milliseconds a point.
+    pub fn boundary_distances(&self, points: &[DVec3]) -> Result<Vec<f64>, CadError> {
+        let points: Vec<ffi::P3> = points.iter().map(|p| p3(*p)).collect();
+        ffi::boundary_distances(&self.0, &points)
+            .map_err(|e| CadError::Operation(e.what().to_owned()))
+    }
+
     /// The shape with the edges at positions `edges` of [`Self::edge_samples`] rounded
     /// with `radius`, mm.
     pub fn filleted(&self, edges: &[usize], radius: f64) -> Result<Shape, CadError> {

@@ -101,6 +101,9 @@ pub struct CollectorData {
     pub double_volute_wrap: Option<f64>,
     /// J_sp = Σ ∬ dA/r over the throats of the volute, m (Gülich Table 4.1).
     pub throat_integral: Option<f64>,
+    /// Flow angle α₃′ at the cutwater at the design point and camber angle α₃B of the
+    /// cutwater, rad.
+    pub cutwater: Option<(f64, f64)>,
 }
 
 /// The flow at which the volute characteristic meets the impeller characteristic,
@@ -201,6 +204,27 @@ pub struct VoluteSummary {
     /// Flow at which the spiral turns from accelerating to decelerating
     /// (λ₆·AR = 1), where its losses are least, m³/s.
     pub matched_flow: Option<f64>,
+    /// Flows between which the incidence on the cutwater stays within ±3°
+    /// ([`INCIDENCE_LIMIT`]), m³/s; the ends of the characteristic where it does not
+    /// leave that band.
+    pub incidence_range: Option<(f64, f64)>,
+}
+
+/// Incidence on the cutwater Gülich admits, ±3° (Chap. 7.8.1, item 7), rad.
+pub const INCIDENCE_LIMIT: f64 = 3.0 * std::f64::consts::PI / 180.0;
+
+/// Incidence i₃ = α₃B − α₃′ on a cutwater of camber angle `blade_angle` at Q/Q_design =
+/// `flow_ratio` and H_th/H_th,design = `head_ratio`, where the flow meets it at
+/// `flow_angle` (rad): c₃m grows with the flow and c₃u with the theoretical head
+/// (eqs. T7.7.3 to T7.7.6, no prerotation). At part load the flow comes flatter, i₃ > 0
+/// (Gülich Fig. 9.20).
+pub fn cutwater_incidence(
+    flow_angle: f64,
+    blade_angle: f64,
+    flow_ratio: f64,
+    head_ratio: f64,
+) -> f64 {
+    blade_angle - (flow_angle.tan() * flow_ratio).atan2(head_ratio)
 }
 
 /// The predicted characteristic of one stage.
@@ -987,10 +1011,45 @@ pub fn predict(
             }
             0.5 * (lo + hi) * duty.flow
         });
+        // The incidence falls with the flow: where it crosses +3° and −3°.
+        let incidence_range = collector.cutwater.map(|(flow_angle, blade_angle)| {
+            let incidence = |ratio: f64| {
+                let p = model.point(ratio);
+                cutwater_incidence(
+                    flow_angle,
+                    blade_angle,
+                    ratio,
+                    p.theoretical_head / design_point.theoretical_head,
+                )
+            };
+            let crossing = |limit: f64| {
+                let (mut lo, mut hi) = (0.05, end);
+                if incidence(lo) <= limit {
+                    return lo;
+                }
+                if incidence(hi) >= limit {
+                    return hi;
+                }
+                for _ in 0..50 {
+                    let mid = 0.5 * (lo + hi);
+                    if incidence(mid) > limit {
+                        lo = mid;
+                    } else {
+                        hi = mid;
+                    }
+                }
+                0.5 * (lo + hi)
+            };
+            (
+                crossing(INCIDENCE_LIMIT) * duty.flow,
+                crossing(-INCIDENCE_LIMIT) * duty.flow,
+            )
+        });
         VoluteSummary {
             design,
             share: design.total() / split.design_losses,
             matched_flow,
+            incidence_range,
         }
     });
     if let Some(q) = volute.and_then(|v| v.matched_flow)
@@ -1861,6 +1920,7 @@ mod tests {
             volute: Some(geometry),
             double_volute_wrap: None,
             throat_integral: Some(volute.throat_integral().unwrap() * throat_scale),
+            cutwater: Some((volute.cutwater_flow_angle, volute.cutwater_angle)),
         }
     }
 
@@ -2040,6 +2100,47 @@ mod tests {
         // Volute losses grow toward overload.
         let last = p.points.last().unwrap();
         assert!(last.volute_loss > p.design.volute_loss);
+    }
+
+    #[test]
+    fn the_flow_meets_the_cutwater_within_3_degrees_about_the_design_point() {
+        let d = design(&duty(), &CentrifugalPumpInput::default()).unwrap();
+        let collector = volute_collector(&d, 1.0);
+        let p = with_collector(&collector);
+        let (lo, hi) = p.volute.unwrap().incidence_range.unwrap();
+        let q = duty().flow;
+        assert!(lo < q && hi > q, "{} to {}", lo / q, hi / q);
+        // At the ends of the band the incidence is ±3°, positive at part load.
+        let (flow_angle, blade_angle) = collector.cutwater.unwrap();
+        let at = |flow: f64| {
+            let point = p
+                .points
+                .windows(2)
+                .find(|w| w[0].flow <= flow && w[1].flow >= flow)
+                .map(|w| {
+                    let t = (flow - w[0].flow) / (w[1].flow - w[0].flow);
+                    w[0].theoretical_head + t * (w[1].theoretical_head - w[0].theoretical_head)
+                })
+                .unwrap();
+            cutwater_incidence(
+                flow_angle,
+                blade_angle,
+                flow / q,
+                point / p.design.theoretical_head,
+            )
+        };
+        assert_relative_eq!(at(lo), INCIDENCE_LIMIT, max_relative = 0.05);
+        assert_relative_eq!(at(hi), -INCIDENCE_LIMIT, max_relative = 0.05);
+        // A cutwater turned by +2° meets the design flow at +2°: the band moves to
+        // larger flows.
+        let mut turned = collector;
+        turned.cutwater = Some((flow_angle, blade_angle + 2f64.to_radians()));
+        let (lo2, hi2) = with_collector(&turned)
+            .volute
+            .unwrap()
+            .incidence_range
+            .unwrap();
+        assert!(lo2 > lo && hi2 > hi);
     }
 
     #[test]

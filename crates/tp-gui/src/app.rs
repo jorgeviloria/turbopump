@@ -347,6 +347,7 @@ pub struct TurbopumpApp {
     cross_section: CrossSectionView,
     performance: PerformanceView,
     blade: blade::BladeView,
+    front: front::FrontView,
     viewer: Viewer,
     /// The renderer of the window, for pictures of the 3D view.
     render_state: Option<RenderState>,
@@ -465,6 +466,7 @@ impl TurbopumpApp {
             cross_section: CrossSectionView::default(),
             performance: PerformanceView::default(),
             blade: blade::BladeView::default(),
+            front: front::FrontView::default(),
             viewer: Viewer::default(),
             render_state: None,
             exports: Exports::default(),
@@ -541,7 +543,9 @@ impl TurbopumpApp {
         self.zoom = ctx.zoom_factor();
         self.handle_shortcuts(&ctx);
         self.handle_close_request(&ctx);
-        self.derived.update(self.doc.project());
+        // While a drag edits a volute, only the volute follows it frame by frame.
+        let dragging = ctx.input(|i| i.pointer.primary_down());
+        self.derived.update_while(self.doc.project(), dragging);
         self.fix_selection();
         self.update_title(&ctx);
         self.exports.poll();
@@ -576,12 +580,13 @@ impl TurbopumpApp {
                 let view = self.view;
                 let meridional = &mut self.meridional;
                 let blade = &mut self.blade;
+                let front = &mut self.front;
                 let viewer = &mut self.viewer;
                 let performance = &mut self.performance;
                 command = self.ribbon.show(ui, &cx, |ui| match view {
                     View::Meridian => tools::meridian(ui, meridional, &units, tools),
                     View::Blade => tools::blade(ui, blade, tools),
-                    View::FrontView => tools::front(ui, tools),
+                    View::FrontView => tools::front(ui, front, tools),
                     View::CrossSection => tools::section(ui, tools),
                     View::View3d => tools::view3d(ui, viewer, tools),
                     View::Performance => tools::curves(ui, performance),
@@ -769,7 +774,8 @@ impl TurbopumpApp {
                     View::CrossSection => self.cross_section.show(ui, &mut cx, volute, cover),
                     View::Blade => self.blade.show(ui, &mut cx, id, &units, cover),
                     View::FrontView => {
-                        front::show(ui, cx.derived, id, stator, volute, &units, cover);
+                        self.front
+                            .show(ui, &mut cx, id, stator, volute, &units, cover);
                     }
                     View::View3d => {
                         scene_area = Some(target);
@@ -811,6 +817,11 @@ impl TurbopumpApp {
             }
         }
         self.properties_panel(&ctx, main_area);
+        // The cutwater page asked for the 3D view at one of its planes.
+        if let Some(z) = self.front.cutwater.open_3d.take() {
+            self.focus_view(View::View3d);
+            self.viewer.focus_cutwater(Some(z));
+        }
 
         if let Some(command) = command {
             self.run(command, &ctx);
@@ -1285,6 +1296,10 @@ impl TurbopumpApp {
                 ))
             }),
             volute: name(self.active_volute()),
+            cutwater: self
+                .active_volute()
+                .and_then(|id| self.derived.volute(id))
+                .is_some_and(|g| !g.cutwater_outline().is_empty() || g.rib.is_some()),
         }
     }
 
@@ -2174,6 +2189,115 @@ mod tests {
         harness.state_mut().doc.undo();
         harness.run();
         assert_eq!(leading(harness.state()), EdgeShape::Ellipse { ratio: 4.0 });
+    }
+
+    #[test]
+    fn the_cutwater_step_opens_its_page_and_its_points_drag() {
+        use crate::views::cutwater::{Grip, nose_frame};
+        use crate::views::front::FrontPage;
+        use tp_design::volute::CutwaterShape;
+        use tp_math::DVec2;
+        let mut harness = Harness::builder()
+            .with_size([1440.0, 900.0])
+            .build_eframe(|cc| TurbopumpApp::new(cc, None));
+        harness.run();
+        let volute = harness.state().active_volute().unwrap();
+        harness.state_mut().selection = Selection::Step(volute, DesignStep::CutWater);
+        harness.run();
+        harness.run();
+        assert_eq!(harness.state().view, View::FrontView);
+        assert_eq!(harness.state().front.page, FrontPage::Cutwater);
+        let scale = |app: &TurbopumpApp| {
+            app.doc
+                .project()
+                .display_units
+                .to_display(QuantityKind::Length, 1.0)
+        };
+        let input = |app: &TurbopumpApp| app.doc.project().volute_input(volute).unwrap();
+        let geometry = |app: &TurbopumpApp| app.derived.volute(volute).unwrap().clone();
+        // Screen points of the grip and of where it is dragged to.
+        let points = |app: &TurbopumpApp, grip: Grip, to: DVec2| {
+            let g = geometry(app);
+            let page = &app.front.cutwater;
+            (
+                page.grip_position(&g, grip, scale(app)).unwrap(),
+                page.screen(to, scale(app)).unwrap(),
+            )
+        };
+
+        // The innermost point of the nose, 3 mm outward: d_z grows by 6 mm.
+        let g = geometry(harness.state());
+        let (centre, radial, _, _, radius) = nose_frame(&g);
+        let before = g.design.cutwater_diameter;
+        let nose = centre - radial * radius;
+        let (from, to) = points(harness.state(), Grip::Nose, nose + radial * 0.003);
+        drag_by(&mut harness, from, to - from);
+        let after = geometry(harness.state()).design.cutwater_diameter;
+        assert!((after - before - 0.006).abs() < 0.001, "{before} → {after}");
+        assert!(matches!(
+            input(harness.state()).setup.cutwater_diameter,
+            tp_design::Param::Manual(_)
+        ));
+        // One drag, one undo step.
+        harness.state_mut().doc.undo();
+        harness.run();
+        assert_eq!(
+            input(harness.state()).setup.cutwater_diameter,
+            tp_design::Param::Auto
+        );
+
+        // The camber point turned 2° toward the outside: 2° of incidence.
+        let g = geometry(harness.state());
+        let (centre, radial, along, _, radius) = nose_frame(&g);
+        let turned = g.design.cutwater_angle + 2f64.to_radians();
+        let target = centre + (along * turned.cos() + radial * turned.sin()) * (6.0 * radius);
+        let (from, to) = points(harness.state(), Grip::Camber, target);
+        drag_by(&mut harness, from, to - from);
+        let d = geometry(harness.state()).design;
+        let incidence = d.cutwater_angle - d.cutwater_flow_angle;
+        assert!(
+            (incidence - 2f64.to_radians()).abs() < 0.3f64.to_radians(),
+            "{}",
+            incidence.to_degrees()
+        );
+
+        // The leading point of the nose pulled forward: a larger radius, the innermost
+        // point kept on d_z.
+        let g = geometry(harness.state());
+        let (centre, radial, _, camber, radius) = nose_frame(&g);
+        let fixed = centre - radial * radius;
+        let target = fixed + (radial - camber) * (1.5 * radius);
+        let (from, to) = points(harness.state(), Grip::Radius, target);
+        drag_by(&mut harness, from, to - from);
+        let CutwaterShape::Rounded {
+            radius: tp_design::Param::Manual(r),
+        } = input(harness.state()).cutwater.shape
+        else {
+            panic!("a radius set by hand");
+        };
+        assert!((r / radius - 1.5).abs() < 0.1, "{r} vs {radius}");
+        let after = geometry(harness.state());
+        assert!((after.cutwater.nose_distance - after.design.cutwater_diameter / 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn the_cutwater_page_opens_the_3d_view_on_its_plane() {
+        let mut harness = Harness::builder()
+            .with_size([1440.0, 900.0])
+            .build_eframe(|cc| TurbopumpApp::new(cc, None));
+        harness.run();
+        let volute = harness.state().active_volute().unwrap();
+        harness.state_mut().selection = Selection::Step(volute, DesignStep::CutWater);
+        harness.run();
+        harness.run();
+        harness.get_by_label_contains("View in 3D").click();
+        harness.run();
+        let app = harness.state();
+        assert_eq!(app.view, View::View3d);
+        // The midplane, as the page showed it; the view applies it when it draws.
+        let g = app.derived.volute(volute).unwrap();
+        let mid = g.cutwater_slices[g.cutwater_slices.len() / 2].z;
+        assert_eq!(app.viewer.pending_focus(), Some(Some(mid)));
     }
 
     fn editor() -> Harness<'static, TurbopumpApp> {

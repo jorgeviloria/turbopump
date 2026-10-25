@@ -486,8 +486,93 @@ fn volute() {
     save(&mut harness, "volute-front");
 }
 
+/// The cutwater step opens the cutwater page of the front view: the plane by plane
+/// drawing with its points to drag, the measures, the body in 3D and the incidence over
+/// the flow range.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn cutwater() {
+    for (theme, suffix) in [(egui::Theme::Dark, "dark"), (egui::Theme::Light, "light")] {
+        let mut harness = harness(theme);
+        for _ in 0..6 {
+            harness.get_by_label_contains("Accept step").click();
+            harness.run();
+        }
+        harness.get_by_label("Volute 1").click();
+        harness.run();
+        // Setup, cross section, spiral and diffuser: the cutwater step is next.
+        for _ in 0..4 {
+            harness.get_by_label_contains("Accept step").click();
+            harness.run();
+        }
+        harness.remove_cursor();
+        harness.run();
+        save(&mut harness, &format!("cutwater-{suffix}"));
+    }
+}
+
+/// The cutwater in the 3D view: framed and cut across the axis at the midplane from
+/// its page, then in zebra stripes.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn cutwater_3d() {
+    let mut harness = harness(egui::Theme::Dark);
+    for _ in 0..6 {
+        harness.get_by_label_contains("Accept step").click();
+        harness.run();
+    }
+    harness.get_by_label("Volute 1").click();
+    harness.run();
+    for _ in 0..4 {
+        harness.get_by_label_contains("Accept step").click();
+        harness.run();
+    }
+    harness.get_by_label_contains("View in 3D").click();
+    harness.run_steps(6);
+    save(&mut harness, "cutwater-3d");
+    harness.get_by_label("Zebra").click();
+    harness.run_steps(4);
+    save(&mut harness, "cutwater-zebra");
+}
+
 /// The cross-section step: the default trapezoid, then a radius-based section with a
 /// second definition of line segments, its corners ready to drag.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn oblique_cutwater() {
+    let mut harness = harness(egui::Theme::Dark);
+    for _ in 0..6 {
+        harness.get_by_label_contains("Accept step").click();
+        harness.run();
+    }
+    harness.get_by_label("Volute 1").click();
+    harness.run();
+    for _ in 0..4 {
+        harness.get_by_label_contains("Accept step").click();
+        harness.run();
+    }
+    // Lean the cutwater with the keyboard on its slider.
+    harness
+        .get_by_role_and_label(egui::accesskit::Role::Slider, "obliquity ε")
+        .focus();
+    harness.run();
+    for _ in 0..35 {
+        harness.key_press(egui::Key::ArrowRight);
+    }
+    harness.run_steps(4);
+    harness.remove_cursor();
+    save(&mut harness, "cutwater-oblique");
+    harness.get_by_label_contains("View in 3D").click();
+    harness.run_steps(6);
+    // Whole, without the cut and the panel: the edge leans across the inlet.
+    harness.get_by_label("Cut across").click();
+    let open = harness.state().sidebar_open();
+    harness.state_mut().set_sidebar_open(!open);
+    harness.remove_cursor();
+    harness.run_steps(6);
+    save(&mut harness, "cutwater-oblique-3d");
+}
+
 #[test]
 #[ignore = "needs a GPU; run with --ignored"]
 fn cross_sections() {

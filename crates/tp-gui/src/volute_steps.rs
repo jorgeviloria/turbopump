@@ -1059,7 +1059,8 @@ fn cutwater(
                 tr("Shape"),
                 tr(
                     "Tangent: the spiral starts where it clears the diffuser. Sharp: the spiral \
-                 cuts the diffuser wall. Rounded: a nose of radius ρ on the cutwater circle \
+                 cuts the diffuser wall. Rounded: a nose of radius ρ on the cutwater circle, \
+                 its body never thinner than the nose and running smoothly into both walls \
                  (Gülich Fig. 7.41b)",
                 ),
             );
@@ -1104,6 +1105,30 @@ fn cutwater(
                     g.map(|g| g.cutwater.radius),
                     &units,
                     0.0001..=0.1,
+                );
+                param_f64(
+                    ui,
+                    tr("Spiral share"),
+                    tr(
+                        "Share of the thickness the wedge lacks past its tip that the spiral side of the body takes; the diffuser side takes the rest. Automatic: ½",
+                    ),
+                    &mut input.cutwater.share,
+                    Dimensionless,
+                    g.map(|g| g.design.cutwater_share),
+                    &units,
+                    0.0..=1.0,
+                );
+                param_f64(
+                    ui,
+                    tr("Obliquity ε"),
+                    tr(
+                        "Angle between the edge of the cutwater and the pump axis, unrolled onto d_z; positive leans it downstream toward +z. Gülich Table 10.2 asks for more than 35° against pressure pulsations; the walls set how far it can lean. Automatic: 0",
+                    ),
+                    &mut input.cutwater.obliquity,
+                    Angle,
+                    g.map(|g| g.design.cutwater_obliquity),
+                    &units,
+                    -tp_design::volute::MAX_OBLIQUITY..=tp_design::volute::MAX_OBLIQUITY,
                 );
             }
             let incidence = input.cutwater.incidence.resolve(|| 0.0);
@@ -1162,6 +1187,43 @@ fn cutwater(
                         tr("Effective cutwater diameter"),
                         units.show(Length, 2.0 * c.nose_distance),
                     );
+                    // Across the inlet width.
+                    let slices = &g.cutwater_slices;
+                    let range = |f: &dyn Fn(&tp_design::volute::CutwaterSlice) -> f64| {
+                        slices
+                            .iter()
+                            .map(f)
+                            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), x| {
+                                (lo.min(x), hi.max(x))
+                            })
+                    };
+                    if !slices.is_empty() {
+                        let (lo, hi) = range(&|c| c.tip.truncate().length());
+                        value_row(
+                            ui,
+                            tr("Tip across the width"),
+                            tf(
+                                "{} to {} from the axis",
+                                &[&units.show(Length, lo), &units.show(Length, hi)],
+                            ),
+                        );
+                    }
+                    if !slices.is_empty() && c.radius > 0.0 {
+                        value_row(
+                            ui,
+                            tr("Thinnest body"),
+                            units.show(Length, range(&|c| c.min_thickness).0),
+                        );
+                        let (lo, hi) = range(&|c| c.join_length);
+                        value_row(
+                            ui,
+                            tr("Joins the walls"),
+                            tf(
+                                "{} to {} past the tip",
+                                &[&units.show(Length, lo), &units.show(Length, hi)],
+                            ),
+                        );
+                    }
                 });
             }
         }
@@ -1188,6 +1250,18 @@ fn wall(
                 g.map(|g| g.design.wall_thickness),
                 &units,
                 0.0005..=0.2,
+            );
+            param_f64(
+                ui,
+                tr("Fillet over the cutwater"),
+                tr(
+                    "Fills and rounds the outside of the casing where the back of the start of the spiral meets the diffuser, so no sharp groove is left over the cutwater; 0 leaves it. Automatic: the wall thickness",
+                ),
+                &mut input.wall.cutwater_fillet,
+                QuantityKind::Length,
+                g.map(|g| g.design.cutwater_fillet),
+                &units,
+                0.0..=0.1,
             );
         });
     }

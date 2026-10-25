@@ -182,6 +182,14 @@ pub(crate) struct Viewer {
     pub cut_offset: f32,
     /// Outline the cutting plane over the view.
     pub show_cut_plane: bool,
+    /// Cut across the pump axis, by a plane z = const, instead of through it.
+    pub horizontal: bool,
+    /// A horizontal cut removes the side above it (+z), else the side below.
+    pub remove_above: bool,
+    /// Zebra stripes instead of shading, to see where curvature jumps.
+    pub zebra: bool,
+    /// Frame the camera on the cutwater next frame, the cut moved to this plane z.
+    focus_cutwater: Option<Option<f64>>,
     /// Clicks put points to measure between, instead of selecting parts.
     measuring: bool,
     /// The points measured: none, the first, or both.
@@ -217,6 +225,7 @@ pub(crate) fn part_name(id: PartId) -> &'static str {
         PartId::Walls => "Side walls",
         PartId::Volute => "Casing",
         PartId::Duct => "Inlet duct",
+        PartId::Cutwater => "Cutwater",
     })
 }
 
@@ -238,6 +247,30 @@ impl Plane {
     pub fn removes(&self, p: Vec3) -> bool {
         self.normal.dot(p) > self.offset
     }
+}
+
+/// The cutting plane of a view: through the axis at the angle `cut`, or across it when
+/// `horizontal`, removing the side above when `above`; moved `offset` times the radius
+/// of the model along its normal, or, across the axis, along the axis from the centre.
+fn plane_of(
+    cut: Option<f32>,
+    horizontal: bool,
+    above: bool,
+    offset: f32,
+    bounds: Option<(Vec3, f32)>,
+) -> Option<Plane> {
+    let angle = cut?;
+    let (center, radius) = bounds.unwrap_or((Vec3::ZERO, 0.0));
+    Some(if horizontal {
+        let z = center.z + offset * radius;
+        let normal = if above { Vec3::Z } else { -Vec3::Z };
+        Plane {
+            normal,
+            offset: normal.z * z,
+        }
+    } else {
+        cut_plane(angle, offset, radius)
+    })
 }
 
 /// The plane of a cut at `angle`, moved `offset` times `radius` along its normal.
@@ -343,6 +376,8 @@ impl Viewer {
     /// it back whole.
     pub(crate) fn set_cut(&mut self, on: bool) {
         self.cut = on.then(|| self.camera.map_or(0.0, |c| c.yaw));
+        // Across the axis, the side the camera looks from goes.
+        self.remove_above = self.camera.is_none_or(|c| c.eye().z >= c.target.z);
     }
 
     /// Turns the cut to remove the half toward the camera.
@@ -356,7 +391,25 @@ impl Viewer {
     pub(crate) fn flip_cut(&mut self) {
         if let Some(angle) = self.cut.as_mut() {
             *angle = wrap_angle(*angle + PI);
+            self.remove_above = !self.remove_above;
         }
+    }
+
+    /// The cutting plane, if the model is cut.
+    pub(crate) fn plane(&self) -> Option<Plane> {
+        plane_of(
+            self.cut,
+            self.horizontal,
+            self.remove_above,
+            self.cut_offset,
+            self.bounds,
+        )
+    }
+
+    /// Frames the camera on the body of the cutwater next frame; with `plane`, also
+    /// cuts the model across the axis there, removing the side the camera looks from.
+    pub(crate) fn focus_cutwater(&mut self, plane: Option<f64>) {
+        self.focus_cutwater = Some(plane);
     }
 
     pub(crate) fn measuring(&self) -> bool {
@@ -460,6 +513,36 @@ impl Viewer {
             camera.reframe(center, radius, self.free_aspect);
             self.framed_aspect = self.free_aspect;
         }
+        // Asked to look at the cutwater: frame its body.
+        if let Some(plane) = self.focus_cutwater.take()
+            && let Some((_, v)) = volute
+        {
+            let points: Vec<Vec3> = v
+                .cutwater_slices
+                .iter()
+                .flat_map(|s| s.outline.iter().chain([&s.tip]))
+                .map(|p| p.as_vec3())
+                .collect();
+            if !points.is_empty() {
+                let centre = points.iter().copied().sum::<Vec3>() / points.len() as f32;
+                let reach = points
+                    .iter()
+                    .map(|p| p.distance(centre))
+                    .fold(0.0, f32::max);
+                // Steeply from the inlet side, a little off the radius through the
+                // cutwater: its profile on the cut, and how it runs across below.
+                camera.look_from(centre.y.atan2(centre.x) + 0.5, 1.2);
+                camera.reframe(centre, (1.15 * reach).max(0.005), self.free_aspect);
+                self.moved = true;
+                self.turn = None;
+                if let (Some(z), Some((center, radius))) = (plane, self.bounds) {
+                    self.cut.get_or_insert(camera.yaw);
+                    self.horizontal = true;
+                    self.remove_above = camera.eye().z >= camera.target.z;
+                    self.cut_offset = ((z as f32 - center.z) / radius.max(1e-6)).clamp(-1.0, 1.0);
+                }
+            }
+        }
 
         // Dragging takes the camera over from a turn in progress.
         if response.dragged() {
@@ -500,8 +583,13 @@ impl Viewer {
         }
 
         let p = Palette::of(ui);
-        let radius = self.bounds.map_or(0.0, |(_, r)| r);
-        let cut = self.cut.map(|a| cut_plane(a, self.cut_offset, radius));
+        let cut = plane_of(
+            self.cut,
+            self.horizontal,
+            self.remove_above,
+            self.cut_offset,
+            self.bounds,
+        );
         let matrix = clip_matrix(camera, rect, free);
         // What lies under the pointer, unless the camera is moving.
         let hit = match (response.hover_pos(), &self.mesh) {
@@ -581,7 +669,7 @@ impl Viewer {
             ((rect.height() * ppp).round() as u32).max(1),
         ];
         let dark = ui.visuals().dark_mode;
-        let uniforms = uniforms(camera, rect, free, dark, cut, p.accent);
+        let uniforms = uniforms(camera, rect, free, dark, cut, p.accent, self.zebra);
         let texture = gpu.render(state, size, &uniforms, &highlights);
         ui.painter().image(
             texture,
@@ -631,8 +719,7 @@ impl Viewer {
     pub(crate) fn capture(&mut self, state: &RenderState, dark: bool) -> Option<Capture> {
         let (free, ppp) = self.frame?;
         let camera = self.camera?;
-        let radius = self.bounds.map_or(0.0, |(_, r)| r);
-        let cut = self.cut.map(|a| cut_plane(a, self.cut_offset, radius));
+        let cut = self.plane();
         let gpu = self.gpu.as_mut()?;
         let limit = state.device.limits().max_texture_dimension_2d as f32;
         let scale = (ppp * CAPTURE_SCALE).min(limit / free.width().max(free.height()).max(1.0));
@@ -640,7 +727,15 @@ impl Viewer {
             ((free.width() * scale).round() as u32).max(1),
             ((free.height() * scale).round() as u32).max(1),
         ];
-        let uniforms = uniforms(&camera, free, free, dark, cut, Color32::TRANSPARENT);
+        let uniforms = uniforms(
+            &camera,
+            free,
+            free,
+            dark,
+            cut,
+            Color32::TRANSPARENT,
+            self.zebra,
+        );
         let rgba = gpu.capture(state, size, &uniforms)?;
         Some(Capture {
             width: size[0],
@@ -661,18 +756,20 @@ fn plane_outline(
     radius: f32,
     p: &Palette,
 ) {
-    let across = Vec3::new(-plane.normal.y, plane.normal.x, 0.0);
-    let on = plane.normal * plane.offset + Vec3::new(0.0, 0.0, center.z);
+    // Two directions in the plane: the axis and one across it for a meridional cut,
+    // x and y for one across the axis.
+    let n = plane.normal;
+    let (across, along) = if n.z.abs() > 0.9 {
+        (Vec3::X, Vec3::Y)
+    } else {
+        (Vec3::new(-n.y, n.x, 0.0), Vec3::Z)
+    };
+    // The point of the plane nearest the centre of the model.
+    let on = center - n * (n.dot(center) - plane.offset);
     let half = 1.1 * radius;
     let corners: Option<Vec<Pos2>> = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)]
         .iter()
-        .map(|(s, t)| {
-            to_screen(
-                matrix,
-                rect,
-                on + across * (s * half) + Vec3::Z * (t * half),
-            )
-        })
+        .map(|(s, t)| to_screen(matrix, rect, on + across * (s * half) + along * (t * half)))
         .collect();
     let Some(corners) = corners else {
         return;
@@ -875,6 +972,7 @@ fn uniforms(
     dark: bool,
     cut: Option<Plane>,
     accent: Color32,
+    zebra: bool,
 ) -> Uniforms {
     let view = camera.view();
     let right = view.row(0).truncate();
@@ -911,8 +1009,12 @@ fn uniforms(
         ],
         cap: [0.0; 4],
         cap_colors: [[0.0; 4]; mesh::MAX_CAPS],
+        style: [if zebra { 1.0 } else { 0.0 }, ZEBRA_STRIPES, 0.0, 0.0],
     }
 }
+
+/// Stripes of the zebra view over a half turn of the reflected view.
+const ZEBRA_STRIPES: f32 = 9.0;
 
 /// Direction `d` of the model as an offset on screen, `scale` points per unit, and
 /// its depth (positive toward the viewer).
@@ -1347,6 +1449,14 @@ fn inside(quad: &[Pos2], point: Pos2) -> bool {
 }
 
 #[cfg(test)]
+impl Viewer {
+    /// The focus on the cutwater asked for and not yet applied.
+    pub(crate) fn pending_focus(&self) -> Option<Option<f64>> {
+        self.focus_cutwater
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -1424,6 +1534,38 @@ mod tests {
         assert!(!step_turn(&mut turn, camera, TURN_TIME));
         assert!((wrap_angle(camera.yaw + 3.0)).abs() < 1e-5);
         assert!((camera.pitch - 0.5).abs() < 1e-6);
+    }
+
+    /// A cut across the axis lies at z = centre + offset × radius and removes the side
+    /// the camera looks from; the other half flips it.
+    #[test]
+    fn a_cut_across_the_axis_is_a_plane_z_const() {
+        let mut viewer = Viewer {
+            camera: Some(Camera::fit(Vec3::new(0.0, 0.0, 0.04), 0.2, 1.0)),
+            bounds: Some((Vec3::new(0.0, 0.0, 0.04), 0.2)),
+            ..Viewer::default()
+        };
+        viewer.set_cut(true);
+        viewer.horizontal = true;
+        viewer.cut_offset = 0.25;
+        let plane = viewer.plane().unwrap();
+        let z = 0.04 + 0.25 * 0.2;
+        assert_eq!(plane.normal.z.abs(), 1.0);
+        assert!((plane.normal.z * plane.offset - z).abs() < 1e-6);
+        // The side of the eye goes.
+        let eye = viewer.camera.unwrap().eye();
+        let up = Vec3::new(0.0, 0.0, z + 0.001);
+        let down = Vec3::new(0.0, 0.0, z - 0.001);
+        let (eye_side, other) = if eye.z > z { (up, down) } else { (down, up) };
+        assert!(plane.removes(eye_side) && !plane.removes(other));
+        viewer.flip_cut();
+        let plane = viewer.plane().unwrap();
+        assert!(plane.removes(other) && !plane.removes(eye_side));
+        // Through the axis again: a meridional plane.
+        viewer.horizontal = false;
+        assert!(viewer.plane().unwrap().normal.z.abs() < 1e-6);
+        viewer.set_cut(false);
+        assert!(viewer.plane().is_none());
     }
 
     /// The cut removes the half toward the camera, flips to the other, and measuring

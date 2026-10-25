@@ -6,6 +6,30 @@
 
 /// English text → Spanish text.
 pub(super) static TEXTS: &[(&str, &str)] = &[
+    ("Fillet over the cutwater", "Redondeo exterior"),
+    (
+        "Fills and rounds the outside of the casing where the back of the start of the spiral meets the diffuser, so no sharp groove is left over the cutwater; 0 leaves it. Automatic: the wall thickness",
+        "Rellena y redondea el exterior de la carcasa donde el dorso del inicio de la espiral se junta con el difusor, para que no quede una hendidura aguda sobre el corte de agua; 0 la deja. Automático: el espesor de pared",
+    ),
+    ("obliquity ε", "oblicuidad ε"),
+    ("Obliquity ε", "Oblicuidad ε"),
+    (
+        "Angle between the edge and the pump axis, unrolled onto d_z; Gülich Table 10.2 asks for more than 35° against pressure pulsations",
+        "Ángulo entre el borde y el eje de la bomba, desarrollado sobre d_z; la tabla 10.2 de Gülich pide más de 35° contra las pulsaciones de presión",
+    ),
+    (
+        "Angle between the edge of the cutwater and the pump axis, unrolled onto d_z; positive leans it downstream toward +z. Gülich Table 10.2 asks for more than 35° against pressure pulsations; the walls set how far it can lean. Automatic: 0",
+        "Ángulo entre el borde del corte de agua y el eje de la bomba, desarrollado sobre d_z; positivo lo inclina aguas abajo hacia +z. La tabla 10.2 de Gülich pide más de 35° contra las pulsaciones de presión; las paredes fijan cuánto puede inclinarse. Automático: 0",
+    ),
+    (
+        "more than 35° against pressure pulsations (Gülich Table 10.2); the walls set how far it can lean",
+        "más de 35° contra las pulsaciones de presión (tabla 10.2 de Gülich); las paredes fijan cuánto puede inclinarse",
+    ),
+    ("Within ±3°", "Dentro de ±3°"),
+    (
+        "the flow range over which the flow meets the cutwater within ±3°; it comes flatter at part load (Gülich Fig. 9.20)",
+        "el rango de caudal en que el flujo llega al corte de agua dentro de ±3°; a carga parcial llega más plano (Gülich, Fig. 9.20)",
+    ),
     ("Remove control point", "Quitar el punto de control"),
     ("Add control point", "Añadir un punto de control"),
     (
@@ -2798,8 +2822,8 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Bend turns", "Giro del codo"),
     ("Centerline length", "Longitud de la línea media"),
     (
-        "Tangent: the spiral starts where it clears the diffuser. Sharp: the spiral cuts the diffuser wall. Rounded: a nose of radius ρ on the cutwater circle (Gülich Fig. 7.41b)",
-        "Tangente: la espiral empieza donde deja libre el difusor. Afilado: la espiral corta la pared del difusor. Redondeado: una nariz de radio ρ sobre el círculo del corte de agua (Gülich Fig. 7.41b)",
+        "Tangent: the spiral starts where it clears the diffuser. Sharp: the spiral cuts the diffuser wall. Rounded: a nose of radius ρ on the cutwater circle, its body never thinner than the nose and running smoothly into both walls (Gülich Fig. 7.41b)",
+        "Tangente: la espiral empieza donde deja libre el difusor. Afilado: la espiral corta la pared del difusor. Redondeado: una nariz de radio ρ sobre el círculo del corte de agua, con un cuerpo nunca más fino que la nariz que se une suavemente a las dos paredes (Gülich Fig. 7.41b)",
     ),
     ("Nose radius ρ", "Radio de la nariz ρ"),
     (
@@ -2808,6 +2832,11 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ),
     ("Tip of the wedge", "Punta de la cuña"),
     ("Wedge angle", "Ángulo de la cuña"),
+    ("Tip across the width", "Punta a lo ancho"),
+    ("{} to {} from the axis", "de {} a {} del eje"),
+    ("Thinnest body", "Cuerpo más fino"),
+    ("Joins the walls", "Se une a las paredes"),
+    ("{} to {} past the tip", "de {} a {} pasada la punta"),
     (
         "{} from the cutwater, {} from the axis",
         "{} desde el corte de agua, {} desde el eje",
@@ -3480,10 +3509,136 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Click two points of the model for the distance between them and its radial and axial parts; near a corner of the mesh the point snaps to it",
         "Clic en dos puntos del modelo: da la distancia entre ellos y sus partes radial y axial; cerca de un vértice de la malla el punto se ajusta a él",
     ),
+    ("No volute yet.", "Todavía no hay voluta."),
+    (
+        "This cutwater does not cut the diffuser wall: choose a sharp or rounded one to shape it here.",
+        "Este corte de agua no corta la pared del difusor: elige uno afilado o redondeado para darle forma aquí.",
+    ),
+    ("Plane", "Plano"),
+    ("Midplane", "Plano medio"),
+    ("All planes", "Todos los planos"),
+    ("spiral share", "reparto en la espiral"),
+    (
+        "Share of the missing thickness the spiral side of the body takes past the tip; the diffuser side takes the rest",
+        "Parte del espesor que falta pasada la punta que toma el lado de la espiral del cuerpo; el lado del difusor toma el resto",
+    ),
+    ("spiral wall", "pared de la espiral"),
+    ("diffuser wall", "pared del difusor"),
+    ("cutwater circle d_z", "círculo del corte de agua d_z"),
+    ("impeller outlet", "salida del rodete"),
+    ("tip of the wedge", "punta de la cuña"),
+    (
+        "Innermost point of the nose: drag outward or inward to set the cutwater circle d_z",
+        "Punto más interior de la nariz: arrástralo hacia fuera o hacia dentro para fijar el círculo del corte de agua d_z",
+    ),
+    (
+        "Leading point of the nose: drag to set its radius ρ",
+        "Punto delantero de la nariz: arrástralo para fijar su radio ρ",
+    ),
+    (
+        "Camber line: turn it to set the incidence i₃ against the flow",
+        "Línea de curvatura: gírala para fijar la incidencia i₃ frente al flujo",
+    ),
+    (
+        "Across the width: drag to turn",
+        "A lo ancho: arrastra para girar",
+    ),
+    ("Gap d_z/d₂ − 1", "Holgura d_z/d₂ − 1"),
+    ("Thickness e/d_z", "Espesor e/d_z"),
+    (
+        "up to 0.04 hardly affects the best efficiency (Gülich p. 421)",
+        "hasta 0,04 apenas afecta al rendimiento óptimo (Gülich p. 421)",
+    ),
+    ("Incidence i₃ at design", "Incidencia i₃ en el diseño"),
+    ("Wedge across the width", "Cuña a lo ancho"),
+    (
+        "angle between the spiral and the diffuser wall where they cross",
+        "ángulo entre la pared de la espiral y la del difusor donde se cruzan",
+    ),
+    (
+        "the throat enlarged for the blockage of the cutwater (eq. 7.28)",
+        "la garganta agrandada por el bloqueo del corte de agua (ec. 7.28)",
+    ),
+    (
+        "The incidence over the flow range needs the predicted characteristic.",
+        "La incidencia en todo el rango de caudal necesita la característica prevista.",
+    ),
+    (
+        "incidence i₃ on the cutwater",
+        "incidencia i₃ sobre el corte de agua",
+    ),
+    ("q* = Q/Q_design", "q* = Q/Q_diseño"),
+    ("designed d_z {}", "d_z de diseño {}"),
+    ("the nose {}: no neck", "la nariz {}: sin cuello"),
+    (
+        "α₃B {} against α₃′ {}; ±3° (eq. T7.7.6)",
+        "α₃B {} frente a α₃′ {}; ±3° (ec. T7.7.6)",
+    ),
+    ("Spiral share", "Reparto en la espiral"),
+    (
+        "Share of the thickness the wedge lacks past its tip that the spiral side of the body takes; the diffuser side takes the rest. Automatic: ½",
+        "Parte del espesor que le falta a la cuña pasada su punta que toma el lado de la espiral del cuerpo; el lado del difusor toma el resto. Automático: ½",
+    ),
+    ("Plan", "Planta"),
+    (
+        "The stage seen from the inlet",
+        "La etapa vista desde la entrada",
+    ),
+    (
+        "The cutwater of the volute in planes across its width, to shape it by hand",
+        "El corte de agua de la voluta en planos a lo ancho, para darle forma a mano",
+    ),
+    (
+        "Drag the green points: the innermost point of the nose sets the cutwater circle d_z, its leading point the nose radius, the point on the dashed camber line the incidence. The slider picks the plane across the width; drag the 3D view to turn it.",
+        "Arrastra los puntos verdes: el punto más interior de la nariz fija el círculo del corte de agua d_z, su punto delantero el radio de la nariz y el punto sobre la línea de curvatura discontinua la incidencia. El deslizador elige el plano a lo ancho; arrastra la vista 3D para girarla.",
+    ),
+    (
+        "at least {} against pulsations (Gülich Table 10.2); past 10 % it costs about 1 % of efficiency (p. 421)",
+        "al menos {} contra las pulsaciones (Gülich tabla 10.2); por encima del 10 % cuesta alrededor de un 1 % de rendimiento (p. 421)",
+    ),
+    ("View in 3D", "Ver en 3D"),
+    (
+        "The 3D view on the cutwater, cut across the axis at this plane",
+        "La vista 3D sobre el corte de agua, cortada a través del eje por este plano",
+    ),
+    (
+        "Frame the camera on the cutwater of the volute",
+        "Encuadra la cámara en el corte de agua de la voluta",
+    ),
+    ("Zebra", "Cebra"),
+    (
+        "Stripes reflected in the surfaces: where they break the surface has a corner, where they kink its curvature jumps",
+        "Franjas reflejadas en las superficies: donde se rompen la superficie tiene una arista, donde se quiebran su curvatura salta",
+    ),
+    ("Cut across", "Corte transversal"),
+    (
+        "Cut the model across its axis, by a plane z = const, and remove the side the camera looks from",
+        "Corta el modelo a través de su eje, por un plano z = cte, y quita el lado desde el que mira la cámara",
+    ),
 ];
 
 /// Messages of the design code, most specific first.
 pub(super) static MESSAGES: &[(&str, &str)] = &[
+    (
+        "the fillet over the cutwater cannot be negative",
+        "el redondeo sobre el corte de agua no puede ser negativo",
+    ),
+    (
+        "the groove over the cutwater is rounded with {} mm, the most the CAD kernel takes there",
+        "la hendidura sobre el corte de agua queda redondeada con {} mm, lo más que acepta ahí el núcleo CAD",
+    ),
+    (
+        "the groove over the cutwater could not be rounded: it stays sharp",
+        "no se pudo redondear la hendidura sobre el corte de agua: queda aguda",
+    ),
+    (
+        "the obliquity of the cutwater must lie within ±{}°, got {}°",
+        "la oblicuidad del corte de agua debe quedar dentro de ±{}°, se pidió {}°",
+    ),
+    (
+        "the cutwater cannot lean {}°: past about {}° it gets thinner than its nose in some plane, where the walls leave it no room",
+        "el corte de agua no puede inclinarse {}°: pasados unos {}° queda más fino que su nariz en algún plano, donde las paredes no le dejan sitio",
+    ),
     (
         "the joined fluid came out as {} solids{}; check the faces at r₂ and, with the inlet duct, at the eye and the seal exit",
         "el fluido unido salió en {} sólidos{}; revisa las caras en r₂ y, con la tubería de entrada, en la boca y en la salida del sello",

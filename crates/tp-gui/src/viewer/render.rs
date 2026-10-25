@@ -41,6 +41,8 @@ pub(crate) struct Uniforms {
     pub cap: [f32; 4],
     /// Linear color of each cap.
     pub cap_colors: [[f32; 4]; MAX_CAPS],
+    /// x: zebra stripes instead of shading when 1; y: stripes over a half turn.
+    pub style: [f32; 4],
 }
 
 /// A part to tint, by its vertices.

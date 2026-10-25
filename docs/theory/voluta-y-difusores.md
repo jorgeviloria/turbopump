@@ -464,14 +464,115 @@ vale 0 por defecto, y fuera de ±3° el programa avisa.
 |---|---|
 | Tangente | la espiral empieza donde su pared exterior deja libre la pared interior de la tobera; el corte de agua es una cuña fina tangente al círculo base, sin nariz diseñada |
 | Afilado | la espiral empieza junto al corte de agua (3°) y corta la pared interior de la tobera; el corte de agua es la cuña entre las dos paredes, con la punta donde se cruzan |
-| Redondeado (por defecto) | la cuña afilada más una **nariz** de radio $\rho$ cuyo punto más interior queda sobre el círculo $d_z$, unida a la punta por sus tangentes |
+| Redondeado (por defecto) | la cuña afilada más un **cuerpo** con una nariz de radio $\rho$ cuyo punto más interior queda sobre el círculo $d_z$; el cuerpo nunca es más fino que la nariz y se une a las dos paredes con tangencia |
 
-**La nariz redondeada:**
+**El corte de agua redondeado** (construcción propia sobre el punto 7 del cap. 7.8.1:
+el corte de agua debe estar perfilado, ser corto y grueso salvo el radio de la nariz
+para que no se agriete, y llevar el ángulo $\alpha_{3B}$ del flujo):
 
-- $\rho$ vale por defecto $e_3/2$, así que su centro cae en el punto de remanso
-  $r'_z = r_z + e_3/2$ de Gülich. La holgura con el rodete es la de diseño, $d_z$.
-- No puede pasar de la distancia entre el círculo $d_z$ y la punta de la cuña; si no,
-  la nariz saldría de la cuña y estrecharía la garganta.
+- **Nariz:** un círculo de radio $\rho$, por defecto $e_3/2$, con el centro en el punto
+  de remanso $r'_z = r_z + e_3/2$ de Gülich sobre el eje x. Se desplaza en radio lo
+  justo para que el punto más interior del corte de agua quede sobre $d_z$: la holgura
+  con el rodete es la de diseño.
+- **Línea de curvatura:** sale de la nariz con el ángulo $\alpha_{3B} = \alpha'_3 + i_3$
+  respecto a la dirección circunferencial y llega a la punta de la cuña por el medio de
+  las dos paredes (una Bézier cúbica tangente a las dos direcciones).
+- **Espesor:** de la nariz a la punta el cuerpo mide $e = 2\rho$ alrededor de esa
+  línea. Pasada la punta, cada cara es su pared desplazada hacia el flujo su parte de
+  lo que le falta a la cuña para medir $e$: el **reparto** (por defecto ½) es la parte
+  del lado de la espiral, y el lado del difusor toma el resto. Con un reparto distinto
+  de ½ las caras se inclinan respecto a la dirección en que se desplazan, así que se
+  mide el espesor y se aumenta el desplazamiento hasta que vuelve a ser $e$. Ese desplazamiento pasa por un máximo suave
+  cuadrático, así que la cara entra en la pared con tangencia donde la cuña ya mide
+  $e + k$, con $k = e/4$.
+- Así el corte de agua **no adelgaza en ningún punto** por debajo de $e$ y quita al
+  flujo solo lo que ese espesor exige.
+- $\rho$ no puede pasar de la distancia entre el círculo $d_z$ y la punta de la cuña.
+
+Una construcción anterior unía el círculo de la nariz a la punta de la cuña con dos
+tangentes. La cuña mide cero en su punta, y esas tangentes también, así que el corte de
+agua quedaba unido al resto de la carcasa por una línea de **espesor cero**. En la bomba
+de referencia, unos 50 mm alrededor de la punta medían menos que $e_3$.
+
+**Incidencia fuera del punto de diseño.** Con el ángulo del corte de agua fijo, la
+incidencia cambia con el caudal. A otro caudal $Q$, $c_{3m}$ crece con $Q$ y $c_{3u}$
+con la altura teórica del rodete $H_{th}$ (Euler, sin prerrotación), así que, de las
+ecs. T7.7.3 a T7.7.5:
+
+$$\tan\alpha'_3(Q) = \tan\alpha'_{3,d}\;\frac{Q/Q_d}{H_{th}(Q)/H_{th,d}}, \qquad
+i_3(Q) = \alpha_{3B} - \alpha'_3(Q)$$
+
+con $H_{th}(Q)$ de la característica prevista. A carga parcial el flujo llega más
+plano e $i_3 > 0$, como en la Fig. 9.20 de Gülich (pág. 539). La predicción da el rango
+de caudal en que $|i_3| \le 3°$, donde la curva cruza +3° y −3°. Sale en la página del
+corte de agua y en `turbopump performance`; en la bomba de referencia va de
+$q^*$ = 0,74 a 1,21.
+
+**Oblicuidad** (`--set obliquity=…`). La tabla 10.2 de Gülich (pág. 567) pide un corte de
+agua oblicuo contra las pulsaciones de presión, con $\varepsilon > 35°$, y la tabla 10.10
+(pág. 632) lo repite. En la figura, las paredes laterales van en vertical y
+$\varepsilon$ es el ángulo entre el borde y la dirección del eje, en el desarrollo. Aquí
+la nariz gira alrededor del eje de un plano al siguiente:
+
+$$\Delta\theta(z) = \frac{(z - z_m)\tan\varepsilon}{r}$$
+
+con $r$ el radio del centro de la nariz. El plano medio queda donde estaba, y con
+$\varepsilon > 0$ el lado de +z va aguas abajo. Al girar alrededor del eje, la nariz
+conserva $d_{min} = d_z$. Las caras, en cambio, siguen las paredes de cada plano. Con la
+nariz girada, la cara de la espiral puede ir junto a una pared muy cerca del eje, y ahí
+sigue el círculo $d_z$ en lugar de meterse dentro (elección propia).
+
+Cuánto puede inclinarse lo deciden las paredes. Pasado cierto ángulo, en los planos de los
+lados el cuerpo queda apretado entre $d_z$ y la pared del difusor, y ya no tiene el
+espesor de la nariz. Se admite un 5 % menos; más allá, el diseño da error y dice hasta
+dónde llega, buscado por bisección. En la bomba de referencia el límite es de unos 53°
+con la sección trapecial por defecto, 38° con la rectangular y 21° con la redonda. La
+página del corte de agua no deja pasar del límite y lo muestra junto al deslizador.
+
+**Por cortes a lo ancho.** El corte de agua se calcula en 9 planos $z$ = cte entre las
+paredes laterales de la entrada (a un 5 % de ellas). En cada plano, la pared exterior de
+la espiral sale de las secciones ajustadas, cada grado desde el inicio de la espiral, y
+la pared interior del difusor de una spline por sus secciones, como el loft del CAD. La
+nariz queda en la misma línea paralela al eje en todos los planos; las caras siguen las
+paredes de cada plano. Con secciones de paredes rectas los planos son casi iguales. Con
+secciones redondas la línea donde se cruzan las paredes se curva: en la bomba de
+referencia la punta pasa de 98,3 mm del eje junto a las paredes laterales a 104,1 mm en
+el plano medio.
+
+**Entre los planos y en el CAD.** Entre dos planos, cada punto del contorno sigue una
+spline de Catmull–Rom a través de los nueve planos, con cuatro contornos por hueco. La
+vista 3D dibuja el cuerpo con esos contornos y recorta con ellos las paredes que el
+cuerpo sustituye. El CAD hace un loft suave por los mismos contornos. Desde los planos
+extremos el cuerpo sigue recto hasta pasar las paredes laterales. Con secciones
+redondas importa: los extremos de las caras se deslizan por las paredes de un plano
+al siguiente (12 mm en la bomba de referencia), y una malla recta entre los nueve
+planos se separaba 0,2 mm del sólido. De cada contorno se toman los puntos necesarios
+para seguirlo a 0,01 mm con tramos rectos, los mismos en todos los planos
+(Douglas–Peucker sobre todos a la vez), a no más de 2 mm uno de otro: por un tramo
+recto largo la spline se balancea al salir de él (casi 1 mm junto a la pared recta
+interior de la descarga tangencial). Una spline por los casi 600 puntos de cada
+contorno daba superficies tan pesadas que una booleana tardaba hasta 90 s.
+
+El cuerpo se recorta del canal y del anillo de entrada por separado, y luego se unen.
+Con secciones redondas exteriores, el anillo solo se une al canal con holgura, y de
+esa unión el cuerpo ya no se recorta limpio. Cada herramienta busca su propia
+holgura. Un corte fallido puede dar un sólido válido, incluso algo más pequeño, sin
+haber quitado el cuerpo: por eso el corte tiene que dejar sobre la superficie el
+centro de cada cara (en el canal) y el punto más interior de la nariz (en el anillo),
+en cada plano, a menos de 0,02 mm.
+
+Una prueba compara el sólido con lo que se ve en las siete familias de sección y en
+las descargas:
+
+- los contornos del cuerpo quedan a menos de 0,1 mm de la superficie del CAD (de 0,02 a
+  0,06 mm);
+- ningún punto del cuerpo queda más cerca del eje que su nariz;
+- a 2 mm del cuerpo, el CAD no se aparta de la vista más que las paredes en el lado
+  opuesto de la espiral, más 0,2 mm.
+
+Las paredes se apartan en toda la voluta hasta 0,5–0,8 mm, según la sección: la vista
+las traza rectas entre los 64 puntos de cada sección, y el CAD pasa superficies suaves
+por ellos.
 
 **Por qué no un simple redondeo tangente a las dos paredes:** la cuña natural es muy
 fina (5,5° en la bomba de referencia con la pared del corte de agua recta), porque la pared
@@ -488,15 +589,23 @@ paredes solo se rozan (cuña de menos de 4°).
 
 El informe da la posición de la punta, el ángulo de la cuña y el **diámetro efectivo del
 corte de agua**: el doble de la distancia del eje al punto más cercano del corte de agua.
+También da, a lo ancho, entre qué radios queda la punta y entre qué ángulos la cuña, y
+para el redondeado el espesor mínimo del cuerpo y dónde se une a las paredes.
 
-En la bomba de referencia:
+En la bomba de referencia (en el plano medio):
 
 | Descarga | Corte de agua | Punta | Cuña | Más cerca del eje |
 |---|---|---|---|---|
-| Tangencial abierta a ambos lados | afilado | 22,1°, a 103,3 mm | 11,6° | 103,3 mm |
+| Tangencial abierta a ambos lados | afilado | 23,4°, a 103,6 mm | 11,9° | 103,6 mm |
 | Tangencial con la pared del corte de agua recta | afilado | 10,4°, a 100,8 mm | 5,5° | 100,8 mm |
-| Radial central | afilado | 12,8°, a 101,3 mm | 6,8° | 101,3 mm |
+| Radial central | afilado | 11,9°, a 101,1 mm | 10,6° | 101,1 mm |
 | Cualquiera | redondeado, $\rho$ = 1,72 mm | igual | igual | 96,6 mm ($d_z/2$) |
+
+El cuerpo redondeado mide 3,44 mm en todos los planos y se une a las paredes entre 14 mm
+(radial) y 21 mm (tangencial con la pared recta) pasada la punta. La punta y la cuña de
+la descarga radial cambiaron respecto a versiones anteriores (12,8° y 6,8°): antes la
+pared del difusor se prolongaba en línea recta desde la garganta, y en la radial ya se
+curva hacia fuera antes de cruzar la espiral; ahora sigue la superficie del difusor.
 
 Al abrirse a ambos lados, la pared interior de la tobera se inclina hacia el eje y el
 corte de agua queda más largo y más grueso. Con la descarga radial central, la brida de
@@ -623,6 +732,14 @@ el empuje radial (cap. 9.3.4 y tabla 9.4). Se elige en el paso de datos de parti
 - **Perfil:** Gülich aconseja perfilar el corte de agua de forma elíptica para que acepte
   cambios de dirección del flujo, y definir su espesor por un círculo (mismo punto).
   Por defecto la nariz es un semicírculo; una relación mayor la alarga.
+- **A lo alto, como el corte de agua:** el nervio se calcula en 9 planos $z$ = cte,
+  desde la cota más baja de las secciones hasta la más alta. Con la oblicuidad del
+  corte de agua, la nariz gira de plano a plano en la misma medida, sobre el círculo de
+  su línea media, $r'_z + e/2$, y la cola se queda. El CAD lo talla con un loft suave
+  por esos planos, como el cuerpo del corte de agua, en lugar de extruirlo. El corte se
+  acepta si deja sobre la superficie la punta de la nariz de cada plano dentro de la
+  anchura de entrada. La vista 3D lo dibuja como cuerpo cerrado, en la pieza del corte
+  de agua.
 
 **Compensación del nervio** (`--set rib_comp=on`, `rib_comp_start=…`; construcción
 propia, como la compensación del corte de agua):
@@ -878,6 +995,17 @@ Los sólidos se construyen en milímetros con Open CASCADE:
     corre justo por dentro de su garganta, con el corte de agua entre ambos; desplazados
     hacia fuera se cortarían dentro de un mismo loft, y Open CASCADE da entonces
     resultados sin sentido aunque el sólido parezca válido;
+  - por fuera, donde el dorso del comienzo de la espiral se mete en la carcasa de la
+    tobera, sobre el corte de agua, las dos paredes desplazadas se cruzan en una
+    hendidura en V. Antes de restar el fluido se rellena y redondea con un radio $R$
+    (`--set fillet=…`; por defecto el espesor de pared, 0 la deja), con el redondeo de
+    Open CASCADE sobre las aristas que la unión crea ahí (construcción propia). Solo
+    añade material por fuera, así que no puede tocar el flujo. Primero se prueba toda la
+    línea de unión. Si no se puede, se prueba solo el tramo que cruza la altura por el
+    dorso; los costados tienen las aristas vivas del tubo trapecial, que el redondeo no
+    cruza. Si tampoco sale con $R$, se prueba con tres cuartos, la mitad y un cuarto de $R$, y
+    se avisa. En la bomba de referencia, las secciones redondas no toman los 6 mm. Con $2s$ los extremos del redondeo acaban con
+    picos donde se juntan con los costados, por eso el valor por defecto es $s$;
   - a la unión de las mitades se le restan el dominio fluido y un cilindro con el radio
     $r_2$ en toda la altura, el espacio del rodete;
   - quedan macizos el corte de agua y su nariz, el nervio de la voluta doble y unas paredes

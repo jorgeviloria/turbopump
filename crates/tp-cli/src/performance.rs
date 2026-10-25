@@ -354,6 +354,14 @@ fn print_report(
             d.matching,
             v.matched_flow.map_or("—".into(), ratio)
         );
+        if let Some((lo, hi)) = v.incidence_range {
+            println!(
+                "           the flow meets the cutwater within ±3° from {} to {} (Gülich Fig. 9.20: \
+                 flatter at part load)",
+                ratio(lo),
+                ratio(hi)
+            );
+        }
     }
     if let Some(q) = c.throat_best_flow {
         println!(
