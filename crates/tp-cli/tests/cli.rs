@@ -347,6 +347,13 @@ fn geometry_overrides() {
 
     let bad = turbopump(&["geometry", file_arg, "--set", "le=pointy"]);
     assert_eq!(bad.status.code(), Some(2));
+    // β from a blade loading, the starting shapes or one given at hub and shroud.
+    for beta in ["beta=loading", "beta=loading:0.3,0.3,0.9,2/0,0.3,0.9,1"] {
+        let out = turbopump(&["geometry", file_arg, "--set", beta]);
+        assert_eq!(out.status.code(), Some(0), "{beta}: {}", stdout(&out));
+    }
+    let bad = turbopump(&["geometry", file_arg, "--set", "beta=loading:0.3,0.3/0,1"]);
+    assert_eq!(bad.status.code(), Some(2));
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
@@ -796,6 +803,8 @@ fn analysis_reports_potential_flow_and_blade_velocities() {
     assert!(matches!(out.status.code(), Some(0 | 1)), "{text}");
     assert!(text.contains("Potential flow   mesh"), "{text}");
     assert!(text.contains("Blade faces"), "{text}");
+    assert!(text.contains("Blade quality"), "{text}");
+    assert!(text.contains("de Haller (shroud) w2/w1 = "), "{text}");
     let walls = std::fs::read_to_string(csv.join("potential-walls.csv")).unwrap();
     assert!(walls.starts_with("fraction,cm_hub_m_s"));
     assert!(walls.lines().count() > 50);

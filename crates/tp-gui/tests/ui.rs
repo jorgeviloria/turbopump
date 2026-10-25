@@ -1636,3 +1636,29 @@ fn nothing_moves_on_hover_in_the_dialogs() {
     harness.run();
     nothing_moves_on_hover(&mut harness);
 }
+
+#[test]
+fn a_blade_loading_sets_the_beta_distribution() {
+    use tp_design::impeller::blade::BetaDistribution;
+    let mut harness = harness();
+    for _ in 0..3 {
+        accept(&mut harness);
+    }
+    assert!(matches!(
+        harness.state().selection(),
+        Selection::Step(_, DesignStep::BladeMeanLines)
+    ));
+    // The quality of the linear distribution is already shown.
+    harness.get_by_label("Deceleration w₂/w₁ (shroud)");
+    harness.get_by_value("linear").click();
+    harness.run();
+    harness.get_by_label("by blade loading").click();
+    harness.run();
+    let project = harness.state().document().project();
+    let id = project.components()[0].id();
+    let beta = project.impeller_geometry_input(id).unwrap().mean_lines.beta;
+    assert_eq!(beta, BetaDistribution::loading());
+    // Hub and shroud each get their four rows, and the blade is still built.
+    assert_eq!(harness.get_all_by_label("Middle slope").count(), 2);
+    harness.get_by_label("Secondary-flow drive ΔC_p");
+}

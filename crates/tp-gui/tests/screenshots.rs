@@ -1290,3 +1290,20 @@ fn blade_edges() {
         save(&mut harness, &format!("blade-edges-{suffix}"));
     }
 }
+
+/// The blade mean lines by blade loading: its rows, the quality indicators and the
+/// swirl and loading plots.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn blade_loading() {
+    let mut harness = harness(egui::Theme::Light);
+    for _ in 0..3 {
+        harness.get_by_label_contains("Accept step").click();
+        harness.run();
+    }
+    harness.get_by_value("linear").click();
+    harness.run();
+    harness.get_by_label("by blade loading").click();
+    harness.run();
+    save(&mut harness, "blade-loading");
+}

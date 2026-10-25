@@ -7,7 +7,7 @@ use clap::Args;
 use tp_design::Param;
 use tp_design::impeller::ImpellerGeometryInput;
 use tp_design::impeller::blade::{
-    BetaDistribution, BladeShape, EdgeShape, InletVelocity, MeridionalFlow, WrapMode,
+    BetaDistribution, BladeShape, EdgeShape, InletVelocity, LoadingShape, MeridionalFlow, WrapMode,
 };
 use tp_design::impeller::{BladeLoading, ImpellerGeometry};
 use tp_io::dwg::{self, DwgVersion};
@@ -265,7 +265,41 @@ fn parse_beta(value: &str) -> Result<BetaDistribution, String> {
     if value == "linear" {
         return Ok(BetaDistribution::Linear);
     }
-    let bad = || format!("beta must be linear or smooth:IN,OUT, got {value:?}");
+    let bad = || {
+        format!(
+            "beta must be linear, smooth:IN,OUT or loading[:L,F,A,S/L,F,A,S] (hub/shroud \
+             leading-edge loading, end of the front part, start of the rear part, middle \
+             slope), got {value:?}"
+        )
+    };
+    if let Some(rest) = value.strip_prefix("loading") {
+        if rest.is_empty() {
+            return Ok(BetaDistribution::loading());
+        }
+        let shape = |text: &str| -> Result<LoadingShape, String> {
+            let v: Vec<f64> = text
+                .split(',')
+                .map(|x| x.trim().parse().map_err(|_| bad()))
+                .collect::<Result<_, _>>()?;
+            let [leading, fore, aft, slope] = v[..] else {
+                return Err(bad());
+            };
+            Ok(LoadingShape {
+                leading,
+                fore,
+                aft,
+                slope,
+            })
+        };
+        let (hub, shroud) = rest
+            .strip_prefix(':')
+            .and_then(|r| r.split_once('/'))
+            .ok_or_else(bad)?;
+        return Ok(BetaDistribution::Loading {
+            hub: shape(hub)?,
+            shroud: shape(shroud)?,
+        });
+    }
     let rest = value.strip_prefix("smooth").ok_or_else(bad)?;
     if rest.is_empty() {
         return Ok(BetaDistribution::Smooth {

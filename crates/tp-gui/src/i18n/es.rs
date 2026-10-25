@@ -3615,6 +3615,83 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Cut the model across its axis, by a plane z = const, and remove the side the camera looks from",
         "Corta el modelo a través de su eje, por un plano z = cte, y quita el lado desde el que mira la cámara",
     ),
+    ("by blade loading", "por carga del álabe"),
+    (
+        "Linear or smooth: β itself between its edge values. By blade loading: the swirl r·c_u rises along the blade as the loading d(r·c_u)/dm̄ shares it out, and β follows from it (inverse design; free-form blades only)",
+        "Lineal o suave: β misma entre sus valores en los bordes. Por carga del álabe: el giro r·c_u sube a lo largo del álabe según lo reparte la carga d(r·c_u)/dm̄, y β sale de él (diseño inverso; sólo álabes de forma libre)",
+    ),
+    ("Leading-edge loading", "Carga en el borde de entrada"),
+    (
+        "d(r·c_u)/dm̄ at the leading edge over the rise of r·c_u; 0 leaves the edge unloaded, which keeps the suction peak low where cavitation starts",
+        "d(r·c_u)/dm̄ en el borde de entrada entre la subida de r·c_u; 0 deja el borde sin carga, lo que mantiene bajo el pico de succión donde empieza la cavitación",
+    ),
+    ("End of the front part m̄₁", "Fin del tramo delantero m̄₁"),
+    (
+        "Where the loading leaves its leading-edge value and turns into the straight middle part",
+        "Donde la carga deja su valor en el borde de entrada y pasa al tramo recto central",
+    ),
+    ("Start of the rear part m̄₂", "Inicio del tramo trasero m̄₂"),
+    (
+        "Where the straight middle part bends down to no loading at the trailing edge",
+        "Donde el tramo recto central se curva hasta carga nula en el borde de salida",
+    ),
+    ("Middle slope", "Pendiente central"),
+    (
+        "Slope of the straight middle part: above 0 loads the rear of the blade, below 0 its front. A radial impeller needs the rear: near the leading edge the radius is small and early swirl asks for β past 90°",
+        "Pendiente del tramo recto central: por encima de 0 carga la parte trasera del álabe, por debajo de 0 la delantera. Un rodete radial necesita la trasera: cerca del borde de entrada el radio es pequeño y un giro temprano pide β por encima de 90°",
+    ),
+    ("Blade quality", "Calidad del álabe"),
+    (
+        "From the velocities on the blade faces with the flow following the blades: they compare designs, they do not predict losses",
+        "A partir de las velocidades en las caras del álabe con el flujo siguiendo los álabes: sirven para comparar diseños, no predicen pérdidas",
+    ),
+    (
+        "Deceleration w₂/w₁ (shroud)",
+        "Desaceleración w₂/w₁ (carcasa)",
+    ),
+    (
+        "de Haller criterion: not below 0.7 on the outer streamline, or the flow stalls early and loses efficiency (Gülich, Chap. 7.2.1)",
+        "Criterio de de Haller: no menos de 0.7 en la línea de corriente exterior, o el flujo se desprende antes y pierde rendimiento (Gülich, cap. 7.2.1)",
+    ),
+    (
+        "Suction-face peak / outlet w",
+        "Pico de succión / w₂",
+    ),
+    (
+        "Highest suction-face velocity over the mean outlet velocity: how much the suction face decelerates to the trailing edge. Lower is better",
+        "Mayor velocidad en la cara de succión entre la velocidad media de salida: cuánto desacelera la cara de succión hasta el borde de salida. Cuanto menor, mejor",
+    ),
+    ("Peak loading Δw/w̄", "Carga máxima Δw/w̄"),
+    (
+        "Highest (w_SS − w_PS)/w̄ and where it is along the blade; above 2 the pressure face stops",
+        "Mayor (w_SS − w_PS)/w̄ y dónde está a lo largo del álabe; por encima de 2 la cara de presión se detiene",
+    ),
+    (
+        "Leading-edge loading (shroud)",
+        "Carga de entrada (carcasa)",
+    ),
+    (
+        "Mean Δw/w̄ over the first tenth of the shroud section: a loaded leading edge lowers the pressure where cavitation starts",
+        "Δw/w̄ medio en la primera décima de la sección de la carcasa: un borde de entrada cargado baja la presión donde empieza la cavitación",
+    ),
+    (
+        "Lowest pressure-face w/u₂",
+        "Menor w/u₂ en la cara de presión",
+    ),
+    (
+        "Below zero the relative flow on the pressure face turns back and may separate (the last 5 % of the blade, where the flow slips, is left out)",
+        "Por debajo de cero el flujo relativo en la cara de presión retrocede y puede desprenderse (se deja fuera el último 5 % del álabe, donde el flujo resbala)",
+    ),
+    (
+        "Secondary-flow drive ΔC_p",
+        "Flujo secundario ΔC_p",
+    ),
+    (
+        "Largest difference of reduced static pressure on the suction face between hub and shroud, over ½ρu₂². Above 0 it draws low-energy fluid to the shroud corner, where the wake forms; loading the hub further back than the shroud lowers it (Zangeneh, Goto & Harada 1998; Gülich, Chap. 8.9.4)",
+        "Mayor diferencia de presión estática reducida en la cara de succión entre el cubo y la carcasa, entre ½ρu₂². Por encima de 0 arrastra fluido de baja energía a la esquina de la carcasa, donde se forma la estela; cargar el cubo más atrás que la carcasa la reduce (Zangeneh, Goto y Harada 1998; Gülich, cap. 8.9.4)",
+    ),
+    ("r·c_u / (r₂·u₂)", "r·c_u / (r₂·u₂)"),
+    ("d(r·c_u)/dm̄ over its rise", "d(r·c_u)/dm̄ entre su subida"),
 ];
 
 /// Messages of the design code, most specific first.
@@ -4600,5 +4677,25 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
     (
         "the leading- and trailing-edge shapes overlap at span {}: shorten them",
         "las formas de los bordes de ataque y de salida se solapan en la sección {}: acórtalas",
+    ),
+    (
+        "the blade loading at the {} turns negative near m̄ = {}: the blade takes swirl back out of the flow there",
+        "la carga del álabe en el {} se vuelve negativa cerca de m̄ = {}: ahí el álabe le quita giro al flujo",
+    ),
+    (
+        "the blade loading asks for more swirl than the blade speed gives at m̄ = {} on span {} (β past 90°): load the blade further back",
+        "la carga del álabe pide más giro del que da la velocidad del álabe en m̄ = {} en la sección {} (β por encima de 90°): carga el álabe más atrás",
+    ),
+    (
+        "at span {} the edge angles give no rise of r·c_u for the blade loading to share out",
+        "en la sección {} los ángulos de los bordes no dan subida de r·c_u que la carga del álabe pueda repartir",
+    ),
+    (
+        "the blade loading needs 0 ≤ fore ≤ aft < 1, got fore {} and aft {}",
+        "la carga del álabe necesita 0 ≤ m̄₁ ≤ m̄₂ < 1; se dio m̄₁ = {} y m̄₂ = {}",
+    ),
+    (
+        "the blade loading sets β on each section, which a cylindrical blade cannot follow: choose the free-form shape or a linear or smooth β",
+        "la carga del álabe fija β en cada sección, y un álabe cilíndrico no puede seguirla: elige la forma libre o una β lineal o suave",
     ),
 ];

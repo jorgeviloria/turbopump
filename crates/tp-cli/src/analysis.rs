@@ -1,6 +1,6 @@
 //! `turbopump analysis`: flow analysis of the impellers of a pump project: the
-//! two-dimensional potential flow in the meridional section and the relative
-//! velocities on the blade faces.
+//! two-dimensional potential flow in the meridional section, the relative
+//! velocities on the blade faces and the blade-quality indicators drawn from them.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -9,6 +9,7 @@ use clap::Args;
 use tp_design::impeller::ImpellerGeometry;
 use tp_design::impeller::loading::{BladeVelocities, blade_velocities};
 use tp_design::impeller::potential::{self, PotentialFlow, PotentialMesh};
+use tp_design::impeller::quality::{DE_HALLER, blade_quality};
 use tp_project::{ComponentId, ComponentKind, Project};
 use tp_units::{DisplayUnits, QuantityKind};
 
@@ -126,6 +127,40 @@ fn print_report(
             sec.mean[sec.mean.len() - 1] / u2
         );
     }
+    let q = blade_quality(g, v);
+    println!();
+    println!("Blade quality    with the flow following the blades");
+    println!(
+        "  {:>6} {:>8} {:>9} {:>9} {:>6} {:>9} {:>9}",
+        "span", "w2/w1", "w_SS/w2", "Δw/w̄ max", "at m̄", "Δw/w̄ LE", "w_PS/u2"
+    );
+    for sec in &q.sections {
+        println!(
+            "  {:>6.2} {:>8.3} {:>9.3} {:>9.3} {:>6.2} {:>9.3} {:>9.3}",
+            sec.span,
+            sec.deceleration,
+            sec.diffusion,
+            sec.peak_loading,
+            sec.peak_at,
+            sec.leading_loading,
+            sec.pressure_minimum
+        );
+    }
+    if let Some(outer) = q.outer() {
+        println!(
+            "  de Haller (shroud) w2/w1 = {:.3}, {} {DE_HALLER}",
+            outer.deceleration,
+            if outer.deceleration >= DE_HALLER {
+                "at least"
+            } else {
+                "below"
+            }
+        );
+    }
+    println!(
+        "  secondary-flow drive ΔC_p (suction face, shroud − hub) = {:.3} at m̄ {:.2}",
+        q.secondary_flow, q.secondary_at
+    );
     if !v.warnings.is_empty() {
         println!();
         println!("Warnings");

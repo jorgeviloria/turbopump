@@ -4,7 +4,7 @@ use eframe::egui::{self, ComboBox, DragValue, Grid, RichText, Ui};
 use tp_design::MainDimensionsInput;
 use tp_design::impeller::blade::{
     BetaDistribution, BladeShape, DEFAULT_POINTS, DEFAULT_SPANS, EdgeShape, InletVelocity,
-    MeridionalFlow, WrapMode,
+    LoadingShape, MeridionalFlow, WrapMode,
 };
 use tp_design::impeller::meridian::{
     DEFAULT_LEADING_EDGE_HUB, DEFAULT_LEADING_EDGE_SHROUD, DEFAULT_TANGENT,
@@ -2666,6 +2666,73 @@ fn blade_properties(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Co
     }
 }
 
+/// Name of a kind of β distribution in the current language.
+fn beta_kind_name(distribution: &BetaDistribution) -> &'static str {
+    tr(match distribution {
+        BetaDistribution::Linear => "linear",
+        BetaDistribution::Smooth { .. } => "smooth (Bézier)",
+        BetaDistribution::Loading { .. } => "by blade loading",
+    })
+}
+
+/// The rows of one loading shape, headed by `place` (hub or shroud); true when it
+/// changed.
+fn loading_rows(ui: &mut Ui, place: &str, shape: &mut LoadingShape) -> bool {
+    let mut changed = false;
+    ui.label(RichText::new(place).strong());
+    ui.end_row();
+    let mut row = |ui: &mut Ui, name: &str, hint: &str, value: &mut f64, range| {
+        label(ui, name, hint);
+        changed |= ui
+            .add(
+                DragValue::new(value)
+                    .range(range)
+                    .speed(0.005)
+                    .max_decimals(3),
+            )
+            .changed();
+        ui.end_row();
+    };
+    row(
+        ui,
+        tr("Leading-edge loading"),
+        tr(
+            "d(r·c_u)/dm̄ at the leading edge over the rise of r·c_u; 0 leaves the edge unloaded, which keeps the suction peak low where cavitation starts",
+        ),
+        &mut shape.leading,
+        -2.0..=5.0,
+    );
+    row(
+        ui,
+        tr("End of the front part m̄₁"),
+        tr(
+            "Where the loading leaves its leading-edge value and turns into the straight middle part",
+        ),
+        &mut shape.fore,
+        0.0..=0.95,
+    );
+    row(
+        ui,
+        tr("Start of the rear part m̄₂"),
+        tr("Where the straight middle part bends down to no loading at the trailing edge"),
+        &mut shape.aft,
+        0.05..=0.98,
+    );
+    row(
+        ui,
+        tr("Middle slope"),
+        tr(
+            "Slope of the straight middle part: above 0 loads the rear of the blade, below 0 its front. A radial impeller needs the rear: near the leading edge the radius is small and early swirl asks for β past 90°",
+        ),
+        &mut shape.slope,
+        -10.0..=10.0,
+    );
+    if shape.fore > shape.aft {
+        shape.aft = shape.fore;
+    }
+    changed
+}
+
 /// Name of a blade shape in the current language.
 fn blade_shape_name(shape: BladeShape) -> &'static str {
     match shape {
@@ -2694,26 +2761,33 @@ fn mean_lines(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                     blade_shape_name(shape),
                 );
             }
-            label(ui, tr("Distribution"), "");
-            let smooth = matches!(input.mean_lines.beta, BetaDistribution::Smooth { .. });
+            label(
+                ui,
+                tr("Distribution"),
+                tr(
+                    "Linear or smooth: β itself between its edge values. By blade loading: the swirl r·c_u rises along the blade as the loading d(r·c_u)/dm̄ shares it out, and β follows from it (inverse design; free-form blades only)",
+                ),
+            );
+            let current = beta_kind_name(&input.mean_lines.beta);
             widgets::list(ui, |ui| {
                 ComboBox::from_id_salt("beta_kind")
-                    .selected_text(crate::widgets::noted(
-                        ui,
-                        tr(if smooth { "smooth (Bézier)" } else { "linear" }),
-                    ))
+                    .selected_text(crate::widgets::noted(ui, current))
                     .show_ui(ui, |ui| {
-                        if ui.selectable_label(!smooth, tr("linear")).clicked() && smooth {
-                            input.mean_lines.beta = BetaDistribution::Linear;
-                            changed = true;
-                        }
-                        if ui.selectable_label(smooth, tr("smooth (Bézier)")).clicked() && !smooth
-                        {
-                            input.mean_lines.beta = BetaDistribution::Smooth {
+                        for option in [
+                            BetaDistribution::Linear,
+                            BetaDistribution::Smooth {
                                 inlet: 0.3,
                                 outlet: 0.3,
-                            };
-                            changed = true;
+                            },
+                            BetaDistribution::loading(),
+                        ] {
+                            let name = beta_kind_name(&option);
+                            if ui.selectable_label(name == current, name).clicked()
+                                && name != current
+                            {
+                                input.mean_lines.beta = option;
+                                changed = true;
+                            }
                         }
                     })
             });
@@ -2737,6 +2811,10 @@ fn mean_lines(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                     .add(DragValue::new(outlet).range(0.0..=1.0).speed(0.005))
                     .changed();
                 ui.end_row();
+            }
+            if let BetaDistribution::Loading { hub, shroud } = &mut input.mean_lines.beta {
+                changed |= loading_rows(ui, tr("Hub"), hub);
+                changed |= loading_rows(ui, tr("Shroud"), shroud);
             }
         });
         if input.properties.shape == BladeShape::FreeForm && section(ui, tr("Wrap angle")) {
@@ -2846,6 +2924,119 @@ fn mean_lines(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                 }
             });
     }
+    if let Some(g) = g
+        && section_kind(
+            ui,
+            tr("Blade quality"),
+            tr(
+                "From the velocities on the blade faces with the flow following the blades: they compare designs, they do not predict losses",
+            ),
+            Kind::Checks,
+        )
+    {
+        blade_quality_rows(ui, g);
+    }
+}
+
+/// The rows of the blade-quality indicators of `g`.
+fn blade_quality_rows(ui: &mut Ui, g: &tp_design::impeller::ImpellerGeometry) {
+    use tp_design::impeller::loading::blade_velocities;
+    use tp_design::impeller::quality::{DE_HALLER, blade_quality};
+    let quality = blade_quality(g, &blade_velocities(g));
+    let span = |s: f64| tf("span {}", &[&format!("{s:.2}")]);
+    props(ui, "quality", |ui| {
+        if let Some(outer) = quality.outer() {
+            let ok = outer.deceleration >= DE_HALLER;
+            let text = format!(
+                "{} {:.2}",
+                if ok {
+                    icon::CHECK_CIRCLE
+                } else {
+                    icon::WARNING
+                },
+                outer.deceleration
+            );
+            let color = if ok {
+                Palette::of(ui).done
+            } else {
+                ui.visuals().warn_fg_color
+            };
+            value_info(
+                ui,
+                tr("Deceleration w₂/w₁ (shroud)"),
+                tr(
+                    "de Haller criterion: not below 0.7 on the outer streamline, or the flow stalls early and loses efficiency (Gülich, Chap. 7.2.1)",
+                ),
+                RichText::new(text).color(color),
+            );
+        }
+        if let Some(s) = quality.highest(|s| s.diffusion) {
+            value_info(
+                ui,
+                tr("Suction-face peak / outlet w"),
+                tr(
+                    "Highest suction-face velocity over the mean outlet velocity: how much the suction face decelerates to the trailing edge. Lower is better",
+                ),
+                format!("{:.2} · {}", s.diffusion, span(s.span)),
+            );
+        }
+        if let Some(s) = quality.highest(|s| s.peak_loading) {
+            value_info(
+                ui,
+                tr("Peak loading Δw/w̄"),
+                tr(
+                    "Highest (w_SS − w_PS)/w̄ and where it is along the blade; above 2 the pressure face stops",
+                ),
+                format!(
+                    "{:.2} · m̄ {:.2} · {}",
+                    s.peak_loading,
+                    s.peak_at,
+                    span(s.span)
+                ),
+            );
+        }
+        if let Some(s) = quality.sections.last() {
+            value_info(
+                ui,
+                tr("Leading-edge loading (shroud)"),
+                tr(
+                    "Mean Δw/w̄ over the first tenth of the shroud section: a loaded leading edge lowers the pressure where cavitation starts",
+                ),
+                format!("{:.2}", s.leading_loading),
+            );
+        }
+        if let Some(s) = quality
+            .sections
+            .iter()
+            .min_by(|a, b| a.pressure_minimum.total_cmp(&b.pressure_minimum))
+        {
+            let text = format!("{:.3} · {}", s.pressure_minimum, span(s.span));
+            value_info(
+                ui,
+                tr("Lowest pressure-face w/u₂"),
+                tr(
+                    "Below zero the relative flow on the pressure face turns back and may separate (the last 5 % of the blade, where the flow slips, is left out)",
+                ),
+                if s.pressure_minimum < 0.0 {
+                    RichText::new(format!("{} {text}", icon::WARNING))
+                        .color(ui.visuals().warn_fg_color)
+                } else {
+                    RichText::new(text)
+                },
+            );
+        }
+        value_info(
+            ui,
+            tr("Secondary-flow drive ΔC_p"),
+            tr(
+                "Largest difference of reduced static pressure on the suction face between hub and shroud, over ½ρu₂². Above 0 it draws low-energy fluid to the shroud corner, where the wake forms; loading the hub further back than the shroud lowers it (Zangeneh, Goto & Harada 1998; Gülich, Chap. 8.9.4)",
+            ),
+            format!(
+                "{:.3} · m̄ {:.2}",
+                quality.secondary_flow, quality.secondary_at
+            ),
+        );
+    });
 }
 
 fn profiles(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: ComponentId) {

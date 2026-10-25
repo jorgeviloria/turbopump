@@ -267,6 +267,16 @@ pub(crate) fn nice_grid(input: egui_plot::GridInput) -> [f64; 3] {
     [step / 5.0, step, step * 5.0]
 }
 
+/// Tick label with as many decimals as the step of its mark needs: egui_plot rounds
+/// the decimals of a 0.5 step down to none, which labels 0.5 as "0".
+pub(crate) fn tick_label(
+    mark: egui_plot::GridMark,
+    _range: &std::ops::RangeInclusive<f64>,
+) -> String {
+    let decimals = (-mark.step_size.log10() - 1e-9).ceil().max(0.0) as usize;
+    format!("{:.*}", decimals, mark.value)
+}
+
 /// Message shown instead of a view when the geometry is missing.
 pub(crate) fn unavailable(ui: &mut Ui, reason: &str) {
     ui.centered_and_justified(|ui| {
