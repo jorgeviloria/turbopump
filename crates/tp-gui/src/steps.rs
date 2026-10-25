@@ -2364,16 +2364,6 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
             );
             changed |= param_f64(
                 ui,
-                tr("Seal clearance s"),
-                tr("Radial, of the annular seal on the neck; automatic: Gülich eq. 3.12"),
-                &mut chambers.seal_clearance,
-                Length,
-                built.map(|v| v.seal_clearance),
-                &units,
-                0.00001..=0.01,
-            );
-            changed |= param_f64(
-                ui,
                 tr("Shaft seal diameter d_D"),
                 tr("Where the rear chamber ends; automatic: the hub diameter"),
                 &mut chambers.shaft_seal_diameter,
@@ -2387,6 +2377,11 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                     ui,
                     tr("Seal diameter d_sp"),
                     units.show(Length, v.seal_diameter),
+                );
+                value_row(
+                    ui,
+                    tr("Seal clearance s"),
+                    units.show(Length, v.seal_clearance),
                 );
                 value_row(
                     ui,

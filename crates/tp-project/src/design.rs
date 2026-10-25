@@ -245,7 +245,7 @@ impl Project {
 
     /// The performance input of impeller `id` with the seals and gaps of its side
     /// chambers, when they are designed, wherever `input` leaves them automatic: the
-    /// annular seal on the neck, its clearance and length, the shaft seal and the axial
+    /// front annular seal, its clearance and length, the shaft seal and the axial
     /// gap. Values set by hand in `input` stay.
     pub fn with_chamber_seals(
         &self,
@@ -996,7 +996,7 @@ mod tests {
         assert_eq!(p.with_chamber_seals(impeller, &base), base);
         let mut input = p.impeller_geometry_input(impeller).unwrap();
         input.meridional.chambers.enabled = true;
-        input.meridional.chambers.seal_clearance = Param::Manual(0.0004);
+        input.meridional.seals.front.clearance = Param::Manual(0.0004);
         p.set_impeller_geometry(impeller, input).unwrap();
         let v = p
             .compute_impeller_geometry(impeller)
@@ -1020,7 +1020,7 @@ mod tests {
         let tight = {
             let mut q = p.clone();
             let mut input = q.impeller_geometry_input(impeller).unwrap();
-            input.meridional.chambers.seal_clearance = Param::Manual(0.0001);
+            input.meridional.seals.front.clearance = Param::Manual(0.0001);
             q.set_impeller_geometry(impeller, input).unwrap();
             q.compute_performance(impeller, &base).unwrap()
         };

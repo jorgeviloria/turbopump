@@ -631,8 +631,14 @@ impl MeridionalContour {
         let inside = hub_line
             .point_at_fraction(0.5)
             .lerp(shroud_line.point_at_fraction(0.5), 0.5);
-        let side_chambers =
-            chambers::build(&wires.shroud, &wires.hub, inside, basis, &input.chambers)?;
+        let side_chambers = chambers::build(
+            &wires.shroud,
+            &wires.hub,
+            inside,
+            basis,
+            &input.chambers,
+            &seals,
+        )?;
         // Walls dragged across each other.
         let mut walls: Vec<(&'static str, &Wall)> = vec![
             ("hub", &hub),
