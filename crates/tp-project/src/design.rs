@@ -306,6 +306,35 @@ impl Project {
         input
     }
 
+    /// The balance holes of impeller `id` for the CAD export, sized as in the axial thrust
+    /// (Gülich Chap. 9.2.2) on the rear seal drawn in `geometry`; `None` when the contour
+    /// has no rear seal for the holes to open into.
+    pub fn balance_hole_size(
+        &self,
+        id: ComponentId,
+        geometry: &ImpellerGeometry,
+    ) -> Result<Option<tp_design::axial_thrust::BalanceHoleSize>, String> {
+        use tp_design::axial_thrust::AxialThrust;
+        let Some(rear) = &geometry.contour.seals.rear else {
+            return Ok(None);
+        };
+        let base = self.performance_input(id).map_err(|e| e.to_string())?;
+        let mut input = self.with_contour_seals(id, &base);
+        input.axial.balance_holes = true;
+        // The geometry may differ from the project's (the CLI overrides the material).
+        input.axial.rear_seal_diameter = tp_design::Param::Manual(2.0 * rear.radius);
+        if let Some(front) = &geometry.contour.seals.front {
+            input.axial.seal_diameter = tp_design::Param::Manual(2.0 * front.radius);
+        }
+        let duty = self.pump_duty(id).map_err(|e| e.to_string())?;
+        let design = self
+            .compute_main_dimensions(id)
+            .map_err(|e| e.to_string())?;
+        let axial =
+            AxialThrust::new(&duty, &design, &input.axial, false).map_err(|e| e.to_string())?;
+        Ok(axial.balance_holes(design.blade_count))
+    }
+
     /// Predicts the characteristic of impeller `id` from its main dimensions and the
     /// collector after it, with the seals of its meridional contour
     /// (see [`Project::with_contour_seals`]). A collector that cannot be computed is left
@@ -324,6 +353,9 @@ impl Project {
         if no_rear_seal {
             input.axial.balance_holes = false;
         }
+        let front_off = self
+            .compute_impeller_geometry(id)
+            .is_ok_and(|g| g.contour.seals.front.is_none());
         let input = &input;
         let duty = self.pump_duty(id)?;
         let design = self.compute_main_dimensions(id)?;
@@ -336,6 +368,12 @@ impl Project {
             curve
                 .warnings
                 .push("balance holes need the rear seal; they are left out".to_string());
+        }
+        if front_off {
+            curve.warnings.push(
+                "the front seal is off in the contour: the thrust and the leakage assume the automatic seal d₁ + 2t that is not drawn"
+                    .to_string(),
+            );
         }
         if let Some(e) = problem {
             curve.warnings.push(format!(
@@ -1172,6 +1210,39 @@ mod tests {
                 .any(|w| w.contains("balance holes need the rear seal")),
             "{:?}",
             without.warnings
+        );
+    }
+
+    #[test]
+    fn balance_hole_size_uses_the_rear_seal_of_the_contour() {
+        let (mut p, impeller, _) = pump_with_volute();
+        let mut input = p.impeller_geometry_input(impeller).unwrap();
+        input.meridional.seals.rear.diameter = Param::Manual(0.09);
+        p.set_impeller_geometry(impeller, input.clone()).unwrap();
+        let g = p.compute_impeller_geometry(impeller).unwrap();
+        let rear = g.contour.seals.rear.unwrap();
+        let size = p.balance_hole_size(impeller, &g).unwrap().unwrap();
+        assert!((size.seal_diameter - 2.0 * rear.radius).abs() < 1e-12);
+        input.meridional.seals.rear.enabled = false;
+        p.set_impeller_geometry(impeller, input).unwrap();
+        let g = p.compute_impeller_geometry(impeller).unwrap();
+        assert!(p.balance_hole_size(impeller, &g).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_front_seal_that_is_off_is_said_in_the_performance() {
+        let (mut p, impeller, _) = pump_with_volute();
+        let base = p.performance_input(impeller).unwrap();
+        let on = p.compute_performance(impeller, &base).unwrap();
+        assert!(!on.warnings.iter().any(|w| w.contains("front seal is off")));
+        let mut input = p.impeller_geometry_input(impeller).unwrap();
+        input.meridional.seals.front.enabled = false;
+        p.set_impeller_geometry(impeller, input).unwrap();
+        let off = p.compute_performance(impeller, &base).unwrap();
+        assert!(
+            off.warnings.iter().any(|w| w.contains("front seal is off")),
+            "{:?}",
+            off.warnings
         );
     }
 

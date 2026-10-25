@@ -551,6 +551,7 @@ mod cad {
             stator: Option<DiffuserDesign>,
             volute: Option<VoluteGeometry>,
             holes: Option<BalanceHoleOptions>,
+            note: Option<String>,
             folder: PathBuf,
         ) {
             let options = CadOptions {
@@ -577,6 +578,10 @@ mod cad {
                         &folder,
                         &formats,
                     );
+                    let result = result.map(|mut report| {
+                        report.problems.extend(note);
+                        report
+                    });
                     let _ = tx.send(result);
                     ctx.request_repaint();
                 });
@@ -592,33 +597,29 @@ mod cad {
         }
 
         /// The balance holes of impeller `id` when asked for: one per channel, sized for
-        /// the automatic rear seal of the axial thrust.
+        /// the rear seal drawn in `g`. Without a rear seal they are left out, and the
+        /// second part says so for the report.
         fn hole_options(
             &self,
             project: &Project,
             id: ComponentId,
-        ) -> Result<Option<BalanceHoleOptions>, String> {
-            use tp_design::axial_thrust::{AxialThrust, AxialThrustInput};
+            g: &ImpellerGeometry,
+        ) -> Result<(Option<BalanceHoleOptions>, Option<String>), String> {
             if !self.balance_holes {
-                return Ok(None);
+                return Ok((None, None));
             }
-            let duty = project.pump_duty(id).map_err(|e| e.to_string())?;
-            let design = project
-                .compute_main_dimensions(id)
-                .map_err(|e| e.to_string())?;
-            let input = AxialThrustInput {
-                balance_holes: true,
-                ..AxialThrustInput::default()
-            };
-            let axial =
-                AxialThrust::new(&duty, &design, &input, false).map_err(|e| e.to_string())?;
-            Ok(axial
-                .balance_holes(design.blade_count)
-                .map(|h| BalanceHoleOptions {
+            let size = project.balance_hole_size(id, g)?;
+            let note = size
+                .is_none()
+                .then(|| "balance holes need the rear seal; they are left out".to_string());
+            Ok((
+                size.map(|h| BalanceHoleOptions {
                     count: h.count,
                     diameter: h.diameter,
                     seal_diameter: h.seal_diameter,
-                }))
+                }),
+                note,
+            ))
         }
 
         pub(super) fn ui(
@@ -733,8 +734,8 @@ mod cad {
                         "Accept the geometry steps up to the blade edges first."
                     }));
                 if response.clicked() {
-                    match self.hole_options(project, id) {
-                        Ok(holes) => {
+                    match self.hole_options(project, id, g) {
+                        Ok((holes, note)) => {
                             if let Some(folder) = rfd::FileDialog::new().pick_folder() {
                                 self.start(
                                     ui.ctx(),
@@ -743,6 +744,7 @@ mod cad {
                                     stator_design.cloned(),
                                     volute_geometry.cloned(),
                                     holes,
+                                    note,
                                     folder,
                                 );
                             }
@@ -873,7 +875,11 @@ mod cad {
                     for p in &report.problems {
                         ui.colored_label(
                             ui.visuals().warn_fg_color,
-                            format!("{} {p}", crate::theme::icon::WARNING),
+                            format!(
+                                "{} {}",
+                                crate::theme::icon::WARNING,
+                                crate::i18n::message(p)
+                            ),
                         );
                     }
                 }
@@ -938,6 +944,29 @@ mod cad {
             // The vanes are off by default and so is their line.
             assert!(report.back_vanes.is_none());
             std::fs::remove_dir_all(&folder).unwrap();
+        }
+
+        #[test]
+        fn balance_holes_follow_the_rear_seal_of_the_contour() {
+            let mut project = default_project();
+            let id = project.components()[0].id();
+            let mut export = CadExport::default();
+            export.balance_holes = true;
+            let mut input = project.impeller_geometry_input(id).unwrap();
+            input.meridional.seals.rear.diameter = Param::Manual(0.09);
+            project.set_impeller_geometry(id, input.clone()).unwrap();
+            let g = project.compute_impeller_geometry(id).unwrap();
+            let rear = g.contour.seals.rear.unwrap();
+            let (holes, note) = export.hole_options(&project, id, &g).unwrap();
+            assert!(note.is_none());
+            assert!((holes.unwrap().seal_diameter - 2.0 * rear.radius).abs() < 1e-12);
+            // Without the rear seal the holes are left out, and the report says so.
+            input.meridional.seals.rear.enabled = false;
+            project.set_impeller_geometry(id, input).unwrap();
+            let g = project.compute_impeller_geometry(id).unwrap();
+            let (holes, note) = export.hole_options(&project, id, &g).unwrap();
+            assert!(holes.is_none());
+            assert!(note.is_some_and(|n| n.contains("rear seal")));
         }
 
         #[test]

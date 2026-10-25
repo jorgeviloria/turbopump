@@ -661,7 +661,14 @@ pub fn build_impeller(g: &ImpellerGeometry, options: &CadOptions) -> Result<Impe
     let pattern = options
         .balance_holes
         .as_ref()
-        .map(|holes| hole_pattern(holes, rboss, collar_limit(g, holes)))
+        .map(|holes| {
+            hole_pattern(
+                holes,
+                rboss,
+                collar_limit(g, holes),
+                g.contour.seals.rear.is_some(),
+            )
+        })
         .transpose()?;
 
     // Everything the impeller fills when the flow domain is taken out, in one profile:
@@ -948,6 +955,7 @@ fn hole_pattern(
     holes: &BalanceHoleOptions,
     boss: f64,
     limit: f64,
+    collar: bool,
 ) -> Result<BalanceHoles, CadError> {
     let radius = holes.diameter / 2.0;
     let pitch = 0.5 * (boss + limit);
@@ -958,11 +966,12 @@ fn hole_pattern(
         || pitch + radius > limit
     {
         return Err(CadError::Input(format!(
-            "{} balance holes of {:.1} mm do not fit between the boss ({:.1} mm) and the rear \
-             seal collar ({:.1} mm)",
+            "{} balance holes of {:.1} mm do not fit between the boss ({:.1} mm) and the \
+             {} ({:.1} mm)",
             holes.count,
             holes.diameter * MM,
             2.0 * boss * MM,
+            if collar { "rear seal collar" } else { "seal" },
             2.0 * limit * MM
         )));
     }
@@ -1293,7 +1302,7 @@ mod tests {
         let limit = collar_limit(&g, &holes);
         assert!((limit - inner).abs() < 1e-15);
         let boss = c.material.boss_diameter / 2.0;
-        let pattern = hole_pattern(&holes, boss, limit).unwrap();
+        let pattern = hole_pattern(&holes, boss, limit, true).unwrap();
         assert!(pattern.pitch_diameter > 2.0 * boss);
         assert!(pattern.pitch_diameter + holes.diameter <= 2.0 * inner + 1e-12);
         // A hole that fits between boss and seal but not inside the collar is refused.
@@ -1301,7 +1310,14 @@ mod tests {
             diameter: 2.0 * (inner - boss),
             ..holes
         };
-        assert!(hole_pattern(&wide, boss, limit).is_err());
+        let Err(CadError::Input(with)) = hole_pattern(&wide, boss, limit, true) else {
+            panic!("a hole too wide for the collar is refused");
+        };
+        assert!(with.contains("rear seal collar"), "{with}");
+        let Err(CadError::Input(without)) = hole_pattern(&wide, boss, limit, false) else {
+            panic!("a hole too wide for the seal is refused");
+        };
+        assert!(!without.contains("collar"), "{without}");
     }
 
     #[test]

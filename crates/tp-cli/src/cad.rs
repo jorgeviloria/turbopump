@@ -178,7 +178,12 @@ pub(crate) fn run(args: CadArgs) -> CliResult {
         }
         let options = CadOptions {
             balance_holes: if args.balance_holes {
-                Some(balance_holes(&project, *id)?)
+                let holes = balance_holes(&project, *id, &geometry)?;
+                if holes.is_none() {
+                    eprintln!("warning: balance holes need the rear seal; they are left out");
+                    warned = true;
+                }
+                holes
             } else {
                 None
             },
@@ -371,24 +376,20 @@ pub(crate) fn run(args: CadArgs) -> CliResult {
     })
 }
 
-/// One balance hole per channel, sized for the rear seal of the axial thrust (Gülich
-/// Chap. 9.2.2) with the automatic seal diameters.
-fn balance_holes(project: &Project, id: ComponentId) -> Result<BalanceHoleOptions, String> {
-    let duty = project.pump_duty(id).map_err(err)?;
-    let design = project.compute_main_dimensions(id).map_err(err)?;
-    let input = AxialThrustInput {
-        balance_holes: true,
-        ..AxialThrustInput::default()
-    };
-    let axial = AxialThrust::new(&duty, &design, &input, false).map_err(|e| e.to_string())?;
-    let size = axial
-        .balance_holes(design.blade_count)
-        .ok_or("the axial thrust has no rear seal for balance holes")?;
-    Ok(BalanceHoleOptions {
-        count: size.count,
-        diameter: size.diameter,
-        seal_diameter: size.seal_diameter,
-    })
+/// One balance hole per channel, sized for the rear seal drawn in `geometry` (Gülich
+/// Chap. 9.2.2); `None` when the contour has no rear seal for the holes to open into.
+fn balance_holes(
+    project: &Project,
+    id: ComponentId,
+    geometry: &tp_design::impeller::ImpellerGeometry,
+) -> Result<Option<BalanceHoleOptions>, String> {
+    Ok(project
+        .balance_hole_size(id, geometry)?
+        .map(|size| BalanceHoleOptions {
+            count: size.count,
+            diameter: size.diameter,
+            seal_diameter: size.seal_diameter,
+        }))
 }
 
 /// Prints volumes and checks; returns whether every solid is valid.
@@ -480,5 +481,52 @@ fn format_mass(kg: f64) -> String {
         format!("{:.0} g", kg * 1e3)
     } else {
         format!("{kg:.2} kg")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::f64::consts::PI;
+
+    use tp_project::{DesignPoint, EnergyTransfer, FlowRate, GlobalSetup, MachineType};
+
+    use super::*;
+
+    fn pump() -> (Project, ComponentId) {
+        let setup = GlobalSetup::new(
+            MachineType::Pump,
+            DesignPoint {
+                flow: FlowRate::Volume(100.0 / 3600.0),
+                energy: EnergyTransfer::Head(32.0),
+                speed: 2900.0 * PI / 30.0,
+            },
+        );
+        let mut project = Project::new("t", MachineType::Pump, setup).unwrap();
+        let id = project
+            .add_component(ComponentKind::Impeller, None)
+            .unwrap();
+        (project, id)
+    }
+
+    #[test]
+    fn balance_holes_follow_the_rear_seal_of_the_contour() {
+        let (mut project, id) = pump();
+        let mut input = project.impeller_geometry_input(id).unwrap();
+        input.meridional.seals.rear.diameter = tp_design::Param::Manual(0.09);
+        project.set_impeller_geometry(id, input).unwrap();
+        let geometry = project.compute_impeller_geometry(id).unwrap();
+        let rear = geometry.contour.seals.rear.unwrap();
+        let holes = balance_holes(&project, id, &geometry).unwrap().unwrap();
+        assert!((holes.seal_diameter - 2.0 * rear.radius).abs() < 1e-12);
+    }
+
+    #[test]
+    fn balance_holes_without_a_rear_seal_are_left_out() {
+        let (mut project, id) = pump();
+        let mut input = project.impeller_geometry_input(id).unwrap();
+        input.meridional.seals.rear.enabled = false;
+        project.set_impeller_geometry(id, input).unwrap();
+        let geometry = project.compute_impeller_geometry(id).unwrap();
+        assert!(balance_holes(&project, id, &geometry).unwrap().is_none());
     }
 }
