@@ -1558,6 +1558,39 @@ mod tests {
 
     #[test]
     #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
+    fn the_matched_area_law_gives_the_same_valid_flow_domain() {
+        let _slot = crate::test_slot::take();
+        use tp_design::volute::{DiffuserGrowth, DischargeShape, StraightWall};
+        let fluid = |growth: DiffuserGrowth, discharge: DischargeShape| -> f64 {
+            let mut input = VoluteInput::default();
+            input.diffuser.growth = growth;
+            input.diffuser.shape = discharge;
+            let g = VoluteGeometry::build(&basis(), &input).unwrap();
+            let cad = build_volute(&g).unwrap();
+            assert!(cad.fluid.is_valid(), "{growth:?} {discharge:?}");
+            assert_eq!(cad.fluid.solid_count(), 1, "{growth:?} {discharge:?}");
+            assert_eq!(cad.channel.solid_count(), 1, "{growth:?} {discharge:?}");
+            assert!(cad.warnings.is_empty(), "{:?}", cad.warnings);
+            cad.fluid_volume()
+        };
+        for discharge in [
+            DischargeShape::Radial { axis_angle: 0.0 },
+            DischargeShape::Tangential {
+                straight_wall: StraightWall::Centered,
+            },
+        ] {
+            let linear = fluid(DiffuserGrowth::Linear, discharge);
+            let matched = fluid(DiffuserGrowth::Matched, discharge);
+            // Same throat, same outlet, same length: only the law between them differs.
+            assert!(
+                (0.0001..0.03).contains(&(matched / linear - 1.0).abs()),
+                "{discharge:?}: {matched} vs {linear}"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
     fn cutwater_and_discharge_shapes_give_valid_solids() {
         let _slot = crate::test_slot::take();
         use tp_design::Param;
