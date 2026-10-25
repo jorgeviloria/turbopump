@@ -6,6 +6,11 @@
 
 /// English text → Spanish text.
 pub(super) static TEXTS: &[(&str, &str)] = &[
+    ("Side endings R", "Remates laterales R"),
+    (
+        "Toward each side wall of the channel the body widens with this round between its faces and the wall, so it meets the wall without a sharp corner; 0 leaves the corner. Automatic: the nose radius ρ for rectangular and trapezoidal sections, 0 for the others",
+        "Hacia cada pared lateral del canal el cuerpo se ensancha con este redondeo entre sus caras y la pared, para llegar a ella sin canto vivo; 0 deja el canto. Automático: el radio de la nariz ρ en las secciones rectangulares y trapeciales, 0 en las demás",
+    ),
     ("Spiral start", "Inicio de la espiral"),
     (
         "Where the spiral starts, before its wall crosses the diffuser's in every plane: from {} to {} here. Automatic: 3°",
@@ -3620,6 +3625,10 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
 
 /// Messages of the design code, most specific first.
 pub(super) static MESSAGES: &[(&str, &str)] = &[
+    (
+        "the radius of the side endings of the cutwater cannot be negative",
+        "el radio de los remates laterales del corte de agua no puede ser negativo",
+    ),
     (
         "the spiral must start between {}° and {}° for its wall to cross the diffuser's in every plane, got {}°",
         "la espiral debe empezar entre {}° y {}° para que su pared cruce la del difusor en todos los planos, se pidió {}°",

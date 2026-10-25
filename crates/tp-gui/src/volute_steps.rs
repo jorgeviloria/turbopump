@@ -1130,6 +1130,18 @@ fn cutwater(
                     &units,
                     -tp_design::volute::MAX_OBLIQUITY..=tp_design::volute::MAX_OBLIQUITY,
                 );
+                param_f64(
+                    ui,
+                    tr("Side endings R"),
+                    tr(
+                        "Toward each side wall of the channel the body widens with this round between its faces and the wall, so it meets the wall without a sharp corner; 0 leaves the corner. Automatic: the nose radius ρ for rectangular and trapezoidal sections, 0 for the others",
+                    ),
+                    &mut input.cutwater.side_radius,
+                    Length,
+                    g.map(|g| g.design.cutwater_side_radius),
+                    &units,
+                    0.0..=0.02,
+                );
             }
             if !matches!(input.cutwater.shape, CutwaterShape::Tangent) {
                 // The starts that see the walls cross in every plane.
