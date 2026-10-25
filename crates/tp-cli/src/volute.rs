@@ -49,7 +49,8 @@ pub(crate) struct VoluteArgs {
     /// number of circular arcs of the outer contour), sections, correction (on or off),
     /// length (along the diffuser centerline) and
     /// outlet (discharge diffuser), incidence (cutwater), obliquity (of a rounded
-    /// cutwater and the rib nose: the angle of the edge to the pump axis), wall, type
+    /// cutwater and the rib nose: the angle of the edge to the pump axis), wall, fillet
+    /// (radius rounding the outside of the casing over the cutwater; 0 for none), type
     /// (single or double),
     /// rib_wrap (wrap of the inner volute of a double volute), rib (rib thickness),
     /// rib_comp (on or off: the first partial volute grows by the rib from rib_comp_start
@@ -683,6 +684,7 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
         "incidence" => input.cutwater.incidence = quantity(Angle)?,
         "obliquity" => input.cutwater.obliquity = quantity(Angle)?,
         "wall" => input.wall.thickness = quantity(Length)?,
+        "fillet" => input.wall.cutwater_fillet = quantity(Length)?,
         "pressure" => input.wall.pressure = quantity(Pressure)?,
         "allowable" => input.wall.allowable_stress = quantity(Pressure)?,
         "type" => {
@@ -728,7 +730,7 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
                 "unknown key {key:?}; valid keys: flow-factor, dz, b3, e3, shape, law, \
                  wrap, x, k3, cu4, qi, q0, end_height, end_area, end_area_radius, \
                  progression, compensation, comp_e, comp_start, arcs, \
-                 sections, correction, length, outlet, incidence, obliquity, wall, type, \
+                 sections, correction, length, outlet, incidence, obliquity, wall, fillet, type, \
                  rib_wrap, rib, \
                  rib_nose, channel_ratio, discharge, bend, rotation, cutwater, nose, height, \
                  dn, flange, flange_d, flange_t, bolt_circle, bolt_hole, bolts, pressure, \

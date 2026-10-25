@@ -1251,6 +1251,18 @@ fn wall(
                 &units,
                 0.0005..=0.2,
             );
+            param_f64(
+                ui,
+                tr("Fillet over the cutwater"),
+                tr(
+                    "Fills and rounds the outside of the casing where the back of the start of the spiral meets the diffuser, so no sharp groove is left over the cutwater; 0 leaves it. Automatic: the wall thickness",
+                ),
+                &mut input.wall.cutwater_fillet,
+                QuantityKind::Length,
+                g.map(|g| g.design.cutwater_fillet),
+                &units,
+                0.0..=0.1,
+            );
         });
     }
     if section_info(

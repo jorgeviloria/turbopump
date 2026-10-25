@@ -6,6 +6,14 @@
 
 /// English text → Spanish text.
 pub(super) static TEXTS: &[(&str, &str)] = &[
+    (
+        "Fillet over the cutwater",
+        "Redondeo sobre el corte de agua",
+    ),
+    (
+        "Fills and rounds the outside of the casing where the back of the start of the spiral meets the diffuser, so no sharp groove is left over the cutwater; 0 leaves it. Automatic: the wall thickness",
+        "Rellena y redondea el exterior de la carcasa donde el dorso del inicio de la espiral se junta con el difusor, para que no quede una hendidura aguda sobre el corte de agua; 0 la deja. Automático: el espesor de pared",
+    ),
     ("obliquity ε", "oblicuidad ε"),
     ("Obliquity ε", "Oblicuidad ε"),
     (
@@ -3595,6 +3603,18 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
 
 /// Messages of the design code, most specific first.
 pub(super) static MESSAGES: &[(&str, &str)] = &[
+    (
+        "the fillet over the cutwater cannot be negative",
+        "el redondeo sobre el corte de agua no puede ser negativo",
+    ),
+    (
+        "the groove over the cutwater is rounded with {} mm, the most the CAD kernel takes there",
+        "la hendidura sobre el corte de agua queda redondeada con {} mm, lo más que acepta ahí el núcleo CAD",
+    ),
+    (
+        "the groove over the cutwater could not be rounded: it stays sharp",
+        "no se pudo redondear la hendidura sobre el corte de agua: queda aguda",
+    ),
     (
         "the obliquity of the cutwater must lie within ±{}°, got {}°",
         "la oblicuidad del corte de agua debe quedar dentro de ±{}°, se pidió {}°",
