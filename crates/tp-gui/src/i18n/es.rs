@@ -1222,7 +1222,8 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Radial clearance", "Holgura radial"),
     ("Impeller ring", "Anillo del rodete"),
     ("Casing ring", "Anillo de la carcasa"),
-    ("Ring thickness", "Espesor del anillo"),
+    ("Impeller ring thickness", "Espesor anillo rodete"),
+    ("Casing ring thickness", "Espesor anillo carcasa"),
     ("Performance view", "vista de Rendimiento"),
     (
         "Set them in the Performance view",

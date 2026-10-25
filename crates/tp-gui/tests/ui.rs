@@ -1749,10 +1749,86 @@ fn toggling_a_seal_keeps_its_manual_values() {
     assert_eq!(harness.get_all_by_label("Seal diameter").count(), 2);
 }
 
+/// Scrolls the rear seal card into view.
+fn show_the_rear_seal(h: &mut Harness<'_, TurbopumpApp>) {
+    h.get_all_by_label("Rear seal")
+        .next()
+        .unwrap()
+        .scroll_to_me();
+    h.run_steps(4);
+}
+
 #[test]
 fn seal_cards_do_not_move_on_hover() {
     let mut harness = on_the_contour("seal-hover", |_, _| {});
+    show_the_rear_seal(&mut harness);
+    // Both cards' rows are among what is compared.
+    assert_eq!(harness.get_all_by_label("Seal diameter").count(), 2);
+    assert!(layout(&harness).contains_key("Rear seal"));
     nothing_moves_on_hover(&mut harness);
+}
+
+#[test]
+fn toggling_a_seal_or_a_ring_moves_nothing_above_it() {
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::NodeT;
+    let mut harness = on_the_contour("seal-toggle-layout", |_, _| {});
+    show_the_rear_seal(&mut harness);
+    for toggle in ["Impeller ring", "Casing ring", "Rear seal"] {
+        harness.remove_cursor();
+        harness.run();
+        let before = layout(&harness);
+        let node = harness
+            .get_all_by_label(toggle)
+            .rfind(|n| n.accesskit_node().role() == Role::CheckBox)
+            .unwrap();
+        let top = node.rect().top();
+        node.click_accesskit();
+        harness.run();
+        harness.remove_cursor();
+        harness.run();
+        let after = layout(&harness);
+        // Whatever sits above the switch stays where it was.
+        let shifted: Vec<String> = before
+            .iter()
+            .filter(|(_, r)| r.bottom() < top)
+            .filter(|(k, r)| after.get(*k).is_some_and(|a| a != *r))
+            .map(|(k, _)| k.clone())
+            .collect();
+        assert!(shifted.is_empty(), "{toggle}: {shifted:?}");
+    }
+}
+
+#[test]
+fn the_two_ring_thicknesses_are_remembered_apart() {
+    use tp_design::Param;
+    let mut harness = on_the_contour("seal-rings-accepted", |_, _| {});
+    // Accept the step as it is, then change the impeller ring of the front seal only.
+    accept(&mut harness);
+    let mut project = harness.state().document().project().clone();
+    let id = project.components()[0].id();
+    let mut input = project.impeller_geometry_input(id).unwrap();
+    input.meridional.seals.front.impeller_ring.thickness = Param::Manual(0.006);
+    project.set_impeller_geometry(id, input).unwrap();
+    let mut harness = reopened(&project, "seal-rings-accepted-2");
+    harness
+        .get_all_by_label("Meridional contour")
+        .find(|n| n.rect().left() < 400.0)
+        .unwrap()
+        .click();
+    harness.run();
+    harness.run();
+    assert_eq!(
+        status(&harness, DesignStep::MeridionalContour),
+        StepStatus::Stale
+    );
+    let marked = |name: &str| {
+        harness
+            .query_all_by_label(&format!("{name} changed since the step was accepted"))
+            .count()
+    };
+    assert_eq!(marked("Impeller ring thickness"), 1);
+    assert_eq!(marked("Casing ring thickness"), 0);
 }
 
 #[test]

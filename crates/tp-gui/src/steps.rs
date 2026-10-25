@@ -2551,6 +2551,33 @@ fn toggle_row(ui: &mut Ui, name: &str, hint: &str, on: &mut bool) -> bool {
     response.changed()
 }
 
+/// The rows of one wear ring: its switch and, with it on, its thickness. `texts` are the
+/// name of the switch, its hint and the label of the thickness row (distinct for each
+/// ring, since a row is remembered by its section and label).
+fn ring_rows(
+    ui: &mut Ui,
+    texts: [&str; 3],
+    ring: &mut tp_design::impeller::seals::RingSettings,
+    used: Option<f64>,
+    units: &DisplayUnits,
+) -> bool {
+    let [name, hint, thickness] = texts;
+    let mut changed = toggle_row(ui, name, hint, &mut ring.enabled);
+    if ring.enabled {
+        changed |= param_f64(
+            ui,
+            thickness,
+            tr("Automatic: max(0.03·d, 4 mm), our choice"),
+            &mut ring.thickness,
+            QuantityKind::Length,
+            used,
+            units,
+            0.0005..=0.1,
+        );
+    }
+    changed
+}
+
 /// The card of one annular seal: its switch, and with it on its diameter, length and
 /// radial clearance and the two wear rings. A seal switched off keeps its values.
 /// `used` is the seal as the design drew it. Returns whether anything changed.
@@ -2634,42 +2661,28 @@ fn seal_card(
                 units,
                 0.00001..=0.01,
             );
-            changed |= toggle_row(
+            changed |= ring_rows(
                 ui,
-                tr("Impeller ring"),
-                tr("A replaceable wear ring pressed on the impeller"),
-                &mut seal.impeller_ring.enabled,
+                [
+                    tr("Impeller ring"),
+                    tr("A replaceable wear ring pressed on the impeller"),
+                    tr("Impeller ring thickness"),
+                ],
+                &mut seal.impeller_ring,
+                used.and_then(|s| s.impeller_ring),
+                units,
             );
-            if seal.impeller_ring.enabled {
-                changed |= param_f64(
-                    ui,
-                    tr("Ring thickness"),
-                    tr("Automatic: max(0.03·d, 4 mm), our choice"),
-                    &mut seal.impeller_ring.thickness,
-                    Length,
-                    used.and_then(|s| s.impeller_ring),
-                    units,
-                    0.0005..=0.1,
-                );
-            }
-            changed |= toggle_row(
+            changed |= ring_rows(
                 ui,
-                tr("Casing ring"),
-                tr("A replaceable wear ring fitted in the casing"),
-                &mut seal.casing_ring.enabled,
+                [
+                    tr("Casing ring"),
+                    tr("A replaceable wear ring fitted in the casing"),
+                    tr("Casing ring thickness"),
+                ],
+                &mut seal.casing_ring,
+                used.and_then(|s| s.casing_ring),
+                units,
             );
-            if seal.casing_ring.enabled {
-                changed |= param_f64(
-                    ui,
-                    tr("Ring thickness"),
-                    tr("Automatic: max(0.03·d, 4 mm), our choice"),
-                    &mut seal.casing_ring.thickness,
-                    Length,
-                    used.and_then(|s| s.casing_ring),
-                    units,
-                    0.0005..=0.1,
-                );
-            }
         },
     );
     changed
