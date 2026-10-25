@@ -247,8 +247,10 @@ impl Project {
     /// wherever `input` leaves them automatic: the front annular seal (diameter,
     /// clearance and length) and the rear one for the balance holes. With the side
     /// chambers designed, the casing run measured on the front seat is its length, and
-    /// the shaft seal and the axial gap come from the chambers too. Values set by hand
-    /// in `input` stay.
+    /// the shaft seal and the axial gap come from the chambers too. Back vanes on the
+    /// contour enter the axial force and the losses, with the tip gap as built when the
+    /// chambers are designed (the collar of the rear seal can widen it). Values set by
+    /// hand in `input` stay.
     pub fn with_contour_seals(
         &self,
         id: ComponentId,
@@ -285,6 +287,20 @@ impl Project {
         if chambers.enabled {
             set(&mut input.axial.shaft_seal_diameter, v.shaft_seal_diameter);
             set(&mut input.losses.axial_gap, v.axial_gap);
+        }
+        let vanes = contour.back_vanes.as_ref().filter(|b| !b.band.is_empty());
+        if let Some(b) = vanes
+            && input.axial.back_vanes.is_none()
+        {
+            let built = chambers.enabled.then_some(v.rear_vane_gap).flatten();
+            input.axial.back_vanes = Some(tp_design::axial_thrust::BackVaneLaw {
+                count: b.count,
+                radial: b.shape == tp_design::impeller::back_vanes::VaneShape::Radial,
+                inner_diameter: 2.0 * b.inner_radius,
+                outer_diameter: 2.0 * b.outer_radius,
+                height: b.height,
+                gap: built.unwrap_or(b.tip_clearance),
+            });
         }
         input
     }
@@ -1168,6 +1184,66 @@ mod tests {
         own.losses.seal_length = Param::Manual(0.02);
         let kept = p.with_contour_seals(impeller, &own);
         assert_eq!(kept, own);
+    }
+
+    #[test]
+    fn back_vanes_of_the_contour_enter_the_performance() {
+        let (mut p, impeller, _) = pump_with_volute();
+        let base = p.performance_input(impeller).unwrap();
+        let before = p.compute_performance(impeller, &base).unwrap();
+        assert!(
+            p.with_contour_seals(impeller, &base)
+                .axial
+                .back_vanes
+                .is_none()
+        );
+        let mut input = p.impeller_geometry_input(impeller).unwrap();
+        input.meridional.seals.rear.enabled = false;
+        input.meridional.back_vanes.enabled = true;
+        p.set_impeller_geometry(impeller, input.clone()).unwrap();
+        let vanes = p
+            .compute_impeller_geometry(impeller)
+            .unwrap()
+            .contour
+            .back_vanes
+            .unwrap();
+        // Without chambers the gap is the tip clearance asked for.
+        let law = p
+            .with_contour_seals(impeller, &base)
+            .axial
+            .back_vanes
+            .unwrap();
+        assert_eq!(law.count, vanes.count);
+        assert!(law.radial);
+        assert_eq!(law.outer_diameter, 2.0 * vanes.outer_radius);
+        assert_eq!(law.height, vanes.height);
+        assert_eq!(law.gap, vanes.tip_clearance);
+        let after = p.compute_performance(impeller, &base).unwrap();
+        assert!(after.axial.design.back_vanes > 0.0);
+        assert!(after.axial.design.total < before.axial.design.total);
+        // The defaults lie inside the range of Gülich Table 9.3.
+        assert!(
+            !after.warnings.iter().any(|w| w.contains("back vanes")),
+            "{:?}",
+            after.warnings
+        );
+        // With the chambers designed, the gap as built.
+        input.meridional.chambers.enabled = true;
+        p.set_impeller_geometry(impeller, input).unwrap();
+        let built = p
+            .compute_impeller_geometry(impeller)
+            .unwrap()
+            .contour
+            .chambers
+            .values
+            .rear_vane_gap
+            .unwrap();
+        let law = p
+            .with_contour_seals(impeller, &base)
+            .axial
+            .back_vanes
+            .unwrap();
+        assert_eq!(law.gap, built);
     }
 
     #[test]

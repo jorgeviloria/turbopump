@@ -22,6 +22,20 @@
 //!   Chap. 9.2.2), s₀ from eq. 3.12; rounded up to 0.5 mm (our choice).
 //! - Double-entry impellers: |F_ax| = f_ax·ρ/2·u₂²·(d₂² − d_sp²) with f_ax = 0.01 to 0.02
 //!   for the steady force (eq. T9.2.15); we take 0.015. Its sign is not known.
+//! - Back vanes on the rear shroud, after Gülich Table 9.3, which sums up the tests of
+//!   Möhring (1976). In the vane zone the liquid turns with
+//!   k_Rs = 1/[1 + 0.13·s/(s + h)·√(r₂/(h·z_v))] (eq. T9.3.2), with h the vane height,
+//!   s the axial gap at the vane tips and z_v the number of vanes, computed without
+//!   leakage. Vanes trimmed to d_Rs < d₂ give the mean factor on the rear shroud
+//!   k_av = √{(d_Rs/d₂)^(2 − 0.9·d_Rs/d₂)·(k_Rs² − k_o²) + k_o²} (eq. T9.3.3). The
+//!   pressure on the rear shroud follows eq. T9.1.7 with k_av, and the force eq. T9.2.8
+//!   with k_av on the rear side and the front side as it is: Gülich says "eq. T9.2.3 or
+//!   9.2.8 using k_av"; putting k_av into the rear term of T9.2.8 is our reading. The
+//!   tested range is s/r₂ = 0.008 to 0.015, s/h = 0.1 to 0.2, h/r₂ = 0.03 to 0.05,
+//!   z_v = 4 to 8 and d_Rs/d₂ = 0.75 to 0.85, with radial vanes; outside it the force is
+//!   computed anyway, with a warning. With balance holes and a rear seal, which Gülich
+//!   does not cover, k_av acts only above the rear seal, with the leakage-corrected k as
+//!   k_o (our choice, with a warning). The power of the vanes is in [`crate::losses`].
 //!
 //! The leakage at other flows scales with √(H/H_opt), our choice: it follows the
 //! pressure difference across the seal.
@@ -63,6 +77,25 @@ pub struct AxialThrustInput {
     /// Rotation factor k_o of the liquid in the sidewall gaps without leakage;
     /// automatic: 0.5.
     pub rotation_factor: Param<f64>,
+    /// Back vanes on the rear shroud; none by default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub back_vanes: Option<BackVaneLaw>,
+}
+
+/// Back vanes on the rear shroud as the axial force and the disk friction see them.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct BackVaneLaw {
+    /// Number of vanes z_v.
+    pub count: u32,
+    /// Straight radial vanes; eqs. T9.3.2 and T9.3.4 hold for these only.
+    pub radial: bool,
+    /// Inner and outer diameters of the vanes, d_Rs the outer one, m.
+    pub inner_diameter: f64,
+    pub outer_diameter: f64,
+    /// Axial height h, m.
+    pub height: f64,
+    /// Axial gap s between the vane tips and the casing, m.
+    pub gap: f64,
 }
 
 /// The parts of the axial force at one flow, N, positive toward the suction side.
@@ -76,6 +109,8 @@ pub struct AxialForces {
     /// Pressure on the front and rear shrouds, N (without balance holes).
     pub front: f64,
     pub rear: f64,
+    /// Reduction of the rear shroud force by the back vanes, N; 0 without them.
+    pub back_vanes: f64,
     /// Net hydraulic force on the shrouds F_Hy, N.
     pub hydraulic: f64,
     /// Momentum of the flow F_I, N.
@@ -104,6 +139,8 @@ pub struct AxialThrust {
     pub rear_seal_diameter: Option<f64>,
     /// k_o.
     pub rotation_factor: f64,
+    /// Back vanes on the rear shroud.
+    pub back_vanes: Option<BackVaneLaw>,
     /// φ_sp at the design point (eq. T9.1.2a).
     pub leakage_coefficient: f64,
     /// m
@@ -144,6 +181,68 @@ pub fn leakage_coefficient(pressure_coefficient: f64, nq: f64) -> f64 {
 /// with b = 1).
 pub fn rotation_with_leakage(rotation: f64, leakage: f64, radius_ratio: f64) -> f64 {
     rotation * (300.0 * leakage * (1.0 / radius_ratio - 1.0)).exp()
+}
+
+/// Rotation factor in the zone of the back vanes, k_Rs = 1/[1 + 0.13·s/(s + h)·
+/// √(r₂/(h·z_v))], for vanes of height `height` with tip gap `gap` (m), `count` of them,
+/// on an impeller of radius `r2` (Gülich eq. T9.3.2).
+pub fn back_vane_rotation(r2: f64, height: f64, gap: f64, count: u32) -> f64 {
+    let z = f64::from(count.max(1));
+    1.0 / (1.0 + 0.13 * gap / (gap + height) * (r2 / (height * z)).sqrt())
+}
+
+/// Mean rotation factor on a rear shroud with back vanes trimmed to `diameter_ratio`
+/// = d_Rs/d₂, k_av = √{x^(2 − 0.9·x)·(k_Rs² − k_o²) + k_o²}, with k_Rs from
+/// [`back_vane_rotation`] and k_o that of the shroud without vanes (Gülich eq.
+/// T9.3.3).
+pub fn trimmed_vane_rotation(vane_rotation: f64, rotation: f64, diameter_ratio: f64) -> f64 {
+    let x = diameter_ratio;
+    let k_o2 = rotation * rotation;
+    (x.powf(2.0 - 0.9 * x) * (vane_rotation * vane_rotation - k_o2) + k_o2).sqrt()
+}
+
+impl BackVaneLaw {
+    /// The mean rotation factor k_av on the rear shroud of an impeller of diameter `d2`
+    /// (m) whose shroud would turn the liquid with `rotation` = k_o without the vanes
+    /// (Gülich eqs. T9.3.2 and T9.3.3).
+    pub fn rotation(&self, d2: f64, rotation: f64) -> f64 {
+        let k_rs = back_vane_rotation(d2 / 2.0, self.height, self.gap, self.count);
+        trimmed_vane_rotation(k_rs, rotation, self.outer_diameter / d2)
+    }
+
+    /// Warnings for vanes outside the range tested behind Gülich Table 9.3, on an
+    /// impeller of diameter `d2` (m).
+    pub fn warnings(&self, d2: f64) -> Vec<String> {
+        let r2 = d2 / 2.0;
+        let mut warnings = Vec::new();
+        // A small margin keeps the defaults (s/r₂ = 0.008 exactly) inside.
+        let outside = |value: f64, low: f64, high: f64| {
+            value < low * (1.0 - 1e-6) || value > high * (1.0 + 1e-6)
+        };
+        for (name, value, low, high) in [
+            ("s/r₂", self.gap / r2, 0.008, 0.015),
+            ("s/h", self.gap / self.height, 0.1, 0.2),
+            ("h/r₂", self.height / r2, 0.03, 0.05),
+            ("z_v", f64::from(self.count), 4.0, 8.0),
+            ("d_Rs/d₂", self.outer_diameter / d2, 0.75, 0.85),
+        ] {
+            if outside(value, low, high) {
+                warnings.push(format!(
+                    "the back vanes have {name} = {value:.3}, outside the {low} to {high} \
+                     tested behind Gülich Table 9.3: their effect on the axial force and \
+                     the power is an extrapolation"
+                ));
+            }
+        }
+        if !self.radial {
+            warnings.push(
+                "Gülich eqs. T9.3.2 and T9.3.4 hold for radial back vanes only: the axial \
+                 force and the power of the curved vanes are estimates"
+                    .into(),
+            );
+        }
+        warnings
+    }
 }
 
 /// Force on one shroud between diameter ratio `x` and d₂ (Gülich eq. T9.2.3), N.
@@ -227,6 +326,20 @@ impl AxialThrust {
             (0.1..=1.0).contains(&rotation_factor),
             format!("the rotation factor k_o must lie between 0.1 and 1, got {rotation_factor}"),
         )?;
+        if let Some(v) = &input.back_vanes {
+            require(
+                v.count > 0 && v.height > 0.0 && v.gap >= 0.0,
+                "the back vanes need a count, a positive height and a gap that is not negative"
+                    .into(),
+            )?;
+            require(
+                v.inner_diameter < v.outer_diameter && v.outer_diameter <= d2 * (1.0 + 1e-9),
+                format!(
+                    "the back vanes must run outward up to d₂ = {:.1} mm at most",
+                    d2 * 1e3
+                ),
+            )?;
+        }
         let clearance = if wide_clearances { 2.0 } else { 1.0 };
         let dn = design.hub_diameter;
         Ok(Self {
@@ -238,6 +351,7 @@ impl AxialThrust {
             shaft_seal_diameter,
             rear_seal_diameter,
             rotation_factor,
+            back_vanes: input.back_vanes,
             leakage_coefficient: clearance
                 * leakage_coefficient(design.pressure_coefficient, design.nq),
             design_head: duty.head,
@@ -284,6 +398,7 @@ impl AxialThrust {
                 rear_rotation: k_front,
                 front: f64::NAN,
                 rear: f64::NAN,
+                back_vanes: 0.0,
                 hydraulic: total,
                 momentum: 0.0,
                 shaft: 0.0,
@@ -292,8 +407,8 @@ impl AxialThrust {
         }
 
         let front = shroud_force(r2, x_sp, pressure_rise, rho, u2, k_front);
-        let rear = shroud_force(r2, x_d, pressure_rise, rho, u2, self.rotation_factor);
-        let unbalanced = rear - front;
+        let plain_rear = shroud_force(r2, x_d, pressure_rise, rho, u2, self.rotation_factor);
+        let unbalanced = plain_rear - front;
         let (hydraulic, rear_rotation) = match self.rear_seal_diameter {
             None => (unbalanced, self.rotation_factor),
             // Balance holes: leakage flows inward on both shrouds.
@@ -311,6 +426,25 @@ impl AxialThrust {
                 (BALANCE_RESIDUAL * unbalanced + seals, k_rear)
             }
         };
+        // Back vanes: k_av of eqs. T9.3.2 and T9.3.3 on the rear side of eq. T9.2.8 (our
+        // reading of Gülich's "eq. T9.2.3 or 9.2.8 using k_av"). Without balance holes
+        // it acts on the whole rear shroud from the shaft seal; with them only above the
+        // rear seal, with the leakage-corrected k there as k_o (our choice: Gülich does
+        // not cover a rear seal with back vanes).
+        let (rear, back_vanes, rear_rotation) = match &self.back_vanes {
+            None => (plain_rear, 0.0, rear_rotation),
+            Some(v) => {
+                let x_in = self.rear_seal_diameter.map_or(x_d, |d| d / d2);
+                let k_av = v.rotation(d2, rear_rotation);
+                let reduction = shroud_force(r2, x_in, pressure_rise, rho, u2, rear_rotation)
+                    - shroud_force(r2, x_in, pressure_rise, rho, u2, k_av);
+                // The rear shroud force without balance holes, as `rear` always is.
+                let k_plain = v.rotation(d2, self.rotation_factor);
+                let rear = shroud_force(r2, x_d, pressure_rise, rho, u2, k_plain);
+                (rear, reduction, k_av)
+            }
+        };
+        let hydraulic = hydraulic - back_vanes;
         // The impeller takes the leakage of its front seal as well.
         let impeller_flow = flow + leakage * PI * r2 * r2 * u2;
         let c1m = impeller_flow / self.eye_area;
@@ -324,11 +458,37 @@ impl AxialThrust {
             rear_rotation,
             front,
             rear,
+            back_vanes,
             hydraulic,
             momentum,
             shaft,
             total: hydraulic - momentum + shaft,
         }
+    }
+
+    /// Warnings on the back vanes: outside the tested range, curved, behind a rear seal
+    /// or on a double-entry impeller, which has no rear shroud for them.
+    pub fn back_vane_warnings(&self) -> Vec<String> {
+        let Some(v) = &self.back_vanes else {
+            return Vec::new();
+        };
+        if self.eyes > 1.5 {
+            return vec![
+                "a double-entry impeller has no rear shroud: its back vanes are left out of \
+                 the axial force and the power"
+                    .into(),
+            ];
+        }
+        let mut warnings = v.warnings(self.impeller_diameter);
+        if self.rear_seal_diameter.is_some() {
+            warnings.push(
+                "Gülich gives no rule for back vanes behind a rear seal with balance holes: \
+                 they turn the liquid faster above the seal only, an estimate outside the \
+                 tested range"
+                    .into(),
+            );
+        }
+        warnings
     }
 
     /// The rough estimate (0.7 to 0.9)·ρ·g·H·π/4·(d_sp² − d_D²) of Gülich eq. T9.2.12 at
@@ -396,5 +556,111 @@ mod tests {
                 - shroud_force(r2, 0.08 / d2, dp, rho, u2, k),
             max_relative = 1e-9
         );
+    }
+    /// An overhung impeller with d₂ = 300 mm at u₂ = 30 m/s, without leakage.
+    fn law(back_vanes: Option<BackVaneLaw>) -> AxialThrust {
+        AxialThrust {
+            eyes: 1.0,
+            density: 1000.0,
+            impeller_diameter: 0.3,
+            tip_speed: 30.0,
+            seal_diameter: 0.15,
+            shaft_seal_diameter: 0.05,
+            rear_seal_diameter: None,
+            rotation_factor: 0.5,
+            back_vanes,
+            leakage_coefficient: 0.0,
+            design_head: 50.0,
+            eye_area: 0.015,
+            inlet_total_pressure: 101_325.0,
+            clearance_factor: 1.0,
+        }
+    }
+
+    /// The example of the spec: z_v = 6, h = 6 mm, s = 1.2 mm, vanes out to `d_rs`.
+    fn vanes(d_rs: f64) -> BackVaneLaw {
+        BackVaneLaw {
+            count: 6,
+            radial: true,
+            inner_diameter: 0.06,
+            outer_diameter: d_rs,
+            height: 6e-3,
+            gap: 1.2e-3,
+        }
+    }
+
+    #[test]
+    fn back_vanes_lower_the_rear_force() {
+        let plain = law(None).forces(0.05, 50.0, 60.0);
+        let with = law(Some(vanes(0.24))).forces(0.05, 50.0, 60.0);
+        assert!(with.back_vanes > 0.0, "{}", with.back_vanes);
+        assert!(with.rear < plain.rear);
+        assert!(with.rear_rotation > plain.rear_rotation);
+        assert_relative_eq!(
+            with.hydraulic,
+            plain.hydraulic - with.back_vanes,
+            max_relative = 1e-12
+        );
+        assert!(with.total < plain.total);
+        // Full vanes turn the liquid faster than trimmed ones.
+        let full = law(Some(vanes(0.3))).forces(0.05, 50.0, 60.0);
+        assert!(full.back_vanes > with.back_vanes);
+    }
+
+    #[test]
+    fn back_vane_force_matches_the_reference_equation() {
+        // Gülich Table 9.3, eq. T9.3.2 by hand, r₂ = 150 mm:
+        // k_Rs = 1/[1 + 0.13·(1.2/7.2)·√(150/(6·6))] = 1/(1 + 0.13·0.16667·2.04124)
+        //      = 1/1.044227 = 0.957646.
+        let full = law(Some(vanes(0.3))).forces(0.05, 50.0, 60.0);
+        assert_relative_eq!(full.rear_rotation, 0.957646, max_relative = 1e-5);
+        // Eq. T9.3.3 for d_Rs/d₂ = 0.8 and k_o = 0.5:
+        // k_av = √{0.8^(2 − 0.72)·(0.957646² − 0.25) + 0.25} = √(0.751545·0.667086 + 0.25)
+        //      = √0.751346 = 0.866802.
+        let trimmed = law(Some(vanes(0.24))).forces(0.05, 50.0, 60.0);
+        let k_av = 0.866802;
+        assert_relative_eq!(trimmed.rear_rotation, k_av, max_relative = 1e-5);
+        // Eq. T9.2.8 with k_av on the rear shroud (x_D = 1/6):
+        // F_RS = π·r₂²·{(1 − x_D²)·Δp_La − ρ/4·u₂²·k_av²·(1 − x_D²)²}.
+        let (r2, a, dp) = (0.15, 1.0 - (1.0f64 / 6.0).powi(2), trimmed.pressure_rise);
+        let rear = PI * r2 * r2 * (a * dp - 1000.0 / 4.0 * 900.0 * k_av * k_av * a * a);
+        assert_relative_eq!(trimmed.rear, rear, max_relative = 1e-5);
+        let plain = PI * r2 * r2 * (a * dp - 1000.0 / 4.0 * 900.0 * 0.25 * a * a);
+        assert_relative_eq!(trimmed.back_vanes, plain - rear, max_relative = 1e-4);
+    }
+
+    #[test]
+    fn without_back_vanes_the_thrust_is_unchanged() {
+        let f = law(None).forces(0.05, 50.0, 60.0);
+        assert_eq!(f.back_vanes, 0.0);
+        assert_eq!(f.rear_rotation, 0.5);
+        assert_relative_eq!(
+            f.rear,
+            shroud_force(0.15, 0.05 / 0.3, f.pressure_rise, 1000.0, 30.0, 0.5),
+            max_relative = 1e-12
+        );
+        assert_relative_eq!(f.hydraulic, f.rear - f.front, max_relative = 1e-12);
+    }
+    #[test]
+    fn back_vane_warnings_flag_the_untested_cases() {
+        // The spec example lies inside Table 9.3 but for d_Rs/d₂ = 1.
+        assert!(law(Some(vanes(0.24))).back_vane_warnings().is_empty());
+        let full = law(Some(vanes(0.3))).back_vane_warnings();
+        assert_eq!(full.len(), 1);
+        assert!(full[0].contains("d_Rs/d₂"));
+        let curved = law(Some(BackVaneLaw {
+            radial: false,
+            ..vanes(0.24)
+        }));
+        assert!(curved.back_vane_warnings()[0].contains("radial back vanes only"));
+        // Behind a rear seal the vanes act above it only.
+        let sealed = AxialThrust {
+            rear_seal_diameter: Some(0.15),
+            ..law(Some(vanes(0.24)))
+        };
+        assert!(sealed.back_vane_warnings()[0].contains("rear seal"));
+        let above = sealed.forces(0.05, 50.0, 60.0);
+        let whole = law(Some(vanes(0.24))).forces(0.05, 50.0, 60.0);
+        assert!(above.back_vanes > 0.0 && above.back_vanes < whole.back_vanes);
     }
 }
