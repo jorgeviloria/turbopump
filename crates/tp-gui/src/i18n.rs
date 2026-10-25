@@ -484,6 +484,34 @@ mod tests {
     }
 
     #[test]
+    fn the_side_of_a_seal_follows_the_seal_and_specific_messages_win() {
+        let text = spanish(|| {
+            message(
+                "the front seal clearance 0.1 mm is below the 0.3 mm Gülich recommends for a seal of 92.1 mm",
+            )
+        });
+        assert_eq!(
+            text,
+            "la holgura del sello delantero, de 0.1 mm, es menor que los 0.3 mm que recomienda Gülich para un sello de 92.1 mm"
+        );
+        let text = spanish(|| {
+            message(
+                "the rear seal diameter 80.0 mm is below the neck wall (85.0 mm): the seal cuts into the neck",
+            )
+        });
+        assert_eq!(
+            text,
+            "el diámetro del sello trasero, de 80.0 mm, queda por debajo de la pared del cuello (85.0 mm): el sello corta el cuello"
+        );
+        let text =
+            spanish(|| message("the back vanes could not be taken out of the side chambers"));
+        assert_eq!(
+            text,
+            "no se pudieron restar los álabes de rebombeo de las cámaras laterales"
+        );
+    }
+
+    #[test]
     fn language_codes_round_trip() {
         for l in Language::ALL {
             assert_eq!(Language::from_code(l.code()), Some(l));

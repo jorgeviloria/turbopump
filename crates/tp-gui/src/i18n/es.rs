@@ -3816,7 +3816,7 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
     ),
     (
         "the {} seal clearance {} mm is below the {} mm Gülich recommends for a seal of {} mm",
-        "la holgura {} del sello, de {} mm, es menor que los {} mm que recomienda Gülich para un sello de {} mm",
+        "la holgura del sello {}, de {} mm, es menor que los {} mm que recomienda Gülich para un sello de {} mm",
     ),
     (
         "the {} impeller ring of {} mm is trimmed to {} mm to leave the neck a wall",
@@ -3828,7 +3828,7 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
     ),
     (
         "the {} seal diameter {} mm is below the neck wall ({} mm): the seal cuts into the neck",
-        "el diámetro {} del sello, de {} mm, queda por debajo de la pared del cuello ({} mm): el sello corta el cuello",
+        "el diámetro del sello {}, de {} mm, queda por debajo de la pared del cuello ({} mm): el sello corta el cuello",
     ),
     ("front", "delantero"),
     ("rear", "trasero"),
@@ -3966,13 +3966,14 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
         "the back vanes were not built: {}",
         "no se construyeron los álabes de rebombeo: {}",
     ),
-    (
-        "the {} could not be taken out of the side chambers",
-        "no se pudo restar el {} de las cámaras laterales",
-    ),
+    // Before the generic pattern below: `message` takes the first entry that matches.
     (
         "the back vanes could not be taken out of the side chambers",
         "no se pudieron restar los álabes de rebombeo de las cámaras laterales",
+    ),
+    (
+        "the {} could not be taken out of the side chambers",
+        "no se pudo restar el {} de las cámaras laterales",
     ),
     (
         "the back vanes left out: the join added less than half of their volume",
