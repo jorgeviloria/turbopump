@@ -1329,6 +1329,11 @@ fn cutwater(
                         );
                         value_row(
                             ui,
+                            tr("Walls off the flow angle"),
+                            units.show(Angle, g.wall_misalignment()),
+                        );
+                        value_row(
+                            ui,
                             tr("Spiral start φC,0"),
                             units.show(Angle, g.start_angle),
                         );

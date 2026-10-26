@@ -876,10 +876,11 @@ fn print_report(name: &str, id: ComponentId, g: &VoluteGeometry, units: &Display
     // The walls at the tip, from the circumferential direction.
     if !matches!(d.cutwater_shape, CutwaterShape::Tangent) && d.development.start <= 0.0 {
         println!(
-            "           walls at the tip: spiral αIn {}   diffuser αOut {}   mean αAvg {}   spiral starts at {}",
+            "           walls at the tip: spiral αIn {}   diffuser αOut {}   mean αAvg {} ({} off the flow angle)   spiral starts at {}",
             s(Angle, c.spiral_angle),
             s(Angle, c.diffuser_angle),
             s(Angle, c.mean_angle()),
+            s(Angle, g.wall_misalignment()),
             s(Angle, g.start_angle)
         );
     }

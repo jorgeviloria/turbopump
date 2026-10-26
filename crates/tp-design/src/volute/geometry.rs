@@ -250,6 +250,10 @@ pub struct VoluteGeometry {
 /// Outlines of the body of the cutwater per gap between two of its planes, for meshes.
 const BODY_STEPS: usize = 4;
 
+/// How far the mean direction of the walls at the cutwater tip may be from the flow
+/// angle α₃' before it is flagged: Gülich (eq. T7.7.6) asks for an incidence within ±3°.
+const WALL_ALIGNMENT_BAND: f64 = 3.0 * std::f64::consts::PI / 180.0;
+
 /// Turn by which the channels of a double volute reach into the discharge diffuser, so
 /// that the solids overlap where they meet, rad.
 const CHANNEL_OVERLAP: f64 = 1.5 * std::f64::consts::PI / 180.0;
@@ -518,6 +522,19 @@ impl VoluteGeometry {
             .iter()
             .map(|rings| rings.iter().map(|ring| offset_ring(ring, t)).collect())
             .collect()
+    }
+
+    /// Angle by which the mean direction of the two walls at the cutwater tip lies above
+    /// the flow angle α₃' the spiral delivers at the design point, rad: the incidence
+    /// of the bare wedge, positive when the walls turn further from the circumference
+    /// than the flow. 0 without a wedge. A sharp cutwater is flagged beyond ±3°; a
+    /// rounded one follows α₃B with the camber of its body, so there it only shows how
+    /// far the diffuser pulls the walls away.
+    pub fn wall_misalignment(&self) -> f64 {
+        if self.cutwater.wedge <= 0.0 {
+            return 0.0;
+        }
+        self.cutwater.mean_angle() - self.design.cutwater_flow_angle
     }
 
     /// Distance C from the pump axis to the axis of the outlet, m: 0 when the outlet
@@ -1214,6 +1231,21 @@ impl VoluteGeometry {
             ));
         }
         volute.wall_stress = stress;
+        // Only the bare wedge of a sharp cutwater is the cutwater: a rounded one follows
+        // the flow with the camber of its body, so there the angle is only reported.
+        let off = volute.wall_misalignment();
+        if matches!(volute.design.cutwater_shape, CutwaterShape::Sharp)
+            && off.abs() > WALL_ALIGNMENT_BAND + 1e-12
+        {
+            volute.warnings.push(format!(
+                "the walls at the cutwater tip point {:.1}° from the circumference, {:.1}° off \
+                 the flow angle α₃' of {:.1}° (beyond ±3°): the flow meets the wedge at an \
+                 angle; turn the diffuser or move the start of the spiral",
+                volute.cutwater.mean_angle().to_degrees(),
+                off.to_degrees(),
+                volute.design.cutwater_flow_angle.to_degrees()
+            ));
+        }
         Ok(volute)
     }
 }
@@ -1862,6 +1894,66 @@ mod tests {
         assert_eq!(
             (g.cutwater.spiral_angle, g.cutwater.diffuser_angle),
             (0.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn the_walls_are_flagged_when_they_turn_away_from_the_flow() {
+        let cases = [
+            DischargeShape::Radial { axis_angle: 0.0 },
+            DischargeShape::Radial {
+                axis_angle: 30f64.to_radians(),
+            },
+            DischargeShape::Tangential {
+                straight_wall: StraightWall::Centered,
+            },
+            DischargeShape::Tangential {
+                straight_wall: StraightWall::Inner,
+            },
+            DischargeShape::Tangential {
+                straight_wall: StraightWall::Outer,
+            },
+        ];
+        let mut flagged = [0, 0];
+        for shape in cases {
+            let mut input = unturned();
+            input.cutwater.shape = CutwaterShape::Sharp;
+            input.diffuser.shape = shape;
+            let g = VoluteGeometry::build(&reference_basis(), &input).unwrap();
+            let off = g.wall_misalignment();
+            assert_relative_eq!(
+                off,
+                g.cutwater.mean_angle() - g.design.cutwater_flow_angle,
+                epsilon = 1e-12
+            );
+            let warned = g
+                .warnings
+                .iter()
+                .any(|w| w.contains("walls at the cutwater tip"));
+            assert_eq!(warned, off.abs() > 3f64.to_radians(), "{shape:?}");
+            flagged[usize::from(warned)] += 1;
+        }
+        // Both outcomes occur among the discharges.
+        assert!(flagged[0] > 0 && flagged[1] > 0, "{flagged:?}");
+        // A rounded cutwater reports the angle but is not flagged for it.
+        let mut input = unturned();
+        input.cutwater.shape = CutwaterShape::default();
+        let g = VoluteGeometry::build(&reference_basis(), &input).unwrap();
+        assert!(g.wall_misalignment().abs() > 3f64.to_radians());
+        assert!(
+            !g.warnings
+                .iter()
+                .any(|w| w.contains("walls at the cutwater tip"))
+        );
+        // A tangent cutwater has no wedge to judge.
+        let mut input = unturned();
+        input.cutwater.shape = CutwaterShape::Tangent;
+        let g = VoluteGeometry::build(&reference_basis(), &input).unwrap();
+        assert_eq!(g.wall_misalignment(), 0.0);
+        assert!(
+            !g.warnings
+                .iter()
+                .any(|w| w.contains("walls at the cutwater tip"))
         );
     }
 

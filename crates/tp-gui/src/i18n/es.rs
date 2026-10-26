@@ -887,6 +887,10 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Ángulo de la pared del difusor αOut",
     ),
     ("Mean wall angle αAvg", "Ángulo medio de las paredes αAvg"),
+    (
+        "Walls off the flow angle",
+        "Paredes frente al ángulo de flujo",
+    ),
     ("Spiral start φC,0", "Inicio de la espiral φC,0"),
     (
         "How the area grows from the throat to the outlet. Radius: the equivalent radius grows \
@@ -4646,6 +4650,10 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
     (
         "d_z/d₂ = {} is below the {} of Gülich Table 10.2: expect pressure pulsations and hydraulic excitation forces",
         "d_z/d₂ = {} está por debajo del {} de la tabla 10.2 de Gülich: habrá pulsaciones de presión y fuerzas de excitación hidráulica",
+    ),
+    (
+        "the walls at the cutwater tip point {}° from the circumference, {}° off the flow angle α₃' of {}° (beyond ±3°): the flow meets the wedge at an angle; turn the diffuser or move the start of the spiral",
+        "las paredes en la punta del corte de agua forman {}° con la circunferencia, {}° de diferencia con el ángulo de flujo α₃' de {}° (más de ±3°): el flujo choca con la cuña en ángulo; conviene girar el difusor o mover el inicio de la espiral",
     ),
     (
         "cutwater incidence {}° is outside ±3° (Gülich eq. T7.7.6)",
