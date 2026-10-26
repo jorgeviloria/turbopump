@@ -7,7 +7,7 @@ use std::f64::consts::PI;
 
 use tp_design::diffuser::DiffuserDesign;
 use tp_design::impeller::ImpellerGeometry;
-use tp_design::volute::VoluteGeometry;
+use tp_design::volute::{RibPlane, VoluteGeometry};
 use tp_math::{DVec2, DVec3};
 
 pub type Triangle = [DVec3; 3];
@@ -281,10 +281,34 @@ pub fn rib_triangles(g: &VoluteGeometry) -> Vec<Triangle> {
     let Some(rib) = &g.rib else {
         return Vec::new();
     };
-    let (Some(first), Some(last)) = (rib.planes.first(), rib.planes.last()) else {
+    if rib.planes.is_empty() {
         return Vec::new();
+    }
+    // The rib runs the full height of the tallest section, but the channel is lower
+    // toward the rib nose: every point is kept inside the channel, so that the volute
+    // trims the rib and it does not stick out of it. The planes above or below the
+    // channel collapse onto its top and bottom and add no surface.
+    let sign = g.basis.rotation_sign;
+    let trim = |p: &DVec3| -> DVec3 {
+        let angle = (sign * (p.y.atan2(p.x) - g.rotation)).rem_euclid(std::f64::consts::TAU);
+        match g.envelope_z_range(angle, p.truncate().length()) {
+            Some((lo, hi)) => DVec3::new(p.x, p.y, p.z.clamp(lo, hi)),
+            None => *p,
+        }
     };
-    let rings: Vec<Vec<DVec3>> = rib.planes.iter().map(|p| p.outline()).collect();
+    let trimmed: Vec<RibPlane> = rib
+        .planes
+        .iter()
+        .map(|p| RibPlane {
+            z: p.z,
+            inner_face: p.inner_face.iter().map(trim).collect(),
+            outer_face: p.outer_face.iter().map(trim).collect(),
+            nose: p.nose.iter().map(trim).collect(),
+            tail: p.tail.iter().map(trim).collect(),
+        })
+        .collect();
+    let (first, last) = (&trimmed[0], &trimmed[trimmed.len() - 1]);
+    let rings: Vec<Vec<DVec3>> = trimmed.iter().map(|p| p.outline()).collect();
     let n = rings[0].len();
     // Outward when the outlines run counter-clockwise, as the planes run up.
     let counter_clockwise = (0..n)
@@ -735,13 +759,11 @@ pub(crate) mod tests {
                 .sum::<f64>()
                 .abs();
         let height = rib.planes[rib.planes.len() - 1].z - rib.planes[0].z;
-        // Positive: the normals point out.
+        // Positive: the normals point out. The volute trims it: it is the part of that
+        // prism that lies inside the channel, which is lower toward the nose.
         let volume = mesh.iter().map(|t| t[0].dot(t[1].cross(t[2]))).sum::<f64>() / 6.0;
-        assert!(
-            (volume / (area * height) - 1.0).abs() < 0.01,
-            "{volume} vs {}",
-            area * height
-        );
+        let share = volume / (area * height);
+        assert!(share > 0.4 && share < 0.9, "{volume} of {}", area * height);
         assert!(rib_triangles(&reference_volute(|_| {})).is_empty());
     }
 
@@ -774,6 +796,47 @@ pub(crate) mod tests {
             volute_view_triangles(&tangent).len(),
             volute_triangles(&tangent).len()
         );
+    }
+
+    #[test]
+    fn the_rib_of_a_double_volute_stays_inside_the_channel() {
+        let g = reference_volute(|v| v.setup.kind = tp_design::volute::VoluteKind::Double);
+        let rib = g.rib.as_ref().unwrap();
+        // The planes run the full height of the tallest section: above the channel at the
+        // rib nose, where the sections are small.
+        let top = rib.planes.last().unwrap().z;
+        let nose = rib.nose_tip;
+        let nose_angle = (g.basis.rotation_sign * (nose.y.atan2(nose.x) - g.rotation))
+            .rem_euclid(std::f64::consts::TAU);
+        let (_, channel_top) = g
+            .envelope_z_range(nose_angle, nose.truncate().length())
+            .unwrap();
+        assert!(top > channel_top + 6e-3, "{top} vs {channel_top}");
+        // Every vertex of the mesh is inside the channel there, within rounding.
+        let tris = rib_triangles(&g);
+        assert!(!tris.is_empty());
+        for t in &tris {
+            for p in t {
+                let angle = (g.basis.rotation_sign * (p.y.atan2(p.x) - g.rotation))
+                    .rem_euclid(std::f64::consts::TAU);
+                if let Some((lo, hi)) = g.envelope_z_range(angle, p.truncate().length()) {
+                    // The centres of the fans that close the nose and the tail are averages
+                    // of trimmed points and may lie a little off: within 2.5 mm.
+                    assert!(
+                        p.z >= lo - 2.5e-3 && p.z <= hi + 2.5e-3,
+                        "z {} outside {lo}..{hi} at {angle}",
+                        p.z
+                    );
+                }
+            }
+        }
+        // And it still reaches the top of the channel at the throat, where it is full
+        // height: the rib is a band, not a sliver.
+        let highest = tris
+            .iter()
+            .flat_map(|t| t.iter().map(|p| p.z))
+            .fold(f64::NEG_INFINITY, f64::max);
+        assert!(highest > channel_top + 1e-3, "{highest} vs {channel_top}");
     }
 
     #[test]
