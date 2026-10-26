@@ -620,12 +620,20 @@ impl VoluteGeometry {
     /// The height range (z_min, z_max), m, of the whole section of a double volute at the
     /// point of wrap angle `angle` from the cutwater (rad, 0 to 2π) and radius `r` from
     /// the pump axis: the channel the rib sits in. The sections are blended between their
-    /// angles; before the rib nose it is the first one. `None` for a single volute or
-    /// where the radius is outside the section.
+    /// angles; before the rib nose it is the first one. `None` for a single volute.
     pub fn envelope_z_range(&self, angle: f64, r: f64) -> Option<(f64, f64)> {
         let at = |s: &VoluteSection| -> Option<(f64, f64)> {
             let mut range: Option<(f64, f64)> = None;
             let n = s.outline.len();
+            // A point a hair off the section in radius (the tip of the nose of the rib
+            // lies just inside the base circle) is taken at its edge.
+            let (r_min, r_max) = s
+                .outline
+                .iter()
+                .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| {
+                    (lo.min(p.x), hi.max(p.x))
+                });
+            let r = r.clamp(r_min, r_max);
             for i in 0..n {
                 let (a, b) = (s.outline[i], s.outline[(i + 1) % n]);
                 if (a.x - r) * (b.x - r) > 0.0 || (b.x - a.x).abs() < 1e-15 {

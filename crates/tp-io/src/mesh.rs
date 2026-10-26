@@ -3,7 +3,7 @@
 //! The mesh is made of separate surfaces (blade faces, hub and shroud walls) and is not
 //! a closed solid; the CAD solids come from the CAD kernel in a later phase.
 
-use std::f64::consts::PI;
+use std::f64::consts::{PI, TAU};
 
 use tp_design::diffuser::DiffuserDesign;
 use tp_design::impeller::ImpellerGeometry;
@@ -274,6 +274,14 @@ pub fn cutwater_triangles(g: &VoluteGeometry) -> Vec<Triangle> {
     out
 }
 
+/// The wrap angle of a point of the rib from the cutwater, rad. The rib runs from half a
+/// turn on to past the throat, where its tail goes beyond 2π: those points keep going
+/// instead of coming round to the start of the spiral.
+fn rib_angle(g: &VoluteGeometry, p: &DVec3) -> f64 {
+    let angle = (g.basis.rotation_sign * (p.y.atan2(p.x) - g.rotation)).rem_euclid(TAU);
+    if angle < PI / 2.0 { angle + TAU } else { angle }
+}
+
 /// The rib of a double volute as a closed surface: lofted through its planes across
 /// the height of the sections and closed at the outermost planes, with the outward
 /// normals. Empty for a single volute.
@@ -288,9 +296,8 @@ pub fn rib_triangles(g: &VoluteGeometry) -> Vec<Triangle> {
     // toward the rib nose: every point is kept inside the channel, so that the volute
     // trims the rib and it does not stick out of it. The planes above or below the
     // channel collapse onto its top and bottom and add no surface.
-    let sign = g.basis.rotation_sign;
     let trim = |p: &DVec3| -> DVec3 {
-        let angle = (sign * (p.y.atan2(p.x) - g.rotation)).rem_euclid(std::f64::consts::TAU);
+        let angle = rib_angle(g, p);
         match g.envelope_z_range(angle, p.truncate().length()) {
             Some((lo, hi)) => DVec3::new(p.x, p.y, p.z.clamp(lo, hi)),
             None => *p,
@@ -806,8 +813,7 @@ pub(crate) mod tests {
         // rib nose, where the sections are small.
         let top = rib.planes.last().unwrap().z;
         let nose = rib.nose_tip;
-        let nose_angle = (g.basis.rotation_sign * (nose.y.atan2(nose.x) - g.rotation))
-            .rem_euclid(std::f64::consts::TAU);
+        let nose_angle = rib_angle(&g, &nose);
         let (_, channel_top) = g
             .envelope_z_range(nose_angle, nose.truncate().length())
             .unwrap();
@@ -817,8 +823,7 @@ pub(crate) mod tests {
         assert!(!tris.is_empty());
         for t in &tris {
             for p in t {
-                let angle = (g.basis.rotation_sign * (p.y.atan2(p.x) - g.rotation))
-                    .rem_euclid(std::f64::consts::TAU);
+                let angle = rib_angle(&g, p);
                 if let Some((lo, hi)) = g.envelope_z_range(angle, p.truncate().length()) {
                     // The centres of the fans that close the nose and the tail are averages
                     // of trimmed points and may lie a little off: within 2.5 mm.
@@ -830,6 +835,46 @@ pub(crate) mod tests {
                 }
             }
         }
+        // Every point of every plane is on a section: none escapes the trimming.
+        for plane in &g.rib.as_ref().unwrap().planes {
+            for p in plane
+                .inner_face
+                .iter()
+                .chain(&plane.outer_face)
+                .chain(&plane.nose)
+                .chain(&plane.tail)
+            {
+                assert!(
+                    g.envelope_z_range(rib_angle(&g, p), p.truncate().length())
+                        .is_some()
+                );
+            }
+        }
+        // At the throat, where the tail runs on past 2π, the rib is as high as the channel
+        // there and no spike leaves it (the tail used to come round to the small
+        // sections of the start and collapse).
+        let at_throat: Vec<DVec3> = tris
+            .iter()
+            .flat_map(|t| t.iter().copied())
+            .filter(|p| {
+                let a = rib_angle(&g, p);
+                a > TAU - 0.05 && a < TAU + 0.02
+            })
+            .collect();
+        assert!(!at_throat.is_empty());
+        let (low, high) = at_throat
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), p| {
+                (l.min(p.z), h.max(p.z))
+            });
+        let r = at_throat[0].truncate().length();
+        let (lo, hi) = g.envelope_z_range(TAU, r).unwrap();
+        assert!(
+            high - low > 0.9 * (hi - lo) && high - low < 1.1 * (hi - lo),
+            "{} vs {}",
+            high - low,
+            hi - lo
+        );
         // And it still reaches the top of the channel at the throat, where it is full
         // height: the rib is a band, not a sliver.
         let highest = tris
