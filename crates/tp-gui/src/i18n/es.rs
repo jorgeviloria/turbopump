@@ -4414,8 +4414,8 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
     ),
     // Cross sections of the volute.
     (
-        "a double volute needs straight walls at one cone angle: the cross sections were made trapezoidal at {}°",
-        "una voluta doble necesita paredes rectas con un solo ángulo de cono: las secciones se hicieron trapeciales a {}°",
+        "a double volute needs straight, radius based, line segment or Bézier sections of two equal sides, one shape all round: the cross sections were made trapezoidal at {}°",
+        "una voluta doble necesita secciones rectas, por radios, por segmentos de recta o Bézier, de dos lados iguales y una sola forma en toda la espiral: las secciones se hicieron trapeciales a {}°",
     ),
     (
         "at least one cross section must be active",

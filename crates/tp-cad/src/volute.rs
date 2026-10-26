@@ -1649,6 +1649,78 @@ mod tests {
 
     #[test]
     #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
+    fn a_double_volute_of_radius_segment_and_bezier_sections_gives_valid_solids() {
+        let _slot = crate::test_slot::take();
+        use tp_design::volute::{
+            BezierBase, BezierSide, RadiusSide, SideShape, VoluteKind, section,
+        };
+        let shapes = [
+            (
+                "radius based",
+                SectionShape::symmetric(SideShape::RadiusBased(RadiusSide::default())),
+            ),
+            (
+                "line segments",
+                SectionShape::symmetric(SideShape::LineSegments {
+                    points: section::default_segments(),
+                }),
+            ),
+            (
+                "Bézier trapezoid",
+                SectionShape::symmetric(SideShape::Bezier(BezierSide {
+                    base: BezierBase::Trapezoid,
+                    ..BezierSide::default()
+                })),
+            ),
+        ];
+        for (name, shape) in shapes {
+            let mut input = VoluteInput::default();
+            input.setup.kind = VoluteKind::Double;
+            input.cross_section = CrossSectionInput::single(shape);
+            let g = VoluteGeometry::build(&basis(), &input).unwrap();
+            let cad = build_volute(&g).unwrap();
+            assert!(cad.fluid.is_valid(), "{name}");
+            assert_eq!(cad.fluid.solid_count(), 1, "{name}");
+            assert_eq!(cad.channel.solid_count(), 1, "{name}");
+            assert!(cad.warnings.is_empty(), "{name}: {:?}", cad.warnings);
+            // The whole sections swept round, less the band of the rib, and the diffuser.
+            let rib = g.design.rib.unwrap();
+            let rz = g.design.stagnation_radius;
+            let steps = 200;
+            let removed: f64 = (0..steps)
+                .map(|k| {
+                    let angle = rib.start
+                        + (rib.end() - rib.start) * (f64::from(k) + 0.5) / f64::from(steps);
+                    let r = rz + g.design.rib_height(angle).unwrap() + 0.5 * rib.thickness;
+                    let (lo, hi) = g.envelope_z_range(angle, r).unwrap();
+                    rib.thickness * (hi - lo) * r * (rib.end() - rib.start) / f64::from(steps)
+                })
+                .sum();
+            let nozzle: f64 = g
+                .nozzle
+                .windows(2)
+                .map(|w| 0.5 * (w[0].area + w[1].area) * w[0].center.distance(w[1].center))
+                .sum();
+            let expected = swept_volume(&g.sections) + swept_volume(&g.envelope) + nozzle - removed;
+            let channel = cad.channel.volume_with_tolerance(0.0) / MM.powi(3);
+            assert!(
+                (channel / expected - 1.0).abs() < 0.04,
+                "{name}: {channel} vs {expected}"
+            );
+            // The CAD kernel does not build the casing of radius based or line segment
+            // sections, a single volute's either (an error and a loop in it).
+            if name == "Bézier trapezoid" {
+                let casing = build_volute_casing(&g, &cad).unwrap();
+                assert!(
+                    casing.solid.is_valid() && casing.solid.solid_count() == 1,
+                    "{name}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
     fn a_rib_that_stops_short_of_the_throat_gives_a_valid_flow_domain_and_casing() {
         let _slot = crate::test_slot::take();
         use tp_design::volute::VoluteKind;

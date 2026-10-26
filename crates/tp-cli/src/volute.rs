@@ -1244,7 +1244,17 @@ fn print_report(name: &str, id: ComponentId, g: &VoluteGeometry, units: &Display
             s(Angle, hi)
         ))
     );
-    if d.rib.is_some() {
+    if let (Some(_), Some(table)) = (&d.rib, d.free_double()) {
+        // Sections the rib cuts: the inner volute and the outer channel are parts of the
+        // whole section, sized together.
+        let end = table.row_at(std::f64::consts::TAU);
+        println!(
+            "           whole sections cut by the rib: {} sections; at the throat the rib stands {} above r'z, the whole section {}",
+            g.envelope.len(),
+            s(Length, end.inner_height),
+            s(Length, end.whole_height)
+        );
+    } else if d.rib.is_some() {
         println!(
             "           inner volute {} sections, outer channel {} sections",
             g.inner_sections.len(),

@@ -399,6 +399,11 @@ impl VoluteGeometry {
             // A sharp or rounded cutwater: the spiral cuts the diffuser.
             return vec![self.extended(&self.sections), self.nozzle_rings()];
         }
+        // A double volute of sections the rib cuts is one channel with the rib in it, as
+        // the CAD model builds it.
+        if self.design.free_double().is_some() {
+            return self.lofts();
+        }
         // The throat of the first partial volute and the start of the outer channel
         // share the angle of the rib nose: the channel takes over there. A rib that
         // stops short of the throat lets the two channels run into the whole section.
@@ -922,13 +927,8 @@ impl VoluteGeometry {
         // Double volute: the outer channel outside the rib, and the section where both
         // channels meet the discharge diffuser.
         let straight = design.shape();
-        let base_width = |height: f64| design.inlet_width + 2.0 * height * straight.slope();
-        let inner_height = |angle: f64| -> Result<f64, DesignError> {
-            match &design.rib {
-                Some(rib) if angle > rib.start => Ok(design.section(angle)?.height),
-                _ => Ok(0.0),
-            }
-        };
+        let base_width = |height: f64| straight.top_width(height);
+        let inner_height = |angle: f64| -> Result<f64, DesignError> { design.rib_height(angle) };
         // The outer channel: the part of the whole section beyond the rib, the same
         // straight walls on a wider base.
         let channel = |angle: f64| -> Result<VoluteSection, DesignError> {
@@ -937,11 +937,7 @@ impl VoluteGeometry {
             let base = base_width(a + rib.thickness);
             let rz = design.stagnation_radius + a + rib.thickness;
             let area = rib.channel_area(angle);
-            let part = super::Shape {
-                b3: base,
-                rz,
-                ..straight
-            };
+            let part = super::Shape::closed(straight.slope, base, rz);
             let size = part.size(part.height_for_area(area));
             let sections = design.cross_sections.with_inlet(base, rz);
             Ok(VoluteSection {
@@ -955,9 +951,19 @@ impl VoluteGeometry {
         // channel. At the rib nose it is the throat of the first partial volute.
         let whole = |angle: f64| -> Result<VoluteSection, DesignError> {
             let rib = design.rib.as_ref().expect("a double volute");
-            let area =
-                straight.area(inner_height(angle)? + rib.thickness) + rib.channel_area(angle);
-            let size = straight.size(straight.height_for_area(area));
+            let size = match design.free_double() {
+                // The whole section is the one the rib was sized on.
+                Some(table) => super::size_of(
+                    &design
+                        .cross_sections
+                        .properties(angle, table.row_at(angle).whole_height)?,
+                ),
+                None => {
+                    let area = straight.area(inner_height(angle)? + rib.thickness)
+                        + rib.channel_area(angle);
+                    straight.size(straight.height_for_area(area))
+                }
+            };
             Ok(VoluteSection {
                 angle,
                 size,
@@ -1235,14 +1241,24 @@ impl VoluteGeometry {
                         .into_iter()
                         .map(make)
                         .collect::<Result<Vec<_>, _>>()?,
-                    spread(rib.start + CUTWATER_START, rib.end())
-                        .into_iter()
-                        .map(make)
-                        .collect::<Result<Vec<_>, _>>()?,
-                    spread(rib.start, rib.end())
-                        .into_iter()
-                        .map(channel)
-                        .collect::<Result<Vec<_>, _>>()?,
+                    // Sections the rib cuts have no sections of their own for the inner
+                    // volute and the outer channel: they are parts of the whole one.
+                    if design.free_double().is_some() {
+                        Vec::new()
+                    } else {
+                        spread(rib.start + CUTWATER_START, rib.end())
+                            .into_iter()
+                            .map(make)
+                            .collect::<Result<Vec<_>, _>>()?
+                    },
+                    if design.free_double().is_some() {
+                        Vec::new()
+                    } else {
+                        spread(rib.start, rib.end())
+                            .into_iter()
+                            .map(channel)
+                            .collect::<Result<Vec<_>, _>>()?
+                    },
                     spread(rib.start, TAU)
                         .into_iter()
                         .map(whole)
@@ -1514,12 +1530,7 @@ fn rib_plane(
 ) -> Result<RibPlane, DesignError> {
     let t = rib.thickness;
     let inner = |angle: f64| -> Result<f64, DesignError> {
-        let a = if angle > rib.start {
-            design.section(angle)?.height
-        } else {
-            0.0
-        };
-        Ok(design.stagnation_radius + a)
+        Ok(design.stagnation_radius + design.rib_height(angle)?)
     };
     let at = |r: f64, angle: f64| {
         let theta = sign * angle;
@@ -3233,6 +3244,102 @@ mod tests {
             let g = VoluteGeometry::build(&reference_basis(), &input).unwrap();
             assert!(!g.inner_sections.is_empty() && !g.outer_channel.is_empty());
             assert_eq!(g.envelope.len(), g.outer_channel.len());
+        }
+    }
+
+    /// Radius based, line segment and Bézier sections, which a double volute splits with
+    /// its rib by their outlines.
+    fn free_shapes() -> Vec<(&'static str, SectionShape)> {
+        use crate::volute::{BezierBase, BezierSide, RadiusSide};
+        vec![
+            (
+                "radius based",
+                SectionShape::symmetric(SideShape::RadiusBased(RadiusSide::default())),
+            ),
+            (
+                "line segments",
+                SectionShape::symmetric(SideShape::LineSegments {
+                    points: crate::volute::section::default_segments(),
+                }),
+            ),
+            (
+                "Bézier trapezoid",
+                SectionShape::symmetric(SideShape::Bezier(BezierSide {
+                    base: BezierBase::Trapezoid,
+                    ..BezierSide::default()
+                })),
+            ),
+            (
+                "Bézier rectangle",
+                SectionShape::symmetric(SideShape::Bezier(BezierSide::default())),
+            ),
+        ]
+    }
+
+    fn free_double_geometry(shape: SectionShape) -> VoluteGeometry {
+        let mut input = unturned();
+        input.setup.kind = crate::volute::VoluteKind::Double;
+        input.cross_section = CrossSectionInput::single(shape);
+        VoluteGeometry::build(&reference_basis(), &input).unwrap()
+    }
+
+    /// ∫ w(r) f(r) dr over the whole section of the envelope at `angle` between the
+    /// radii `from` and `to`, with the axial width w of its outline.
+    fn envelope_integral(
+        g: &VoluteGeometry,
+        angle: f64,
+        from: f64,
+        to: f64,
+        f: impl Fn(f64) -> f64,
+    ) -> f64 {
+        let n = 400;
+        (0..n)
+            .map(|k| {
+                let r = from + (to - from) * (f64::from(k) + 0.5) / f64::from(n);
+                let (lo, hi) = g.envelope_z_range(angle, r).unwrap_or((0.0, 0.0));
+                (hi - lo) * f(r) * (to - from) / f64::from(n)
+            })
+            .sum()
+    }
+
+    #[test]
+    fn a_double_volute_splits_radius_segment_and_bezier_sections_with_its_rib() {
+        for (name, shape) in free_shapes() {
+            let g = free_double_geometry(shape);
+            let rib = g.design.rib.unwrap();
+            assert!(g.design.free_double().is_some(), "{name}");
+            // One channel with the rib in it, as the CAD builds it.
+            assert!(
+                g.inner_sections.is_empty() && g.outer_channel.is_empty(),
+                "{name}"
+            );
+            assert_eq!(g.channels().len(), 2, "{name}");
+            let rz = g.design.stagnation_radius;
+            let reference = g.basis.impeller_diameter / 2.0;
+            let mut ratios = Vec::new();
+            for sec in g.envelope.iter().filter(|s| s.angle > rib.start + 0.2) {
+                let r_max = sec
+                    .outline
+                    .iter()
+                    .map(|p| p.x)
+                    .fold(f64::NEG_INFINITY, f64::max);
+                let a = g.design.rib_height(sec.angle).unwrap();
+                let cut = rz + a + rib.thickness;
+                // The outer channel has the area the design gives it, beyond the rib.
+                let outer = envelope_integral(&g, sec.angle, cut, r_max, |_| 1.0);
+                assert_relative_eq!(outer, rib.channel_area(sec.angle), max_relative = 0.02);
+                // The inner volute holds the angular momentum of the flow of its wrap.
+                let momentum = envelope_integral(&g, sec.angle, rz, rz + a, |r| reference / r);
+                ratios.push((sec.angle, momentum));
+            }
+            let (last_angle, last) = *ratios.last().unwrap();
+            assert_relative_eq!(last_angle, TAU, epsilon = 1e-9);
+            for (angle, m) in &ratios {
+                let share = (angle - rib.start) / (TAU - rib.start);
+                // Up to the throat correction, which makes the inner volute a little
+                // larger toward the throat.
+                assert_relative_eq!(m / last, share, max_relative = 0.05, epsilon = 0.01);
+            }
         }
     }
 

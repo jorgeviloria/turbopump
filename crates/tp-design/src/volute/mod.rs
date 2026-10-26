@@ -44,6 +44,8 @@ pub use geometry::{
     AcrossWidth, CutwaterValues, FlowSection, NozzleSection, RibPlane, ThroatJunction,
     VoluteGeometry, VoluteSection,
 };
+mod double;
+pub use double::{DoubleRow, FreeDouble};
 pub use section::{
     BendWall, BezierBase, BezierSide, CrossSectionInput, CrossSections, DEFAULT_CONE_ANGLE_DEG,
     ExternalRound, InnerPosition, InternalRound, Measure, RadiusSide, SectionDefinition,
@@ -858,6 +860,8 @@ pub struct VoluteDesign {
     throat_corrected: bool,
     /// The straight walls of a double volute, in closed form.
     straight: Option<Shape>,
+    /// The sizes of a double volute of radius based, line segment or Bézier sections.
+    free_double: Option<FreeDouble>,
 }
 
 /// The axial gap between the spiral of an internal volute and the impeller beside it.
@@ -906,31 +910,87 @@ pub fn inlet_width_ratio(nq: f64) -> f64 {
 /// A rectangular or trapezoidal section in closed form: flanks at slope t = tan δ from
 /// the width b₃ at radius `rz` (Gülich eqs. T7.7.8 and T7.7.9). The double volute uses
 /// it, since its rib runs at one radius across sections of straight walls.
-#[derive(Debug, Clone, Copy, PartialEq)]
+///
+/// A `free` shape stands for any other section a double volute takes (radius based, line
+/// segments, Bézier): the same functions of the height, from the outlines of the cross
+/// sections instead of closed forms.
+#[derive(Debug, Clone, PartialEq)]
 struct Shape {
     slope: f64,
     b3: f64,
     rz: f64,
+    free: Option<std::sync::Arc<CrossSections>>,
 }
 
 impl Shape {
-    fn slope(&self) -> f64 {
-        self.slope
+    fn closed(slope: f64, b3: f64, rz: f64) -> Self {
+        Self {
+            slope,
+            b3,
+            rz,
+            free: None,
+        }
+    }
+
+    /// The shape of `sections` all round the volute, which has one definition.
+    fn free(sections: &CrossSections) -> Self {
+        Self {
+            slope: 0.0,
+            b3: sections.inlet_width,
+            rz: sections.stagnation_radius,
+            free: Some(std::sync::Arc::new(sections.clone())),
+        }
+    }
+
+    /// The properties of the section of height `a`, for a free shape.
+    fn properties(&self, a: f64) -> Option<section::SectionProperties> {
+        let cs = self.free.as_ref()?;
+        cs.properties(TAU, a).ok()
+    }
+
+    /// Area of the part of the section of height `total` below the height `cut`: for
+    /// straight walls the section of height `cut` itself.
+    fn area_below(&self, total: f64, cut: f64) -> f64 {
+        match &self.free {
+            None => self.area(cut),
+            Some(cs) => double::clip_area(cs, total, cut),
+        }
+    }
+
+    /// Width of the outer wall of the section of height `a`, at the top: the base a wider
+    /// channel beyond a rib starts from.
+    fn top_width(&self, a: f64) -> f64 {
+        match &self.free {
+            None => self.b3 + 2.0 * a * self.slope,
+            Some(cs) => {
+                let outline = cs.outline(TAU, a);
+                section::width_at(&outline, 0.97 * a)
+            }
+        }
     }
 
     /// ∫ b/r dr over the section of height `a`.
     fn momentum_integral(&self, a: f64) -> f64 {
+        if let Some(p) = self.properties(a) {
+            return p.momentum;
+        }
         let (rz, t) = (self.rz, self.slope);
         (self.b3 - 2.0 * rz * t) * ((rz + a) / rz).ln() + 2.0 * t * a
     }
 
     fn area(&self, a: f64) -> f64 {
+        if let Some(p) = self.properties(a) {
+            return p.area;
+        }
         self.b3 * a + self.slope * a * a
     }
 
     /// Wetted perimeter of the section of height `a`: all walls but the opening of
     /// width b₃ toward the impeller.
     fn wetted_perimeter(&self, a: f64) -> f64 {
+        if let Some(p) = self.properties(a) {
+            return p.wetted_perimeter;
+        }
         let t = self.slope;
         self.b3 + 2.0 * t * a + 2.0 * a * t.hypot(1.0)
     }
@@ -938,12 +998,18 @@ impl Shape {
     /// ∮ r⁻² dℓ along the wetted walls of the section of height `a`, all but the
     /// opening of width b₃ toward the impeller, 1/m.
     fn wall_inverse_square(&self, a: f64) -> f64 {
+        if let Some(p) = self.properties(a) {
+            return p.wall_inverse_square;
+        }
         let (rz, t) = (self.rz, self.slope);
         let outer = rz + a;
         (self.b3 + 2.0 * t * a) / (outer * outer) + 2.0 * t.hypot(1.0) * (1.0 / rz - 1.0 / outer)
     }
 
     fn centroid_radius(&self, a: f64) -> f64 {
+        if let Some(p) = self.properties(a) {
+            return p.centroid_radius;
+        }
         let (rz, t) = (self.rz, self.slope);
         // ∫ r·b dr with b = b₃ + 2t·s over s = r − r'_z ∈ [0, a].
         let moment =
@@ -952,6 +1018,9 @@ impl Shape {
     }
 
     fn size(&self, a: f64) -> SectionSize {
+        if let Some(p) = self.properties(a) {
+            return size_of(&p);
+        }
         SectionSize {
             height: a,
             outer_radius: self.rz + a,
@@ -964,6 +1033,13 @@ impl Shape {
     /// ∫ b·(r_ref/r)^x dr over the section of height `a` (see
     /// [`section::Outline::swirl_area`]).
     fn swirl_area(&self, a: f64, reference: f64, exponent: f64) -> f64 {
+        if let Some(cs) = &self.free {
+            let measure = section::Measure::Swirl {
+                exponent,
+                reference_radius: reference,
+            };
+            return cs.measure(TAU, a, 0.0, measure).unwrap_or(f64::NAN);
+        }
         #[allow(clippy::float_cmp)] // Closed forms only at exactly these exponents.
         if exponent == 1.0 {
             return reference * self.momentum_integral(a);
@@ -986,6 +1062,13 @@ impl Shape {
         reference: f64,
         exponent: f64,
     ) -> Result<f64, DesignError> {
+        if let Some(cs) = &self.free {
+            let measure = section::Measure::Swirl {
+                exponent,
+                reference_radius: reference,
+            };
+            return cs.height_for(TAU, 0.0, measure, target);
+        }
         #[allow(clippy::float_cmp)]
         if exponent == 1.0 {
             return self.height_for_integral(target / reference);
@@ -1013,6 +1096,9 @@ impl Shape {
 
     /// Height whose momentum integral is `k` (eq. 7.24).
     fn height_for_integral(&self, k: f64) -> Result<f64, DesignError> {
+        if let Some(cs) = &self.free {
+            return cs.height_for_momentum(TAU, k);
+        }
         if k <= 0.0 {
             return Ok(0.0);
         }
@@ -1037,6 +1123,9 @@ impl Shape {
     fn height_for_area(&self, area: f64) -> f64 {
         if area <= 0.0 {
             return 0.0;
+        }
+        if let Some(cs) = &self.free {
+            return cs.height_for_area(TAU, area).unwrap_or(0.0);
         }
         let t = self.slope;
         if t < 1e-12 {
@@ -1129,38 +1218,53 @@ impl VoluteDesign {
         })?;
         let stagnation_radius = cutwater_diameter / 2.0 + cutwater_thickness / 2.0;
         let mut warnings = Vec::new();
-        // A double volute splits every section with its rib at one radius, so its walls
-        // must be straight and keep one cone angle: other shapes become the trapezoid of
-        // the first definition's cone angle.
+        // A double volute splits every section with its rib at one radius: the shape is
+        // the same all round, and either its walls are straight (closed forms) or it is a
+        // radius based, line segment or Bézier section the rib cuts (`double`). Other
+        // shapes become the trapezoid of the first definition's cone angle.
         let mut sections = input.cross_section.clone();
+        let mut free_shape = false;
         if setup.kind == VoluteKind::Double {
             let mut active = sections.sections.iter().filter(|d| d.active);
             let first = active.clone().min_by(|a, b| a.angle.total_cmp(&b.angle));
             let cone = first
                 .and_then(|d| d.shape.cone_angle())
                 .unwrap_or(DEFAULT_CONE_ANGLE_DEG.to_radians());
-            if !active.all(|d| d.shape.straight_cone_angle() == Some(cone)) {
-                warnings.push(format!(
-                    "a double volute needs straight walls at one cone angle: the cross \
-                     sections were made trapezoidal at {:.1}°",
-                    cone.to_degrees()
-                ));
-            }
-            sections = CrossSectionInput::single(if cone == 0.0 {
-                SectionShape::rectangular()
+            let free = first
+                .filter(|f| f.shape.takes_a_rib() && active.clone().all(|d| d.shape == f.shape))
+                .map(|f| f.shape.clone());
+            if let Some(shape) = free {
+                free_shape = true;
+                sections = CrossSectionInput::single(shape);
             } else {
-                SectionShape::trapezoidal(cone)
-            });
+                if !active.all(|d| d.shape.straight_cone_angle() == Some(cone)) {
+                    warnings.push(format!(
+                        "a double volute needs straight, radius based, line segment or Bézier \
+                         sections of two equal sides, one shape all round: the cross \
+                         sections were made trapezoidal at {:.1}°",
+                        cone.to_degrees()
+                    ));
+                }
+                sections = CrossSectionInput::single(if cone == 0.0 {
+                    SectionShape::rectangular()
+                } else {
+                    SectionShape::trapezoidal(cone)
+                });
+            }
         }
         let mut cross_sections = CrossSections::new(&sections, inlet_width, stagnation_radius)?;
-        let section = Shape {
-            slope: cross_sections.definitions()[0]
-                .shape
-                .straight_cone_angle()
-                .unwrap_or(0.0)
-                .tan(),
-            b3: inlet_width,
-            rz: stagnation_radius,
+        let section = if free_shape {
+            Shape::free(&cross_sections)
+        } else {
+            Shape::closed(
+                cross_sections.definitions()[0]
+                    .shape
+                    .straight_cone_angle()
+                    .unwrap_or(0.0)
+                    .tan(),
+                inlet_width,
+                stagnation_radius,
+            )
         };
         // Eq. 7.24 for a partial volute of wrap angle ε: ∫ b/r dr = ε·Q_Le/(2π·c₂u·r₂).
         let momentum_constant = flow / (TAU * basis.cu * r2);
@@ -1349,10 +1453,85 @@ impl VoluteDesign {
                 let correction = correction_for(blockage, a);
                 Ok((section.size(a + correction), correction))
             };
+        let rib = match rib_wrap.zip(rib_length) {
+            None => None,
+            Some((wrap, length)) => {
+                let start = TAU - wrap;
+                let thickness = setup.rib_thickness.resolve(|| cutwater_thickness);
+                require(thickness > 0.0, || {
+                    "the rib thickness must be positive".into()
+                })?;
+                // The compensation makes room for the rib instead of eq. 7.28.
+                let compensation_start = if setup.rib_compensation {
+                    let at = setup.rib_compensation_start.resolve(|| start / 2.0);
+                    require(at >= 0.0 && at < start - 1f64.to_radians(), || {
+                        format!(
+                            "the rib compensation must start between the cutwater and the rib \
+                             nose at {:.0}°, got {:.1}°",
+                            start.to_degrees(),
+                            at.to_degrees()
+                        )
+                    })?;
+                    Some(at)
+                } else {
+                    None
+                };
+                let (outer_throat, _) = match compensation_start {
+                    Some(_) => partial_throat(start, 0.0, thickness)?,
+                    None => partial_throat(start, thickness, 0.0)?,
+                };
+                require(outer_throat.height > 1.5 * thickness, || {
+                    format!(
+                        "the rib ({:.1} mm) is too thick for the {:.1} mm high throat of the \
+                         first partial volute",
+                        thickness * 1e3,
+                        outer_throat.height * 1e3
+                    )
+                })?;
+                let nose_ratio = setup.rib_nose_ratio.resolve(|| 1.0);
+                require((1.0..=5.0).contains(&nose_ratio), || {
+                    format!("the nose ratio of the rib must lie between 1 and 5, got {nose_ratio}")
+                })?;
+                let ratio = setup.channel_area_ratio.resolve(|| 1.0);
+                require((0.8..=3.0).contains(&ratio), || {
+                    format!(
+                        "the area ratio of the outer channel must lie between 0.8 and 3, \
+                         got {ratio}"
+                    )
+                })?;
+                Some(Rib {
+                    wrap,
+                    start,
+                    length,
+                    thickness,
+                    nose_ratio,
+                    outer_throat,
+                    channel_inlet_area: outer_throat.area
+                        - section.area_below(outer_throat.height, thickness),
+                    channel_outlet_area: outer_throat.area * ratio,
+                    compensation_start,
+                })
+            }
+        };
         let inner_wrap = rib_wrap.unwrap_or(TAU);
-        let (throat, throat_correction, throat_aspect) = if rib_wrap.is_some() {
+        // The sections of the double volute the rib cuts, if its walls are not straight.
+        let free_double = match (&rib, free_shape) {
+            (Some(rib), true) => Some(double::FreeDouble::build(
+                &section,
+                &development,
+                rib,
+                cutwater_thickness,
+                spiral_input.cutwater_correction,
+            )?),
+            _ => None,
+        };
+        let (throat, throat_correction, throat_aspect) = if let Some(table) = &free_double {
+            let throat = table.inner_size(TAU, stagnation_radius);
+            let width = cross_sections.properties(TAU, throat.height)?.width;
+            (throat, table.correction, width / throat.height)
+        } else if rib_wrap.is_some() {
             let (throat, correction) = partial_throat(inner_wrap, cutwater_thickness, 0.0)?;
-            let aspect = (inlet_width + 2.0 * section.slope() * throat.height) / throat.height;
+            let aspect = section.top_width(throat.height) / throat.height;
             (throat, correction, aspect)
         } else {
             // A single volute takes the shape defined at its throat, raised by the
@@ -1487,65 +1666,6 @@ impl VoluteDesign {
             )
         })?;
 
-        let rib = match rib_wrap.zip(rib_length) {
-            None => None,
-            Some((wrap, length)) => {
-                let start = TAU - wrap;
-                let thickness = setup.rib_thickness.resolve(|| cutwater_thickness);
-                require(thickness > 0.0, || {
-                    "the rib thickness must be positive".into()
-                })?;
-                // The compensation makes room for the rib instead of eq. 7.28.
-                let compensation_start = if setup.rib_compensation {
-                    let at = setup.rib_compensation_start.resolve(|| start / 2.0);
-                    require(at >= 0.0 && at < start - 1f64.to_radians(), || {
-                        format!(
-                            "the rib compensation must start between the cutwater and the rib \
-                             nose at {:.0}°, got {:.1}°",
-                            start.to_degrees(),
-                            at.to_degrees()
-                        )
-                    })?;
-                    Some(at)
-                } else {
-                    None
-                };
-                let (outer_throat, _) = match compensation_start {
-                    Some(_) => partial_throat(start, 0.0, thickness)?,
-                    None => partial_throat(start, thickness, 0.0)?,
-                };
-                require(outer_throat.height > 1.5 * thickness, || {
-                    format!(
-                        "the rib ({:.1} mm) is too thick for the {:.1} mm high throat of the \
-                         first partial volute",
-                        thickness * 1e3,
-                        outer_throat.height * 1e3
-                    )
-                })?;
-                let nose_ratio = setup.rib_nose_ratio.resolve(|| 1.0);
-                require((1.0..=5.0).contains(&nose_ratio), || {
-                    format!("the nose ratio of the rib must lie between 1 and 5, got {nose_ratio}")
-                })?;
-                let ratio = setup.channel_area_ratio.resolve(|| 1.0);
-                require((0.8..=3.0).contains(&ratio), || {
-                    format!(
-                        "the area ratio of the outer channel must lie between 0.8 and 3, \
-                         got {ratio}"
-                    )
-                })?;
-                Some(Rib {
-                    wrap,
-                    start,
-                    length,
-                    thickness,
-                    nose_ratio,
-                    outer_throat,
-                    channel_inlet_area: outer_throat.area - section.area(thickness),
-                    channel_outlet_area: outer_throat.area * ratio,
-                    compensation_start,
-                })
-            }
-        };
         // Both channels feed the discharge diffuser.
         let discharge_area = throat.area + rib.map_or(0.0, |r| r.channel_outlet_area);
         let diffuser = Self::discharge(basis, &input.diffuser, flow, discharge_area)?;
@@ -1688,6 +1808,7 @@ impl VoluteDesign {
             momentum_constant,
             throat_corrected: input.spiral.cutwater_correction,
             straight: rib_wrap.map(|_| section),
+            free_double,
             development,
         })
     }
@@ -1860,15 +1981,33 @@ impl VoluteDesign {
     /// The straight walls of a double volute in closed form; for a single volute, those
     /// of its first definition, or rectangles.
     fn shape(&self) -> Shape {
-        self.straight.unwrap_or(Shape {
-            slope: self.cross_sections.definitions()[0]
-                .shape
-                .straight_cone_angle()
-                .unwrap_or(0.0)
-                .tan(),
-            b3: self.inlet_width,
-            rz: self.stagnation_radius,
+        self.straight.clone().unwrap_or_else(|| {
+            Shape::closed(
+                self.cross_sections.definitions()[0]
+                    .shape
+                    .straight_cone_angle()
+                    .unwrap_or(0.0)
+                    .tan(),
+                self.inlet_width,
+                self.stagnation_radius,
+            )
         })
+    }
+
+    /// The sizes of a double volute whose sections the rib cuts, if it is one.
+    pub fn free_double(&self) -> Option<&FreeDouble> {
+        self.free_double.as_ref()
+    }
+
+    /// The height of the inner face of the rib above r'_z at wrap `angle`, m: that of the
+    /// inner volute, where there is one.
+    pub fn rib_height(&self, angle: f64) -> Result<f64, DesignError> {
+        match (&self.rib, &self.free_double) {
+            (Some(rib), _) if angle <= rib.start => Ok(0.0),
+            (Some(_), Some(table)) => Ok(table.row_at(angle).inner_height),
+            (Some(_), None) => Ok(self.section(angle)?.height),
+            (None, _) => Ok(0.0),
+        }
     }
 
     /// Flow angle α₃′ at the cutwater at another operating point, rad: c₃m grows with
@@ -1896,6 +2035,10 @@ impl VoluteDesign {
     pub fn section(&self, angle: f64) -> Result<SectionSize, DesignError> {
         let e3 = self.cutwater_thickness;
         match &self.rib {
+            Some(rib) if angle > rib.start && self.free_double.is_some() => {
+                let table = self.free_double.as_ref().expect("checked");
+                Ok(table.inner_size(angle, self.stagnation_radius))
+            }
             Some(rib) if angle > rib.start => {
                 self.partial_section(angle - rib.start, rib.wrap, e3, None)
             }
@@ -2782,13 +2925,42 @@ mod tests {
             v.cross_section = CrossSectionInput::single(SectionShape::round());
         })
         .unwrap();
-        assert!(d.warnings.iter().any(|w| w.contains("straight walls")));
+        assert!(
+            d.warnings
+                .iter()
+                .any(|w| w.contains("straight, radius based"))
+        );
         assert_eq!(
             d.cross_sections.definitions()[0].shape,
             SectionShape::default()
         );
         let d = double_with(|_| {}).unwrap();
-        assert!(d.warnings.iter().all(|w| !w.contains("straight walls")));
+        assert!(
+            d.warnings
+                .iter()
+                .all(|w| !w.contains("straight, radius based"))
+        );
+        // Radius based, line segment and Bézier sections are kept as they are.
+        for shape in [
+            SectionShape::symmetric(SideShape::RadiusBased(Default::default())),
+            SectionShape::symmetric(SideShape::LineSegments {
+                points: section::default_segments(),
+            }),
+            SectionShape::symmetric(SideShape::Bezier(Default::default())),
+        ] {
+            let d = double_with(|v| {
+                v.cross_section = CrossSectionInput::single(shape.clone());
+            })
+            .unwrap();
+            assert_eq!(d.cross_sections.definitions()[0].shape, shape);
+            assert!(d.free_double().is_some());
+            assert!(
+                d.warnings
+                    .iter()
+                    .all(|w| !w.contains("straight, radius based"))
+            );
+            assert!(d.throat.area > 0.0 && d.throat.height > 0.0);
+        }
         // A widening outer channel, against the first throat.
         let d = double_with(|v| v.setup.channel_area_ratio = Param::Manual(1.5)).unwrap();
         let rib = d.rib.unwrap();
