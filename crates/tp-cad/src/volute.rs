@@ -1989,4 +1989,34 @@ mod tests {
             },
         );
     }
+
+    #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
+    fn a_single_volute_of_radius_and_segment_sections_gives_a_valid_flow_domain() {
+        let _slot = crate::test_slot::take();
+        use tp_design::volute::{RadiusSide, SideShape, section};
+        for (name, shape) in [
+            (
+                "radius based",
+                SectionShape::symmetric(SideShape::RadiusBased(RadiusSide::default())),
+            ),
+            (
+                "line segments",
+                SectionShape::symmetric(SideShape::LineSegments {
+                    points: section::default_segments(),
+                }),
+            ),
+        ] {
+            let input = VoluteInput {
+                cross_section: CrossSectionInput::single(shape),
+                ..VoluteInput::default()
+            };
+            let g = VoluteGeometry::build(&basis(), &input).unwrap();
+            let cad = build_volute(&g).unwrap();
+            assert!(cad.fluid.is_valid(), "{name}");
+            assert_eq!(cad.fluid.solid_count(), 1, "{name}");
+            assert_eq!(cad.channel.solid_count(), 1, "{name}");
+            assert!(cad.warnings.is_empty(), "{name}: {:?}", cad.warnings);
+        }
+    }
 }
