@@ -11,7 +11,7 @@
 //! of the diffuser and is open toward the impeller.
 
 use tp_design::impeller::edge::EdgeShape;
-use tp_design::volute::VoluteGeometry;
+use tp_design::volute::{CutwaterShape, VoluteGeometry};
 use tp_math::{DVec2, DVec3};
 
 use crate::CadError;
@@ -187,7 +187,46 @@ pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
     // channel so the two solids overlap.
     let ring = occ::revolve_z(&occ::planar_face(&profile_wire(&g.inlet_profile())?)?)?;
 
-    // The body of a rounded cutwater and the rib of a double volute are carved out of
+    // A failed fusion may still give one valid solid that lost a piece: the channel must
+    // keep about the volume of its pieces, which only overlap where the spiral reaches
+    // into the diffuser, and the flow domain most of the ring besides (quick estimates).
+    // The channel and the flow domain may each need their own gap.
+    let pieces: f64 = lofts.iter().map(|l| l.volume_with_tolerance(0.0)).sum();
+    let ring_volume = ring.volume_with_tolerance(0.0);
+    let whole = |channel: &Shape| channel.volume_with_tolerance(0.0) > 0.9 * pieces;
+    let mut joined = first_sound(
+        |fuzzy| occ::fuse_all_fuzzy(&lofts, fuzzy),
+        |channel| channel.is_valid() && channel.solid_count() == 1 && whole(channel),
+        |channel| channel.fixed().ok(),
+    )?;
+
+    // A fillet cutwater is the union as it is, its intersection edge rounded by the
+    // kernel; where the kernel cannot, the body of a rounded cutwater is cut as for
+    // that shape.
+    let mut notes = Vec::new();
+    let mut kernel_rounded = false;
+    if matches!(g.design.cutwater_shape, CutwaterShape::Fillet { .. }) && g.design.rib.is_none() {
+        let radius = g.design.nose_radius * MM;
+        match fillet_tip(&joined, &lofts, g, radius) {
+            Some((rounded, r)) => {
+                joined = rounded;
+                kernel_rounded = true;
+                if r < radius * (1.0 - 1e-9) {
+                    notes.push(format!(
+                        "the cutwater is rounded with {r:.1} mm, the most the CAD kernel takes \
+                         there"
+                    ));
+                }
+            }
+            None => notes.push(
+                "the CAD kernel could not round the cutwater edge: the body of a rounded \
+                 cutwater is cut instead"
+                    .to_owned(),
+            ),
+        }
+    }
+
+    // The body of a rounded cutwater (unless the kernel rounded it) and the rib of a double volute are carved out of
     // the flow domain across the whole height of the volute, each lofted through its
     // outlines plane by plane.
     let zs = g.rings().into_iter().flatten().map(|p| p.z);
@@ -198,7 +237,9 @@ pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
     // Each tool with the points its cut must leave on the surface of the channel and
     // of the ring.
     let mut tools: Vec<(Shape, Vec<DVec3>, Vec<DVec3>)> = Vec::new();
-    if let Some(body) = cutwater_body(g, (z_lo - margin) * MM, (z_hi + margin) * MM)? {
+    if !kernel_rounded
+        && let Some(body) = cutwater_body(g, (z_lo - margin) * MM, (z_hi + margin) * MM)?
+    {
         let (faces, noses) = cutwater_probes(g);
         tools.push((body, faces, noses));
     }
@@ -206,18 +247,6 @@ pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
         tools.push((rib, rib_probes(g), Vec::new()));
     }
 
-    // A failed fusion may still give one valid solid that lost a piece: the channel must
-    // keep about the volume of its pieces, which only overlap where the spiral reaches
-    // into the diffuser, and the flow domain most of the ring besides (quick estimates).
-    // The channel and the flow domain may each need their own gap.
-    let pieces: f64 = lofts.iter().map(|l| l.volume_with_tolerance(0.0)).sum();
-    let ring_volume = ring.volume_with_tolerance(0.0);
-    let whole = |channel: &Shape| channel.volume_with_tolerance(0.0) > 0.9 * pieces;
-    let joined = first_sound(
-        |fuzzy| occ::fuse_all_fuzzy(&lofts, fuzzy),
-        |channel| channel.is_valid() && channel.solid_count() == 1 && whole(channel),
-        |channel| channel.fixed().ok(),
-    )?;
     // The cutwater and the rib come out of the channel and of the ring apart, before
     // they are joined: the ring needs a gap to join some channels (external round
     // sections), and the body of the cutwater no longer cuts cleanly out of that
@@ -289,7 +318,7 @@ pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
                     return Ok(VoluteCad {
                         channel,
                         fluid,
-                        warnings: Vec::new(),
+                        warnings: notes,
                     });
                 }
                 plain.get_or_insert(fluid);
@@ -316,7 +345,7 @@ pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
             return Ok(VoluteCad {
                 channel,
                 fluid,
-                warnings: Vec::new(),
+                warnings: notes,
             });
         }
         plain.get_or_insert(fluid);
@@ -343,7 +372,8 @@ pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
     let fluid = plain
         .or(built)
         .ok_or_else(|| CadError::Operation("the flow domain of the volute failed".into()))?;
-    let warnings = vec![warning];
+    notes.push(warning);
+    let warnings = notes;
     Ok(VoluteCad {
         channel,
         fluid,
@@ -809,6 +839,82 @@ fn groove_edges(whole: &Shape, pieces: &[Shape], g: &VoluteGeometry) -> (Vec<usi
         }
     }
     (all, across)
+}
+
+/// The edges of the flow domain `whole`, the fused lofts `pieces`, along the cutwater: the
+/// edges the fusion made (no loft has them) within reach of the tip, where the outer
+/// wall of the spiral meets the inner wall of the diffuser.
+fn tip_edges(whole: &Shape, pieces: &[Shape], g: &VoluteGeometry) -> Vec<usize> {
+    const SAMPLES: usize = 17;
+    let lofted: Vec<Vec<DVec3>> = pieces
+        .iter()
+        .flat_map(|p| p.edge_samples(4 * SAMPLES))
+        .filter(|e| !e.is_empty())
+        .collect();
+    let off_the_lofts = |p: DVec3| {
+        lofted
+            .iter()
+            .flat_map(|e| e.windows(2))
+            .map(|w| {
+                let (a, b) = (w[0], w[1]);
+                let t = ((p - a).dot(b - a) / (b - a).length_squared().max(1e-24)).clamp(0.0, 1.0);
+                p.distance(a + (b - a) * t)
+            })
+            .fold(f64::INFINITY, f64::min)
+    };
+    let tip = g.cutwater.tip * MM;
+    let reach = 10.0 * g.design.wall_thickness * MM;
+    whole
+        .edge_samples(SAMPLES)
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| {
+            !e.is_empty()
+                && e.iter()
+                    .all(|p| p.truncate().distance(tip.truncate()) < reach)
+                && off_the_lofts(e[SAMPLES / 2]) >= 0.01
+        })
+        .map(|(k, _)| k)
+        .collect()
+}
+
+/// `channel` with its cutwater edge rounded by the kernel, and the radius it took, mm: the
+/// edges of the tip that run across the height, with `radius` or a part of it if this
+/// one is too much; `None` if the kernel builds nothing sound.
+fn fillet_tip(
+    channel: &Shape,
+    pieces: &[Shape],
+    g: &VoluteGeometry,
+    radius: f64,
+) -> Option<(Shape, f64)> {
+    let samples = channel.edge_samples(17);
+    let across: Vec<usize> = tip_edges(channel, pieces, g)
+        .into_iter()
+        .filter(|&k| {
+            let e = &samples[k];
+            let length: f64 = e.windows(2).map(|w| w[0].distance(w[1])).sum();
+            let (lo, hi) = e
+                .iter()
+                .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| {
+                    (lo.min(p.z), hi.max(p.z))
+                });
+            hi - lo > 0.5 * length
+        })
+        .collect();
+    if across.is_empty() || radius <= 0.0 {
+        return None;
+    }
+    let before = channel.volume_with_tolerance(0.0);
+    [1.0, 0.75, 0.5, 0.25].into_iter().find_map(|share| {
+        let r = share * radius;
+        channel
+            .filleted(&across, r)
+            .ok()
+            .filter(|f| {
+                f.is_valid() && f.solid_count() == 1 && f.volume_with_tolerance(0.0) > before
+            })
+            .map(|f| (f, r))
+    })
 }
 
 /// `whole` with the groove over the cutwater filled and rounded with `radius`, mm, and
@@ -1879,5 +1985,64 @@ mod tests {
                 straight_wall: StraightWall::Centered,
             },
         );
+    }
+    #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
+    fn a_fillet_cutwater_is_rounded_by_the_kernel_without_a_body() {
+        use tp_design::volute::CutwaterShape;
+        let _slot = crate::test_slot::take();
+        let fluid = |shape: CutwaterShape| {
+            let mut input = VoluteInput::default();
+            input.cutwater.shape = shape;
+            let g = VoluteGeometry::build(&basis(), &input).unwrap();
+            build_volute(&g).unwrap()
+        };
+        let sharp = fluid(CutwaterShape::Sharp);
+        let mut input = VoluteInput::default();
+        input.cutwater.shape = CutwaterShape::Fillet {
+            radius: tp_design::Param::Auto,
+        };
+        let g = VoluteGeometry::build(&basis(), &input).unwrap();
+        let fillet = build_volute(&g).unwrap();
+        // The casing round it is one valid solid too.
+        let casing = build_volute_casing(&g, &fillet).unwrap();
+        assert!(casing.solid.is_valid() && casing.solid.solid_count() == 1);
+        // Rounded by the kernel as asked, with nothing to say.
+        assert!(fillet.warnings.is_empty(), "{:?}", fillet.warnings);
+        for s in [&fillet.channel, &fillet.fluid] {
+            assert!(s.is_valid());
+            assert_eq!(s.solid_count(), 1);
+        }
+        // The round adds a sliver of flow at the tip of the sharp edge.
+        let (sharp, fillet) = (sharp.fluid_volume(), fillet.fluid_volume());
+        assert!(
+            fillet > sharp && fillet < sharp * 1.01,
+            "{fillet} vs {sharp}"
+        );
+    }
+
+    #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
+    fn a_fillet_cutwater_falls_back_to_the_body_where_the_kernel_cannot_round() {
+        use tp_design::volute::CutwaterShape;
+        let _slot = crate::test_slot::take();
+        let mut input = VoluteInput {
+            cross_section: CrossSectionInput::single(SectionShape::round()),
+            ..VoluteInput::default()
+        };
+        input.cutwater.shape = CutwaterShape::Fillet {
+            radius: tp_design::Param::Auto,
+        };
+        let g = VoluteGeometry::build(&basis(), &input).unwrap();
+        let cad = build_volute(&g).unwrap();
+        assert!(
+            cad.warnings.iter().any(|w| w.contains("could not round")),
+            "{:?}",
+            cad.warnings
+        );
+        for s in [&cad.channel, &cad.fluid] {
+            assert!(s.is_valid());
+            assert_eq!(s.solid_count(), 1);
+        }
     }
 }
