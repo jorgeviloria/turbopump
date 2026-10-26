@@ -797,10 +797,17 @@ fn measures(ui: &mut Ui, g: &VoluteGeometry, band: Option<(f64, f64)>, units: &D
         },
         tr("Effective cutwater diameter").to_owned(),
         show(QuantityKind::Length, effective),
-        tf(
-            "designed d_z {}",
-            &[&show(QuantityKind::Length, d.cutwater_diameter)],
-        ),
+        if effective >= d.cutwater_diameter * (1.0 - 1e-4) {
+            tf(
+                "designed d_z {}",
+                &[&show(QuantityKind::Length, d.cutwater_diameter)],
+            )
+        } else {
+            tf(
+                "fix: the nose reaches inside d_z {}; lower the obliquity or the side radius",
+                &[&show(QuantityKind::Length, d.cutwater_diameter)],
+            )
+        },
     ));
     // Gap B to the impeller, against Table 10.2.
     let gap = d.cutwater_diameter / d2 - 1.0;
@@ -813,10 +820,20 @@ fn measures(ui: &mut Ui, g: &VoluteGeometry, band: Option<(f64, f64)>, units: &D
         },
         tr("Gap d_z/d₂ − 1").to_owned(),
         percent(gap),
-        tf(
-            "at least {} against pulsations (Gülich Table 10.2); past 10 % it costs about 1 % of efficiency (p. 421)",
-            &[&percent(least)],
-        ),
+        if d.cutwater_diameter >= d.min_cutwater_diameter * (1.0 - 1e-9) {
+            tf(
+                "at least {} against pulsations (Gülich Table 10.2); past 10 % it costs about 1 % of efficiency (p. 421)",
+                &[&percent(least)],
+            )
+        } else {
+            tf(
+                "fix: raise d_z to {}, the least that gives the gap {} against pulsations (Gülich Table 10.2)",
+                &[
+                    &show(QuantityKind::Length, d.min_cutwater_diameter),
+                    &percent(least),
+                ],
+            )
+        },
     ));
     if g.cutwater.radius > 0.0 {
         let e = 2.0 * g.cutwater.radius;
@@ -829,7 +846,14 @@ fn measures(ui: &mut Ui, g: &VoluteGeometry, band: Option<(f64, f64)>, units: &D
             },
             tr("Thinnest body").to_owned(),
             show(QuantityKind::Length, thin),
-            tf("the nose {}: no neck", &[&show(QuantityKind::Length, e)]),
+            if thin >= e * (1.0 - 2e-3) {
+                tf("the nose {}: no neck", &[&show(QuantityKind::Length, e)])
+            } else {
+                tf(
+                    "fix: thinner than the nose {}, a neck; reduce the side radius or enlarge the nose",
+                    &[&show(QuantityKind::Length, e)],
+                )
+            },
         ));
         let ratio = e / d.cutwater_diameter;
         rows.push((
@@ -852,13 +876,23 @@ fn measures(ui: &mut Ui, g: &VoluteGeometry, band: Option<(f64, f64)>, units: &D
         },
         tr("Incidence i₃ at design").to_owned(),
         show(QuantityKind::Angle, incidence),
-        tf(
-            "α₃B {} against α₃′ {}; ±3° (eq. T7.7.6)",
-            &[
-                &show(QuantityKind::Angle, d.cutwater_angle),
-                &show(QuantityKind::Angle, d.cutwater_flow_angle),
-            ],
-        ),
+        if incidence.abs() <= 3f64.to_radians() + 1e-12 {
+            tf(
+                "α₃B {} against α₃′ {}; ±3° (eq. T7.7.6)",
+                &[
+                    &show(QuantityKind::Angle, d.cutwater_angle),
+                    &show(QuantityKind::Angle, d.cutwater_flow_angle),
+                ],
+            )
+        } else {
+            tf(
+                "fix: set the cutwater angle α₃B to the flow angle {}, against α₃B {} now; ±3° (eq. T7.7.6)",
+                &[
+                    &show(QuantityKind::Angle, d.cutwater_flow_angle),
+                    &show(QuantityKind::Angle, d.cutwater_angle),
+                ],
+            )
+        },
     ));
     if let Some((lo, hi)) = band {
         rows.push((
@@ -869,7 +903,11 @@ fn measures(ui: &mut Ui, g: &VoluteGeometry, band: Option<(f64, f64)>, units: &D
             },
             tr("Within ±3°").to_owned(),
             format!("q* {lo:.2}–{hi:.2}"),
-            tr("the flow range over which the flow meets the cutwater within ±3°; it comes flatter at part load (Gülich Fig. 9.20)").to_owned(),
+            if lo < 0.8 && hi > 1.2 {
+                tr("the flow range over which the flow meets the cutwater within ±3°; it comes flatter at part load (Gülich Fig. 9.20)").to_owned()
+            } else {
+                tr("fix: the flow meets the cutwater within ±3° over too narrow a range; change the cutwater angle α₃B or the spiral start").to_owned()
+            },
         ));
     }
     if g.cutwater.radius > 0.0 {
@@ -904,19 +942,67 @@ fn measures(ui: &mut Ui, g: &VoluteGeometry, band: Option<(f64, f64)>, units: &D
             None => tr("the walls do not cross in every plane: the spiral starts where it clears the diffuser").to_owned(),
         },
     ));
-    let (wedge_lo, wedge_hi) = range(slices, |s| s.wedge);
-    let degrees = |a: f64| units.to_display(QuantityKind::Angle, a);
-    rows.push((
-        Check::Info,
-        tr("Wedge across the width").to_owned(),
-        format!(
-            "{:.1}–{:.1} {}",
-            degrees(wedge_lo),
-            degrees(wedge_hi),
-            units.get(QuantityKind::Angle).symbol
-        ),
-        tr("angle between the spiral and the diffuser wall where they cross").to_owned(),
-    ));
+    if let Some(v) = g.cutwater_values() {
+        rows.push((
+            Check::Info,
+            tr("Cutwater diameter in / out / mean").to_owned(),
+            format!(
+                "{} / {} / {}",
+                show(QuantityKind::Length, v.diameter.lower),
+                show(QuantityKind::Length, v.diameter.upper),
+                show(QuantityKind::Length, v.diameter.mean)
+            ),
+            tf(
+                "lower side / upper side / mean of the planes; the least, dMin, is {} above",
+                &[&show(QuantityKind::Length, v.least_diameter)],
+            ),
+        ));
+        rows.push((
+            Check::Info,
+            tr("Cutwater angle in / out / mean").to_owned(),
+            format!(
+                "{} / {} / {}",
+                show(QuantityKind::Angle, v.angle.lower),
+                show(QuantityKind::Angle, v.angle.upper),
+                show(QuantityKind::Angle, v.angle.mean)
+            ),
+            tr("angle between the spiral and the diffuser wall at the tip, lower side / upper side / mean of the planes").to_owned(),
+        ));
+        rows.push((
+            Check::Info,
+            tr("Cutwater position φC,1").to_owned(),
+            show(QuantityKind::Angle, v.position),
+            tr("wrap angle of the tip, from the start of the volute").to_owned(),
+        ));
+        for (label, section, note) in [
+            (
+                tr("Equivalent diameter D, cutwater section"),
+                v.start,
+                tr("the start of the spiral, where the cutwater ends"),
+            ),
+            (
+                tr("Equivalent diameter D, throat"),
+                v.throat,
+                tr("the first section of the discharge diffuser"),
+            ),
+            (
+                tr("Equivalent diameter D, outlet"),
+                v.outlet,
+                tr("the last section of the discharge diffuser"),
+            ),
+        ] {
+            rows.push((
+                Check::Info,
+                label.to_owned(),
+                format!(
+                    "{} · A {}",
+                    show(QuantityKind::Length, section.equivalent_diameter),
+                    show(QuantityKind::Area, section.area)
+                ),
+                note.to_owned(),
+            ));
+        }
+    }
     if d.development.law.velocity_based() {
         rows.push((
             Check::Info,

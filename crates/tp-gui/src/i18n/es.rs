@@ -6,6 +6,71 @@
 
 /// English text → Spanish text.
 pub(super) static TEXTS: &[(&str, &str)] = &[
+    (
+        "Cutwater diameter in / out / mean",
+        "Diámetro del corte de agua entrada / salida / media",
+    ),
+    (
+        "lower side / upper side / mean of the planes; the least, dMin, is {} above",
+        "cara inferior / cara superior / media de los planos; el mínimo, dMin, es {} (fila de arriba)",
+    ),
+    (
+        "Cutwater angle in / out / mean",
+        "Ángulo del corte de agua entrada / salida / media",
+    ),
+    (
+        "angle between the spiral and the diffuser wall at the tip, lower side / upper side / mean of the planes",
+        "ángulo entre la pared de la espiral y la del difusor en la punta, cara inferior / cara superior / media de los planos",
+    ),
+    ("Cutwater position φC,1", "Posición del corte de agua φC,1"),
+    (
+        "wrap angle of the tip, from the start of the volute",
+        "ángulo de envoltura de la punta, desde el inicio de la voluta",
+    ),
+    (
+        "Equivalent diameter D, cutwater section",
+        "Diámetro equivalente D, sección del corte de agua",
+    ),
+    (
+        "the start of the spiral, where the cutwater ends",
+        "el inicio de la espiral, donde acaba el corte de agua",
+    ),
+    (
+        "Equivalent diameter D, throat",
+        "Diámetro equivalente D, garganta",
+    ),
+    (
+        "the first section of the discharge diffuser",
+        "la primera sección del difusor de descarga",
+    ),
+    (
+        "Equivalent diameter D, outlet",
+        "Diámetro equivalente D, salida",
+    ),
+    (
+        "the last section of the discharge diffuser",
+        "la última sección del difusor de descarga",
+    ),
+    (
+        "fix: raise d_z to {}, the least that gives the gap {} against pulsations (Gülich Table 10.2)",
+        "solución: sube d_z a {}, lo mínimo para que el hueco sea {} contra pulsaciones (Gülich Tabla 10.2)",
+    ),
+    (
+        "fix: set the cutwater angle α₃B to the flow angle {}, against α₃B {} now; ±3° (eq. T7.7.6)",
+        "solución: fija el ángulo del corte de agua α₃B en el ángulo del flujo {}, frente al α₃B {} actual; ±3° (ec. T7.7.6)",
+    ),
+    (
+        "fix: the nose reaches inside d_z {}; lower the obliquity or the side radius",
+        "solución: la nariz entra dentro de d_z {}; baja la oblicuidad o el radio lateral",
+    ),
+    (
+        "fix: thinner than the nose {}, a neck; reduce the side radius or enlarge the nose",
+        "solución: más fino que la nariz {}, un cuello; reduce el radio lateral o agranda la nariz",
+    ),
+    (
+        "fix: the flow meets the cutwater within ±3° over too narrow a range; change the cutwater angle α₃B or the spiral start",
+        "solución: el flujo llega al corte de agua dentro de ±3° en un rango demasiado estrecho; cambia el ángulo del corte de agua α₃B o el inicio de la espiral",
+    ),
     ("Nose shape", "Forma de la nariz"),
     (
         "As a blade edge on a body as thick as the nose: elliptic (round by default; Gülich asks for an elliptic profile), tapered, Bézier or blunt. Its pressure face is the diffuser side",

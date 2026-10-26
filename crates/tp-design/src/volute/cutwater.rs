@@ -1418,6 +1418,29 @@ mod tests {
     }
 
     #[test]
+    fn the_cutwater_values_follow_the_planes_and_the_sections() {
+        let g = build(|_| {});
+        let v = g.cutwater_values().unwrap();
+        // The least nose diameter is the effective one, and the planes bracket the mean.
+        let least = g
+            .cutwater_slices
+            .iter()
+            .map(|s| 2.0 * s.nose_distance)
+            .fold(f64::INFINITY, f64::min);
+        assert!((v.least_diameter - least).abs() < 1e-15);
+        assert!(v.least_diameter <= v.diameter.mean + 1e-15);
+        assert!(v.diameter.lower.min(v.diameter.upper) >= v.least_diameter - 1e-15);
+        // Equivalent diameters are the circles of the sections' areas.
+        for s in [v.start, v.throat, v.outlet] {
+            let circle = std::f64::consts::PI * s.equivalent_diameter * s.equivalent_diameter / 4.0;
+            assert!((circle - s.area).abs() < 1e-12 * s.area.max(1.0));
+        }
+        // The cutwater section is the start of the spiral.
+        assert!((v.start.area - g.sections[0].size.area).abs() < 1e-15);
+        assert!((v.position - g.cutwater.angle).abs() < 1e-15);
+    }
+
+    #[test]
     fn the_nose_takes_any_edge_shape() {
         use crate::impeller::edge::EdgeShape;
         let round = build(|_| {});

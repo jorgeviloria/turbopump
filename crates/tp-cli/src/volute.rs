@@ -890,6 +890,31 @@ fn print_report(name: &str, id: ComponentId, g: &VoluteGeometry, units: &Display
             s(Angle, wedge_hi),
             s(Length, near)
         );
+        if let Some(v) = g.cutwater_values() {
+            println!(
+                "           diameter lower / upper / mean {} / {} / {} (dMin {}), angle {} / {} / {}, \
+                 position φC,1 {}",
+                s(Length, v.diameter.lower),
+                s(Length, v.diameter.upper),
+                s(Length, v.diameter.mean),
+                s(Length, v.least_diameter),
+                s(Angle, v.angle.lower),
+                s(Angle, v.angle.upper),
+                s(Angle, v.angle.mean),
+                s(Angle, v.position)
+            );
+            for (label, f) in [
+                ("cutwater section", v.start),
+                ("throat", v.throat),
+                ("outlet", v.outlet),
+            ] {
+                println!(
+                    "           {label}: equivalent diameter D {}, area A {}",
+                    s(Length, f.equivalent_diameter),
+                    s(Area, f.area)
+                );
+            }
+        }
         if c.radius > 0.0 {
             let (thin, _) = range(&|c| c.min_thickness);
             let (join_lo, join_hi) = range(&|c| c.join_length);

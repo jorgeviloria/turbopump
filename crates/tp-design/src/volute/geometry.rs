@@ -227,7 +227,84 @@ const BODY_STEPS: usize = 4;
 /// that the solids overlap where they meet, rad.
 const CHANNEL_OVERLAP: f64 = 1.5 * std::f64::consts::PI / 180.0;
 
+/// A value at the lower side of the cutwater (the lowest plane), at its upper side (the
+/// highest) and their mean over the planes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AcrossWidth {
+    pub lower: f64,
+    pub upper: f64,
+    pub mean: f64,
+}
+
+/// A flow cross section by its area and the diameter of the circle of that area.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FlowSection {
+    /// Equivalent diameter √(4A/π), m.
+    pub equivalent_diameter: f64,
+    /// m²
+    pub area: f64,
+}
+
+impl FlowSection {
+    fn of(area: f64) -> Self {
+        Self {
+            equivalent_diameter: (4.0 * area / std::f64::consts::PI).sqrt(),
+            area,
+        }
+    }
+}
+
+/// The values beside the cutwater that the design shows, from the planes and the flow
+/// sections as built. The cutwater section is the start of the spiral: the cutwater
+/// fills the space before it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CutwaterValues {
+    /// Diameter of the nose circle in each plane, 2·nose distance, m.
+    pub diameter: AcrossWidth,
+    /// The least nose diameter over the planes, m: the effective cutwater diameter.
+    pub least_diameter: f64,
+    /// Wedge angle at the tip in each plane, rad.
+    pub angle: AcrossWidth,
+    /// Wrap angle of the tip in the midplane, rad (the cutwater position φC).
+    pub position: f64,
+    /// Start of the spiral, the cutwater section.
+    pub start: FlowSection,
+    /// Throat, the first section of the discharge diffuser.
+    pub throat: FlowSection,
+    /// Outlet of the discharge diffuser.
+    pub outlet: FlowSection,
+}
+
 impl VoluteGeometry {
+    /// The values beside the cutwater; `None` where the design has no planes or
+    /// sections to take them from.
+    pub fn cutwater_values(&self) -> Option<CutwaterValues> {
+        let slices = &self.cutwater_slices;
+        let lower = slices.iter().min_by(|a, b| a.z.total_cmp(&b.z))?;
+        let upper = slices.iter().max_by(|a, b| a.z.total_cmp(&b.z))?;
+        let mean = |f: fn(&CutwaterSlice) -> f64| {
+            slices.iter().map(f).sum::<f64>() / slices.len() as f64
+        };
+        let across = |f: fn(&CutwaterSlice) -> f64| AcrossWidth {
+            lower: f(lower),
+            upper: f(upper),
+            mean: mean(f),
+        };
+        let least = slices
+            .iter()
+            .map(|s| s.nose_distance)
+            .fold(f64::INFINITY, f64::min);
+        Some(CutwaterValues {
+            diameter: across(|s| 2.0 * s.nose_distance),
+            least_diameter: 2.0 * least,
+            angle: across(|s| s.wedge),
+            position: self.cutwater.angle,
+            start: FlowSection::of(self.sections.first()?.size.area),
+            throat: FlowSection::of(self.nozzle.first()?.area),
+            outlet: FlowSection::of(self.nozzle.last()?.area),
+        })
+    }
+
     /// Smooth outline in the midplane of the material a rounded cutwater adds to the
     /// sharp wedge: from where it joins the spiral wall, round the nose, to where it
     /// joins the diffuser wall, the chord back closing it inside the wedge. Empty unless

@@ -40,7 +40,9 @@ use crate::{DesignError, Param};
 use tp_units::STANDARD_GRAVITY;
 
 pub use cutwater::CutwaterSlice;
-pub use geometry::{NozzleSection, RibPlane, VoluteGeometry, VoluteSection};
+pub use geometry::{
+    AcrossWidth, CutwaterValues, FlowSection, NozzleSection, RibPlane, VoluteGeometry, VoluteSection,
+};
 pub use section::{
     BendWall, BezierBase, BezierSide, CrossSectionInput, CrossSections, DEFAULT_CONE_ANGLE_DEG,
     ExternalRound, InnerPosition, InternalRound, Measure, RadiusSide, SectionDefinition,
