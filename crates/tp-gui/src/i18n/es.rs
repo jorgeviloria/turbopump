@@ -3061,8 +3061,8 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Ángulo de la voluta interior ε_sp",
     ),
     (
-        "From the rib nose to the throat; 180°, or 170° with an even number of blades (Gülich Chap. 7.8.1)",
-        "De la nariz del nervio a la garganta; 180°, o 170° con un número par de álabes (Gülich cap. 7.8.1)",
+        "From the rib nose to the throat. The nose is always 180° from the cutwater (automatic); Gülich advises 165° to 170° with an even number of blades (Chap. 7.8.1), which can be set by hand",
+        "Del morro del nervio a la garganta. El morro está siempre a 180° del corte de agua (automático); Gülich aconseja de 165° a 170° con un número par de álabes (cap. 7.8.1), que se puede fijar a mano",
     ),
     ("Rib thickness", "Espesor del nervio"),
     (
@@ -4615,10 +4615,6 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
     (
         "the inner volute wraps {}°: past 180° the long outer channel adds losses and radial force at overload (Gülich Chap. 7.8.1)",
         "la voluta interior abarca {}°: pasados 180° el canal exterior largo añade pérdidas y empuje radial en sobrecarga (Gülich cap. 7.8.1)",
-    ),
-    (
-        "with {} blades and a rib at 180° two blades pass the cutwaters at once: Gülich advises 165° to 170° (Chap. 7.8.1)",
-        "con {} álabes y un nervio a 180° dos álabes pasan por los cortes de agua a la vez: Gülich aconseja de 165° a 170° (cap. 7.8.1)",
     ),
     (
         "the volute loses {} m at the design point, more than the {} m of all the hydraulic losses: check the volute",

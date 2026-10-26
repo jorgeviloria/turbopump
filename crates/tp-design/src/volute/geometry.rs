@@ -617,6 +617,44 @@ impl VoluteGeometry {
         self.cutwater.mean_angle() - self.design.cutwater_flow_angle
     }
 
+    /// The height range (z_min, z_max), m, of the whole section of a double volute at the
+    /// point of wrap angle `angle` from the cutwater (rad, 0 to 2π) and radius `r` from
+    /// the pump axis: the channel the rib sits in. The sections are blended between their
+    /// angles; before the rib nose it is the first one. `None` for a single volute or
+    /// where the radius is outside the section.
+    pub fn envelope_z_range(&self, angle: f64, r: f64) -> Option<(f64, f64)> {
+        let at = |s: &VoluteSection| -> Option<(f64, f64)> {
+            let mut range: Option<(f64, f64)> = None;
+            let n = s.outline.len();
+            for i in 0..n {
+                let (a, b) = (s.outline[i], s.outline[(i + 1) % n]);
+                if (a.x - r) * (b.x - r) > 0.0 || (b.x - a.x).abs() < 1e-15 {
+                    continue;
+                }
+                let z = a.y + (b.y - a.y) * (r - a.x) / (b.x - a.x);
+                range = Some(range.map_or((z, z), |(lo, hi)| (lo.min(z), hi.max(z))));
+            }
+            range
+        };
+        let sections = &self.envelope;
+        let (first, last) = (sections.first()?, sections.last()?);
+        if angle <= first.angle {
+            return at(first);
+        }
+        if angle >= last.angle {
+            return at(last);
+        }
+        let k = sections
+            .partition_point(|s| s.angle < angle)
+            .clamp(1, sections.len() - 1);
+        let (a, b) = (&sections[k - 1], &sections[k]);
+        let w = ((angle - a.angle) / (b.angle - a.angle)).clamp(0.0, 1.0);
+        match (at(a), at(b)) {
+            (Some((l0, h0)), Some((l1, h1))) => Some((l0 + (l1 - l0) * w, h0 + (h1 - h0) * w)),
+            (one, other) => one.or(other),
+        }
+    }
+
     /// Distance C from the pump axis to the axis of the outlet, m: 0 when the outlet
     /// stands on the line through the pump axis.
     pub fn outlet_offset(&self) -> f64 {
@@ -631,10 +669,9 @@ impl VoluteGeometry {
     pub fn outlet_angle(&self) -> f64 {
         let last = self.nozzle.last().expect("a diffuser");
         let sign = self.basis.rotation_sign;
-        let throat = self
-            .sections
-            .last()
-            .map_or(0.0, |s| s.rotation + sign * s.angle);
+        // The throat is at 2π for a single and a double volute alike (the sections of a
+        // double volute stop at the rib nose).
+        let throat = self.rotation + sign * TAU;
         let outlet = last.center.y.atan2(last.center.x);
         let turn = sign * (outlet - throat);
         turn.sin().atan2(turn.cos())
@@ -2747,6 +2784,32 @@ mod tests {
             |g: &VoluteGeometry| (g.nozzle[mid].center.z - centric.nozzle[mid].center.z) / 0.02;
         assert_relative_eq!(share(&linear), 0.5, epsilon = 1e-9);
         assert_relative_eq!(share(&quadratic), 0.25, epsilon = 1e-9);
+    }
+
+    #[test]
+    fn a_double_volute_measures_the_outlet_angle_from_its_throat_at_2pi() {
+        let single = VoluteGeometry::build(&reference_basis(), &unturned()).unwrap();
+        let mut input = unturned();
+        input.setup.kind = crate::volute::VoluteKind::Double;
+        let double = VoluteGeometry::build(&reference_basis(), &input).unwrap();
+        // Same discharge, so the same angle, whatever the sections before the throat.
+        assert_relative_eq!(double.outlet_angle(), single.outlet_angle(), epsilon = 0.05);
+    }
+
+    #[test]
+    fn the_rib_nose_of_a_double_volute_is_180_degrees_from_the_cutwater() {
+        for blades in [5, 6] {
+            let mut basis = reference_basis();
+            basis.impeller_blades = blades;
+            let mut input = unturned();
+            input.setup.kind = crate::volute::VoluteKind::Double;
+            let g = VoluteGeometry::build(&basis, &input).unwrap();
+            let rib = g.rib.as_ref().unwrap();
+            assert_relative_eq!(rib.nose_angle, PI, epsilon = 0.03);
+            // The inner volute runs from there to the throat, toward the discharge.
+            assert_relative_eq!(g.design.rib.unwrap().wrap, PI, epsilon = 1e-12);
+            assert!(g.inner_sections.iter().all(|s| s.angle > PI - 1e-9));
+        }
     }
 
     #[test]

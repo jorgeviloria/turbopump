@@ -155,8 +155,9 @@ fn setup(
                     ui,
                     tr("Inner volute wrap ε_sp"),
                     tr(
-                        "From the rib nose to the throat; 180°, or 170° with an even number of \
-                        blades (Gülich Chap. 7.8.1)",
+                        "From the rib nose to the throat. The nose is always 180° from the \
+                        cutwater (automatic); Gülich advises 165° to 170° with an even number \
+                        of blades (Chap. 7.8.1), which can be set by hand",
                     ),
                     &mut input.setup.rib_wrap,
                     Angle,

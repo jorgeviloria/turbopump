@@ -1149,16 +1149,14 @@ impl VoluteDesign {
             law => law,
         };
 
-        // A double volute: the inner volute wraps ε_sp, 180° by default and 170° with an
-        // even number of blades so that two blades never pass the cutwaters together
-        // (Gülich Chap. 7.8.1, item 1).
-        let even_blades = basis.impeller_blades.is_multiple_of(2);
+        // A double volute: the inner volute starts at the rib nose, always 180° from the
+        // cutwater, and wraps ε_sp = 180° to the throat, where the discharge is. Gülich
+        // (Chap. 7.8.1, item 1) advises 165° to 170° with an even number of blades, so
+        // that two blades never pass the cutwaters together: a manual value does that.
         let rib_wrap = match setup.kind {
             VoluteKind::Single => None,
             VoluteKind::Double => {
-                let wrap = setup
-                    .rib_wrap
-                    .resolve(|| if even_blades { 170f64.to_radians() } else { PI });
+                let wrap = setup.rib_wrap.resolve(|| PI);
                 require(
                     wrap > 90f64.to_radians() && wrap <= 240f64.to_radians(),
                     || {
@@ -1624,21 +1622,12 @@ impl VoluteDesign {
                 diffuser.allowable_angle.to_degrees()
             ));
         }
-        if let Some(r) = &rib {
-            if r.wrap > PI + 1e-9 {
-                warnings.push(format!(
-                    "the inner volute wraps {:.0}°: past 180° the long outer channel adds \
-                     losses and radial force at overload (Gülich Chap. 7.8.1)",
-                    r.wrap.to_degrees()
-                ));
-            }
-            if even_blades && (r.wrap - PI).abs() < 0.5f64.to_radians() {
-                warnings.push(format!(
-                    "with {} blades and a rib at 180° two blades pass the cutwaters at once: \
-                     Gülich advises 165° to 170° (Chap. 7.8.1)",
-                    basis.impeller_blades
-                ));
-            }
+        if let Some(r) = rib.as_ref().filter(|r| r.wrap > PI + 1e-9) {
+            warnings.push(format!(
+                "the inner volute wraps {:.0}°: past 180° the long outer channel adds \
+                 losses and radial force at overload (Gülich Chap. 7.8.1)",
+                r.wrap.to_degrees()
+            ));
         }
         if basis.nq > NO_DIFFUSION_NQ && diffuser.area_ratio > 1.05 {
             warnings.push(format!(
@@ -2738,17 +2727,22 @@ mod tests {
 
     #[test]
     fn double_volute_rib_limits() {
-        // An even blade count turns the default rib to 170°.
+        // The rib nose is always 180° from the cutwater, whatever the blade count.
         let mut basis = reference_basis();
-        basis.impeller_blades = 6;
         let mut input = VoluteInput::default();
         input.setup.kind = VoluteKind::Double;
+        for blades in [5, 6, 7, 8] {
+            basis.impeller_blades = blades;
+            let d = VoluteDesign::new(&basis, &input).unwrap();
+            let rib = d.rib.unwrap();
+            assert_relative_eq!(rib.wrap, PI, epsilon = 1e-12);
+            assert_relative_eq!(rib.start, PI, epsilon = 1e-12);
+            assert!(d.warnings.iter().all(|w| !w.contains("two blades")));
+        }
+        // 170° by hand is allowed, and 200° with a warning; 80° is not.
+        input.setup.rib_wrap = Param::Manual(170f64.to_radians());
         let d = VoluteDesign::new(&basis, &input).unwrap();
         assert_relative_eq!(d.rib.unwrap().wrap, 170f64.to_radians());
-        // 180° with six blades and 200° are allowed with a warning; 80° is not.
-        input.setup.rib_wrap = Param::Manual(PI);
-        let d = VoluteDesign::new(&basis, &input).unwrap();
-        assert!(d.warnings.iter().any(|w| w.contains("two blades")));
         let d = double_with(|v| v.setup.rib_wrap = Param::Manual(200f64.to_radians())).unwrap();
         assert!(d.warnings.iter().any(|w| w.contains("past 180°")));
         assert!(double_with(|v| v.setup.rib_wrap = Param::Manual(80f64.to_radians())).is_err());
