@@ -368,17 +368,23 @@ pub fn volute_view_triangles(g: &VoluteGeometry) -> Vec<Triangle> {
     let mut out = Vec::new();
     let count = channels.len();
     for (i, rings) in channels.into_iter().enumerate() {
+        let diffuser = i + 1 == count;
+        // The last ring of a spiral reaches into the diffuser so that the solids overlap
+        // for the CAD kernel; seen through the casing, its walls inside the diffuser
+        // show as a sliver at the neck.
+        let shown = if diffuser {
+            &rings[..]
+        } else {
+            &rings[..rings.len().saturating_sub(1)]
+        };
         let mut own = Vec::new();
-        loft_rings(&mut own, &rings);
-        if let Some(first) = rings.first() {
+        loft_rings(&mut own, shown);
+        if let Some(first) = shown.first() {
             cap(&mut own, first);
         }
-        if i + 1 == count
-            && let Some(last) = rings.last()
-        {
+        if diffuser && let Some(last) = shown.last() {
             cap(&mut own, last);
         }
-        let diffuser = i + 1 == count;
         // Only triangles wholly inside go, so that no hole opens along the edge: what
         // is left pokes a little into the opaque body or into the other channel.
         out.extend(own.into_iter().filter(|t| {
@@ -767,6 +773,24 @@ pub(crate) mod tests {
         assert_eq!(
             volute_view_triangles(&tangent).len(),
             volute_triangles(&tangent).len()
+        );
+    }
+
+    #[test]
+    fn the_view_leaves_out_the_end_of_the_spiral_that_reaches_into_the_diffuser() {
+        let g = reference_volute(|_| {});
+        let tail: Vec<DVec3> = g.channels()[0].last().unwrap().clone();
+        // The walls of that last piece lie inside the diffuser: seen through the casing
+        // they are a sliver at the neck.
+        assert!(
+            volute_triangles(&g)
+                .iter()
+                .any(|t| t.iter().any(|q| tail.contains(q)))
+        );
+        assert!(
+            !volute_view_triangles(&g)
+                .iter()
+                .any(|t| t.iter().any(|q| tail.contains(q)))
         );
     }
 
