@@ -189,6 +189,9 @@ const MIN_START: f64 = 1.0 * std::f64::consts::PI / 180.0;
 /// The spiral starts at least this much before its wall crosses the diffuser's in every
 /// plane, rad.
 const START_MARGIN: f64 = 0.5 * std::f64::consts::PI / 180.0;
+/// Least wrap of the spiral, from its start to the throat, for a sharp or rounded
+/// cutwater to be built, rad.
+const MIN_WRAP: f64 = 330.0 * std::f64::consts::PI / 180.0;
 /// Wrap of the spiral past its start in which the cutwater planes look for the walls,
 /// rad.
 const CUTWATER_SPAN: f64 = 60.0 * std::f64::consts::PI / 180.0;
@@ -757,6 +760,19 @@ impl VoluteGeometry {
             direction_turn: last.dot(first).clamp(-1.0, 1.0).acos(),
         })
     }
+}
+
+/// The warning for a sharp or rounded cutwater whose spiral, starting at `start`, wraps
+/// less than [`MIN_WRAP`] to the throat.
+fn short_wrap_warning(shape: CutwaterShape, start: f64) -> Option<String> {
+    (!matches!(shape, CutwaterShape::Tangent) && TAU - start < MIN_WRAP * (1.0 - 1e-9)).then(|| {
+        format!(
+            "the spiral wraps {:.0}° from its start to the throat, less than the {:.0}° a \
+             sharp or rounded cutwater needs: start the spiral earlier",
+            (TAU - start).to_degrees(),
+            MIN_WRAP.to_degrees()
+        )
+    })
 }
 
 /// The closed planar outline `ring` offset outward by `distance` in its plane: each
@@ -1393,6 +1409,7 @@ impl VoluteGeometry {
 
         let mut warnings = design.warnings.clone();
         warnings.extend(intersection_warning);
+        warnings.extend(short_wrap_warning(design.cutwater_shape, start));
         if design.diffuser.z_bend.is_some() {
             warnings.push(
                 "the CAD kernel builds the flow domain of a diffuser with an axial bend but \
@@ -2235,6 +2252,25 @@ mod tests {
             }
         }
         cases
+    }
+
+    #[test]
+    fn a_spiral_that_wraps_less_than_330_degrees_is_warned_of() {
+        let early = 3f64.to_radians();
+        let late = 40f64.to_radians();
+        for shape in [CutwaterShape::Sharp, CutwaterShape::default()] {
+            assert!(short_wrap_warning(shape, early).is_none());
+            let warning = short_wrap_warning(shape, late).expect("a short wrap");
+            assert!(
+                warning.contains("320°") && warning.contains("330°"),
+                "{warning}"
+            );
+        }
+        // A tangent cutwater has no wedge to build.
+        assert!(short_wrap_warning(CutwaterShape::Tangent, late).is_none());
+        // The default design wraps enough.
+        let g = geometry(SectionShape::default());
+        assert!(g.warnings.iter().all(|w| !w.contains("wraps")));
     }
 
     #[test]

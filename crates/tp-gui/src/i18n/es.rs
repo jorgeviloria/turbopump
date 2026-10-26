@@ -4798,6 +4798,10 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
         "la pared de la espiral cruza la del difusor más de una vez en {} de {} planos, así que hay varias curvas de intersección: conviene mover el inicio de la espiral, reducir el desplazamiento radial o subir el factor de forma de la base",
     ),
     (
+        "the spiral wraps {}° from its start to the throat, less than the {}° a sharp or rounded cutwater needs: start the spiral earlier",
+        "la espiral da {}° desde su inicio hasta la garganta, menos de los {}° que necesita un corte de agua afilado o redondeado: conviene empezar la espiral antes",
+    ),
+    (
         "a rectangular outlet has no flange of ours, which is round: the casing ends flat",
         "una salida rectangular no lleva nuestra brida, que es circular: la carcasa termina plana",
     ),
