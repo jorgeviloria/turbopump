@@ -13,7 +13,7 @@ use super::cutwater::CutwaterSlice;
 use super::section::Bend;
 use super::stress::WallStress;
 use super::{
-    CrossSections, CutwaterShape, DiffuserGrowth, DischargeShape, SectionSize, StraightWall,
+    CrossSections, CutwaterShape, DiffuserGrowth, DischargeShape, OutletShape, SectionSize,
     VoluteDesign, VoluteInput, ZAlignment,
 };
 use crate::outlet::ImpellerOutlet;
@@ -1621,10 +1621,40 @@ fn nozzle(
         .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| {
             (lo.min(p.x), hi.max(p.x))
         });
-    let circle: Vec<DVec2> = throat_points
-        .iter()
-        .map(|p| r1 * DVec2::new(p.x, p.y).normalize())
-        .collect();
+    // The outline the sections tend to, point for point along the rays of the throat: the
+    // circle, or a rectangle of the same area with its corners on the nearest rays.
+    let circle: Vec<DVec2> = match design.diffuser.outlet_shape {
+        OutletShape::Round => throat_points
+            .iter()
+            .map(|p| r1 * DVec2::new(p.x, p.y).normalize())
+            .collect(),
+        OutletShape::Rectangular { aspect } => {
+            let area = std::f64::consts::PI * r1 * r1;
+            let (hw, hh) = (0.5 * (area / aspect).sqrt(), 0.5 * (area * aspect).sqrt());
+            let mut points: Vec<DVec2> = throat_points
+                .iter()
+                .map(|p| {
+                    let d = p.normalize();
+                    d * (hw / d.x.abs()).min(hh / d.y.abs())
+                })
+                .collect();
+            for corner in [(hw, hh), (-hw, hh), (-hw, -hh), (hw, -hh)] {
+                let corner = DVec2::new(corner.0, corner.1);
+                let nearest = throat_points
+                    .iter()
+                    .enumerate()
+                    .max_by(|a, b| {
+                        a.1.normalize()
+                            .dot(corner.normalize())
+                            .total_cmp(&b.1.normalize().dot(corner.normalize()))
+                    })
+                    .map(|(k, _)| k)
+                    .expect("a throat outline");
+                points[nearest] = corner;
+            }
+            points
+        }
+    };
     // The sampled circle encloses a little less than π·r²; scale against it so the
     // outlet points lie exactly on the outlet radius.
     let circle_area = polygon_area(&circle).abs();
@@ -1669,14 +1699,11 @@ fn nozzle(
             let lowest = blend.iter().map(|p| p.x).fold(f64::INFINITY, f64::min) * scale;
             let highest = blend.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max) * scale;
             let u = across(tangent);
+            let e = design.diffuser.eccentricity;
             let shift = match design.diffuser.shape {
-                DischargeShape::Tangential {
-                    straight_wall: StraightWall::Inner,
-                } => inner - lowest,
-                DischargeShape::Tangential {
-                    straight_wall: StraightWall::Outer,
-                } => outer - highest,
-                _ => 0.0,
+                DischargeShape::Tangential { .. } if e < 0.0 => -e * (inner - lowest),
+                DischargeShape::Tangential { .. } => e * (outer - highest),
+                DischargeShape::Radial { .. } => 0.0,
             };
             // The height offset grows from nothing at the throat, with no slope there so
             // that the diffuser leaves along the spiral, to its full value over the first
@@ -1709,7 +1736,7 @@ fn nozzle(
 mod tests {
     use super::super::tests::reference_basis;
     use super::*;
-    use crate::volute::{AreaLaw, CrossSectionInput, SectionShape, SideShape};
+    use crate::volute::{AreaLaw, CrossSectionInput, SectionShape, SideShape, StraightWall};
 
     #[test]
     fn outlines_offset_outward_in_their_plane() {
@@ -2077,6 +2104,102 @@ mod tests {
         let mut input = unturned();
         edit(&mut input.diffuser);
         VoluteGeometry::build(&reference_basis(), &input).unwrap()
+    }
+
+    #[test]
+    fn the_eccentricity_runs_between_the_three_straight_walls() {
+        let tangential = |wall: StraightWall, e: Option<f64>| {
+            with_diffuser(|d| {
+                d.shape = DischargeShape::Tangential {
+                    straight_wall: wall,
+                };
+                if let Some(e) = e {
+                    d.eccentricity = Param::Manual(e);
+                }
+            })
+        };
+        let last = |g: &VoluteGeometry| g.nozzle.last().unwrap().center;
+        // The manual values at the ends are the chosen walls.
+        for (wall, e) in [
+            (StraightWall::Inner, -1.0),
+            (StraightWall::Centered, 0.0),
+            (StraightWall::Outer, 1.0),
+        ] {
+            let by_wall = tangential(wall, None);
+            let by_value = tangential(StraightWall::Centered, Some(e));
+            for (a, b) in by_wall.nozzle.iter().zip(&by_value.nozzle) {
+                for (p, q) in a.points.iter().zip(&b.points) {
+                    assert!(p.distance(*q) < 1e-12, "{wall:?}");
+                }
+            }
+        }
+        // In between, the outlet sits in between.
+        let inner = last(&tangential(StraightWall::Centered, Some(-1.0)));
+        let middle = last(&tangential(StraightWall::Centered, Some(0.0)));
+        let half = last(&tangential(StraightWall::Centered, Some(-0.5)));
+        assert_relative_eq!(
+            half.distance(middle),
+            0.5 * inner.distance(middle),
+            epsilon = 1e-9
+        );
+        // Out of range is refused.
+        let mut input = unturned();
+        input.diffuser.eccentricity = Param::Manual(1.2);
+        assert!(VoluteGeometry::build(&reference_basis(), &input).is_err());
+    }
+
+    #[test]
+    fn a_rectangular_outlet_has_the_area_and_proportions_asked_for() {
+        use crate::volute::OutletShape;
+        let round = with_diffuser(|_| {});
+        let aspect = 2.0;
+        let rect = with_diffuser(|d| d.outlet_shape = OutletShape::Rectangular { aspect });
+        // The throat and the area law are the same.
+        for (a, b) in round.nozzle[0].points.iter().zip(&rect.nozzle[0].points) {
+            assert!(a.distance(*b) < 1e-12);
+        }
+        let (a, b) = (round.nozzle.last().unwrap(), rect.nozzle.last().unwrap());
+        assert_relative_eq!(a.area, b.area, epsilon = 1e-12);
+        // The outlet outline is a rectangle with that aspect: its extent along the axis
+        // over its extent across, and its corners among the points.
+        let (lo, hi) = b.points.iter().fold(
+            (DVec3::splat(f64::INFINITY), DVec3::splat(f64::NEG_INFINITY)),
+            |(lo, hi), p| (lo.min(*p - b.center), hi.max(*p - b.center)),
+        );
+        let height = hi.z - lo.z;
+        let width =
+            (b.points.iter().map(|p| (*p - b.center).truncate().length())).fold(0.0, f64::max);
+        assert!(width > 0.0);
+        let across = b
+            .points
+            .iter()
+            .map(|p| {
+                let d = (*p - b.center).truncate();
+                d.dot(b.tangent.truncate().perp()).abs()
+            })
+            .fold(0.0, f64::max)
+            * 2.0;
+        assert_relative_eq!(height / across, aspect, max_relative = 1e-6);
+        // The polygon area is that of the circle it replaces, within the sampling.
+        let polygon: f64 = {
+            let n = b.points.len();
+            0.5 * (0..n)
+                .map(|i| {
+                    let (p, q) = (b.points[i] - b.center, b.points[(i + 1) % n] - b.center);
+                    p.cross(q).length()
+                })
+                .sum::<f64>()
+        };
+        assert_relative_eq!(polygon, b.area, max_relative = 0.02);
+        // A flange is not drawn on it, and says so; out of range is refused.
+        let mut input = unturned();
+        input.diffuser.outlet_shape = OutletShape::Rectangular { aspect };
+        input.wall.flange.enabled = true;
+        let g = VoluteGeometry::build(&reference_basis(), &input).unwrap();
+        assert!(g.design.flange.is_none());
+        assert!(g.warnings.iter().any(|w| w.contains("rectangular outlet")));
+        input.diffuser.outlet_shape = OutletShape::Rectangular { aspect: 10.0 };
+        assert!(VoluteGeometry::build(&reference_basis(), &input).is_err());
     }
 
     #[test]

@@ -9,9 +9,9 @@ use tp_design::outlet::Reach;
 use tp_design::volute::stress::StressPlace;
 use tp_design::volute::{
     AreaLaw, BendWall, BezierBase, BezierSide, CutwaterShape, DEFAULT_CONE_ANGLE_DEG,
-    DiffuserGrowth, DischargeShape, ExternalRound, InnerPosition, InternalRound, Progression,
-    RadiusSide, SectionDefinition, SectionShape, SegmentPoint, SideShape, StraightWall,
-    VoluteGeometry, VoluteInput, VoluteKind, ZAlignment,
+    DiffuserGrowth, DischargeShape, ExternalRound, InnerPosition, InternalRound, OutletShape,
+    Progression, RadiusSide, SectionDefinition, SectionShape, SegmentPoint, SideShape,
+    StraightWall, VoluteGeometry, VoluteInput, VoluteKind, ZAlignment,
 };
 use tp_project::{ComponentId, ComponentKind, Project, VOLUTE_STEPS};
 use tp_units::{DisplayUnits, QuantityKind, parse_quantity_or};
@@ -63,7 +63,7 @@ pub(crate) struct VoluteArgs {
     /// semicircle), channel_ratio (outlet area of the outer channel over the first
     /// throat), discharge (radial, the default, with the outlet on the pump centerline,
     /// or radial:DEGREES from the line through the pump axis; tangential, opening to both
-    /// sides; tangential:inner or tangential:outer with that wall straight), bend (bend radius of a radial discharge), base_form (0 to 0.9: how round the diffuser is on its base side, toward the pump axis), height_offset (Δr_C: the diffuser shifted across its centerline, away from the pump axis when positive, to give the cutwater room), z_align (centric, or manual:OFFSET[,quadratic]: the outlet shifted along the pump axis), growth (area of the diffuser from the throat: linear, the default, or matched, which starts with the slope of the spiral), rotation (angle
+    /// sides; tangential:inner or tangential:outer with that wall straight), bend (bend radius of a radial discharge), outlet_shape (round, or rectangular[:ASPECT] with the height along the pump axis over the width, the same area as the round outlet and no round flange), eccentricity (−1 to 1 for a tangential diffuser: −1 with the cutwater wall straight, 0 opening to both sides, 1 with the outer wall straight), base_form (0 to 0.9: how round the diffuser is on its base side, toward the pump axis), height_offset (Δr_C: the diffuser shifted across its centerline, away from the pump axis when positive, to give the cutwater room), z_align (centric, or manual:OFFSET[,quadratic]: the outlet shifted along the pump axis), growth (area of the diffuser from the throat: linear, the default, or matched, which starts with the slope of the spiral), rotation (angle
     /// of the cutwater from the x axis; auto turns the discharge vertically up), cutwater
     /// (tangent, sharp or rounded), nose (radius of a rounded cutwater), height (H, the
     /// outlet face from the pump axis, which sets the diffuser length), dn (on: round the
@@ -745,6 +745,25 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
         "bend" => input.diffuser.bend_radius = quantity(Length)?,
         "height_offset" => input.diffuser.height_offset = quantity(Length)?,
         "base_form" => input.diffuser.base_form = quantity(Dimensionless)?,
+        "eccentricity" => input.diffuser.eccentricity = quantity(Dimensionless)?,
+        "outlet_shape" => {
+            input.diffuser.outlet_shape =
+                match value {
+                    "round" => OutletShape::Round,
+                    _ => {
+                        let aspect = value
+                        .strip_prefix("rectangular:")
+                        .or(if value == "rectangular" { Some("1") } else { None })
+                        .and_then(|a| a.trim().parse::<f64>().ok())
+                        .ok_or_else(|| {
+                            format!(
+                                "outlet_shape must be round or rectangular[:ASPECT], got {value:?}"
+                            )
+                        })?;
+                        OutletShape::Rectangular { aspect }
+                    }
+                }
+        }
         "z_align" => input.diffuser.z_alignment = parse_z_alignment(value, units)?,
         "growth" => {
             input.diffuser.growth = match value {

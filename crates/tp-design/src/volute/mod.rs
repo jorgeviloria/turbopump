@@ -343,6 +343,20 @@ pub enum ZAlignment {
     Manual { offset: f64, quadratic: bool },
 }
 
+/// Shape of the outlet section of the discharge diffuser. The outlet diameter is then
+/// the equivalent one: the area of the outlet stays π·D²/4.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum OutletShape {
+    #[default]
+    Round,
+    /// A rectangle of the same area, `aspect` = height along the pump axis over width.
+    Rectangular { aspect: f64 },
+}
+
+/// Range of the aspect of a rectangular outlet.
+pub const OUTLET_ASPECT: std::ops::RangeInclusive<f64> = 0.25..=4.0;
+
 /// Largest base form factor of the discharge diffuser. At 1 the base side is the circle
 /// at once and the CAD kernel cannot cut the cutwater cleanly (the flow domain comes out
 /// in four pieces); up to 0.9 it builds on the reference volute.
@@ -377,6 +391,13 @@ pub struct DischargeInput {
     pub height_offset: Param<f64>,
     /// Alignment of the diffuser along the pump axis.
     pub z_alignment: ZAlignment,
+    /// Shape of the outlet section; a rectangular one has no round flange.
+    pub outlet_shape: OutletShape,
+    /// Eccentricity of a tangential diffuser, −1 to 1: how it widens against its axis,
+    /// −1 with the wall on the cutwater side straight (it opens outward only), 0 to
+    /// both sides, 1 with the outer wall straight; between them in proportion. Automatic:
+    /// that of the wall chosen in the shape.
+    pub eccentricity: Param<f64>,
     /// Base form factor, 0 to [`MAX_BASE_FORM`]: how round the diffuser is on its base
     /// side, toward the pump axis, over the first 30 % of its length. 0 keeps the corners
     /// of the section of the spiral there, 1 would round that side to the circle at once. A rounder base
@@ -642,6 +663,10 @@ pub struct DischargeDiffuser {
     pub height_offset: f64,
     /// Alignment along the pump axis.
     pub z_alignment: ZAlignment,
+    /// Shape of the outlet section.
+    pub outlet_shape: OutletShape,
+    /// Eccentricity of a tangential diffuser, −1 to 1 (0 for a radial one).
+    pub eccentricity: f64,
     /// Base form factor, 0 to 1.
     pub base_form: f64,
     /// Mean radius of the bend of a radial discharge; 0 for a straight one, m.
@@ -1518,10 +1543,14 @@ impl VoluteDesign {
                 gap,
             });
         }
-        let flange = input
-            .wall
-            .flange
-            .enabled
+        let round_outlet = matches!(diffuser.outlet_shape, OutletShape::Round);
+        if input.wall.flange.enabled && !round_outlet {
+            warnings.push(
+                "a rectangular outlet has no flange of ours, which is round: the casing ends flat"
+                    .into(),
+            );
+        }
+        let flange = (input.wall.flange.enabled && round_outlet)
             .then(|| Flange::new(diffuser.outlet_diameter, wall_thickness, &input.wall.flange))
             .transpose()?;
 
@@ -1692,6 +1721,26 @@ impl VoluteDesign {
                 )
             })?;
         }
+        if let OutletShape::Rectangular { aspect } = input.outlet_shape {
+            require(OUTLET_ASPECT.contains(&aspect), || {
+                format!(
+                    "the aspect of a rectangular outlet must lie between {} and {}, got {aspect:.2}",
+                    OUTLET_ASPECT.start(),
+                    OUTLET_ASPECT.end()
+                )
+            })?;
+        }
+        let eccentricity = input.eccentricity.resolve(|| match input.shape {
+            DischargeShape::Tangential { straight_wall } => match straight_wall {
+                StraightWall::Inner => -1.0,
+                StraightWall::Centered => 0.0,
+                StraightWall::Outer => 1.0,
+            },
+            DischargeShape::Radial { .. } => 0.0,
+        });
+        require((-1.0..=1.0).contains(&eccentricity), || {
+            format!("the eccentricity must lie between −1 and 1, got {eccentricity:.2}")
+        })?;
         let base_form = input.base_form.resolve(|| 0.0);
         require((0.0..=MAX_BASE_FORM).contains(&base_form), || {
             format!(
@@ -1703,6 +1752,8 @@ impl VoluteDesign {
             growth: input.growth,
             height_offset,
             z_alignment: input.z_alignment,
+            outlet_shape: input.outlet_shape,
+            eccentricity,
             base_form,
             bend_radius,
             length,

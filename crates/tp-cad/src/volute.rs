@@ -1627,6 +1627,54 @@ mod tests {
 
     #[test]
     #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
+    fn the_eccentric_and_rectangular_diffusers_give_valid_flow_domains() {
+        let _slot = crate::test_slot::take();
+        use tp_design::Param;
+        use tp_design::volute::{DischargeInput, DischargeShape, OutletShape, StraightWall};
+        let fluid = |edit: &dyn Fn(&mut DischargeInput)| -> f64 {
+            let mut input = VoluteInput::default();
+            edit(&mut input.diffuser);
+            let g = VoluteGeometry::build(&basis(), &input).unwrap();
+            let cad = build_volute(&g).unwrap();
+            assert!(cad.fluid.is_valid());
+            assert_eq!(cad.fluid.solid_count(), 1);
+            assert_eq!(cad.channel.solid_count(), 1);
+            assert!(cad.warnings.is_empty(), "{:?}", cad.warnings);
+            cad.fluid_volume()
+        };
+        let tangential = |d: &mut DischargeInput| {
+            d.shape = DischargeShape::Tangential {
+                straight_wall: StraightWall::Centered,
+            }
+        };
+        let centered = fluid(&tangential);
+        let eccentric = fluid(&|d| {
+            tangential(d);
+            d.eccentricity = Param::Manual(-0.5);
+        });
+        let radial = fluid(&|_| {});
+        let rectangular = fluid(&|d| d.outlet_shape = OutletShape::Rectangular { aspect: 1.5 });
+        // The casing round a rectangular outlet closes flat, with no flange.
+        let mut input = VoluteInput::default();
+        input.diffuser.outlet_shape = OutletShape::Rectangular { aspect: 1.5 };
+        let g = VoluteGeometry::build(&basis(), &input).unwrap();
+        let cad = build_volute(&g).unwrap();
+        let casing = build_volute_casing(&g, &cad).unwrap();
+        assert!(casing.solid.is_valid() && casing.solid.solid_count() == 1);
+        assert!(!casing.flange, "{:?}", casing.warnings);
+        // The same areas along the same length: the volumes agree to a few per cent.
+        assert!(
+            (eccentric / centered - 1.0).abs() < 0.03,
+            "{eccentric} vs {centered}"
+        );
+        assert!(
+            (rectangular / radial - 1.0).abs() < 0.03,
+            "{rectangular} vs {radial}"
+        );
+    }
+
+    #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
     fn cutwater_and_discharge_shapes_give_valid_solids() {
         let _slot = crate::test_slot::take();
         use tp_design::Param;
