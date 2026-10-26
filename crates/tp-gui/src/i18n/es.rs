@@ -874,6 +874,40 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Shifts the diffuser across its centerline, away from the pump axis when positive, over the first 40 % of its length: room for the cutwater, whose tip moves toward the base circle",
         "Desplaza el difusor a través de su línea media, alejándolo del eje de la bomba si es positivo, en el primer 40 % de su longitud: da sitio al corte de agua, cuya punta se acerca al círculo base",
     ),
+    ("spline turning {}", "spline con giro de {}"),
+    ("spline", "spline"),
+    ("Turn", "Giro"),
+    (
+        "How far the centerline of the spline diffuser turns between the throat and the outlet, away from the pump axis",
+        "Cuánto gira la línea media del difusor spline entre la garganta y la salida, alejándose del eje de la bomba",
+    ),
+    ("Start share", "Proporción inicial"),
+    ("End share", "Proporción final"),
+    (
+        "Where the control points 1 and 3 of the fourth-degree Bézier centerline sit between the ends and point 2: they shape the curve",
+        "Dónde quedan los puntos de control 1 y 3 de la línea media Bézier de cuarto grado entre los extremos y el punto 2: dan forma a la curva",
+    ),
+    ("Axial bend", "Codo axial"),
+    (
+        "Bends the centerline of the diffuser along the pump axis: it runs flat from the throat, rounds off with the radius R through the angle α and goes on straight, ending Δz along the pump axis. The three have to agree for the length of the diffuser",
+        "Curva la línea media del difusor a lo largo del eje de la bomba: va plana desde la garganta, se redondea con el radio R hasta el ángulo α y sigue recta, acabando a Δz sobre el eje de la bomba. Los tres tienen que ser compatibles con la longitud del difusor",
+    ),
+    ("bent", "con codo"),
+    ("Axial extension Δz", "Extensión axial Δz"),
+    (
+        "How far the outlet lies from the plane of the volute, along the pump axis",
+        "A qué distancia del plano de la voluta queda la salida, a lo largo del eje de la bomba",
+    ),
+    ("Bend radius R", "Radio del codo R"),
+    (
+        "Radius of the round of the axial bend",
+        "Radio del redondeo del codo axial",
+    ),
+    ("Bend angle α", "Ángulo del codo α"),
+    (
+        "Angle the centerline reaches against the plane of the volute",
+        "Ángulo que alcanza la línea media respecto al plano de la voluta",
+    ),
     ("Outlet section", "Sección de salida"),
     (
         "Round, or a rectangle of the same area: its aspect is the height along the pump axis over the width. A rectangular outlet has no round flange",
@@ -4704,6 +4738,14 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
     (
         "a rectangular outlet has no flange of ours, which is round: the casing ends flat",
         "una salida rectangular no lleva nuestra brida, que es circular: la carcasa termina plana",
+    ),
+    (
+        "the CAD kernel builds the flow domain of a diffuser with an axial bend but not yet its casing",
+        "el núcleo CAD construye el dominio de fluido de un difusor con codo axial, pero todavía no su carcasa",
+    ),
+    (
+        "the CAD kernel is slow and unreliable on a spline diffuser (minutes to half an hour, depending on the turn): export the CAD solids with a radial or tangential discharge",
+        "el núcleo CAD es lento y poco fiable con un difusor spline (de minutos a media hora, según el giro): exporta los sólidos CAD con una descarga radial o tangencial",
     ),
     (
         "cutwater incidence {}° is outside ±3° (Gülich eq. T7.7.6)",

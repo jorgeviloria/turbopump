@@ -1121,6 +1121,9 @@ fn content(
                             &s(Angle, axis_angle),
                         ],
                     ),
+                    DischargeShape::Spline { turn, .. } => {
+                        tf("spline turning {}", &[&s(Angle, turn)])
+                    }
                 };
                 value_row(
                     ui,
