@@ -874,6 +874,11 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Shifts the diffuser across its centerline, away from the pump axis when positive, over the first 40 % of its length: room for the cutwater, whose tip moves toward the base circle",
         "Desplaza el difusor a través de su línea media, alejándolo del eje de la bomba si es positivo, en el primer 40 % de su longitud: da sitio al corte de agua, cuya punta se acerca al círculo base",
     ),
+    ("Base form factor", "Factor de forma de la base"),
+    (
+        "How round the diffuser is on its base side, toward the pump axis: 0 keeps the corners of the last section of the spiral, 1 would round that side to the circle (the limit is 0.9). It builds up over the first 30 % of the length and changes where the spiral wall crosses the diffuser wall",
+        "Cuán redondo es el difusor en su lado de la base, hacia el eje de la bomba: 0 conserva las esquinas de la última sección de la espiral, 1 redondearía ese lado hasta el círculo (el límite es 0,9). Se forma en el primer 30 % de la longitud y cambia dónde la pared de la espiral cruza la del difusor",
+    ),
     ("Axial alignment", "Alineación axial"),
     (
         "Where the sections of the diffuser sit along the pump axis. Centric: on the centerline. Manual: the outlet is shifted by the offset, linearly or quadratically with the length",
@@ -4675,6 +4680,10 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
     (
         "the walls at the cutwater tip point {}° from the circumference, {}° off the flow angle α₃' of {}° (beyond ±3°): the flow meets the wedge at an angle; turn the diffuser or move the start of the spiral",
         "las paredes en la punta del corte de agua forman {}° con la circunferencia, {}° de diferencia con el ángulo de flujo α₃' de {}° (más de ±3°): el flujo choca con la cuña en ángulo; conviene girar el difusor o mover el inicio de la espiral",
+    ),
+    (
+        "the spiral wall crosses the diffuser wall more than once in {} of {} planes, so there are several intersection curves: move the start of the spiral, reduce the height offset or raise the base form factor",
+        "la pared de la espiral cruza la del difusor más de una vez en {} de {} planos, así que hay varias curvas de intersección: conviene mover el inicio de la espiral, reducir el desplazamiento radial o subir el factor de forma de la base",
     ),
     (
         "cutwater incidence {}° is outside ±3° (Gülich eq. T7.7.6)",

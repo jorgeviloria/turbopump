@@ -1023,6 +1023,21 @@ fn diffuser(
                 &units,
                 -0.5..=0.5,
             );
+            param_f64(
+                ui,
+                tr("Base form factor"),
+                tr(
+                    "How round the diffuser is on its base side, toward the pump axis: 0 keeps \
+                    the corners of the last section of the spiral, 1 would round that side to the \
+                    circle (the limit is 0.9). It builds up over the first 30 % of the length and changes where the \
+                    spiral wall crosses the diffuser wall",
+                ),
+                &mut input.diffuser.base_form,
+                Dimensionless,
+                Some(0.0),
+                &units,
+                0.0..=tp_design::volute::MAX_BASE_FORM,
+            );
             label(
                 ui,
                 tr("Axial alignment"),
