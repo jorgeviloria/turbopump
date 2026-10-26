@@ -868,6 +868,17 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Distancia del eje de la bomba a la cara de salida; si se fija, da el largo del difusor",
     ),
     ("Nominal size DN", "Diámetro nominal DN"),
+    ("Area growth", "Crecimiento del área"),
+    (
+        "How the area grows from the throat to the outlet. Radius: the equivalent radius grows \
+        linearly, so the area gains slope from the first step. Matched: quadratic area that starts \
+        with the slope of the spiral, with no break at the throat",
+        "Cómo crece el área de la garganta a la salida. Radio: el radio equivalente crece \
+        linealmente y el área gana pendiente desde el primer paso. Empalmada: área cuadrática que \
+        parte con la pendiente de la espiral, sin salto en la garganta",
+    ),
+    ("linear in the radius", "lineal en el radio"),
+    ("matched to the spiral", "empalmada con la espiral"),
     (
         "Round the automatic outlet diameter to the nearest nominal size",
         "Redondea el diámetro de salida automático al diámetro nominal más próximo",

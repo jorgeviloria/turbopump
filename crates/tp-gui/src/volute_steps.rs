@@ -8,8 +8,8 @@ use egui_plot::{Line, Plot, PlotPoints};
 use tp_design::Param;
 use tp_design::volute::stress::StressPlace;
 use tp_design::volute::{
-    AreaLaw, CutwaterShape, DischargeShape, MAX_ARCS, MIN_ARCS, MIN_WRAP_DEG, Progression,
-    StraightWall, VoluteGeometry, VoluteInput, VoluteKind,
+    AreaLaw, CutwaterShape, DiffuserGrowth, DischargeShape, MAX_ARCS, MIN_ARCS, MIN_WRAP_DEG,
+    Progression, StraightWall, VoluteGeometry, VoluteInput, VoluteKind,
 };
 use tp_project::{ComponentId, DesignStep, Project};
 use tp_units::{DisplayUnits, QuantityKind};
@@ -979,6 +979,35 @@ fn diffuser(
                 tr("Round the automatic outlet diameter to the nearest nominal size"),
             );
             ui.checkbox(&mut input.diffuser.nominal_size, "");
+            ui.end_row();
+            label(
+                ui,
+                tr("Area growth"),
+                tr(
+                    "How the area grows from the throat to the outlet. Radius: the equivalent \
+                    radius grows linearly, so the area gains slope from the first step. Matched: \
+                    quadratic area that starts with the slope of the spiral, with no break at the \
+                    throat",
+                ),
+            );
+            let growth = |g: DiffuserGrowth| {
+                tr(match g {
+                    DiffuserGrowth::Linear => "linear in the radius",
+                    DiffuserGrowth::Matched => "matched to the spiral",
+                })
+            };
+            crate::widgets::list(ui, |ui| {
+                ComboBox::from_id_salt("volute_growth")
+                    .selected_text(crate::widgets::noted(ui, growth(input.diffuser.growth)))
+                    .show_ui(ui, |ui| {
+                        for option in [DiffuserGrowth::Linear, DiffuserGrowth::Matched] {
+                            let same = option == input.diffuser.growth;
+                            if ui.selectable_label(same, growth(option)).clicked() && !same {
+                                input.diffuser.growth = option;
+                            }
+                        }
+                    })
+            });
             ui.end_row();
             param_f64(
                 ui,
