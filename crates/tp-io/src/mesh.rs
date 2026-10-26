@@ -661,7 +661,10 @@ pub(crate) mod tests {
         };
         let mut double = VoluteInput::default();
         double.setup.kind = tp_design::volute::VoluteKind::Double;
-        for input in [VoluteInput::default(), internal, double] {
+        // The rib stops 70° short of the throat: one more piece of channel.
+        let mut short = double.clone();
+        short.setup.rib_length = tp_design::Param::Manual(110f64.to_radians());
+        for input in [VoluteInput::default(), internal, double, short] {
             let v = VoluteGeometry::build(&basis, &input).unwrap();
             let solids = volute_solids(&v);
             assert_eq!(solids.len(), v.channels().len());

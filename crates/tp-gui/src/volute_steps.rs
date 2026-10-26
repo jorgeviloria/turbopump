@@ -153,17 +153,18 @@ fn setup(
                 let rib = d.and_then(|d| d.rib);
                 param_f64(
                     ui,
-                    tr("Inner volute wrap ε_sp"),
+                    tr("Rib length"),
                     tr(
-                        "From the rib nose to the throat. The nose is always 180° from the \
-                        cutwater (automatic); Gülich advises 165° to 170° with an even number \
-                        of blades (Chap. 7.8.1), which can be set by hand",
+                        "From the rib nose, which is always 180° from the cutwater and keeps \
+                        the two channels balanced. 180° (automatic) reaches the throat; less \
+                        stops the rib short of the discharge diffuser and the two channels \
+                        join there",
                     ),
-                    &mut input.setup.rib_wrap,
+                    &mut input.setup.rib_length,
                     Angle,
-                    rib.map(|r| r.wrap),
+                    rib.map(|r| r.length),
                     &units,
-                    (90.5f64).to_radians()..=(240f64).to_radians(),
+                    tp_design::volute::MIN_RIB_LENGTH..=PI,
                 );
                 param_f64(
                     ui,

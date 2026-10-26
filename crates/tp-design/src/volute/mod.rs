@@ -196,8 +196,13 @@ pub enum VoluteKind {
 #[serde(default)]
 pub struct VoluteSetupInput {
     pub kind: VoluteKind,
-    /// Wrap angle ε_sp of the inner volute of a double volute, rad.
-    pub rib_wrap: Param<f64>,
+    /// Length of the rib of a double volute from its nose, rad. The nose is fixed at
+    /// 180° from the cutwater, which balances the two channels; the rib runs from there
+    /// toward the discharge and ends where this length says: 180° (automatic) reaches
+    /// the throat, less stops the rib short of the discharge diffuser, and the two
+    /// channels join there. Files saved with `rib_wrap` read it as this length.
+    #[serde(alias = "rib_wrap")]
+    pub rib_length: Param<f64>,
     /// Thickness of the rib of a double volute, m.
     pub rib_thickness: Param<f64>,
     /// Length over thickness of the elliptic nose and tail of the rib: 1 for a
@@ -390,6 +395,9 @@ pub enum OutletShape {
 
 /// Range of the aspect of a rectangular outlet.
 pub const OUTLET_ASPECT: std::ops::RangeInclusive<f64> = 0.25..=4.0;
+
+/// Shortest rib of a double volute, rad.
+pub const MIN_RIB_LENGTH: f64 = 60.0 * PI / 180.0;
 
 /// Largest base form factor of the discharge diffuser. At 1 the base side is the circle
 /// at once and the CAD kernel cannot cut the cutwater cleanly (the flow domain comes out
@@ -739,6 +747,8 @@ pub struct Rib {
     /// Wrap angle of the rib nose from the cutwater, 2π − ε_sp, rad: where the inner
     /// volute starts. The elliptic nose reaches a little ahead of it.
     pub start: f64,
+    /// Length of the rib from its nose, rad: the whole inner volute (`wrap`) or less.
+    pub length: f64,
     /// m
     pub thickness: f64,
     /// Length over thickness of the elliptic nose and tail.
@@ -756,6 +766,17 @@ pub struct Rib {
 }
 
 impl Rib {
+    /// Wrap angle where the tail of the rib ends, rad; 2π when it reaches the throat.
+    pub fn end(&self) -> f64 {
+        self.start + self.length
+    }
+
+    /// Whether the rib stops short of the throat, so that the two channels join before
+    /// the discharge diffuser.
+    pub fn is_short(&self) -> bool {
+        self.length < self.wrap - 1e-9
+    }
+
     /// Length of the nose ahead of the start of the inner volute, and of the tail after
     /// the throat, m.
     pub fn nose_length(&self) -> f64 {
@@ -1150,24 +1171,26 @@ impl VoluteDesign {
         };
 
         // A double volute: the inner volute starts at the rib nose, always 180° from the
-        // cutwater, and wraps ε_sp = 180° to the throat, where the discharge is. Gülich
-        // (Chap. 7.8.1, item 1) advises 165° to 170° with an even number of blades, so
-        // that two blades never pass the cutwaters together: a manual value does that.
+        // cutwater (the hydraulic balance), and wraps 180° to the throat, where the
+        // discharge is. The rib may end earlier.
         let rib_wrap = match setup.kind {
             VoluteKind::Single => None,
+            // The inner volute always wraps 180°: the nose is half a turn from the cutwater.
+            VoluteKind::Double => Some(PI),
+        };
+        let rib_length = match setup.kind {
+            VoluteKind::Single => None,
             VoluteKind::Double => {
-                let wrap = setup.rib_wrap.resolve(|| PI);
-                require(
-                    wrap > 90f64.to_radians() && wrap <= 240f64.to_radians(),
-                    || {
-                        format!(
-                            "the inner volute of a double volute must wrap more than 90° and \
-                             at most 240°, got {:.1}°",
-                            wrap.to_degrees()
-                        )
-                    },
-                )?;
-                Some(wrap)
+                let length = setup.rib_length.resolve(|| PI);
+                require((MIN_RIB_LENGTH..=PI + 1e-9).contains(&length), || {
+                    format!(
+                        "the rib of a double volute must be between {:.0}° and 180° long, \
+                             got {:.1}°",
+                        MIN_RIB_LENGTH.to_degrees(),
+                        length.to_degrees()
+                    )
+                })?;
+                Some(length.min(PI))
             }
         };
 
@@ -1464,9 +1487,9 @@ impl VoluteDesign {
             )
         })?;
 
-        let rib = match rib_wrap {
+        let rib = match rib_wrap.zip(rib_length) {
             None => None,
-            Some(wrap) => {
+            Some((wrap, length)) => {
                 let start = TAU - wrap;
                 let thickness = setup.rib_thickness.resolve(|| cutwater_thickness);
                 require(thickness > 0.0, || {
@@ -1513,6 +1536,7 @@ impl VoluteDesign {
                 Some(Rib {
                     wrap,
                     start,
+                    length,
                     thickness,
                     nose_ratio,
                     outer_throat,
@@ -1620,13 +1644,6 @@ impl VoluteDesign {
                  its length (Gülich eq. 1.44): the flow may separate",
                 diffuser.opening_angle.to_degrees(),
                 diffuser.allowable_angle.to_degrees()
-            ));
-        }
-        if let Some(r) = rib.as_ref().filter(|r| r.wrap > PI + 1e-9) {
-            warnings.push(format!(
-                "the inner volute wraps {:.0}°: past 180° the long outer channel adds \
-                 losses and radial force at overload (Gülich Chap. 7.8.1)",
-                r.wrap.to_degrees()
             ));
         }
         if basis.nq > NO_DIFFUSION_NQ && diffuser.area_ratio > 1.05 {
@@ -2739,13 +2756,23 @@ mod tests {
             assert_relative_eq!(rib.start, PI, epsilon = 1e-12);
             assert!(d.warnings.iter().all(|w| !w.contains("two blades")));
         }
-        // 170° by hand is allowed, and 200° with a warning; 80° is not.
-        input.setup.rib_wrap = Param::Manual(170f64.to_radians());
+        // The nose stays at 180° and the length of the rib is what changes: 120° stops it
+        // before the throat, the two channels joining there. It cannot be longer than
+        // the inner volute or shorter than 60°.
+        input.setup.rib_length = Param::Manual(120f64.to_radians());
         let d = VoluteDesign::new(&basis, &input).unwrap();
-        assert_relative_eq!(d.rib.unwrap().wrap, 170f64.to_radians());
-        let d = double_with(|v| v.setup.rib_wrap = Param::Manual(200f64.to_radians())).unwrap();
-        assert!(d.warnings.iter().any(|w| w.contains("past 180°")));
-        assert!(double_with(|v| v.setup.rib_wrap = Param::Manual(80f64.to_radians())).is_err());
+        let rib = d.rib.unwrap();
+        assert_relative_eq!(rib.start, PI, epsilon = 1e-12);
+        assert_relative_eq!(rib.wrap, PI, epsilon = 1e-12);
+        assert_relative_eq!(rib.length, 120f64.to_radians());
+        assert_relative_eq!(rib.end(), PI + 120f64.to_radians());
+        assert!(rib.is_short());
+        assert!(!VoluteDesign::new(&basis, &VoluteInput::default()).is_err());
+        assert!(double_with(|v| v.setup.rib_length = Param::Manual(200f64.to_radians())).is_err());
+        assert!(double_with(|v| v.setup.rib_length = Param::Manual(40f64.to_radians())).is_err());
+        let full = double_with(|_| {}).unwrap().rib.unwrap();
+        assert_relative_eq!(full.length, PI);
+        assert!(!full.is_short());
         assert!(double_with(|v| v.setup.channel_area_ratio = Param::Manual(5.0)).is_err());
         assert!(double_with(|v| v.setup.rib_nose_ratio = Param::Manual(0.5)).is_err());
         assert!(double_with(|v| v.setup.rib_nose_ratio = Param::Manual(6.0)).is_err());

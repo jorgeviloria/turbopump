@@ -215,6 +215,9 @@ pub struct VoluteGeometry {
     /// Double volute: whole sections from the rib nose to 2π (inner volute, rib and
     /// outer channel), continuing the first partial volute.
     pub envelope: Vec<VoluteSection>,
+    /// Double volute whose rib stops short of the throat: the whole sections from the end
+    /// of the rib to 2π, where the two channels have joined; empty otherwise.
+    pub merged: Vec<VoluteSection>,
     /// Double volute: the rib in the midplane.
     pub rib: Option<RibGeometry>,
     /// Discharge diffuser from the throat (first) to the outlet (last).
@@ -376,7 +379,8 @@ impl VoluteGeometry {
     /// through, for surface meshes. A single volute is one piece from the start of the
     /// spiral to the diffuser outlet. A double volute has three: the first partial
     /// volute with the outer channel, the inner volute, and the discharge diffuser; the
-    /// first two reach a little into the third.
+    /// first two reach a little into the third. With a rib that stops short of the throat
+    /// there is one more, the whole section from the end of the rib, before the diffuser.
     pub fn channels(&self) -> Vec<Vec<Vec<DVec3>>> {
         // An internal spiral starts inside the diffuser: they cut each other.
         let joined =
@@ -396,12 +400,17 @@ impl VoluteGeometry {
             return vec![self.extended(&self.sections), self.nozzle_rings()];
         }
         // The throat of the first partial volute and the start of the outer channel
-        // share the angle of the rib nose: the channel takes over there.
-        vec![
+        // share the angle of the rib nose: the channel takes over there. A rib that
+        // stops short of the throat lets the two channels run into the whole section.
+        let mut pieces = vec![
             self.extended(&self.followed_by(&self.outer_channel)),
             self.extended(&self.inner_sections),
-            self.nozzle_rings(),
-        ]
+        ];
+        if !self.merged.is_empty() {
+            pieces.push(self.extended(&self.merged));
+        }
+        pieces.push(self.nozzle_rings());
+        pieces
     }
 
     /// The solids to loft for the CAD model: as [`Self::channels`] for a single volute.
@@ -1204,12 +1213,13 @@ impl VoluteGeometry {
                 .map(|i| from + (to - from) * f64::from(i) / f64::from(n))
                 .collect()
         };
-        let (sections, inner_sections, outer_channel, envelope) = match &design.rib {
+        let (sections, inner_sections, outer_channel, envelope, merged) = match &design.rib {
             None => (
                 spread(start, TAU)
                     .into_iter()
                     .map(make)
                     .collect::<Result<Vec<_>, _>>()?,
+                Vec::new(),
                 Vec::new(),
                 Vec::new(),
                 Vec::new(),
@@ -1225,11 +1235,11 @@ impl VoluteGeometry {
                         .into_iter()
                         .map(make)
                         .collect::<Result<Vec<_>, _>>()?,
-                    spread(rib.start + CUTWATER_START, TAU)
+                    spread(rib.start + CUTWATER_START, rib.end())
                         .into_iter()
                         .map(make)
                         .collect::<Result<Vec<_>, _>>()?,
-                    spread(rib.start, TAU)
+                    spread(rib.start, rib.end())
                         .into_iter()
                         .map(channel)
                         .collect::<Result<Vec<_>, _>>()?,
@@ -1237,6 +1247,14 @@ impl VoluteGeometry {
                         .into_iter()
                         .map(whole)
                         .collect::<Result<Vec<_>, _>>()?,
+                    if rib.is_short() {
+                        spread(rib.end(), TAU)
+                            .into_iter()
+                            .map(whole)
+                            .collect::<Result<Vec<_>, _>>()?
+                    } else {
+                        Vec::new()
+                    },
                 )
             }
         };
@@ -1292,13 +1310,14 @@ impl VoluteGeometry {
         let rotation = (rotation + PI).rem_euclid(TAU) - PI;
         let (rs, rc) = rotation.sin_cos();
         let turn = |p: DVec3| DVec3::new(rc * p.x - rs * p.y, rs * p.x + rc * p.y, p.z);
-        let (mut sections, mut inner_sections, mut outer_channel, mut envelope) =
-            (sections, inner_sections, outer_channel, envelope);
+        let (mut sections, mut inner_sections, mut outer_channel, mut envelope, mut merged) =
+            (sections, inner_sections, outer_channel, envelope, merged);
         for list in [
             &mut sections,
             &mut inner_sections,
             &mut outer_channel,
             &mut envelope,
+            &mut merged,
         ] {
             for s in list.iter_mut() {
                 s.rotation = rotation;
@@ -1390,6 +1409,7 @@ impl VoluteGeometry {
             inner_sections,
             outer_channel,
             envelope,
+            merged,
             rib,
             nozzle,
             nozzle_axis,
@@ -1484,7 +1504,7 @@ fn rib(
     }))
 }
 
-/// The rib in the plane `z`, its faces from the wrap angle `start` to the throat.
+/// The rib in the plane `z`, its faces from the wrap angle `start` to its end.
 fn rib_plane(
     design: &VoluteDesign,
     rib: &super::Rib,
@@ -1507,8 +1527,9 @@ fn rib_plane(
     };
     let n = RIB_FACE_POINTS;
     let (mut inner_face, mut outer_face) = (Vec::with_capacity(n + 1), Vec::with_capacity(n + 1));
+    let end = rib.end();
     for i in 0..=n {
-        let angle = start + (TAU - start) * i as f64 / n as f64;
+        let angle = start + (end - start) * i as f64 / n as f64;
         let r = inner(angle)?;
         inner_face.push(at(r, angle));
         outer_face.push(at(r + t, angle));
@@ -1517,7 +1538,7 @@ fn rib_plane(
     let mid = |angle: f64| -> Result<DVec3, DesignError> { Ok(at(inner(angle)? + t / 2.0, angle)) };
     let step = 1e-4;
     let lead = (mid(start + step)? - mid(start)?).normalize();
-    let trail = (mid(TAU)? - mid(TAU - step)?).normalize();
+    let trail = (mid(end)? - mid(end - step)?).normalize();
     let length = rib.nose_length();
     let half_ellipse = |inner: DVec3, outer: DVec3, along: DVec3, from: f64, to: f64| {
         let centre = 0.5 * (inner + outer);
@@ -3045,7 +3066,7 @@ mod tests {
         let mut input = unturned();
         input.setup.kind = crate::volute::VoluteKind::Double;
         if let Some(w) = wrap {
-            input.setup.rib_wrap = crate::Param::Manual(w);
+            input.setup.rib_length = crate::Param::Manual(w);
         }
         VoluteGeometry::build(&reference_basis(), &input).unwrap()
     }
@@ -3213,9 +3234,63 @@ mod tests {
             assert!(!g.inner_sections.is_empty() && !g.outer_channel.is_empty());
             assert_eq!(g.envelope.len(), g.outer_channel.len());
         }
-        // A shorter rib moves the nose later.
-        let short = double(Some(150f64.to_radians()));
-        assert_relative_eq!(short.design.rib.unwrap().start, 210f64.to_radians());
+    }
+
+    #[test]
+    fn a_short_rib_keeps_its_nose_and_ends_before_the_throat() {
+        let full = double(None);
+        let short = double(Some(130f64.to_radians()));
+        let (rf, rs) = (full.design.rib.unwrap(), short.design.rib.unwrap());
+        // The nose does not move: it is 180° from the cutwater either way.
+        assert_relative_eq!(rs.start, rf.start);
+        assert_relative_eq!(short.rib.as_ref().unwrap().nose_angle, PI, epsilon = 0.03);
+        let end = PI + 130f64.to_radians();
+        assert_relative_eq!(rs.end(), end);
+        // The inner volute and the outer channel stop where the rib does, and the whole
+        // section takes over to the throat.
+        assert_relative_eq!(short.inner_sections.last().unwrap().angle, end);
+        assert_relative_eq!(short.outer_channel.last().unwrap().angle, end);
+        assert_relative_eq!(short.merged.first().unwrap().angle, end);
+        assert_relative_eq!(short.merged.last().unwrap().angle, TAU);
+        assert!(full.merged.is_empty());
+        // The sections of the whole channel, turned with the rest of the volute, lie where
+        // their angles say: the cutwater turned off the x axis by the discharge.
+        for list in [&short.merged, &short.envelope, &short.inner_sections] {
+            for sec in list {
+                let (sin, cos) = (sec.rotation + short.basis.rotation_sign * sec.angle).sin_cos();
+                let p = sec.points(short.basis.rotation_sign)[0];
+                assert_relative_eq!(p.y * cos - p.x * sin, 0.0, epsilon = 1e-9);
+            }
+        }
+        assert_relative_eq!(short.merged[0].rotation, short.rotation);
+        // The whole section is the same in both: the rib only divides it.
+        assert_eq!(short.envelope.len(), full.envelope.len());
+        for (a, b) in short.envelope.iter().zip(&full.envelope) {
+            assert_relative_eq!(a.size.area, b.size.area, epsilon = 1e-12);
+        }
+        // Four pieces of channel, the third running into the diffuser; three with the
+        // whole rib.
+        assert_eq!(short.channels().len(), 4);
+        assert_eq!(full.channels().len(), 3);
+        // The faces of the rib end at the end of the rib, with the tail beyond: the
+        // outer face at that angle is the same distance out as the outer channel's wall.
+        let rib = short.rib.as_ref().unwrap();
+        let last = rib.outer_face.last().unwrap();
+        let angle =
+            (short.basis.rotation_sign * (last.y.atan2(last.x) - short.rotation)).rem_euclid(TAU);
+        assert_relative_eq!(angle, end, epsilon = 1e-9);
+        // The tail is shorter than the whole rib's: less rib, less band.
+        assert!(rib.inner_face.len() == full.rib.as_ref().unwrap().inner_face.len());
+        let reach = |g: &VoluteGeometry| {
+            g.rib
+                .as_ref()
+                .unwrap()
+                .tail
+                .iter()
+                .map(|p| (g.basis.rotation_sign * (p.y.atan2(p.x) - g.rotation)).rem_euclid(TAU))
+                .fold(0.0, f64::max)
+        };
+        assert!(reach(&short) < PI + 140f64.to_radians());
     }
 
     fn internal(round: crate::volute::InternalRound) -> VoluteGeometry {

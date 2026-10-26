@@ -56,7 +56,7 @@ pub(crate) struct VoluteArgs {
     /// or g2: how its faces run into the walls), wall, fillet
     /// (radius rounding the outside of the casing over the cutwater; 0 for none), type
     /// (single or double),
-    /// rib_wrap (wrap of the inner volute of a double volute), rib (rib thickness),
+    /// rib_length (length of the rib of a double volute from its nose, which is always 180° from the cutwater; 180° reaches the throat, less stops the rib short of the discharge diffuser), rib (rib thickness),
     /// rib_comp (on or off: the first partial volute grows by the rib from rib_comp_start
     /// to the nose, so the outer channel starts with the area of the rule), rib_comp_start,
     /// rib_nose (length over thickness of the elliptic nose and tail of the rib, 1 for a
@@ -781,7 +781,7 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
                 _ => return Err(format!("type must be single or double, got {value:?}")),
             }
         }
-        "rib_wrap" => input.setup.rib_wrap = quantity(Angle)?,
+        "rib_length" | "rib_wrap" => input.setup.rib_length = quantity(Angle)?,
         "rib" => input.setup.rib_thickness = quantity(Length)?,
         "rib_nose" => input.setup.rib_nose_ratio = quantity(Dimensionless)?,
         "channel_ratio" => input.setup.channel_area_ratio = quantity(Dimensionless)?,
@@ -850,7 +850,7 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
                  sections, correction, length, outlet, incidence, obliquity, spiral_start, \
                  side_radius, nose_shape, join, wall, \
                  fillet, type, \
-                 rib_wrap, rib, \
+                 rib_length, rib, \
                  rib_nose, channel_ratio, discharge, bend, growth, height_offset, z_align, \
                  base_form, eccentricity, outlet_shape, z_bend, rotation, cutwater, nose, height, \
                  dn, flange, flange_d, flange_t, bolt_circle, bolt_hole, bolts, pressure, \
@@ -1125,10 +1125,16 @@ fn print_report(name: &str, id: ComponentId, g: &VoluteGeometry, units: &Display
     }
     if let Some(rib) = &d.rib {
         println!(
-            "Double     inner volute wraps {} from the rib nose at {}   rib {}",
+            "Double     inner volute wraps {} from the rib nose at {}   rib {} long {}{}",
             s(Angle, rib.wrap),
             s(Angle, rib.start),
-            s(Length, rib.thickness)
+            s(Length, rib.thickness),
+            s(Angle, rib.length),
+            if rib.is_short() {
+                format!(" (ends at {}, before the throat)", s(Angle, rib.end()))
+            } else {
+                String::new()
+            }
         );
         println!(
             "           first throat {} at the rib nose   outer channel {} → {}",

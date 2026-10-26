@@ -3056,13 +3056,10 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "A double volute splits the spiral with a rib to cut the radial force (Gülich Chap. 7.8.1 and Table 9.4)",
         "Una voluta doble divide la espiral con un nervio para reducir el empuje radial (Gülich cap. 7.8.1 y tabla 9.4)",
     ),
+    ("Rib length", "Largo del nervio"),
     (
-        "Inner volute wrap ε_sp",
-        "Ángulo de la voluta interior ε_sp",
-    ),
-    (
-        "From the rib nose to the throat. The nose is always 180° from the cutwater (automatic); Gülich advises 165° to 170° with an even number of blades (Chap. 7.8.1), which can be set by hand",
-        "Del morro del nervio a la garganta. El morro está siempre a 180° del corte de agua (automático); Gülich aconseja de 165° a 170° con un número par de álabes (cap. 7.8.1), que se puede fijar a mano",
+        "From the rib nose, which is always 180° from the cutwater and keeps the two channels balanced. 180° (automatic) reaches the throat; less stops the rib short of the discharge diffuser and the two channels join there",
+        "Desde el morro del nervio, que está siempre a 180° del corte de agua y mantiene equilibrados los dos canales. 180° (automático) llega a la garganta; menos detiene el nervio antes del difusor de descarga y los dos canales se unen ahí",
     ),
     ("Rib thickness", "Espesor del nervio"),
     (

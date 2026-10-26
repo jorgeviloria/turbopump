@@ -875,7 +875,7 @@ fn flange(g: &VoluteGeometry, f: &tp_design::volute::Flange) -> Result<Shape, Ca
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::f64::consts::PI;
+    use std::f64::consts::{PI, TAU};
     use tp_design::outlet::ImpellerOutlet;
     use tp_design::volute::{CrossSectionInput, SectionShape, VoluteInput};
 
@@ -1415,7 +1415,7 @@ mod tests {
             &|v| v.cross_section = CrossSectionInput::single(SectionShape::rectangular()),
             &|v| {
                 v.cutwater.shape = tp_design::volute::CutwaterShape::Tangent;
-                v.setup.rib_wrap = tp_design::Param::Manual(170f64.to_radians());
+                v.setup.rib_length = tp_design::Param::Manual(170f64.to_radians());
             },
             &|v| v.cutwater.obliquity = tp_design::Param::Manual(35f64.to_radians()),
         ];
@@ -1645,6 +1645,47 @@ mod tests {
         ] {
             assert!((v / plain - 1.0).abs() < 0.03, "{name}: {v} vs {plain}");
         }
+    }
+
+    #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
+    fn a_rib_that_stops_short_of_the_throat_gives_a_valid_flow_domain_and_casing() {
+        let _slot = crate::test_slot::take();
+        use tp_design::volute::VoluteKind;
+        let build = |length: Option<f64>| {
+            let mut input = VoluteInput::default();
+            input.setup.kind = VoluteKind::Double;
+            if let Some(l) = length {
+                input.setup.rib_length = tp_design::Param::Manual(l.to_radians());
+            }
+            let g = VoluteGeometry::build(&basis(), &input).unwrap();
+            let cad = build_volute(&g).unwrap();
+            assert!(cad.fluid.is_valid(), "{length:?}");
+            assert_eq!(cad.fluid.solid_count(), 1, "{length:?}");
+            assert_eq!(cad.channel.solid_count(), 1, "{length:?}");
+            assert!(cad.warnings.is_empty(), "{length:?}: {:?}", cad.warnings);
+            (g, cad)
+        };
+        let (_, full) = build(None);
+        let (g, short) = build(Some(120.0));
+        // Less rib, more flow domain: by the band of the rib, its thickness over the
+        // height of the channel at its radius, swept over the 60° it lacks.
+        let rib = g.design.rib.unwrap();
+        let steps = 200;
+        let removed: f64 = (0..steps)
+            .map(|k| {
+                let angle = rib.end() + (TAU - rib.end()) * (f64::from(k) + 0.5) / f64::from(steps);
+                let r = g.design.stagnation_radius
+                    + g.design.section(angle).unwrap().height
+                    + 0.5 * rib.thickness;
+                let (lo, hi) = g.envelope_z_range(angle, r).unwrap();
+                rib.thickness * (hi - lo) * r * (TAU - rib.end()) / f64::from(steps)
+            })
+            .sum();
+        let gain = short.fluid_volume() - full.fluid_volume();
+        assert!((gain / removed - 1.0).abs() < 0.1, "{gain} vs {removed}");
+        let casing = build_volute_casing(&g, &short).unwrap();
+        assert!(casing.solid.is_valid() && casing.solid.solid_count() == 1);
     }
 
     #[test]
