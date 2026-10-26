@@ -57,6 +57,11 @@ pub struct CutwaterSlice {
     pub tip: DVec3,
     /// Angle between the two walls at the tip, rad.
     pub wedge: f64,
+    /// Angles of the outer wall of the spiral and of the inner wall of the diffuser at
+    /// the tip from the circumferential direction, positive away from the pump axis,
+    /// rad. The wedge is their difference.
+    pub spiral_angle: f64,
+    pub diffuser_angle: f64,
     /// Smooth outline of the material a rounded cutwater adds, from where it joins
     /// the spiral wall, round the nose, to where it joins the diffuser wall; the chord
     /// back to the first point closes it inside the wedge. Empty unless rounded.
@@ -271,6 +276,10 @@ impl Walls {
         let ts = direction(&self.spiral, s.segment);
         let td = direction(&self.diffuser, d.segment);
         let wedge = ts.dot(td).clamp(-1.0, 1.0).acos();
+        let radial = s.point.normalize();
+        let circumferential = DVec2::new(-radial.y, radial.x) * sign;
+        let from_circle = |d: DVec2| d.dot(radial).atan2(d.dot(circumferential));
+        let (spiral_angle, diffuser_angle) = (from_circle(ts), from_circle(td));
         let at = |p: DVec2| DVec3::new(p.x, p.y, z);
         let spiral_wall: Vec<DVec3> = self.spiral.iter().map(|p| at(*p)).collect();
         let diffuser_wall: Vec<DVec3> = self.diffuser.iter().map(|p| at(*p)).collect();
@@ -279,6 +288,8 @@ impl Walls {
                 z,
                 tip: at(s.point),
                 wedge,
+                spiral_angle,
+                diffuser_angle,
                 outline: Vec::new(),
                 min_thickness: 0.0,
                 nose_distance: s.point.length(),
@@ -293,6 +304,8 @@ impl Walls {
             z,
             tip: at(s.point),
             wedge,
+            spiral_angle,
+            diffuser_angle,
             nose_distance: body
                 .outline
                 .iter()

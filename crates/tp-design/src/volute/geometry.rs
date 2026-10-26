@@ -90,6 +90,18 @@ pub struct CutwaterGeometry {
     /// Distance from the pump axis to the nearest point of the cutwater: half the
     /// effective cutwater diameter, m.
     pub nose_distance: f64,
+    /// Angle of the outer wall of the spiral at the tip from the circumferential
+    /// direction, positive away from the pump axis, rad; 0 without a wedge.
+    pub spiral_angle: f64,
+    /// The same for the inner wall of the diffuser, rad. The wedge is the difference.
+    pub diffuser_angle: f64,
+}
+
+impl CutwaterGeometry {
+    /// Mean of the angles of the two walls: the direction of the wedge, rad.
+    pub fn mean_angle(&self) -> f64 {
+        0.5 * (self.spiral_angle + self.diffuser_angle)
+    }
 }
 
 /// The rib of a double volute in the midplane: a band as thick as the rib between the
@@ -508,6 +520,29 @@ impl VoluteGeometry {
             .collect()
     }
 
+    /// Distance C from the pump axis to the axis of the outlet, m: 0 when the outlet
+    /// stands on the line through the pump axis.
+    pub fn outlet_offset(&self) -> f64 {
+        let last = self.nozzle.last().expect("a diffuser");
+        let axis = last.tangent.truncate().normalize();
+        let c = axis.perp_dot(last.center.truncate()).abs();
+        if c < 1e-9 { 0.0 } else { c }
+    }
+
+    /// Angle φ between the radial line through the throat and the line from the pump
+    /// axis to the centre of the outlet, rad, positive in the direction of rotation.
+    pub fn outlet_angle(&self) -> f64 {
+        let last = self.nozzle.last().expect("a diffuser");
+        let sign = self.basis.rotation_sign;
+        let throat = self
+            .sections
+            .last()
+            .map_or(0.0, |s| s.rotation + sign * s.angle);
+        let outlet = last.center.y.atan2(last.center.x);
+        let turn = sign * (outlet - throat);
+        turn.sin().atan2(turn.cos())
+    }
+
     /// The break of the area law and of the path where the spiral ends and the diffuser
     /// starts; `None` for a double volute, whose throat is split by the rib, and for
     /// sections too close together to measure.
@@ -805,6 +840,8 @@ impl VoluteGeometry {
                         radius: 0.0,
                         nose_center: tip,
                         nose_distance: r,
+                        spiral_angle: 0.0,
+                        diffuser_angle: 0.0,
                     },
                 )
             }
@@ -821,6 +858,8 @@ impl VoluteGeometry {
                         radius: 0.0,
                         nose_center: tip,
                         nose_distance: design.stagnation_radius,
+                        spiral_angle: 0.0,
+                        diffuser_angle: 0.0,
                     },
                 )
             }
@@ -952,6 +991,8 @@ impl VoluteGeometry {
                 cutwater.tip = mid.tip;
                 cutwater.angle = (sign * mid.tip.y.atan2(mid.tip.x)).rem_euclid(TAU);
                 cutwater.wedge = mid.wedge;
+                cutwater.spiral_angle = mid.spiral_angle;
+                cutwater.diffuser_angle = mid.diffuser_angle;
                 if cutwater.radius <= 0.0 {
                     cutwater.nose_center = mid.tip;
                     cutwater.nose_distance = mid.nose_distance;
@@ -1305,6 +1346,8 @@ fn cutwater(
             radius: 0.0,
             nose_center: stagnation,
             nose_distance: design.stagnation_radius,
+            spiral_angle: 0.0,
+            diffuser_angle: 0.0,
         });
     }
     // Inner wall of the diffuser near the throat: the innermost points of the first
@@ -1369,6 +1412,14 @@ fn cutwater(
     let d_wall = along;
     let d_spiral = (wall(angle + 1e-4)? - wall(angle - 1e-4)?).normalize();
     let wedge = d_wall.dot(d_spiral).clamp(-1.0, 1.0).acos();
+    // Angles of the two walls from the circumferential direction at the tip.
+    let radial = tip.truncate().normalize();
+    let circumferential = DVec2::new(-radial.y, radial.x) * sign;
+    let from_circle = |d: DVec3| {
+        d.truncate()
+            .dot(radial)
+            .atan2(d.truncate().dot(circumferential))
+    };
     // A rounded nose of radius ρ whose innermost point lies on the cutwater circle d_z
     // (Gülich Fig. 7.41b: the flow stagnates on the nose at r'_z = r_z + e₃/2 when
     // ρ = e₃/2), joined to the tip by its tangents.
@@ -1396,6 +1447,8 @@ fn cutwater(
         radius,
         nose_center,
         nose_distance,
+        spiral_angle: from_circle(d_spiral),
+        diffuser_angle: from_circle(d_wall),
     })
 }
 
@@ -1782,6 +1835,64 @@ mod tests {
         for (a, b) in default.nozzle.iter().zip(&linear.nozzle) {
             assert_eq!(a.points, b.points);
         }
+    }
+
+    #[test]
+    fn the_wedge_is_the_difference_of_the_wall_angles() {
+        for shape in [CutwaterShape::Sharp, CutwaterShape::default()] {
+            let mut input = unturned();
+            input.cutwater.shape = shape;
+            let g = VoluteGeometry::build(&reference_basis(), &input).unwrap();
+            let c = g.cutwater;
+            assert_relative_eq!(
+                c.wedge,
+                (c.diffuser_angle - c.spiral_angle).abs(),
+                epsilon = 1e-9
+            );
+            // The wall of the spiral runs nearly along the circle; that of the diffuser
+            // leaves it outward.
+            assert!(c.spiral_angle.abs() < 0.3, "{c:?}");
+            assert!(c.mean_angle() >= c.spiral_angle.min(c.diffuser_angle));
+            assert!(c.mean_angle() <= c.spiral_angle.max(c.diffuser_angle));
+        }
+        // No wedge to speak of for a tangent cutwater.
+        let mut input = unturned();
+        input.cutwater.shape = CutwaterShape::Tangent;
+        let g = VoluteGeometry::build(&reference_basis(), &input).unwrap();
+        assert_eq!(
+            (g.cutwater.spiral_angle, g.cutwater.diffuser_angle),
+            (0.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn the_outlet_offset_and_angle_follow_the_discharge() {
+        // A radial discharge on the pump centerline: no offset, and it lies at the
+        // angle between the throat and the vertical.
+        let radial = with_discharge(DischargeShape::Radial { axis_angle: 0.0 });
+        assert!(radial.outlet_offset() < 1e-6, "{}", radial.outlet_offset());
+        let last = radial.nozzle.last().unwrap().center;
+        let towards = radial.outlet_angle();
+        let expected = last.y.atan2(last.x) - 0.0;
+        assert_relative_eq!(
+            towards * radial.basis.rotation_sign,
+            expected,
+            epsilon = 1e-9
+        );
+        // A tilted one stands off the line through the axis; a straight one too.
+        let tilted = with_discharge(DischargeShape::Radial {
+            axis_angle: 20f64.to_radians(),
+        });
+        assert!(tilted.outlet_offset() > 1e-3);
+        let straight = with_discharge(DischargeShape::Tangential {
+            straight_wall: StraightWall::Centered,
+        });
+        let r = straight.sections.last().unwrap().outline[0].x;
+        assert!(
+            straight.outlet_offset() > 0.5 * r,
+            "{}",
+            straight.outlet_offset()
+        );
     }
 
     #[test]

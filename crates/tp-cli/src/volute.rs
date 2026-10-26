@@ -873,6 +873,16 @@ fn print_report(name: &str, id: ComponentId, g: &VoluteGeometry, units: &Display
             s(Length, c.nose_distance)
         ),
     }
+    // The walls at the tip, from the circumferential direction.
+    if !matches!(d.cutwater_shape, CutwaterShape::Tangent) && d.development.start <= 0.0 {
+        println!(
+            "           walls at the tip: spiral αIn {}   diffuser αOut {}   mean αAvg {}   spiral starts at {}",
+            s(Angle, c.spiral_angle),
+            s(Angle, c.diffuser_angle),
+            s(Angle, c.mean_angle()),
+            s(Angle, g.start_angle)
+        );
+    }
     // Across the inlet width: where the walls cross, and the body of a rounded cutwater.
     let slices = &g.cutwater_slices;
     if !slices.is_empty() {
@@ -1065,6 +1075,25 @@ fn print_report(name: &str, id: ComponentId, g: &VoluteGeometry, units: &Display
         s(Angle, dif.opening_angle),
         s(Angle, dif.allowable_angle),
         dif.ideal_pressure_recovery
+    );
+    // Inlet and outlet as equivalent circles, the velocity ratio, and where the outlet
+    // stands: C from the pump axis to its axis, φ from the throat to its centre.
+    let equivalent = |area: f64| (4.0 * area / std::f64::consts::PI).sqrt();
+    println!(
+        "           inlet D {} A {}   outlet D {} A {}   c_out/c_in {:.3}",
+        s(Length, equivalent(dif.inlet_area)),
+        s(Area, dif.inlet_area),
+        s(Length, dif.outlet_diameter),
+        s(
+            Area,
+            std::f64::consts::PI * dif.outlet_diameter.powi(2) / 4.0
+        ),
+        1.0 / dif.area_ratio
+    );
+    println!(
+        "           outlet axis C {} from the pump axis   outlet centre φ {} from the throat",
+        s(Length, g.outlet_offset()),
+        s(Angle, g.outlet_angle())
     );
     println!(
         "Spiral     {} sections from {} to {}   wall {}{}",
