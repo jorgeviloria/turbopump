@@ -2264,7 +2264,9 @@ mod tests {
             let nozzle = &g.nozzle[0];
             let mean = |p: &[DVec3]| p.iter().copied().sum::<DVec3>() / p.len() as f64;
             let c = mean(&spiral);
-            let normal = (spiral[0] - c).cross(spiral[spiral.len() / 3] - c).normalize();
+            let normal = (spiral[0] - c)
+                .cross(spiral[spiral.len() / 3] - c)
+                .normalize();
             let u = (spiral[0] - c).reject_from(normal).normalize();
             let v = normal.cross(u);
             let flat = |p: &[DVec3]| -> Vec<DVec2> {
@@ -2285,13 +2287,16 @@ mod tests {
                 }
                 hit
             };
-            let (lo, hi) = a.iter().fold((DVec2::splat(1e9), DVec2::splat(-1e9)), |(l, h), q| {
-                (l.min(*q), h.max(*q))
-            });
+            let (lo, hi) = a
+                .iter()
+                .fold((DVec2::splat(1e9), DVec2::splat(-1e9)), |(l, h), q| {
+                    (l.min(*q), h.max(*q))
+                });
             let (mut n_a, mut n_out) = (0usize, 0usize);
             for i in 0..80 {
                 for j in 0..80 {
-                    let q = lo + (hi - lo) * DVec2::new((i as f64 + 0.5) / 80.0, (j as f64 + 0.5) / 80.0);
+                    let q = lo
+                        + (hi - lo) * DVec2::new((i as f64 + 0.5) / 80.0, (j as f64 + 0.5) / 80.0);
                     if inside(&a, q) {
                         n_a += 1;
                         if !inside(&b, q) {
