@@ -328,6 +328,21 @@ pub enum DiffuserGrowth {
     Matched,
 }
 
+/// How the sections of the discharge diffuser sit along the pump axis against the
+/// last section of the spiral. Shifting the whole diffuser so that it stays below the
+/// top of the spiral, or above its bottom, leaves a face lying in the plane of the top
+/// of the spiral, which the CAD kernel cannot build: the same shift is a manual offset.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ZAlignment {
+    /// Each section is centred on the centerline.
+    #[default]
+    Centric,
+    /// The outlet is `offset` toward +z (m), the sections in between by the share of the
+    /// length covered, or by its square when `quadratic`.
+    Manual { offset: f64, quadratic: bool },
+}
+
 /// Inputs of the discharge-diffuser step.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -351,6 +366,12 @@ pub struct DischargeInput {
     pub rotation: Param<f64>,
     /// Law of the area from the throat to the outlet.
     pub growth: DiffuserGrowth,
+    /// Height offset Δr_C, m: the diffuser is shifted across its centerline, away from
+    /// the pump axis when positive, growing from nothing at the throat to the full offset
+    /// over the first 40 % of its length. It gives the cutwater more room. Automatic: 0.
+    pub height_offset: Param<f64>,
+    /// Alignment of the diffuser along the pump axis.
+    pub z_alignment: ZAlignment,
 }
 
 /// Shape of the cutwater where the spiral meets the discharge diffuser (Gülich Chap.
@@ -607,6 +628,10 @@ pub struct DischargeDiffuser {
     pub shape: DischargeShape,
     /// Law of the area from the throat to the outlet.
     pub growth: DiffuserGrowth,
+    /// Height offset Δr_C, m.
+    pub height_offset: f64,
+    /// Alignment along the pump axis.
+    pub z_alignment: ZAlignment,
     /// Mean radius of the bend of a radial discharge; 0 for a straight one, m.
     pub bend_radius: f64,
     /// Length along the centerline from the throat, m: the bend of a radial discharge
@@ -1635,9 +1660,31 @@ impl VoluteDesign {
         let area_ratio = outlet_area / throat_area;
         // Eq. 1.45: tan ϑ_eq = (R₁,eq/L)·(√(A₂/A₁) − 1).
         let opening_angle = (r1 / length * (area_ratio.sqrt() - 1.0)).atan();
+        let height_offset = input.height_offset.resolve(|| 0.0);
+        require(
+            height_offset.is_finite() && height_offset.abs() <= 2.0 * r1,
+            || {
+                format!(
+                    "the height offset {:.1} mm must lie within two throat radii ({:.1} mm)",
+                    height_offset * 1e3,
+                    2.0 * r1 * 1e3
+                )
+            },
+        )?;
+        if let ZAlignment::Manual { offset, .. } = input.z_alignment {
+            require(offset.is_finite() && offset.abs() <= 4.0 * r1, || {
+                format!(
+                    "the axial offset {:.1} mm must lie within four throat radii ({:.1} mm)",
+                    offset * 1e3,
+                    4.0 * r1 * 1e3
+                )
+            })?;
+        }
         Ok(DischargeDiffuser {
             shape: input.shape,
             growth: input.growth,
+            height_offset,
+            z_alignment: input.z_alignment,
             bend_radius,
             length,
             inlet_area: throat_area,

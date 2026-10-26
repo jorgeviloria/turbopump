@@ -11,7 +11,7 @@ use tp_design::volute::{
     AreaLaw, BendWall, BezierBase, BezierSide, CutwaterShape, DEFAULT_CONE_ANGLE_DEG,
     DiffuserGrowth, DischargeShape, ExternalRound, InnerPosition, InternalRound, Progression,
     RadiusSide, SectionDefinition, SectionShape, SegmentPoint, SideShape, StraightWall,
-    VoluteGeometry, VoluteInput, VoluteKind,
+    VoluteGeometry, VoluteInput, VoluteKind, ZAlignment,
 };
 use tp_project::{ComponentId, ComponentKind, Project, VOLUTE_STEPS};
 use tp_units::{DisplayUnits, QuantityKind, parse_quantity_or};
@@ -63,7 +63,7 @@ pub(crate) struct VoluteArgs {
     /// semicircle), channel_ratio (outlet area of the outer channel over the first
     /// throat), discharge (radial, the default, with the outlet on the pump centerline,
     /// or radial:DEGREES from the line through the pump axis; tangential, opening to both
-    /// sides; tangential:inner or tangential:outer with that wall straight), bend (bend radius of a radial discharge), growth (area of the diffuser from the throat: linear, the default, or matched, which starts with the slope of the spiral), rotation (angle
+    /// sides; tangential:inner or tangential:outer with that wall straight), bend (bend radius of a radial discharge), height_offset (Δr_C: the diffuser shifted across its centerline, away from the pump axis when positive, to give the cutwater room), z_align (centric, or manual:OFFSET[,quadratic]: the outlet shifted along the pump axis), growth (area of the diffuser from the throat: linear, the default, or matched, which starts with the slope of the spiral), rotation (angle
     /// of the cutwater from the x axis; auto turns the discharge vertically up), cutwater
     /// (tangent, sharp or rounded), nose (radius of a rounded cutwater), height (H, the
     /// outlet face from the pump axis, which sets the diffuser length), dn (on: round the
@@ -545,6 +545,33 @@ fn on_off(value: &str) -> Result<bool, String> {
     }
 }
 
+/// How the diffuser sits along the pump axis: centric, or manual:OFFSET[,quadratic]
+/// with a length for the shift of the outlet.
+fn parse_z_alignment(value: &str, units: &DisplayUnits) -> Result<ZAlignment, String> {
+    match value {
+        "centric" => Ok(ZAlignment::Centric),
+        _ => {
+            let manual = value.strip_prefix("manual:").ok_or_else(|| {
+                format!(
+                    "z_align must be centric or manual:OFFSET[,quadratic], got \
+                     {value:?}"
+                )
+            })?;
+            let (offset, quadratic) = match manual.strip_suffix(",quadratic") {
+                Some(offset) => (offset, true),
+                None => (manual, false),
+            };
+            let offset = parse_quantity_or(
+                offset.trim(),
+                QuantityKind::Length,
+                units.get(QuantityKind::Length),
+            )
+            .map_err(|e| format!("z_align: {e}"))?;
+            Ok(ZAlignment::Manual { offset, quadratic })
+        }
+    }
+}
+
 fn parse_discharge(value: &str) -> Result<DischargeShape, String> {
     let wall = |w| DischargeShape::Tangential { straight_wall: w };
     match value {
@@ -716,6 +743,8 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
         "rib_comp_start" => input.setup.rib_compensation_start = quantity(Angle)?,
         "discharge" => input.diffuser.shape = parse_discharge(value)?,
         "bend" => input.diffuser.bend_radius = quantity(Length)?,
+        "height_offset" => input.diffuser.height_offset = quantity(Length)?,
+        "z_align" => input.diffuser.z_alignment = parse_z_alignment(value, units)?,
         "growth" => {
             input.diffuser.growth = match value {
                 "linear" => DiffuserGrowth::Linear,

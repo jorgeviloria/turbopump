@@ -14,7 +14,7 @@ use super::section::Bend;
 use super::stress::WallStress;
 use super::{
     CrossSections, CutwaterShape, DiffuserGrowth, DischargeShape, SectionSize, StraightWall,
-    VoluteDesign, VoluteInput,
+    VoluteDesign, VoluteInput, ZAlignment,
 };
 use crate::outlet::ImpellerOutlet;
 use crate::{DesignError, Param};
@@ -22,6 +22,8 @@ use crate::{DesignError, Param};
 /// Sections of the discharge diffuser after the throat.
 const NOZZLE_SECTIONS: usize = 10;
 const DEFAULT_SECTIONS: u32 = 36;
+/// Share of the length of the diffuser over which the height offset builds up.
+const OFFSET_REACH: f64 = 0.4;
 
 /// One cross section of the spiral, in its radial plane.
 #[derive(Debug, Clone, PartialEq)]
@@ -1649,7 +1651,19 @@ fn nozzle(
                 } => outer - highest,
                 _ => 0.0,
             };
-            let center = position + u * shift;
+            // The height offset grows from nothing at the throat, with no slope there so
+            // that the diffuser leaves along the spiral, to its full value over the first
+            // OFFSET_REACH of the length: it is room for the cutwater, which sits at the
+            // start.
+            let reach = (s / OFFSET_REACH).min(1.0);
+            let ramp = reach * reach * (3.0 - 2.0 * reach);
+            let mut center = position + u * (shift + design.diffuser.height_offset * ramp);
+            center.z += match design.diffuser.z_alignment {
+                ZAlignment::Centric => 0.0,
+                ZAlignment::Manual { offset, quadratic } => {
+                    offset * if quadratic { s * s } else { s }
+                }
+            };
             NozzleSection {
                 center,
                 tangent,
@@ -1955,6 +1969,94 @@ mod tests {
                 .iter()
                 .any(|w| w.contains("walls at the cutwater tip"))
         );
+    }
+
+    /// The reference volute with the discharge diffuser changed.
+    fn with_diffuser(edit: impl FnOnce(&mut crate::volute::DischargeInput)) -> VoluteGeometry {
+        let mut input = unturned();
+        edit(&mut input.diffuser);
+        VoluteGeometry::build(&reference_basis(), &input).unwrap()
+    }
+
+    #[test]
+    fn no_offsets_leave_the_diffuser_as_it_was() {
+        let plain = with_diffuser(|_| {});
+        let zero = with_diffuser(|d| {
+            d.height_offset = Param::Manual(0.0);
+            d.z_alignment = ZAlignment::Manual {
+                offset: 0.0,
+                quadratic: false,
+            };
+        });
+        for (a, b) in plain.nozzle.iter().zip(&zero.nozzle) {
+            for (p, q) in a.points.iter().zip(&b.points) {
+                assert!(p.distance(*q) < 1e-12);
+            }
+        }
+    }
+
+    #[test]
+    fn the_height_offset_moves_the_diffuser_away_from_the_spiral() {
+        let plain = with_diffuser(|_| {});
+        let offset = 0.01;
+        let moved = with_diffuser(|d| d.height_offset = Param::Manual(offset));
+        // The throat stays, the outlet is shifted by the whole offset across its axis.
+        for (a, b) in plain.nozzle[0].points.iter().zip(&moved.nozzle[0].points) {
+            assert!(a.distance(*b) < 1e-12);
+        }
+        let (a, b) = (plain.nozzle.last().unwrap(), moved.nozzle.last().unwrap());
+        assert_relative_eq!(a.center.distance(b.center), offset, epsilon = 1e-9);
+        // The first step has hardly left: the shift starts with no slope.
+        let first = plain.nozzle[1].center.distance(moved.nozzle[1].center);
+        assert!(first < 0.2 * offset, "{first}");
+        // It is complete after 40 % of the length.
+        let at = |g: &VoluteGeometry, k: usize| g.nozzle[k].center;
+        assert_relative_eq!(
+            at(&plain, 4).distance(at(&moved, 4)),
+            offset,
+            epsilon = 1e-9
+        );
+        // The outlet axis stands that much further from the pump axis (C).
+        assert_relative_eq!(
+            moved.outlet_offset() - plain.outlet_offset(),
+            offset,
+            epsilon = 1e-9
+        );
+        // Too much is refused.
+        let mut input = unturned();
+        input.diffuser.height_offset = Param::Manual(1.0);
+        assert!(VoluteGeometry::build(&reference_basis(), &input).is_err());
+    }
+
+    #[test]
+    fn a_manual_axial_offset_reaches_its_value_at_the_outlet() {
+        let linear = with_diffuser(|d| {
+            d.z_alignment = ZAlignment::Manual {
+                offset: 0.02,
+                quadratic: false,
+            }
+        });
+        let quadratic = with_diffuser(|d| {
+            d.z_alignment = ZAlignment::Manual {
+                offset: 0.02,
+                quadratic: true,
+            }
+        });
+        let centric = with_diffuser(|_| {});
+        for g in [&linear, &quadratic] {
+            let last = g.nozzle.len() - 1;
+            assert_relative_eq!(
+                g.nozzle[last].center.z - centric.nozzle[last].center.z,
+                0.02,
+                epsilon = 1e-9
+            );
+        }
+        // Halfway: half of it, or a quarter.
+        let mid = linear.nozzle.len() / 2;
+        let share =
+            |g: &VoluteGeometry| (g.nozzle[mid].center.z - centric.nozzle[mid].center.z) / 0.02;
+        assert_relative_eq!(share(&linear), 0.5, epsilon = 1e-9);
+        assert_relative_eq!(share(&quadratic), 0.25, epsilon = 1e-9);
     }
 
     #[test]

@@ -1591,6 +1591,37 @@ mod tests {
 
     #[test]
     #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
+    fn the_diffuser_offsets_give_valid_flow_domains() {
+        let _slot = crate::test_slot::take();
+        use tp_design::Param;
+        use tp_design::volute::{DischargeInput, ZAlignment};
+        let fluid = |edit: &dyn Fn(&mut DischargeInput)| -> f64 {
+            let mut input = VoluteInput::default();
+            edit(&mut input.diffuser);
+            let g = VoluteGeometry::build(&basis(), &input).unwrap();
+            let cad = build_volute(&g).unwrap();
+            assert!(cad.fluid.is_valid());
+            assert_eq!(cad.fluid.solid_count(), 1);
+            assert_eq!(cad.channel.solid_count(), 1);
+            assert!(cad.warnings.is_empty(), "{:?}", cad.warnings);
+            cad.fluid_volume()
+        };
+        let plain = fluid(&|_| {});
+        let offset = fluid(&|d| d.height_offset = Param::Manual(0.01));
+        let manual = fluid(&|d| {
+            d.z_alignment = ZAlignment::Manual {
+                offset: 0.01,
+                quadratic: true,
+            }
+        });
+        // Same areas along the diffuser: the volume hardly changes, but it does.
+        for (name, v) in [("offset", offset), ("manual", manual)] {
+            assert!((v / plain - 1.0).abs() < 0.03, "{name}: {v} vs {plain}");
+        }
+    }
+
+    #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
     fn cutwater_and_discharge_shapes_give_valid_solids() {
         let _slot = crate::test_slot::take();
         use tp_design::Param;
