@@ -168,6 +168,26 @@ pub(super) fn crossings(
         .collect()
 }
 
+/// How many times the outer wall of the spiral crosses the inner wall of the diffuser
+/// in each of the planes across the inlet width, as for [`crossings`]. A cutwater needs
+/// one intersection curve between the spiral and the diffuser: more than one crossing in
+/// a plane means several.
+pub(super) fn crossing_counts(
+    design: &VoluteDesign,
+    outlines: &[(f64, Vec<DVec2>)],
+    nozzle: &[NozzleSection],
+    sign: f64,
+    midplane: f64,
+) -> Vec<usize> {
+    let half = 0.5 * design.inlet_width * (1.0 - EDGE_MARGIN);
+    (0..SLICES)
+        .map(|k| {
+            let z = midplane - half + 2.0 * half * k as f64 / (SLICES - 1) as f64;
+            Walls::at(outlines, nozzle, sign, z).map_or(0, |w| w.count_crossings())
+        })
+        .collect()
+}
+
 /// The two walls in one plane, as polylines (x, y) downstream.
 struct Walls {
     spiral: Vec<DVec2>,
@@ -220,6 +240,25 @@ impl Walls {
                 Station { segment, point },
             )
         })
+    }
+
+    /// The number of distinct points where the two walls cross.
+    fn count_crossings(&self) -> usize {
+        let mut points: Vec<DVec2> = Vec::new();
+        for i in 0..self.spiral.len() - 1 {
+            for j in 0..self.diffuser.len() - 1 {
+                if let Some(p) = segment_crossing(
+                    self.spiral[i],
+                    self.spiral[i + 1],
+                    self.diffuser[j],
+                    self.diffuser[j + 1],
+                ) && points.iter().all(|q| q.distance(p) > 1e-5)
+                {
+                    points.push(p);
+                }
+            }
+        }
+        points.len()
     }
 
     /// Where the spiral wall first crosses the diffuser wall, on each polyline.
@@ -1338,6 +1377,31 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(err.contains("must start between"), "{err}");
+    }
+
+    #[test]
+    fn the_walls_are_counted_where_they_cross() {
+        let line = |points: &[(f64, f64)]| -> Vec<DVec2> {
+            points.iter().map(|&(x, y)| DVec2::new(x, y)).collect()
+        };
+        // A spiral wall running up through a straight diffuser wall: one crossing.
+        let walls = Walls {
+            spiral: line(&[(0.0, -1.0), (1.0, 1.0)]),
+            diffuser: line(&[(-1.0, 0.0), (2.0, 0.0)]),
+        };
+        assert_eq!(walls.count_crossings(), 1);
+        // It comes back down through it again: two. A crossing at a vertex counts once.
+        let walls = Walls {
+            spiral: line(&[(0.0, -1.0), (1.0, 1.0), (2.0, -1.0)]),
+            diffuser: line(&[(-1.0, 0.0), (1.0, 0.0), (3.0, 0.0)]),
+        };
+        assert_eq!(walls.count_crossings(), 2);
+        // Apart: none.
+        let walls = Walls {
+            spiral: line(&[(0.0, 1.0), (1.0, 2.0)]),
+            diffuser: line(&[(-1.0, 0.0), (2.0, 0.0)]),
+        };
+        assert_eq!(walls.count_crossings(), 0);
     }
 
     #[test]

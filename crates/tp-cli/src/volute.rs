@@ -63,7 +63,7 @@ pub(crate) struct VoluteArgs {
     /// semicircle), channel_ratio (outlet area of the outer channel over the first
     /// throat), discharge (radial, the default, with the outlet on the pump centerline,
     /// or radial:DEGREES from the line through the pump axis; tangential, opening to both
-    /// sides; tangential:inner or tangential:outer with that wall straight), bend (bend radius of a radial discharge), height_offset (Δr_C: the diffuser shifted across its centerline, away from the pump axis when positive, to give the cutwater room), z_align (centric, or manual:OFFSET[,quadratic]: the outlet shifted along the pump axis), growth (area of the diffuser from the throat: linear, the default, or matched, which starts with the slope of the spiral), rotation (angle
+    /// sides; tangential:inner or tangential:outer with that wall straight), bend (bend radius of a radial discharge), base_form (0 to 0.9: how round the diffuser is on its base side, toward the pump axis), height_offset (Δr_C: the diffuser shifted across its centerline, away from the pump axis when positive, to give the cutwater room), z_align (centric, or manual:OFFSET[,quadratic]: the outlet shifted along the pump axis), growth (area of the diffuser from the throat: linear, the default, or matched, which starts with the slope of the spiral), rotation (angle
     /// of the cutwater from the x axis; auto turns the discharge vertically up), cutwater
     /// (tangent, sharp or rounded), nose (radius of a rounded cutwater), height (H, the
     /// outlet face from the pump axis, which sets the diffuser length), dn (on: round the
@@ -744,6 +744,7 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
         "discharge" => input.diffuser.shape = parse_discharge(value)?,
         "bend" => input.diffuser.bend_radius = quantity(Length)?,
         "height_offset" => input.diffuser.height_offset = quantity(Length)?,
+        "base_form" => input.diffuser.base_form = quantity(Dimensionless)?,
         "z_align" => input.diffuser.z_alignment = parse_z_alignment(value, units)?,
         "growth" => {
             input.diffuser.growth = match value {

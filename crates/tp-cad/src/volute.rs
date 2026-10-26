@@ -1608,6 +1608,7 @@ mod tests {
         };
         let plain = fluid(&|_| {});
         let offset = fluid(&|d| d.height_offset = Param::Manual(0.01));
+        let rounded_base = fluid(&|d| d.base_form = Param::Manual(0.9));
         let manual = fluid(&|d| {
             d.z_alignment = ZAlignment::Manual {
                 offset: 0.01,
@@ -1615,7 +1616,11 @@ mod tests {
             }
         });
         // Same areas along the diffuser: the volume hardly changes, but it does.
-        for (name, v) in [("offset", offset), ("manual", manual)] {
+        for (name, v) in [
+            ("offset", offset),
+            ("rounded base", rounded_base),
+            ("manual", manual),
+        ] {
             assert!((v / plain - 1.0).abs() < 0.03, "{name}: {v} vs {plain}");
         }
     }

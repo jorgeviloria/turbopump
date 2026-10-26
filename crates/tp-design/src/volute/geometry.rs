@@ -24,6 +24,8 @@ const NOZZLE_SECTIONS: usize = 10;
 const DEFAULT_SECTIONS: u32 = 36;
 /// Share of the length of the diffuser over which the height offset builds up.
 const OFFSET_REACH: f64 = 0.4;
+/// Share of the length of the diffuser over which its base side rounds.
+const BASE_REACH: f64 = 0.3;
 
 /// One cross section of the spiral, in its radial plane.
 #[derive(Debug, Clone, PartialEq)]
@@ -843,6 +845,7 @@ impl VoluteGeometry {
         // discharge), the spiral starts where it clears the wall and the cutwater sits
         // there.
         let mut start_range = None;
+        let mut intersection_warning: Option<String> = None;
         let (start, cutwater) = match design.cutwater_shape {
             // An internal spiral starts beside the face of the neck, inside the diffuser:
             // the cutwater is where the two cut each other, with no nose of its own.
@@ -901,6 +904,16 @@ impl VoluteGeometry {
                     })
                     .collect();
                 let crossings = super::cutwater::crossings(&design, &early, &nozzle, sign, zm);
+                let counts = super::cutwater::crossing_counts(&design, &early, &nozzle, sign, zm);
+                let several = counts.iter().filter(|c| **c > 1).count();
+                if several > 0 {
+                    intersection_warning = Some(format!(
+                        "the spiral wall crosses the diffuser wall more than once in {several} of \
+                         {} planes, so there are several intersection curves: move the start of \
+                         the spiral, reduce the height offset or raise the base form factor",
+                        counts.len()
+                    ));
+                }
                 let sharp = matches!(design.cutwater_shape, CutwaterShape::Sharp);
                 let wedged = |c: &Option<(f64, f64)>| c.is_some_and(|(_, w)| w > MIN_WEDGE);
                 let crosses = wedged(&crossings[crossings.len() / 2])
@@ -1189,6 +1202,7 @@ impl VoluteGeometry {
         let inner_wall: Vec<DVec3> = inner_wall.into_iter().map(turn).collect();
 
         let mut warnings = design.warnings.clone();
+        warnings.extend(intersection_warning);
         if nozzle_length > design.diffuser.length * (1.0 + 1e-9) {
             warnings.push(format!(
                 "the bend of the radial discharge ({:.0} mm) is longer than the diffuser \
@@ -1602,6 +1616,11 @@ fn nozzle(
         .iter()
         .map(|p| (*p - start).dot(u0))
         .fold(f64::NEG_INFINITY, f64::max);
+    let (x_lo, x_hi) = throat_points
+        .iter()
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| {
+            (lo.min(p.x), hi.max(p.x))
+        });
     let circle: Vec<DVec2> = throat_points
         .iter()
         .map(|p| r1 * DVec2::new(p.x, p.y).normalize())
@@ -1623,10 +1642,18 @@ fn nozzle(
                 };
             }
             let w = s * s * (3.0 - 2.0 * s);
+            // The base side, toward the pump axis, rounds sooner by the base form factor:
+            // full weight at its edge, none over the far half, building up from the throat.
+            let reach_b = (s / BASE_REACH).min(1.0);
+            let base = design.diffuser.base_form * reach_b * reach_b * (3.0 - 2.0 * reach_b);
             let blend: Vec<DVec2> = throat_points
                 .iter()
                 .zip(&circle)
-                .map(|(t, c)| t.lerp(*c, w))
+                .map(|(t, c)| {
+                    let near = ((x_hi - t.x) / (x_hi - x_lo) * 2.0 - 1.0).clamp(0.0, 1.0);
+                    let weight = near * near * (3.0 - 2.0 * near);
+                    t.lerp(*c, w + (1.0 - w) * base * weight)
+                })
                 .collect();
             let radius = match design.diffuser.growth {
                 DiffuserGrowth::Linear => r1 + (r2 - r1) * s,
@@ -1909,6 +1936,80 @@ mod tests {
             (g.cutwater.spiral_angle, g.cutwater.diffuser_angle),
             (0.0, 0.0)
         );
+    }
+
+    #[test]
+    fn one_intersection_curve_gives_no_warning() {
+        type Edit = fn(&mut crate::volute::DischargeInput);
+        let edits: [Edit; 2] = [
+            |_| {},
+            |d| {
+                d.height_offset = Param::Manual(0.01);
+                d.base_form = Param::Manual(0.9);
+            },
+        ];
+        for edit in edits {
+            for shape in [CutwaterShape::Sharp, CutwaterShape::default()] {
+                let mut input = unturned();
+                input.cutwater.shape = shape;
+                edit(&mut input.diffuser);
+                let g = VoluteGeometry::build(&reference_basis(), &input).unwrap();
+                assert!(
+                    !g.warnings.iter().any(|w| w.contains("intersection curves")),
+                    "{:?}",
+                    g.warnings
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_base_form_factor_rounds_the_base_side_only() {
+        let plain = with_diffuser(|_| {});
+        let round = with_diffuser(|d| d.base_form = Param::Manual(0.9));
+        // The throat stays, and the area law does not change.
+        for (a, b) in plain.nozzle[0].points.iter().zip(&round.nozzle[0].points) {
+            assert!(a.distance(*b) < 1e-12);
+        }
+        for (a, b) in plain.nozzle.iter().zip(&round.nozzle) {
+            assert_relative_eq!(a.area, b.area, epsilon = 1e-12);
+        }
+        // Past the first steps the outline differs, more on the base side (toward the
+        // axis, small radius) than on the far side.
+        let k = 4;
+        let radius = |p: &DVec3| p.truncate().length();
+        let moved: Vec<f64> = plain.nozzle[k]
+            .points
+            .iter()
+            .zip(&round.nozzle[k].points)
+            .map(|(a, b)| a.distance(*b))
+            .collect();
+        assert!(moved.iter().cloned().fold(0.0, f64::max) > 1e-3);
+        let (near, far): (Vec<f64>, Vec<f64>) = {
+            let mid = plain.nozzle[k].points.iter().map(radius).sum::<f64>()
+                / plain.nozzle[k].points.len() as f64;
+            let mut near = Vec::new();
+            let mut far = Vec::new();
+            for (p, d) in plain.nozzle[k].points.iter().zip(&moved) {
+                if radius(p) < mid {
+                    near.push(*d);
+                } else {
+                    far.push(*d);
+                }
+            }
+            (near, far)
+        };
+        let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len() as f64;
+        assert!(
+            mean(&near) > mean(&far),
+            "{} vs {}",
+            mean(&near),
+            mean(&far)
+        );
+        // Out of range is refused.
+        let mut input = unturned();
+        input.diffuser.base_form = Param::Manual(0.95);
+        assert!(VoluteGeometry::build(&reference_basis(), &input).is_err());
     }
 
     #[test]

@@ -343,6 +343,11 @@ pub enum ZAlignment {
     Manual { offset: f64, quadratic: bool },
 }
 
+/// Largest base form factor of the discharge diffuser. At 1 the base side is the circle
+/// at once and the CAD kernel cannot cut the cutwater cleanly (the flow domain comes out
+/// in four pieces); up to 0.9 it builds on the reference volute.
+pub const MAX_BASE_FORM: f64 = 0.9;
+
 /// Inputs of the discharge-diffuser step.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -372,6 +377,11 @@ pub struct DischargeInput {
     pub height_offset: Param<f64>,
     /// Alignment of the diffuser along the pump axis.
     pub z_alignment: ZAlignment,
+    /// Base form factor, 0 to [`MAX_BASE_FORM`]: how round the diffuser is on its base
+    /// side, toward the pump axis, over the first 30 % of its length. 0 keeps the corners
+    /// of the section of the spiral there, 1 would round that side to the circle at once. A rounder base
+    /// changes where the spiral wall crosses the diffuser wall. Automatic: 0.
+    pub base_form: Param<f64>,
 }
 
 /// Shape of the cutwater where the spiral meets the discharge diffuser (Gülich Chap.
@@ -632,6 +642,8 @@ pub struct DischargeDiffuser {
     pub height_offset: f64,
     /// Alignment along the pump axis.
     pub z_alignment: ZAlignment,
+    /// Base form factor, 0 to 1.
+    pub base_form: f64,
     /// Mean radius of the bend of a radial discharge; 0 for a straight one, m.
     pub bend_radius: f64,
     /// Length along the centerline from the throat, m: the bend of a radial discharge
@@ -1680,11 +1692,18 @@ impl VoluteDesign {
                 )
             })?;
         }
+        let base_form = input.base_form.resolve(|| 0.0);
+        require((0.0..=MAX_BASE_FORM).contains(&base_form), || {
+            format!(
+                "the base form factor must lie between 0 and {MAX_BASE_FORM}, got {base_form:.2}"
+            )
+        })?;
         Ok(DischargeDiffuser {
             shape: input.shape,
             growth: input.growth,
             height_offset,
             z_alignment: input.z_alignment,
+            base_form,
             bend_radius,
             length,
             inlet_area: throat_area,
