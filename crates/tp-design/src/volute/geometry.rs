@@ -2254,6 +2254,63 @@ mod tests {
         }
     }
 
+    #[test]
+    fn the_throat_faces_of_spiral_and_diffuser_are_compared() {
+        // Prints how much of the last section of the spiral lies outside the first
+        // section of the diffuser, in the plane of the spiral's: `-- --nocapture`.
+        for (name, g) in junction_cases() {
+            let sign = g.basis.rotation_sign;
+            let spiral = g.sections.last().unwrap().points(sign);
+            let nozzle = &g.nozzle[0];
+            let mean = |p: &[DVec3]| p.iter().copied().sum::<DVec3>() / p.len() as f64;
+            let c = mean(&spiral);
+            let normal = (spiral[0] - c).cross(spiral[spiral.len() / 3] - c).normalize();
+            let u = (spiral[0] - c).reject_from(normal).normalize();
+            let v = normal.cross(u);
+            let flat = |p: &[DVec3]| -> Vec<DVec2> {
+                p.iter()
+                    .map(|q| DVec2::new((*q - c).dot(u), (*q - c).dot(v)))
+                    .collect()
+            };
+            let (a, b) = (flat(&spiral), flat(&nozzle.points));
+            let inside = |poly: &[DVec2], q: DVec2| {
+                let mut hit = false;
+                for i in 0..poly.len() {
+                    let (p, r) = (poly[i], poly[(i + 1) % poly.len()]);
+                    if (p.y > q.y) != (r.y > q.y)
+                        && q.x < p.x + (q.y - p.y) / (r.y - p.y) * (r.x - p.x)
+                    {
+                        hit = !hit;
+                    }
+                }
+                hit
+            };
+            let (lo, hi) = a.iter().fold((DVec2::splat(1e9), DVec2::splat(-1e9)), |(l, h), q| {
+                (l.min(*q), h.max(*q))
+            });
+            let (mut n_a, mut n_out) = (0usize, 0usize);
+            for i in 0..80 {
+                for j in 0..80 {
+                    let q = lo + (hi - lo) * DVec2::new((i as f64 + 0.5) / 80.0, (j as f64 + 0.5) / 80.0);
+                    if inside(&a, q) {
+                        n_a += 1;
+                        if !inside(&b, q) {
+                            n_out += 1;
+                        }
+                    }
+                }
+            }
+            println!(
+                "{name:22} centre gap {:6.2} mm  normal vs tangent {:5.1}°  area {:7.1} → {:7.1} mm²  spiral face outside diffuser {:5.1} %",
+                (mean(&nozzle.points) - c).length() * 1e3,
+                normal.dot(nozzle.tangent).abs().acos().to_degrees(),
+                g.sections.last().unwrap().size.area * 1e6,
+                nozzle.area * 1e6,
+                100.0 * n_out as f64 / n_a as f64
+            );
+        }
+    }
+
     /// The cases of `junction_cases` with the given growth law of the diffuser.
     fn junction_cases_with(growth: DiffuserGrowth) -> Vec<(String, VoluteGeometry)> {
         let mut cases = Vec::new();
