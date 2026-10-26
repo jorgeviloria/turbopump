@@ -41,8 +41,8 @@ use tp_units::STANDARD_GRAVITY;
 
 pub use cutwater::CutwaterSlice;
 pub use geometry::{
-    AcrossWidth, CutwaterValues, FlowSection, NozzleSection, RibPlane, ThroatJunction,
-    VoluteGeometry, VoluteSection,
+    AcrossWidth, CHANNEL_OVERLAP, CutwaterValues, FlowSection, NozzleSection, RibPlane,
+    ThroatJunction, VoluteGeometry, VoluteSection,
 };
 mod double;
 pub use double::{DoubleRow, FreeDouble};
