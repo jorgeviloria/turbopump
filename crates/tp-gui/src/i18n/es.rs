@@ -874,6 +874,22 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Shifts the diffuser across its centerline, away from the pump axis when positive, over the first 40 % of its length: room for the cutwater, whose tip moves toward the base circle",
         "Desplaza el difusor a través de su línea media, alejándolo del eje de la bomba si es positivo, en el primer 40 % de su longitud: da sitio al corte de agua, cuya punta se acerca al círculo base",
     ),
+    ("Outlet section", "Sección de salida"),
+    (
+        "Round, or a rectangle of the same area: its aspect is the height along the pump axis over the width. A rectangular outlet has no round flange",
+        "Circular, o un rectángulo de la misma área: su proporción es la altura a lo largo del eje de la bomba sobre el ancho. Una salida rectangular no lleva la brida circular",
+    ),
+    ("round", "circular"),
+    ("Outlet aspect", "Proporción de la salida"),
+    (
+        "Height along the pump axis over the width of the rectangular outlet",
+        "Altura a lo largo del eje de la bomba sobre el ancho de la salida rectangular",
+    ),
+    ("Eccentricity", "Excentricidad"),
+    (
+        "How the diffuser widens against its axis: −1 with the wall on the cutwater side straight, 0 to both sides, 1 with the outer wall straight; automatic: that of the wall chosen above",
+        "Cómo se ensancha el difusor respecto a su eje: −1 con la pared del lado del corte de agua recta, 0 hacia ambos lados, 1 con la pared exterior recta; automática: la de la pared elegida arriba",
+    ),
     ("Base form factor", "Factor de forma de la base"),
     (
         "How round the diffuser is on its base side, toward the pump axis: 0 keeps the corners of the last section of the spiral, 1 would round that side to the circle (the limit is 0.9). It builds up over the first 30 % of the length and changes where the spiral wall crosses the diffuser wall",
@@ -4684,6 +4700,10 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
     (
         "the spiral wall crosses the diffuser wall more than once in {} of {} planes, so there are several intersection curves: move the start of the spiral, reduce the height offset or raise the base form factor",
         "la pared de la espiral cruza la del difusor más de una vez en {} de {} planos, así que hay varias curvas de intersección: conviene mover el inicio de la espiral, reducir el desplazamiento radial o subir el factor de forma de la base",
+    ),
+    (
+        "a rectangular outlet has no flange of ours, which is round: the casing ends flat",
+        "una salida rectangular no lleva nuestra brida, que es circular: la carcasa termina plana",
     ),
     (
         "cutwater incidence {}° is outside ±3° (Gülich eq. T7.7.6)",

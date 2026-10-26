@@ -9,7 +9,7 @@ use tp_design::Param;
 use tp_design::volute::stress::StressPlace;
 use tp_design::volute::{
     AreaLaw, CutwaterShape, DiffuserGrowth, DischargeShape, MAX_ARCS, MIN_ARCS, MIN_WRAP_DEG,
-    Progression, StraightWall, VoluteGeometry, VoluteInput, VoluteKind, ZAlignment,
+    OutletShape, Progression, StraightWall, VoluteGeometry, VoluteInput, VoluteKind, ZAlignment,
 };
 use tp_project::{ComponentId, DesignStep, Project};
 use tp_units::{DisplayUnits, QuantityKind};
@@ -937,6 +937,22 @@ fn diffuser(
                     0.001..=10.0,
                 );
             }
+            if matches!(input.diffuser.shape, DischargeShape::Tangential { .. }) {
+                param_f64(
+                    ui,
+                    tr("Eccentricity"),
+                    tr(
+                        "How the diffuser widens against its axis: −1 with the wall on the \
+                        cutwater side straight, 0 to both sides, 1 with the outer wall straight; \
+                        automatic: that of the wall chosen above",
+                    ),
+                    &mut input.diffuser.eccentricity,
+                    Dimensionless,
+                    dif.map(|d| d.eccentricity),
+                    &units,
+                    -1.0..=1.0,
+                );
+            }
             param_f64(
                 ui,
                 tr("Length"),
@@ -973,6 +989,50 @@ fn diffuser(
                 &units,
                 0.005..=10.0,
             );
+            label(
+                ui,
+                tr("Outlet section"),
+                tr(
+                    "Round, or a rectangle of the same area: its aspect is the height along the \
+                    pump axis over the width. A rectangular outlet has no round flange",
+                ),
+            );
+            let section = |o: &OutletShape| {
+                tr(match o {
+                    OutletShape::Round => "round",
+                    OutletShape::Rectangular { .. } => "rectangular",
+                })
+            };
+            let current = input.diffuser.outlet_shape;
+            crate::widgets::list(ui, |ui| {
+                ComboBox::from_id_salt("volute_outlet_shape")
+                    .selected_text(crate::widgets::noted(ui, section(&current)))
+                    .show_ui(ui, |ui| {
+                        for option in [OutletShape::Round, OutletShape::Rectangular { aspect: 1.0 }]
+                        {
+                            let same =
+                                std::mem::discriminant(&option) == std::mem::discriminant(&current);
+                            if ui.selectable_label(same, section(&option)).clicked() && !same {
+                                input.diffuser.outlet_shape = option;
+                            }
+                        }
+                    })
+            });
+            ui.end_row();
+            if let OutletShape::Rectangular { aspect } = &mut input.diffuser.outlet_shape {
+                let mut value = Param::Manual(*aspect);
+                param_f64(
+                    ui,
+                    tr("Outlet aspect"),
+                    tr("Height along the pump axis over the width of the rectangular outlet"),
+                    &mut value,
+                    Dimensionless,
+                    Some(*aspect),
+                    &units,
+                    tp_design::volute::OUTLET_ASPECT,
+                );
+                *aspect = value.resolve(|| 1.0);
+            }
             label(
                 ui,
                 tr("Nominal size DN"),
