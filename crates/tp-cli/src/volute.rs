@@ -825,14 +825,14 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
                 "tangent" => CutwaterShape::Tangent,
                 "sharp" => CutwaterShape::Sharp,
                 "rounded" => CutwaterShape::Rounded {
-                    radius: match input.cutwater.shape {
-                        CutwaterShape::Rounded { radius } => radius,
-                        _ => Param::Auto,
-                    },
+                    radius: input.cutwater.shape.radius().unwrap_or(Param::Auto),
+                },
+                "fillet" => CutwaterShape::Fillet {
+                    radius: input.cutwater.shape.radius().unwrap_or(Param::Auto),
                 },
                 _ => {
                     return Err(format!(
-                        "cutwater must be tangent, sharp or rounded, got {value:?}"
+                        "cutwater must be tangent, sharp, rounded or fillet, got {value:?}"
                     ));
                 }
             }
@@ -954,10 +954,10 @@ fn print_report(name: &str, id: ComponentId, g: &VoluteGeometry, units: &Display
         }
         shape => println!(
             "           {} cutwater: tip at {} ({} from the axis), wedge {}{}   nearest to the axis {}",
-            if matches!(shape, CutwaterShape::Sharp) {
-                "sharp"
-            } else {
-                "rounded"
+            match shape {
+                CutwaterShape::Sharp => "sharp",
+                CutwaterShape::Fillet { .. } => "fillet",
+                _ => "rounded",
             },
             s(Angle, c.angle),
             s(Length, c.tip.truncate().length()),

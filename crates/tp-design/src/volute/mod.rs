@@ -466,6 +466,27 @@ pub enum CutwaterShape {
     /// That edge rounded with `radius`, m (automatic: e₃/2, a nose as thick as the
     /// cutwater).
     Rounded { radius: Param<f64> },
+    /// The same rounded edge with the CAD built as its kernel's fillet: the spiral and
+    /// the diffuser are joined, trimmed at their intersection, and the edge is rounded
+    /// with `radius`, m (automatic: e₃/2). The design draws the nose as for `Rounded`;
+    /// where the kernel cannot round the edge, the CAD builds the body of a rounded
+    /// cutwater instead.
+    Fillet { radius: Param<f64> },
+}
+
+impl CutwaterShape {
+    /// Whether the edge is rounded, with a nose designed as a body.
+    pub fn is_rounded(&self) -> bool {
+        matches!(self, Self::Rounded { .. } | Self::Fillet { .. })
+    }
+
+    /// The radius of the rounded edge.
+    pub fn radius(&self) -> Option<Param<f64>> {
+        match self {
+            Self::Rounded { radius } | Self::Fillet { radius } => Some(*radius),
+            _ => None,
+        }
+    }
 }
 
 impl Default for CutwaterShape {
@@ -1627,9 +1648,9 @@ impl VoluteDesign {
         let incidence = input.cutwater.incidence.resolve(|| 0.0);
         let cutwater_angle = cutwater_flow_angle + incidence;
         let cutwater_shape = input.cutwater.shape;
-        let nose_radius = match cutwater_shape {
-            CutwaterShape::Rounded { radius } => radius.resolve(|| cutwater_thickness / 2.0),
-            _ => 0.0,
+        let nose_radius = match cutwater_shape.radius() {
+            Some(radius) => radius.resolve(|| cutwater_thickness / 2.0),
+            None => 0.0,
         };
         require(nose_radius >= 0.0, || {
             "the cutwater radius cannot be negative".into()

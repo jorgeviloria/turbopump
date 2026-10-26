@@ -3116,6 +3116,10 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "redondeado con ρ {}, punta a {} con una cuña de {}",
     ),
     (
+        "fillet with ρ {}, tip at {} with a wedge of {}",
+        "empalme con ρ {}, punta a {} con una cuña de {}",
+    ),
+    (
         "radial, bend R_N {} turning {}, axis at {}",
         "radial, codo R_N {} que gira {}, eje a {}",
     ),
@@ -3144,8 +3148,8 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Bend turns", "Giro del codo"),
     ("Centerline length", "Longitud de la línea media"),
     (
-        "Tangent: the spiral starts where it clears the diffuser. Sharp: the spiral cuts the diffuser wall. Rounded: a nose of radius ρ on the cutwater circle, its body never thinner than the nose and running smoothly into both walls (Gülich Fig. 7.41b)",
-        "Tangente: la espiral empieza donde deja libre el difusor. Afilado: la espiral corta la pared del difusor. Redondeado: una nariz de radio ρ sobre el círculo del corte de agua, con un cuerpo nunca más fino que la nariz que se une suavemente a las dos paredes (Gülich Fig. 7.41b)",
+        "Tangent: the spiral starts where it clears the diffuser. Sharp: the spiral cuts the diffuser wall. Rounded: a nose of radius ρ on the cutwater circle, its body never thinner than the nose and running smoothly into both walls (Gülich Fig. 7.41b). Fillet: the same nose, and the CAD joins the spiral and the diffuser and rounds their intersection edge with the radius",
+        "Tangente: la espiral empieza donde deja libre el difusor. Afilado: la espiral corta la pared del difusor. Redondeado: una nariz de radio ρ sobre el círculo del corte de agua, con un cuerpo nunca más fino que la nariz que se une suavemente a las dos paredes (Gülich Fig. 7.41b). Empalme: la misma nariz, y el CAD une la espiral y el difusor y redondea su arista de intersección con el radio",
     ),
     ("Nose radius ρ", "Radio de la nariz ρ"),
     (
@@ -3178,6 +3182,7 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("radial", "radial"),
     ("sharp", "afilado"),
     ("rounded", "redondeado"),
+    ("fillet", "empalme"),
     (
         "the cutwater radius cannot be negative",
         "el radio del corte de agua no puede ser negativo",

@@ -308,7 +308,7 @@ impl CutwaterPage {
             {
                 self.open_3d = Some(slices[plane].z);
             }
-            if let CutwaterShape::Rounded { .. } = input.cutwater.shape {
+            if input.cutwater.shape.is_rounded() {
                 ui.separator();
                 let mut share = g.design.cutwater_share;
                 let response = ui

@@ -1103,6 +1103,10 @@ fn content(
                         "rounded with ρ {}, tip at {} with a wedge of {}",
                         &[&s(Length, c.radius), &s(Angle, c.angle), &s(Angle, c.wedge)],
                     ),
+                    CutwaterShape::Fillet { .. } => tf(
+                        "fillet with ρ {}, tip at {} with a wedge of {}",
+                        &[&s(Length, c.radius), &s(Angle, c.angle), &s(Angle, c.wedge)],
+                    ),
                 };
                 value_row(ui, tr("Cutwater"), cutwater);
                 value_row(

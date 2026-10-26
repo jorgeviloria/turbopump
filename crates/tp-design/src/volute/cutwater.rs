@@ -31,7 +31,7 @@
 use tp_math::{Bezier, DVec2, DVec3};
 
 use super::NozzleSection;
-use super::{Continuity, CutwaterShape, VoluteDesign};
+use super::{Continuity, VoluteDesign};
 use crate::impeller::edge::EdgeProfile;
 
 /// Planes across the inlet width, an odd number so that one is the midplane.
@@ -126,7 +126,7 @@ pub(super) fn slices(
     let levels: Vec<f64> = (0..SLICES)
         .map(|k| midplane - half + 2.0 * half * k as f64 / (SLICES - 1) as f64)
         .collect();
-    let rounded = matches!(design.cutwater_shape, CutwaterShape::Rounded { .. });
+    let rounded = design.cutwater_shape.is_rounded();
     // The nose centre is set in the midplane and kept in the other planes.
     let mid = Walls::at(outlines, nozzle, sign, midplane);
     let centre = match (&mid, rounded) {
@@ -1071,8 +1071,8 @@ mod tests {
     use crate::Param;
     use crate::volute::tests::reference_basis;
     use crate::volute::{
-        BezierSide, CrossSectionInput, DischargeShape, ExternalRound, RadiusSide, SectionShape,
-        SideShape, StraightWall, VoluteGeometry, VoluteInput, section,
+        BezierSide, CrossSectionInput, CutwaterShape, DischargeShape, ExternalRound, RadiusSide,
+        SectionShape, SideShape, StraightWall, VoluteGeometry, VoluteInput, section,
     };
 
     fn build(edit: impl Fn(&mut VoluteInput)) -> VoluteGeometry {

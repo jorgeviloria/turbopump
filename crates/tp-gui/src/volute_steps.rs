@@ -1394,7 +1394,8 @@ fn cutwater(
                     "Tangent: the spiral starts where it clears the diffuser. Sharp: the spiral \
                  cuts the diffuser wall. Rounded: a nose of radius ρ on the cutwater circle, \
                  its body never thinner than the nose and running smoothly into both walls \
-                 (Gülich Fig. 7.41b)",
+                 (Gülich Fig. 7.41b). Fillet: the same nose, and the CAD joins the spiral \
+                 and the diffuser and rounds their intersection edge with the radius",
                 ),
             );
             let text = |shape: &CutwaterShape| {
@@ -1402,6 +1403,7 @@ fn cutwater(
                     CutwaterShape::Tangent => "tangent",
                     CutwaterShape::Sharp => "sharp",
                     CutwaterShape::Rounded { .. } => "rounded",
+                    CutwaterShape::Fillet { .. } => "fillet",
                 })
             };
             let current = input.cutwater.shape;
@@ -1415,6 +1417,9 @@ fn cutwater(
                             CutwaterShape::Rounded {
                                 radius: Param::Auto,
                             },
+                            CutwaterShape::Fillet {
+                                radius: Param::Auto,
+                            },
                         ] {
                             let same =
                                 std::mem::discriminant(&option) == std::mem::discriminant(&current);
@@ -1425,7 +1430,9 @@ fn cutwater(
                     })
             });
             ui.end_row();
-            if let CutwaterShape::Rounded { radius } = &mut input.cutwater.shape {
+            if let CutwaterShape::Rounded { radius } | CutwaterShape::Fillet { radius } =
+                &mut input.cutwater.shape
+            {
                 param_f64(
                     ui,
                     tr("Nose radius ρ"),
