@@ -82,6 +82,34 @@ pub struct CutwaterSlice {
     pub nose_centre: DVec3,
 }
 
+impl CutwaterSlice {
+    /// The outer wall of the spiral from the tip downstream: the wall trimmed where it
+    /// crosses the inner wall of the diffuser, so that the part before the crossing,
+    /// which lies inside the diffuser, is left out (a sharp cutwater).
+    pub fn trimmed_spiral_wall(&self) -> Vec<DVec3> {
+        trimmed(&self.spiral_wall, self.tip)
+    }
+
+    /// The inner wall of the diffuser from the tip downstream: the wall trimmed where it
+    /// crosses the outer wall of the spiral.
+    pub fn trimmed_diffuser_wall(&self) -> Vec<DVec3> {
+        trimmed(&self.diffuser_wall, self.tip)
+    }
+}
+
+/// The polyline `wall` from `tip` on: the tip, then the points past the segment nearest
+/// to it.
+fn trimmed(wall: &[DVec3], tip: DVec3) -> Vec<DVec3> {
+    if wall.len() < 2 {
+        return wall.to_vec();
+    }
+    let flat: Vec<DVec2> = wall.iter().map(|p| p.truncate()).collect();
+    let (k, _) = nearest_on(&flat, tip.truncate());
+    let mut out = vec![tip];
+    out.extend_from_slice(&wall[k + 1..]);
+    out
+}
+
 /// The cutwater in planes across the inlet width, from −z to +z. `outlines` are the
 /// fitted sections (r, z) of the spiral at their wrap angles, from its start, a degree
 /// or less apart; `nozzle` the sections of the diffuser before the volute is turned. Planes
@@ -1072,6 +1100,37 @@ mod tests {
             let (a, b) = ((w[1] - w[0]).normalize(), (w[2] - w[1]).normalize());
             a.dot(b).clamp(-1.0, 1.0).acos()
         })
+    }
+
+    #[test]
+    fn the_trimmed_walls_meet_only_at_the_tip() {
+        for shape in discharges() {
+            let g = build(|v| v.diffuser.shape = shape);
+            for s in &g.cutwater_slices {
+                let flat = |w: Vec<DVec3>| w.iter().map(|p| p.truncate()).collect::<Vec<_>>();
+                let (spiral, diffuser) = (
+                    flat(s.trimmed_spiral_wall()),
+                    flat(s.trimmed_diffuser_wall()),
+                );
+                assert_eq!(spiral[0], s.tip.truncate());
+                assert_eq!(diffuser[0], s.tip.truncate());
+                assert!(
+                    spiral.len() < s.spiral_wall.len() && diffuser.len() <= s.diffuser_wall.len()
+                );
+                let mut apart = 0;
+                for i in 0..spiral.len() - 1 {
+                    for j in 0..diffuser.len() - 1 {
+                        if let Some(p) =
+                            segment_crossing(spiral[i], spiral[i + 1], diffuser[j], diffuser[j + 1])
+                            && p.distance(s.tip.truncate()) > 1e-5
+                        {
+                            apart += 1;
+                        }
+                    }
+                }
+                assert_eq!(apart, 0, "{shape:?} at z = {:.4}", s.z);
+            }
+        }
     }
 
     #[test]

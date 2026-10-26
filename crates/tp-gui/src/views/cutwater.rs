@@ -512,7 +512,7 @@ impl CutwaterPage {
                         tr("spiral wall"),
                         line(
                             &mut shown
-                                .spiral_wall
+                                .trimmed_spiral_wall()
                                 .iter()
                                 .filter(|p| near(p))
                                 .map(|p| p.truncate()),
@@ -526,7 +526,7 @@ impl CutwaterPage {
                         tr("diffuser wall"),
                         line(
                             &mut shown
-                                .diffuser_wall
+                                .trimmed_diffuser_wall()
                                 .iter()
                                 .filter(|p| near(p))
                                 .map(|p| p.truncate()),
@@ -727,8 +727,8 @@ impl CutwaterPage {
         let near = |p: &&DVec3| p.distance(centre) < 1.6 * radius;
         for s in &g.cutwater_slices {
             for (wall, color) in [
-                (&s.spiral_wall, palette.hub),
-                (&s.diffuser_wall, palette.volute),
+                (s.trimmed_spiral_wall(), palette.hub),
+                (s.trimmed_diffuser_wall(), palette.volute),
             ] {
                 let points: Vec<Pos2> =
                     wall.iter().filter(near).map(|p| screen(view(*p))).collect();
