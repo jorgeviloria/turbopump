@@ -205,8 +205,11 @@ pub fn volute_triangles(g: &VoluteGeometry) -> Vec<Triangle> {
     let count = channels.len();
     for (i, rings) in channels.into_iter().enumerate() {
         loft_rings(&mut out, &rings);
-        // The other channels end inside the diffuser: only the outlet is closed.
-        if let Some(first) = rings.first() {
+        // The diffuser starts at the throat, open to the spiral; the other channels end
+        // inside it: only the outlet is closed.
+        if let Some(first) = rings.first()
+            && (i == 0 || i + 1 != count)
+        {
             cap(&mut out, first);
         }
         if i + 1 == count
@@ -410,7 +413,10 @@ pub fn volute_view_triangles(g: &VoluteGeometry) -> Vec<Triangle> {
         };
         let mut own = Vec::new();
         loft_rings(&mut own, shown);
-        if let Some(first) = shown.first() {
+        // The diffuser starts at the throat, open to the spiral.
+        if let Some(first) = shown.first()
+            && (i == 0 || !diffuser)
+        {
             cap(&mut own, first);
         }
         if diffuser && let Some(last) = shown.last() {
@@ -691,6 +697,27 @@ pub(crate) mod tests {
         let mut input = tp_design::volute::VoluteInput::default();
         edit(&mut input);
         VoluteGeometry::build(&basis, &input).unwrap()
+    }
+
+    #[test]
+    fn the_diffuser_is_not_capped_at_the_throat() {
+        use tp_design::volute::{CutwaterShape, SectionShape};
+        let g = reference_volute(|v| {
+            v.cross_section = tp_design::volute::CrossSectionInput::single(SectionShape::round());
+            v.cutwater.shape = CutwaterShape::Sharp;
+        });
+        let channels = g.channels();
+        assert!(channels.len() > 1, "a spiral and a diffuser");
+        let throat = &channels[channels.len() - 1][0];
+        let centre = throat.iter().copied().sum::<DVec3>() / throat.len() as f64;
+        // A cap is fanned from the mean point of its ring.
+        let capped = |triangles: &[Triangle]| {
+            triangles
+                .iter()
+                .any(|t| t.iter().any(|q| q.distance(centre) < 1e-12))
+        };
+        assert!(!capped(&volute_triangles(&g)));
+        assert!(!capped(&volute_view_triangles(&g)));
     }
 
     #[test]
