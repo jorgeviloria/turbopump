@@ -870,6 +870,25 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Nominal size DN", "Diámetro nominal DN"),
     ("Area growth", "Crecimiento del área"),
     (
+        "Velocity ratio c_out/c_in",
+        "Relación de velocidades c_sal/c_ent",
+    ),
+    ("Outlet axis offset C", "Desvío C del eje de salida"),
+    ("Outlet centre angle φ", "Ángulo φ del centro de la salida"),
+    ("Inlet diameter D₁", "Diámetro de entrada D₁"),
+    ("Inlet area A₁", "Área de entrada A₁"),
+    ("Outlet area A₂", "Área de salida A₂"),
+    (
+        "Spiral wall angle αIn",
+        "Ángulo de la pared de la espiral αIn",
+    ),
+    (
+        "Diffuser wall angle αOut",
+        "Ángulo de la pared del difusor αOut",
+    ),
+    ("Mean wall angle αAvg", "Ángulo medio de las paredes αAvg"),
+    ("Spiral start φC,0", "Inicio de la espiral φC,0"),
+    (
         "How the area grows from the throat to the outlet. Radius: the equivalent radius grows \
         linearly, so the area gains slope from the first step. Matched: quadratic area that starts \
         with the slope of the spiral, with no break at the throat",

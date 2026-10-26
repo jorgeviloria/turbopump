@@ -1027,12 +1027,39 @@ fn diffuser(
             && section_kind(ui, tr("Results"), "", Kind::Results)
         {
             props(ui, "volute_diffuser_results", |ui| {
+                let equivalent = |area: f64| (4.0 * area / std::f64::consts::PI).sqrt();
+                value_row(
+                    ui,
+                    tr("Inlet diameter D₁"),
+                    units.show(Length, equivalent(d.inlet_area)),
+                );
+                value_row(ui, tr("Inlet area A₁"), units.show(Area, d.inlet_area));
+                value_row(
+                    ui,
+                    tr("Outlet area A₂"),
+                    units.show(Area, std::f64::consts::PI * d.outlet_diameter.powi(2) / 4.0),
+                );
                 value_row(ui, tr("Area ratio A_R"), format!("{:.2}", d.area_ratio));
+                value_row(
+                    ui,
+                    tr("Velocity ratio c_out/c_in"),
+                    format!("{:.3}", 1.0 / d.area_ratio),
+                );
                 if let Some(g) = g {
                     value_row(
                         ui,
                         tr("Outlet face from the pump axis"),
                         units.show(Length, g.outlet_height),
+                    );
+                    value_row(
+                        ui,
+                        tr("Outlet axis offset C"),
+                        units.show(Length, g.outlet_offset()),
+                    );
+                    value_row(
+                        ui,
+                        tr("Outlet centre angle φ"),
+                        units.show(Angle, g.outlet_angle()),
                     );
                 }
                 if let Some(g) = g
@@ -1285,6 +1312,26 @@ fn cutwater(
                             ),
                         );
                         value_row(ui, tr("Wedge angle"), units.show(Angle, c.wedge));
+                        value_row(
+                            ui,
+                            tr("Spiral wall angle αIn"),
+                            units.show(Angle, c.spiral_angle),
+                        );
+                        value_row(
+                            ui,
+                            tr("Diffuser wall angle αOut"),
+                            units.show(Angle, c.diffuser_angle),
+                        );
+                        value_row(
+                            ui,
+                            tr("Mean wall angle αAvg"),
+                            units.show(Angle, c.mean_angle()),
+                        );
+                        value_row(
+                            ui,
+                            tr("Spiral start φC,0"),
+                            units.show(Angle, g.start_angle),
+                        );
                     }
                     value_row(
                         ui,
