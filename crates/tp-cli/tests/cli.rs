@@ -432,6 +432,15 @@ fn volute_designs_and_exports() {
     assert_eq!(out.status.code(), Some(0), "{text}");
     assert!(text.contains("min 193.3 mm, Table 10.2"), "{text}");
     assert!(text.contains("conservation of angular momentum"), "{text}");
+    // The walls at the tip, the inlet and outlet of the diffuser and where it stands.
+    for part in [
+        "walls at the tip: spiral αIn",
+        "c_out/c_in",
+        "outlet axis C",
+        "centre φ",
+    ] {
+        assert!(text.contains(part), "{part}: {text}");
+    }
     for name in ["volute.txt", "volute.stl"] {
         assert!(std::fs::metadata(out_dir.join(name)).unwrap().len() > 10_000);
     }

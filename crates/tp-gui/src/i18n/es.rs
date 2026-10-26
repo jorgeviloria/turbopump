@@ -933,6 +933,116 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Distancia del eje de la bomba a la cara de salida; si se fija, da el largo del difusor",
     ),
     ("Nominal size DN", "Diámetro nominal DN"),
+    ("Area growth", "Crecimiento del área"),
+    ("Height offset Δr_C", "Desplazamiento radial Δr_C"),
+    (
+        "Shifts the diffuser across its centerline, away from the pump axis when positive, over the first 40 % of its length: room for the cutwater, whose tip moves toward the base circle",
+        "Desplaza el difusor a través de su línea media, alejándolo del eje de la bomba si es positivo, en el primer 40 % de su longitud: da sitio al corte de agua, cuya punta se acerca al círculo base",
+    ),
+    ("spline turning {}", "spline con giro de {}"),
+    ("spline", "spline"),
+    ("Turn", "Giro"),
+    (
+        "How far the centerline of the spline diffuser turns between the throat and the outlet, away from the pump axis",
+        "Cuánto gira la línea media del difusor spline entre la garganta y la salida, alejándose del eje de la bomba",
+    ),
+    ("Start share", "Proporción inicial"),
+    ("End share", "Proporción final"),
+    (
+        "Where the control points 1 and 3 of the fourth-degree Bézier centerline sit between the ends and point 2: they shape the curve",
+        "Dónde quedan los puntos de control 1 y 3 de la línea media Bézier de cuarto grado entre los extremos y el punto 2: dan forma a la curva",
+    ),
+    ("Axial bend", "Codo axial"),
+    (
+        "Bends the centerline of the diffuser along the pump axis: it runs flat from the throat, rounds off with the radius R through the angle α and goes on straight, ending Δz along the pump axis. The three have to agree for the length of the diffuser",
+        "Curva la línea media del difusor a lo largo del eje de la bomba: va plana desde la garganta, se redondea con el radio R hasta el ángulo α y sigue recta, acabando a Δz sobre el eje de la bomba. Los tres tienen que ser compatibles con la longitud del difusor",
+    ),
+    ("bent", "con codo"),
+    ("Axial extension Δz", "Extensión axial Δz"),
+    (
+        "How far the outlet lies from the plane of the volute, along the pump axis",
+        "A qué distancia del plano de la voluta queda la salida, a lo largo del eje de la bomba",
+    ),
+    ("Bend radius R", "Radio del codo R"),
+    (
+        "Radius of the round of the axial bend",
+        "Radio del redondeo del codo axial",
+    ),
+    ("Bend angle α", "Ángulo del codo α"),
+    (
+        "Angle the centerline reaches against the plane of the volute",
+        "Ángulo que alcanza la línea media respecto al plano de la voluta",
+    ),
+    ("Outlet section", "Sección de salida"),
+    (
+        "Round, or a rectangle of the same area: its aspect is the height along the pump axis over the width. A rectangular outlet has no round flange",
+        "Circular, o un rectángulo de la misma área: su proporción es la altura a lo largo del eje de la bomba sobre el ancho. Una salida rectangular no lleva la brida circular",
+    ),
+    ("round", "circular"),
+    ("Outlet aspect", "Proporción de la salida"),
+    (
+        "Height along the pump axis over the width of the rectangular outlet",
+        "Altura a lo largo del eje de la bomba sobre el ancho de la salida rectangular",
+    ),
+    ("Eccentricity", "Excentricidad"),
+    (
+        "How the diffuser widens against its axis: −1 with the wall on the cutwater side straight, 0 to both sides, 1 with the outer wall straight; automatic: that of the wall chosen above",
+        "Cómo se ensancha el difusor respecto a su eje: −1 con la pared del lado del corte de agua recta, 0 hacia ambos lados, 1 con la pared exterior recta; automática: la de la pared elegida arriba",
+    ),
+    ("Base form factor", "Factor de forma de la base"),
+    (
+        "How round the diffuser is on its base side, toward the pump axis: 0 keeps the corners of the last section of the spiral, 1 would round that side to the circle (the limit is 0.9). It builds up over the first 30 % of the length and changes where the spiral wall crosses the diffuser wall",
+        "Cuán redondo es el difusor en su lado de la base, hacia el eje de la bomba: 0 conserva las esquinas de la última sección de la espiral, 1 redondearía ese lado hasta el círculo (el límite es 0,9). Se forma en el primer 30 % de la longitud y cambia dónde la pared de la espiral cruza la del difusor",
+    ),
+    ("Axial alignment", "Alineación axial"),
+    (
+        "Where the sections of the diffuser sit along the pump axis. Centric: on the centerline. Manual: the outlet is shifted by the offset, linearly or quadratically with the length",
+        "Dónde quedan las secciones del difusor a lo largo del eje de la bomba. Centrada: sobre la línea media. Manual: la salida se desplaza el desvío indicado, de forma lineal o cuadrática con la longitud",
+    ),
+    ("centric", "centrada"),
+    ("Axial offset", "Desvío axial"),
+    (
+        "Shift of the outlet along the pump axis, positive toward +z",
+        "Desplazamiento de la salida a lo largo del eje de la bomba, positivo hacia +z",
+    ),
+    ("Quadratic progression", "Progresión cuadrática"),
+    (
+        "The shift grows with the square of the length instead of linearly",
+        "El desplazamiento crece con el cuadrado de la longitud en vez de linealmente",
+    ),
+    (
+        "Velocity ratio c_out/c_in",
+        "Relación de velocidades c_sal/c_ent",
+    ),
+    ("Outlet axis offset C", "Desvío C del eje de salida"),
+    ("Outlet centre angle φ", "Ángulo φ del centro de la salida"),
+    ("Inlet diameter D₁", "Diámetro de entrada D₁"),
+    ("Inlet area A₁", "Área de entrada A₁"),
+    ("Outlet area A₂", "Área de salida A₂"),
+    (
+        "Spiral wall angle αIn",
+        "Ángulo de la pared de la espiral αIn",
+    ),
+    (
+        "Diffuser wall angle αOut",
+        "Ángulo de la pared del difusor αOut",
+    ),
+    ("Mean wall angle αAvg", "Ángulo medio de las paredes αAvg"),
+    (
+        "Walls off the flow angle",
+        "Paredes frente al ángulo de flujo",
+    ),
+    ("Spiral start φC,0", "Inicio de la espiral φC,0"),
+    (
+        "How the area grows from the throat to the outlet. Radius: the equivalent radius grows \
+        linearly, so the area gains slope from the first step. Matched: quadratic area that starts \
+        with the slope of the spiral, with no break at the throat",
+        "Cómo crece el área de la garganta a la salida. Radio: el radio equivalente crece \
+        linealmente y el área gana pendiente desde el primer paso. Empalmada: área cuadrática que \
+        parte con la pendiente de la espiral, sin salto en la garganta",
+    ),
+    ("linear in the radius", "lineal en el radio"),
+    ("matched to the spiral", "empalmada con la espiral"),
     (
         "Round the automatic outlet diameter to the nearest nominal size",
         "Redondea el diámetro de salida automático al diámetro nominal más próximo",
@@ -4685,6 +4795,26 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
     (
         "d_z/d₂ = {} is below the {} of Gülich Table 10.2: expect pressure pulsations and hydraulic excitation forces",
         "d_z/d₂ = {} está por debajo del {} de la tabla 10.2 de Gülich: habrá pulsaciones de presión y fuerzas de excitación hidráulica",
+    ),
+    (
+        "the walls at the cutwater tip point {}° from the circumference, {}° off the flow angle α₃' of {}° (beyond ±3°): the flow meets the wedge at an angle; turn the diffuser or move the start of the spiral",
+        "las paredes en la punta del corte de agua forman {}° con la circunferencia, {}° de diferencia con el ángulo de flujo α₃' de {}° (más de ±3°): el flujo choca con la cuña en ángulo; conviene girar el difusor o mover el inicio de la espiral",
+    ),
+    (
+        "the spiral wall crosses the diffuser wall more than once in {} of {} planes, so there are several intersection curves: move the start of the spiral, reduce the height offset or raise the base form factor",
+        "la pared de la espiral cruza la del difusor más de una vez en {} de {} planos, así que hay varias curvas de intersección: conviene mover el inicio de la espiral, reducir el desplazamiento radial o subir el factor de forma de la base",
+    ),
+    (
+        "a rectangular outlet has no flange of ours, which is round: the casing ends flat",
+        "una salida rectangular no lleva nuestra brida, que es circular: la carcasa termina plana",
+    ),
+    (
+        "the CAD kernel builds the flow domain of a diffuser with an axial bend but not yet its casing",
+        "el núcleo CAD construye el dominio de fluido de un difusor con codo axial, pero todavía no su carcasa",
+    ),
+    (
+        "the CAD kernel is slow and unreliable on a spline diffuser (minutes to half an hour, depending on the turn): export the CAD solids with a radial or tangential discharge",
+        "el núcleo CAD es lento y poco fiable con un difusor spline (de minutos a media hora, según el giro): exporta los sólidos CAD con una descarga radial o tangencial",
     ),
     (
         "cutwater incidence {}° is outside ±3° (Gülich eq. T7.7.6)",

@@ -655,6 +655,16 @@ fn casing_pieces(g: &VoluteGeometry) -> Result<(Vec<Shape>, Lofts), CadError> {
 }
 
 pub fn build_volute_casing(g: &VoluteGeometry, cad: &VoluteCad) -> Result<VoluteCasing, CadError> {
+    // The outer lofts of a diffuser tilted along the pump axis do not fuse into one
+    // casing (tried from 10° to 25°: the casing came out in 8 pieces, with or without
+    // the flange), so it is refused instead of returned broken.
+    if g.design.diffuser.z_bend.is_some() {
+        return Err(CadError::Input(
+            "the casing of a diffuser with an axial bend cannot be built yet: the flow \
+             domain can"
+                .into(),
+        ));
+    }
     let (mut outer, halves) = casing_pieces(g)?;
     // The wall round the bend and neck of an internal volute.
     if let Some(profile) = g.bend_casing_profile() {
@@ -848,7 +858,9 @@ fn flange(g: &VoluteGeometry, f: &tp_design::volute::Flange) -> Result<Shape, Ca
         (f.bore / 2.0 + 0.5 * g.design.wall_thickness) * MM,
         thickness + 2.0 * margin,
     )?;
-    let (u, v) = (DVec3::Z, axis.cross(DVec3::Z));
+    // Square to the axis even when a z-bend tilts it.
+    let u = (DVec3::Z - axis * DVec3::Z.dot(axis)).normalize();
+    let v = axis.cross(u);
     let holes = (0..f.bolts)
         .map(|k| {
             let angle = std::f64::consts::TAU * (f64::from(k) + 0.5) / f64::from(f.bolts);
@@ -943,6 +955,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
     fn volute_channel_and_fluid_domain_are_valid_solids() {
         let _slot = crate::test_slot::take();
         for sections in every_cross_section() {
@@ -1230,6 +1243,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
     fn the_casing_wraps_the_flow_domain_in_one_solid() {
         let _slot = crate::test_slot::take();
         use tp_design::volute::VoluteKind;
@@ -1269,6 +1283,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
     fn the_casing_fills_and_rounds_the_groove_over_the_cutwater() {
         let _slot = crate::test_slot::take();
         // Round sections take a smaller radius there.
@@ -1325,6 +1340,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
     fn nose_shapes_and_g2_joins_give_the_body_the_view_shows() {
         let _slot = crate::test_slot::take();
         type Setting = fn(&mut VoluteInput);
@@ -1357,6 +1373,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
     fn a_double_volute_is_one_valid_solid() {
         let _slot = crate::test_slot::take();
         let double = |edit: &dyn Fn(&mut VoluteInput)| {
@@ -1424,6 +1441,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
     fn an_internal_volute_is_one_solid_with_its_bend() {
         let _slot = crate::test_slot::take();
         use tp_design::volute::{InternalRound, SectionShape};
@@ -1492,6 +1510,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
     fn common_volute_options_give_one_valid_flow_domain() {
         let _slot = crate::test_slot::take();
         use tp_design::volute::{CutwaterShape, DischargeShape, StraightWall};
@@ -1526,6 +1545,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
     fn spiral_development_options_give_one_valid_flow_domain() {
         let _slot = crate::test_slot::take();
         use tp_design::Param;
@@ -1559,6 +1579,153 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
+    fn the_matched_area_law_gives_the_same_valid_flow_domain() {
+        let _slot = crate::test_slot::take();
+        use tp_design::volute::{DiffuserGrowth, DischargeShape, StraightWall};
+        let fluid = |growth: DiffuserGrowth, discharge: DischargeShape| -> f64 {
+            let mut input = VoluteInput::default();
+            input.diffuser.growth = growth;
+            input.diffuser.shape = discharge;
+            let g = VoluteGeometry::build(&basis(), &input).unwrap();
+            let cad = build_volute(&g).unwrap();
+            assert!(cad.fluid.is_valid(), "{growth:?} {discharge:?}");
+            assert_eq!(cad.fluid.solid_count(), 1, "{growth:?} {discharge:?}");
+            assert_eq!(cad.channel.solid_count(), 1, "{growth:?} {discharge:?}");
+            assert!(cad.warnings.is_empty(), "{:?}", cad.warnings);
+            cad.fluid_volume()
+        };
+        for discharge in [
+            DischargeShape::Radial { axis_angle: 0.0 },
+            DischargeShape::Tangential {
+                straight_wall: StraightWall::Centered,
+            },
+        ] {
+            let linear = fluid(DiffuserGrowth::Linear, discharge);
+            let matched = fluid(DiffuserGrowth::Matched, discharge);
+            // Same throat, same outlet, same length: only the law between them differs.
+            assert!(
+                (0.0001..0.03).contains(&(matched / linear - 1.0).abs()),
+                "{discharge:?}: {matched} vs {linear}"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
+    fn the_diffuser_offsets_give_valid_flow_domains() {
+        let _slot = crate::test_slot::take();
+        use tp_design::Param;
+        use tp_design::volute::{DischargeInput, ZAlignment};
+        let fluid = |edit: &dyn Fn(&mut DischargeInput)| -> f64 {
+            let mut input = VoluteInput::default();
+            edit(&mut input.diffuser);
+            let g = VoluteGeometry::build(&basis(), &input).unwrap();
+            let cad = build_volute(&g).unwrap();
+            assert!(cad.fluid.is_valid());
+            assert_eq!(cad.fluid.solid_count(), 1);
+            assert_eq!(cad.channel.solid_count(), 1);
+            assert!(cad.warnings.is_empty(), "{:?}", cad.warnings);
+            cad.fluid_volume()
+        };
+        let plain = fluid(&|_| {});
+        let offset = fluid(&|d| d.height_offset = Param::Manual(0.01));
+        let rounded_base = fluid(&|d| d.base_form = Param::Manual(0.9));
+        let manual = fluid(&|d| {
+            d.z_alignment = ZAlignment::Manual {
+                offset: 0.01,
+                quadratic: true,
+            }
+        });
+        // Same areas along the diffuser: the volume hardly changes, but it does.
+        for (name, v) in [
+            ("offset", offset),
+            ("rounded base", rounded_base),
+            ("manual", manual),
+        ] {
+            assert!((v / plain - 1.0).abs() < 0.03, "{name}: {v} vs {plain}");
+        }
+    }
+
+    #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
+    fn the_axial_bend_gives_a_valid_flow_domain_but_no_casing() {
+        let _slot = crate::test_slot::take();
+        use tp_design::volute::ZBend;
+        let build = |bend: Option<ZBend>| {
+            let mut input = VoluteInput::default();
+            input.diffuser.z_bend = bend;
+            let g = VoluteGeometry::build(&basis(), &input).unwrap();
+            let cad = build_volute(&g).unwrap();
+            assert!(cad.fluid.is_valid());
+            assert_eq!(cad.fluid.solid_count(), 1);
+            assert_eq!(cad.channel.solid_count(), 1);
+            assert!(cad.warnings.is_empty(), "{:?}", cad.warnings);
+            (g, cad)
+        };
+        let straight = build(None).1.fluid_volume();
+        let (g, cad) = build(Some(ZBend {
+            extent: 0.03,
+            radius: 0.08,
+            angle: 25f64.to_radians(),
+        }));
+        // The same areas along the same length: the volumes agree to a few per cent.
+        assert!((cad.fluid_volume() / straight - 1.0).abs() < 0.03);
+        // The casing is refused, with the reason, rather than returned in pieces.
+        let error = build_volute_casing(&g, &cad).unwrap_err().to_string();
+        assert!(error.contains("axial bend"), "{error}");
+    }
+
+    #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
+    fn the_eccentric_and_rectangular_diffusers_give_valid_flow_domains() {
+        let _slot = crate::test_slot::take();
+        use tp_design::Param;
+        use tp_design::volute::{DischargeInput, DischargeShape, OutletShape, StraightWall};
+        let fluid = |edit: &dyn Fn(&mut DischargeInput)| -> f64 {
+            let mut input = VoluteInput::default();
+            edit(&mut input.diffuser);
+            let g = VoluteGeometry::build(&basis(), &input).unwrap();
+            let cad = build_volute(&g).unwrap();
+            assert!(cad.fluid.is_valid());
+            assert_eq!(cad.fluid.solid_count(), 1);
+            assert_eq!(cad.channel.solid_count(), 1);
+            assert!(cad.warnings.is_empty(), "{:?}", cad.warnings);
+            cad.fluid_volume()
+        };
+        let tangential = |d: &mut DischargeInput| {
+            d.shape = DischargeShape::Tangential {
+                straight_wall: StraightWall::Centered,
+            }
+        };
+        let centered = fluid(&tangential);
+        let eccentric = fluid(&|d| {
+            tangential(d);
+            d.eccentricity = Param::Manual(-0.5);
+        });
+        let radial = fluid(&|_| {});
+        let rectangular = fluid(&|d| d.outlet_shape = OutletShape::Rectangular { aspect: 1.5 });
+        // The casing round a rectangular outlet closes flat, with no flange.
+        let mut input = VoluteInput::default();
+        input.diffuser.outlet_shape = OutletShape::Rectangular { aspect: 1.5 };
+        let g = VoluteGeometry::build(&basis(), &input).unwrap();
+        let cad = build_volute(&g).unwrap();
+        let casing = build_volute_casing(&g, &cad).unwrap();
+        assert!(casing.solid.is_valid() && casing.solid.solid_count() == 1);
+        assert!(!casing.flange, "{:?}", casing.warnings);
+        // The same areas along the same length: the volumes agree to a few per cent.
+        assert!(
+            (eccentric / centered - 1.0).abs() < 0.03,
+            "{eccentric} vs {centered}"
+        );
+        assert!(
+            (rectangular / radial - 1.0).abs() < 0.03,
+            "{rectangular} vs {radial}"
+        );
+    }
+
+    #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
     fn cutwater_and_discharge_shapes_give_valid_solids() {
         let _slot = crate::test_slot::take();
         use tp_design::Param;

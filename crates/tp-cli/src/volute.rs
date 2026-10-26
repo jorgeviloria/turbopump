@@ -9,9 +9,9 @@ use tp_design::outlet::Reach;
 use tp_design::volute::stress::StressPlace;
 use tp_design::volute::{
     AreaLaw, BendWall, BezierBase, BezierSide, CutwaterShape, DEFAULT_CONE_ANGLE_DEG,
-    DischargeShape, ExternalRound, InnerPosition, InternalRound, Progression, RadiusSide,
-    SectionDefinition, SectionShape, SegmentPoint, SideShape, StraightWall, VoluteGeometry,
-    VoluteInput, VoluteKind,
+    DiffuserGrowth, DischargeShape, ExternalRound, InnerPosition, InternalRound, OutletShape,
+    Progression, RadiusSide, SectionDefinition, SectionShape, SegmentPoint, SideShape,
+    StraightWall, VoluteGeometry, VoluteInput, VoluteKind, ZAlignment, ZBend,
 };
 use tp_project::{ComponentId, ComponentKind, Project, VOLUTE_STEPS};
 use tp_units::{DisplayUnits, QuantityKind, parse_quantity_or};
@@ -61,9 +61,9 @@ pub(crate) struct VoluteArgs {
     /// to the nose, so the outer channel starts with the area of the rule), rib_comp_start,
     /// rib_nose (length over thickness of the elliptic nose and tail of the rib, 1 for a
     /// semicircle), channel_ratio (outlet area of the outer channel over the first
-    /// throat), discharge (radial, the default, with the outlet on the pump centerline,
+    /// throat), discharge (spline:TURN[,START,END], a Bézier centerline turning TURN degrees with shares START and END from 0.1 to 0.9; radial, the default, with the outlet on the pump centerline,
     /// or radial:DEGREES from the line through the pump axis; tangential, opening to both
-    /// sides; tangential:inner or tangential:outer with that wall straight), bend (bend radius of a radial discharge), rotation (angle
+    /// sides; tangential:inner or tangential:outer with that wall straight), bend (bend radius of a radial discharge), outlet_shape (round, or rectangular[:ASPECT] with the height along the pump axis over the width, the same area as the round outlet and no round flange), z_bend (none, or EXTENT,RADIUS,ANGLE: the centerline of the diffuser runs flat, rounds off with RADIUS through ANGLE degrees and goes on straight, ending EXTENT along the pump axis), eccentricity (−1 to 1 for a tangential diffuser: −1 with the cutwater wall straight, 0 opening to both sides, 1 with the outer wall straight), base_form (0 to 0.9: how round the diffuser is on its base side, toward the pump axis), height_offset (Δr_C: the diffuser shifted across its centerline, away from the pump axis when positive, to give the cutwater room), z_align (centric, or manual:OFFSET[,quadratic]: the outlet shifted along the pump axis), growth (area of the diffuser from the throat: linear, the default, or matched, which starts with the slope of the spiral), rotation (angle
     /// of the cutwater from the x axis; auto turns the discharge vertically up), cutwater
     /// (tangent, sharp or rounded), nose (radius of a rounded cutwater), height (H, the
     /// outlet face from the pump axis, which sets the diffuser length), dn (on: round the
@@ -545,6 +545,55 @@ fn on_off(value: &str) -> Result<bool, String> {
     }
 }
 
+/// The bend of the diffuser along the pump axis: none, or EXTENT,RADIUS,ANGLE with two
+/// lengths and the angle in degrees.
+fn parse_z_bend(value: &str, units: &DisplayUnits) -> Result<Option<ZBend>, String> {
+    if value == "none" || value == "off" {
+        return Ok(None);
+    }
+    let bad = || format!("z_bend must be none or EXTENT,RADIUS,ANGLE (degrees), got {value:?}");
+    let parts: Vec<&str> = value.split(',').map(str::trim).collect();
+    let [extent, radius, angle] = parts[..] else {
+        return Err(bad());
+    };
+    let length = |text: &str| {
+        parse_quantity_or(text, QuantityKind::Length, units.get(QuantityKind::Length))
+            .map_err(|e| format!("z_bend: {e}"))
+    };
+    Ok(Some(ZBend {
+        extent: length(extent)?,
+        radius: length(radius)?,
+        angle: angle.parse::<f64>().map_err(|_| bad())?.to_radians(),
+    }))
+}
+
+/// How the diffuser sits along the pump axis: centric, or manual:OFFSET[,quadratic]
+/// with a length for the shift of the outlet.
+fn parse_z_alignment(value: &str, units: &DisplayUnits) -> Result<ZAlignment, String> {
+    match value {
+        "centric" => Ok(ZAlignment::Centric),
+        _ => {
+            let manual = value.strip_prefix("manual:").ok_or_else(|| {
+                format!(
+                    "z_align must be centric or manual:OFFSET[,quadratic], got \
+                     {value:?}"
+                )
+            })?;
+            let (offset, quadratic) = match manual.strip_suffix(",quadratic") {
+                Some(offset) => (offset, true),
+                None => (manual, false),
+            };
+            let offset = parse_quantity_or(
+                offset.trim(),
+                QuantityKind::Length,
+                units.get(QuantityKind::Length),
+            )
+            .map_err(|e| format!("z_align: {e}"))?;
+            Ok(ZAlignment::Manual { offset, quadratic })
+        }
+    }
+}
+
 fn parse_discharge(value: &str) -> Result<DischargeShape, String> {
     let wall = |w| DischargeShape::Tangential { straight_wall: w };
     match value {
@@ -552,6 +601,30 @@ fn parse_discharge(value: &str) -> Result<DischargeShape, String> {
         "tangential" | "tangential:centered" => Ok(wall(StraightWall::Centered)),
         "tangential:outer" => Ok(wall(StraightWall::Outer)),
         "radial" => Ok(DischargeShape::Radial { axis_angle: 0.0 }),
+        _ if value.starts_with("spline") => {
+            let bad = || {
+                format!(
+                    "discharge spline must be spline:TURN[,START,END] with the turn in degrees \
+                     and the two shares from 0.1 to 0.9, got {value:?}"
+                )
+            };
+            let numbers: Vec<f64> = value
+                .strip_prefix("spline:")
+                .ok_or_else(bad)?
+                .split(',')
+                .map(|n| n.trim().parse::<f64>().map_err(|_| bad()))
+                .collect::<Result<_, _>>()?;
+            match numbers[..] {
+                [turn] => Ok((turn, 0.5, 0.5)),
+                [turn, start, end] => Ok((turn, start, end)),
+                _ => Err(bad()),
+            }
+            .map(|(turn, start_share, end_share)| DischargeShape::Spline {
+                turn: turn.to_radians(),
+                start_share,
+                end_share,
+            })
+        }
         _ => value
             .strip_prefix("radial:")
             .and_then(|d| d.trim().parse::<f64>().ok())
@@ -560,8 +633,8 @@ fn parse_discharge(value: &str) -> Result<DischargeShape, String> {
             })
             .ok_or_else(|| {
                 format!(
-                    "discharge must be tangential[:inner|centered|outer] or \
-                     radial[:DEGREES], got {value:?}"
+                    "discharge must be tangential[:inner|centered|outer], radial[:DEGREES] \
+                     or spline:TURN[,START,END], got {value:?}"
                 )
             }),
     }
@@ -716,6 +789,36 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
         "rib_comp_start" => input.setup.rib_compensation_start = quantity(Angle)?,
         "discharge" => input.diffuser.shape = parse_discharge(value)?,
         "bend" => input.diffuser.bend_radius = quantity(Length)?,
+        "height_offset" => input.diffuser.height_offset = quantity(Length)?,
+        "base_form" => input.diffuser.base_form = quantity(Dimensionless)?,
+        "eccentricity" => input.diffuser.eccentricity = quantity(Dimensionless)?,
+        "z_bend" => input.diffuser.z_bend = parse_z_bend(value, units)?,
+        "outlet_shape" => {
+            input.diffuser.outlet_shape =
+                match value {
+                    "round" => OutletShape::Round,
+                    _ => {
+                        let aspect = value
+                        .strip_prefix("rectangular:")
+                        .or(if value == "rectangular" { Some("1") } else { None })
+                        .and_then(|a| a.trim().parse::<f64>().ok())
+                        .ok_or_else(|| {
+                            format!(
+                                "outlet_shape must be round or rectangular[:ASPECT], got {value:?}"
+                            )
+                        })?;
+                        OutletShape::Rectangular { aspect }
+                    }
+                }
+        }
+        "z_align" => input.diffuser.z_alignment = parse_z_alignment(value, units)?,
+        "growth" => {
+            input.diffuser.growth = match value {
+                "linear" => DiffuserGrowth::Linear,
+                "matched" => DiffuserGrowth::Matched,
+                _ => return Err(format!("growth must be linear or matched, got {value:?}")),
+            }
+        }
         "rotation" => input.diffuser.rotation = quantity(Angle)?,
         "cutwater" => {
             input.cutwater.shape = match value {
@@ -748,7 +851,8 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
                  side_radius, nose_shape, join, wall, \
                  fillet, type, \
                  rib_wrap, rib, \
-                 rib_nose, channel_ratio, discharge, bend, rotation, cutwater, nose, height, \
+                 rib_nose, channel_ratio, discharge, bend, growth, height_offset, z_align, \
+                 base_form, eccentricity, outlet_shape, z_bend, rotation, cutwater, nose, height, \
                  dn, flange, flange_d, flange_t, bolt_circle, bolt_hole, bolts, pressure, \
                  allowable"
             ));
@@ -865,6 +969,17 @@ fn print_report(name: &str, id: ComponentId, g: &VoluteGeometry, units: &Display
             },
             s(Length, c.nose_distance)
         ),
+    }
+    // The walls at the tip, from the circumferential direction.
+    if !matches!(d.cutwater_shape, CutwaterShape::Tangent) && d.development.start <= 0.0 {
+        println!(
+            "           walls at the tip: spiral αIn {}   diffuser αOut {}   mean αAvg {} ({} off the flow angle)   spiral starts at {}",
+            s(Angle, c.spiral_angle),
+            s(Angle, c.diffuser_angle),
+            s(Angle, c.mean_angle()),
+            s(Angle, g.wall_misalignment()),
+            s(Angle, g.start_angle)
+        );
     }
     // Across the inlet width: where the walls cross, and the body of a rounded cutwater.
     let slices = &g.cutwater_slices;
@@ -1063,6 +1178,14 @@ fn print_report(name: &str, id: ComponentId, g: &VoluteGeometry, units: &Display
             s(Angle, g.nozzle_bend),
             s(Angle, axis_angle)
         ),
+        DischargeShape::Spline {
+            turn,
+            start_share,
+            end_share,
+        } => format!(
+            "spline (Bézier of degree 4) turning {}, shares {start_share:.2} and {end_share:.2}",
+            s(Angle, turn)
+        ),
     };
     println!("Diffuser   {discharge}");
     println!(
@@ -1083,6 +1206,25 @@ fn print_report(name: &str, id: ComponentId, g: &VoluteGeometry, units: &Display
         s(Angle, dif.opening_angle),
         s(Angle, dif.allowable_angle),
         dif.ideal_pressure_recovery
+    );
+    // Inlet and outlet as equivalent circles, the velocity ratio, and where the outlet
+    // stands: C from the pump axis to its axis, φ from the throat to its centre.
+    let equivalent = |area: f64| (4.0 * area / std::f64::consts::PI).sqrt();
+    println!(
+        "           inlet D {} A {}   outlet D {} A {}   c_out/c_in {:.3}",
+        s(Length, equivalent(dif.inlet_area)),
+        s(Area, dif.inlet_area),
+        s(Length, dif.outlet_diameter),
+        s(
+            Area,
+            std::f64::consts::PI * dif.outlet_diameter.powi(2) / 4.0
+        ),
+        1.0 / dif.area_ratio
+    );
+    println!(
+        "           outlet axis C {} from the pump axis   outlet centre φ {} from the throat",
+        s(Length, g.outlet_offset()),
+        s(Angle, g.outlet_angle())
     );
     println!(
         "Spiral     {} sections from {} to {}   wall {}{}",

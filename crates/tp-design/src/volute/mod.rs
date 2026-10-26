@@ -41,7 +41,8 @@ use tp_units::STANDARD_GRAVITY;
 
 pub use cutwater::CutwaterSlice;
 pub use geometry::{
-    AcrossWidth, CutwaterValues, FlowSection, NozzleSection, RibPlane, VoluteGeometry, VoluteSection,
+    AcrossWidth, CutwaterValues, FlowSection, NozzleSection, RibPlane, ThroatJunction,
+    VoluteGeometry, VoluteSection,
 };
 pub use section::{
     BendWall, BezierBase, BezierSide, CrossSectionInput, CrossSections, DEFAULT_CONE_ANGLE_DEG,
@@ -305,7 +306,21 @@ pub enum DischargeShape {
     /// end of the bend, rad: 0 points the discharge straight away from the pump axis (a
     /// centerline discharge).
     Radial { axis_angle: f64 },
+    /// A centerline of a fourth-degree Bézier curve between the throat and the outlet:
+    /// it leaves along the flow at the throat and ends `turn` further round, away from
+    /// the pump axis (rad). The control points 0 and 4 are its ends, point 2 lies where
+    /// the two directions meet, and points 1 and 3 sit at `start_share` and
+    /// `end_share` of the way from the ends to point 2; they shape the curve.
+    Spline {
+        turn: f64,
+        start_share: f64,
+        end_share: f64,
+    },
 }
+
+/// Range of the turn of a spline diffuser, rad, and of its shape shares.
+pub const SPLINE_TURN: std::ops::RangeInclusive<f64> = 0.05..=2.6;
+pub const SPLINE_SHARE: std::ops::RangeInclusive<f64> = 0.1..=0.9;
 
 /// By default a centerline discharge: the bend turns the outlet onto the line through
 /// the pump axis, as on process pumps (our choice).
@@ -314,6 +329,72 @@ impl Default for DischargeShape {
         DischargeShape::Radial { axis_angle: 0.0 }
     }
 }
+
+/// How the area of the discharge diffuser grows from the throat to the outlet. Gülich
+/// (Eqs. 1.44 and 1.45) limits the opening angle but does not give the law between the
+/// two areas, so both laws are our choice.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiffuserGrowth {
+    /// The equivalent radius grows linearly, so the area gains slope from the first
+    /// step: several times that of the last section of the spiral, a break at the throat.
+    #[default]
+    Linear,
+    /// The area is quadratic along the centerline, starts with the slope of the spiral
+    /// at the throat and reaches the outlet area: no break at the throat.
+    Matched,
+}
+
+/// How the sections of the discharge diffuser sit along the pump axis against the
+/// last section of the spiral. Shifting the whole diffuser so that it stays below the
+/// top of the spiral, or above its bottom, leaves a face lying in the plane of the top
+/// of the spiral, which the CAD kernel cannot build: the same shift is a manual offset.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ZAlignment {
+    /// Each section is centred on the centerline.
+    #[default]
+    Centric,
+    /// The outlet is `offset` toward +z (m), the sections in between by the share of the
+    /// length covered, or by its square when `quadratic`.
+    Manual { offset: f64, quadratic: bool },
+}
+
+/// A bend of the centerline of the discharge diffuser along the pump axis: it runs flat
+/// from the throat, rounds off with the radius `radius` through `angle` and goes on
+/// straight at that angle, ending `extent` away from the plane of the volute. The
+/// three have to agree for the length of the diffuser (Δz, R and α of the manual).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ZBend {
+    /// Axial extension Δz at the outlet, m, positive toward +z.
+    pub extent: f64,
+    /// Radius of the round, m.
+    pub radius: f64,
+    /// Angle the centerline reaches against the plane of the volute, rad.
+    pub angle: f64,
+}
+
+/// Range of the angle of a z-bend, rad.
+pub const Z_BEND_ANGLE: std::ops::RangeInclusive<f64> = 0.05..=1.2;
+
+/// Shape of the outlet section of the discharge diffuser. The outlet diameter is then
+/// the equivalent one: the area of the outlet stays π·D²/4.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum OutletShape {
+    #[default]
+    Round,
+    /// A rectangle of the same area, `aspect` = height along the pump axis over width.
+    Rectangular { aspect: f64 },
+}
+
+/// Range of the aspect of a rectangular outlet.
+pub const OUTLET_ASPECT: std::ops::RangeInclusive<f64> = 0.25..=4.0;
+
+/// Largest base form factor of the discharge diffuser. At 1 the base side is the circle
+/// at once and the CAD kernel cannot cut the cutwater cleanly (the flow domain comes out
+/// in four pieces); up to 0.9 it builds on the reference volute.
+pub const MAX_BASE_FORM: f64 = 0.9;
 
 /// Inputs of the discharge-diffuser step.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -336,6 +417,28 @@ pub struct DischargeInput {
     /// x axis, counter-clockwise about z, rad. Automatic: the discharge points along +y,
     /// vertically up in the front view.
     pub rotation: Param<f64>,
+    /// Law of the area from the throat to the outlet.
+    pub growth: DiffuserGrowth,
+    /// Height offset Δr_C, m: the diffuser is shifted across its centerline, away from
+    /// the pump axis when positive, growing from nothing at the throat to the full offset
+    /// over the first 40 % of its length. It gives the cutwater more room. Automatic: 0.
+    pub height_offset: Param<f64>,
+    /// Alignment of the diffuser along the pump axis.
+    pub z_alignment: ZAlignment,
+    /// Bend of the centerline along the pump axis, if any.
+    pub z_bend: Option<ZBend>,
+    /// Shape of the outlet section; a rectangular one has no round flange.
+    pub outlet_shape: OutletShape,
+    /// Eccentricity of a tangential diffuser, −1 to 1: how it widens against its axis,
+    /// −1 with the wall on the cutwater side straight (it opens outward only), 0 to
+    /// both sides, 1 with the outer wall straight; between them in proportion. Automatic:
+    /// that of the wall chosen in the shape.
+    pub eccentricity: Param<f64>,
+    /// Base form factor, 0 to [`MAX_BASE_FORM`]: how round the diffuser is on its base
+    /// side, toward the pump axis, over the first 30 % of its length. 0 keeps the corners
+    /// of the section of the spiral there, 1 would round that side to the circle at once. A rounder base
+    /// changes where the spiral wall crosses the diffuser wall. Automatic: 0.
+    pub base_form: Param<f64>,
 }
 
 /// Shape of the cutwater where the spiral meets the discharge diffuser (Gülich Chap.
@@ -591,6 +694,20 @@ pub struct SectionSize {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DischargeDiffuser {
     pub shape: DischargeShape,
+    /// Law of the area from the throat to the outlet.
+    pub growth: DiffuserGrowth,
+    /// Height offset Δr_C, m.
+    pub height_offset: f64,
+    /// Alignment along the pump axis.
+    pub z_alignment: ZAlignment,
+    /// Bend of the centerline along the pump axis, if any.
+    pub z_bend: Option<ZBend>,
+    /// Shape of the outlet section.
+    pub outlet_shape: OutletShape,
+    /// Eccentricity of a tangential diffuser, −1 to 1 (0 for a radial one).
+    pub eccentricity: f64,
+    /// Base form factor, 0 to 1.
+    pub base_form: f64,
     /// Mean radius of the bend of a radial discharge; 0 for a straight one, m.
     pub bend_radius: f64,
     /// Length along the centerline from the throat, m: the bend of a radial discharge
@@ -1466,10 +1583,14 @@ impl VoluteDesign {
                 gap,
             });
         }
-        let flange = input
-            .wall
-            .flange
-            .enabled
+        let round_outlet = matches!(diffuser.outlet_shape, OutletShape::Round);
+        if input.wall.flange.enabled && !round_outlet {
+            warnings.push(
+                "a rectangular outlet has no flange of ours, which is round: the casing ends flat"
+                    .into(),
+            );
+        }
+        let flange = (input.wall.flange.enabled && round_outlet)
             .then(|| Flange::new(diffuser.outlet_diameter, wall_thickness, &input.wall.flange))
             .transpose()?;
 
@@ -1578,6 +1699,32 @@ impl VoluteDesign {
         // Eq. 7.29: R_N ≈ 1.5·√(4·A₃q/π).
         let bend_radius = match input.shape {
             DischargeShape::Tangential { .. } => 0.0,
+            DischargeShape::Spline {
+                turn,
+                start_share,
+                end_share,
+            } => {
+                require(SPLINE_TURN.contains(&turn), || {
+                    format!(
+                        "the turn of a spline diffuser must lie between {:.0}° and {:.0}°, got \
+                         {:.1}°",
+                        SPLINE_TURN.start().to_degrees(),
+                        SPLINE_TURN.end().to_degrees(),
+                        turn.to_degrees()
+                    )
+                })?;
+                require(
+                    SPLINE_SHARE.contains(&start_share) && SPLINE_SHARE.contains(&end_share),
+                    || {
+                        format!(
+                            "the shares of a spline diffuser must lie between {} and {}",
+                            SPLINE_SHARE.start(),
+                            SPLINE_SHARE.end()
+                        )
+                    },
+                )?;
+                0.0
+            }
             DischargeShape::Radial { axis_angle } => {
                 require((0.0..=80f64.to_radians()).contains(&axis_angle), || {
                     format!(
@@ -1620,8 +1767,77 @@ impl VoluteDesign {
         let area_ratio = outlet_area / throat_area;
         // Eq. 1.45: tan ϑ_eq = (R₁,eq/L)·(√(A₂/A₁) − 1).
         let opening_angle = (r1 / length * (area_ratio.sqrt() - 1.0)).atan();
+        let height_offset = input.height_offset.resolve(|| 0.0);
+        require(
+            height_offset.is_finite() && height_offset.abs() <= 2.0 * r1,
+            || {
+                format!(
+                    "the height offset {:.1} mm must lie within two throat radii ({:.1} mm)",
+                    height_offset * 1e3,
+                    2.0 * r1 * 1e3
+                )
+            },
+        )?;
+        if let ZAlignment::Manual { offset, .. } = input.z_alignment {
+            require(offset.is_finite() && offset.abs() <= 4.0 * r1, || {
+                format!(
+                    "the axial offset {:.1} mm must lie within four throat radii ({:.1} mm)",
+                    offset * 1e3,
+                    4.0 * r1 * 1e3
+                )
+            })?;
+        }
+        if let Some(b) = input.z_bend {
+            require(
+                b.extent.is_finite()
+                    && b.radius.is_finite()
+                    && b.radius > 0.0
+                    && Z_BEND_ANGLE.contains(&b.angle),
+                || {
+                    format!(
+                        "the z-bend needs a positive radius and an angle between {:.0}° and \
+                         {:.0}°",
+                        Z_BEND_ANGLE.start().to_degrees(),
+                        Z_BEND_ANGLE.end().to_degrees()
+                    )
+                },
+            )?;
+        }
+        if let OutletShape::Rectangular { aspect } = input.outlet_shape {
+            require(OUTLET_ASPECT.contains(&aspect), || {
+                format!(
+                    "the aspect of a rectangular outlet must lie between {} and {}, got {aspect:.2}",
+                    OUTLET_ASPECT.start(),
+                    OUTLET_ASPECT.end()
+                )
+            })?;
+        }
+        let eccentricity = input.eccentricity.resolve(|| match input.shape {
+            DischargeShape::Tangential { straight_wall } => match straight_wall {
+                StraightWall::Inner => -1.0,
+                StraightWall::Centered => 0.0,
+                StraightWall::Outer => 1.0,
+            },
+            DischargeShape::Radial { .. } | DischargeShape::Spline { .. } => 0.0,
+        });
+        require((-1.0..=1.0).contains(&eccentricity), || {
+            format!("the eccentricity must lie between −1 and 1, got {eccentricity:.2}")
+        })?;
+        let base_form = input.base_form.resolve(|| 0.0);
+        require((0.0..=MAX_BASE_FORM).contains(&base_form), || {
+            format!(
+                "the base form factor must lie between 0 and {MAX_BASE_FORM}, got {base_form:.2}"
+            )
+        })?;
         Ok(DischargeDiffuser {
             shape: input.shape,
+            growth: input.growth,
+            height_offset,
+            z_alignment: input.z_alignment,
+            z_bend: input.z_bend,
+            outlet_shape: input.outlet_shape,
+            eccentricity,
+            base_form,
             bend_radius,
             length,
             inlet_area: throat_area,

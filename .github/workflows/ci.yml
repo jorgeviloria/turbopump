@@ -63,7 +63,11 @@ jobs:
       - name: Tests
         if: runner.os != 'Windows'
         timeout-minutes: 75
-        run: cargo test --workspace
+        # The slowest CAD tests are #[ignore]d so that a local `cargo test` is quick;
+        # CI still runs them (the other ignored tests need a GPU or are benchmarks).
+        run: |
+          cargo test --workspace
+          cargo test -p tp-cad --lib -- --ignored
       # On the Windows runners OCCT ran 3 to 16 times slower than on macOS depending on
       # the operation (diffuser 20 s, reference impeller 9 min, internal volute 28 min,
       # one test at a time), with the parallel booleans still faster than one thread.
