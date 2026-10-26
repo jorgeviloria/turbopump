@@ -869,6 +869,27 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ),
     ("Nominal size DN", "Diámetro nominal DN"),
     ("Area growth", "Crecimiento del área"),
+    ("Height offset Δr_C", "Desplazamiento radial Δr_C"),
+    (
+        "Shifts the diffuser across its centerline, away from the pump axis when positive, over the first 40 % of its length: room for the cutwater, whose tip moves toward the base circle",
+        "Desplaza el difusor a través de su línea media, alejándolo del eje de la bomba si es positivo, en el primer 40 % de su longitud: da sitio al corte de agua, cuya punta se acerca al círculo base",
+    ),
+    ("Axial alignment", "Alineación axial"),
+    (
+        "Where the sections of the diffuser sit along the pump axis. Centric: on the centerline. Manual: the outlet is shifted by the offset, linearly or quadratically with the length",
+        "Dónde quedan las secciones del difusor a lo largo del eje de la bomba. Centrada: sobre la línea media. Manual: la salida se desplaza el desvío indicado, de forma lineal o cuadrática con la longitud",
+    ),
+    ("centric", "centrada"),
+    ("Axial offset", "Desvío axial"),
+    (
+        "Shift of the outlet along the pump axis, positive toward +z",
+        "Desplazamiento de la salida a lo largo del eje de la bomba, positivo hacia +z",
+    ),
+    ("Quadratic progression", "Progresión cuadrática"),
+    (
+        "The shift grows with the square of the length instead of linearly",
+        "El desplazamiento crece con el cuadrado de la longitud en vez de linealmente",
+    ),
     (
         "Velocity ratio c_out/c_in",
         "Relación de velocidades c_sal/c_ent",

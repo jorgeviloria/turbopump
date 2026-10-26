@@ -9,7 +9,7 @@ use tp_design::Param;
 use tp_design::volute::stress::StressPlace;
 use tp_design::volute::{
     AreaLaw, CutwaterShape, DiffuserGrowth, DischargeShape, MAX_ARCS, MIN_ARCS, MIN_WRAP_DEG,
-    Progression, StraightWall, VoluteGeometry, VoluteInput, VoluteKind,
+    Progression, StraightWall, VoluteGeometry, VoluteInput, VoluteKind, ZAlignment,
 };
 use tp_project::{ComponentId, DesignStep, Project};
 use tp_units::{DisplayUnits, QuantityKind};
@@ -1009,6 +1009,77 @@ fn diffuser(
                     })
             });
             ui.end_row();
+            param_f64(
+                ui,
+                tr("Height offset Δr_C"),
+                tr(
+                    "Shifts the diffuser across its centerline, away from the pump axis when \
+                    positive, over the first 40 % of its length: room for the cutwater, whose \
+                    tip moves toward the base circle",
+                ),
+                &mut input.diffuser.height_offset,
+                Length,
+                Some(0.0),
+                &units,
+                -0.5..=0.5,
+            );
+            label(
+                ui,
+                tr("Axial alignment"),
+                tr(
+                    "Where the sections of the diffuser sit along the pump axis. Centric: on the \
+                    centerline. Manual: the outlet is shifted by the offset, linearly or \
+                    quadratically with the length",
+                ),
+            );
+            let alignment = |a: &ZAlignment| {
+                tr(match a {
+                    ZAlignment::Centric => "centric",
+                    ZAlignment::Manual { .. } => "manual",
+                })
+            };
+            let current = input.diffuser.z_alignment;
+            crate::widgets::list(ui, |ui| {
+                ComboBox::from_id_salt("volute_z_alignment")
+                    .selected_text(crate::widgets::noted(ui, alignment(&current)))
+                    .show_ui(ui, |ui| {
+                        for option in [
+                            ZAlignment::Centric,
+                            ZAlignment::Manual {
+                                offset: 0.0,
+                                quadratic: false,
+                            },
+                        ] {
+                            let same =
+                                std::mem::discriminant(&option) == std::mem::discriminant(&current);
+                            if ui.selectable_label(same, alignment(&option)).clicked() && !same {
+                                input.diffuser.z_alignment = option;
+                            }
+                        }
+                    })
+            });
+            ui.end_row();
+            if let ZAlignment::Manual { offset, quadratic } = &mut input.diffuser.z_alignment {
+                let mut value = Param::Manual(*offset);
+                param_f64(
+                    ui,
+                    tr("Axial offset"),
+                    tr("Shift of the outlet along the pump axis, positive toward +z"),
+                    &mut value,
+                    Length,
+                    Some(*offset),
+                    &units,
+                    -0.5..=0.5,
+                );
+                *offset = value.resolve(|| 0.0);
+                label(
+                    ui,
+                    tr("Quadratic progression"),
+                    tr("The shift grows with the square of the length instead of linearly"),
+                );
+                ui.checkbox(quadratic, "");
+                ui.end_row();
+            }
             param_f64(
                 ui,
                 tr("Volute rotation"),
