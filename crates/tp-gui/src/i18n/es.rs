@@ -991,8 +991,8 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ),
     ("Base form factor", "Factor de forma de la base"),
     (
-        "How round the diffuser is on its base side, toward the pump axis: 0 keeps the corners of the last section of the spiral, 1 would round that side to the circle (the limit is 0.9). It builds up over the first 30 % of the length and changes where the spiral wall crosses the diffuser wall",
-        "Cuán redondo es el difusor en su lado de la base, hacia el eje de la bomba: 0 conserva las esquinas de la última sección de la espiral, 1 redondearía ese lado hasta el círculo (el límite es 0,9). Se forma en el primer 30 % de la longitud y cambia dónde la pared de la espiral cruza la del difusor",
+        "How round the diffuser is on its base side, toward the pump axis: 0 keeps the corners of the last section of the spiral, 1 would round that side to the circle (the limit is 0.75). It builds up over the first 30 % of the length and changes where the spiral wall crosses the diffuser wall",
+        "Cuán redondo es el difusor en su lado de la base, hacia el eje de la bomba: 0 conserva las esquinas de la última sección de la espiral, 1 redondearía ese lado hasta el círculo (el límite es 0,75). Se forma en el primer 30 % de la longitud y cambia dónde la pared de la espiral cruza la del difusor",
     ),
     ("Axial alignment", "Alineación axial"),
     (

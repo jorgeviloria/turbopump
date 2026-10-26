@@ -1141,7 +1141,7 @@ fn diffuser(
                 tr(
                     "How round the diffuser is on its base side, toward the pump axis: 0 keeps \
                     the corners of the last section of the spiral, 1 would round that side to the \
-                    circle (the limit is 0.9). It builds up over the first 30 % of the length and changes where the \
+                    circle (the limit is 0.75). It builds up over the first 30 % of the length and changes where the \
                     spiral wall crosses the diffuser wall",
                 ),
                 &mut input.diffuser.base_form,

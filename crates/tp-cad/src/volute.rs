@@ -1617,21 +1617,21 @@ mod tests {
         let _slot = crate::test_slot::take();
         use tp_design::Param;
         use tp_design::volute::{DischargeInput, ZAlignment};
-        let fluid = |edit: &dyn Fn(&mut DischargeInput)| -> f64 {
+        let fluid = |name: &str, edit: &dyn Fn(&mut DischargeInput)| -> f64 {
             let mut input = VoluteInput::default();
             edit(&mut input.diffuser);
             let g = VoluteGeometry::build(&basis(), &input).unwrap();
             let cad = build_volute(&g).unwrap();
-            assert!(cad.fluid.is_valid());
-            assert_eq!(cad.fluid.solid_count(), 1);
-            assert_eq!(cad.channel.solid_count(), 1);
-            assert!(cad.warnings.is_empty(), "{:?}", cad.warnings);
+            assert!(cad.fluid.is_valid(), "{name}");
+            assert_eq!(cad.fluid.solid_count(), 1, "{name}");
+            assert_eq!(cad.channel.solid_count(), 1, "{name}");
+            assert!(cad.warnings.is_empty(), "{name}: {:?}", cad.warnings);
             cad.fluid_volume()
         };
-        let plain = fluid(&|_| {});
-        let offset = fluid(&|d| d.height_offset = Param::Manual(0.01));
-        let rounded_base = fluid(&|d| d.base_form = Param::Manual(0.9));
-        let manual = fluid(&|d| {
+        let plain = fluid("plain", &|_| {});
+        let offset = fluid("offset", &|d| d.height_offset = Param::Manual(0.01));
+        let rounded_base = fluid("rounded base", &|d| d.base_form = Param::Manual(0.75));
+        let manual = fluid("manual", &|d| {
             d.z_alignment = ZAlignment::Manual {
                 offset: 0.01,
                 quadratic: true,

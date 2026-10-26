@@ -2280,7 +2280,7 @@ mod tests {
             |_| {},
             |d| {
                 d.height_offset = Param::Manual(0.01);
-                d.base_form = Param::Manual(0.9);
+                d.base_form = Param::Manual(0.75);
             },
         ];
         for edit in edits {
@@ -2301,7 +2301,7 @@ mod tests {
     #[test]
     fn the_base_form_factor_rounds_the_base_side_only() {
         let plain = with_diffuser(|_| {});
-        let round = with_diffuser(|d| d.base_form = Param::Manual(0.9));
+        let round = with_diffuser(|d| d.base_form = Param::Manual(0.75));
         // The throat stays, and the area law does not change.
         for (a, b) in plain.nozzle[0].points.iter().zip(&round.nozzle[0].points) {
             assert!(a.distance(*b) < 1e-12);
@@ -2343,7 +2343,7 @@ mod tests {
         );
         // Out of range is refused.
         let mut input = unturned();
-        input.diffuser.base_form = Param::Manual(0.95);
+        input.diffuser.base_form = Param::Manual(0.8);
         assert!(VoluteGeometry::build(&reference_basis(), &input).is_err());
     }
 

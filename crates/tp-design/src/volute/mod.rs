@@ -393,8 +393,9 @@ pub const OUTLET_ASPECT: std::ops::RangeInclusive<f64> = 0.25..=4.0;
 
 /// Largest base form factor of the discharge diffuser. At 1 the base side is the circle
 /// at once and the CAD kernel cannot cut the cutwater cleanly (the flow domain comes out
-/// in four pieces); up to 0.9 it builds on the reference volute.
-pub const MAX_BASE_FORM: f64 = 0.9;
+/// in four pieces), and at 0.9 the cutwater of the CAD solid lies 1.7 mm off its design
+/// with the automatic side endings; up to 0.75 it builds cleanly on the reference volute.
+pub const MAX_BASE_FORM: f64 = 0.75;
 
 /// Inputs of the discharge-diffuser step.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
