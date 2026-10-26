@@ -647,6 +647,16 @@ fn casing_pieces(g: &VoluteGeometry) -> Result<(Vec<Shape>, Lofts), CadError> {
 }
 
 pub fn build_volute_casing(g: &VoluteGeometry, cad: &VoluteCad) -> Result<VoluteCasing, CadError> {
+    // The outer lofts of a diffuser tilted along the pump axis do not fuse into one
+    // casing (tried from 10° to 25°: the casing came out in 8 pieces, with or without
+    // the flange), so it is refused instead of returned broken.
+    if g.design.diffuser.z_bend.is_some() {
+        return Err(CadError::Input(
+            "the casing of a diffuser with an axial bend cannot be built yet: the flow \
+             domain can"
+                .into(),
+        ));
+    }
     let (mut outer, halves) = casing_pieces(g)?;
     // The wall round the bend and neck of an internal volute.
     if let Some(profile) = g.bend_casing_profile() {
@@ -840,7 +850,9 @@ fn flange(g: &VoluteGeometry, f: &tp_design::volute::Flange) -> Result<Shape, Ca
         (f.bore / 2.0 + 0.5 * g.design.wall_thickness) * MM,
         thickness + 2.0 * margin,
     )?;
-    let (u, v) = (DVec3::Z, axis.cross(DVec3::Z));
+    // Square to the axis even when a z-bend tilts it.
+    let u = (DVec3::Z - axis * DVec3::Z.dot(axis)).normalize();
+    let v = axis.cross(u);
     let holes = (0..f.bolts)
         .map(|k| {
             let angle = std::f64::consts::TAU * (f64::from(k) + 0.5) / f64::from(f.bolts);
@@ -1623,6 +1635,35 @@ mod tests {
         ] {
             assert!((v / plain - 1.0).abs() < 0.03, "{name}: {v} vs {plain}");
         }
+    }
+
+    #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
+    fn the_axial_bend_gives_a_valid_flow_domain_but_no_casing() {
+        let _slot = crate::test_slot::take();
+        use tp_design::volute::ZBend;
+        let build = |bend: Option<ZBend>| {
+            let mut input = VoluteInput::default();
+            input.diffuser.z_bend = bend;
+            let g = VoluteGeometry::build(&basis(), &input).unwrap();
+            let cad = build_volute(&g).unwrap();
+            assert!(cad.fluid.is_valid());
+            assert_eq!(cad.fluid.solid_count(), 1);
+            assert_eq!(cad.channel.solid_count(), 1);
+            assert!(cad.warnings.is_empty(), "{:?}", cad.warnings);
+            (g, cad)
+        };
+        let straight = build(None).1.fluid_volume();
+        let (g, cad) = build(Some(ZBend {
+            extent: 0.03,
+            radius: 0.08,
+            angle: 25f64.to_radians(),
+        }));
+        // The same areas along the same length: the volumes agree to a few per cent.
+        assert!((cad.fluid_volume() / straight - 1.0).abs() < 0.03);
+        // The casing is refused, with the reason, rather than returned in pieces.
+        let error = build_volute_casing(&g, &cad).unwrap_err().to_string();
+        assert!(error.contains("axial bend"), "{error}");
     }
 
     #[test]

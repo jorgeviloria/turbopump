@@ -303,7 +303,21 @@ pub enum DischargeShape {
     /// end of the bend, rad: 0 points the discharge straight away from the pump axis (a
     /// centerline discharge).
     Radial { axis_angle: f64 },
+    /// A centerline of a fourth-degree Bézier curve between the throat and the outlet:
+    /// it leaves along the flow at the throat and ends `turn` further round, away from
+    /// the pump axis (rad). The control points 0 and 4 are its ends, point 2 lies where
+    /// the two directions meet, and points 1 and 3 sit at `start_share` and
+    /// `end_share` of the way from the ends to point 2; they shape the curve.
+    Spline {
+        turn: f64,
+        start_share: f64,
+        end_share: f64,
+    },
 }
+
+/// Range of the turn of a spline diffuser, rad, and of its shape shares.
+pub const SPLINE_TURN: std::ops::RangeInclusive<f64> = 0.05..=2.6;
+pub const SPLINE_SHARE: std::ops::RangeInclusive<f64> = 0.1..=0.9;
 
 /// By default a centerline discharge: the bend turns the outlet onto the line through
 /// the pump axis, as on process pumps (our choice).
@@ -342,6 +356,23 @@ pub enum ZAlignment {
     /// length covered, or by its square when `quadratic`.
     Manual { offset: f64, quadratic: bool },
 }
+
+/// A bend of the centerline of the discharge diffuser along the pump axis: it runs flat
+/// from the throat, rounds off with the radius `radius` through `angle` and goes on
+/// straight at that angle, ending `extent` away from the plane of the volute. The
+/// three have to agree for the length of the diffuser (Δz, R and α of the manual).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ZBend {
+    /// Axial extension Δz at the outlet, m, positive toward +z.
+    pub extent: f64,
+    /// Radius of the round, m.
+    pub radius: f64,
+    /// Angle the centerline reaches against the plane of the volute, rad.
+    pub angle: f64,
+}
+
+/// Range of the angle of a z-bend, rad.
+pub const Z_BEND_ANGLE: std::ops::RangeInclusive<f64> = 0.05..=1.2;
 
 /// Shape of the outlet section of the discharge diffuser. The outlet diameter is then
 /// the equivalent one: the area of the outlet stays π·D²/4.
@@ -391,6 +422,8 @@ pub struct DischargeInput {
     pub height_offset: Param<f64>,
     /// Alignment of the diffuser along the pump axis.
     pub z_alignment: ZAlignment,
+    /// Bend of the centerline along the pump axis, if any.
+    pub z_bend: Option<ZBend>,
     /// Shape of the outlet section; a rectangular one has no round flange.
     pub outlet_shape: OutletShape,
     /// Eccentricity of a tangential diffuser, −1 to 1: how it widens against its axis,
@@ -663,6 +696,8 @@ pub struct DischargeDiffuser {
     pub height_offset: f64,
     /// Alignment along the pump axis.
     pub z_alignment: ZAlignment,
+    /// Bend of the centerline along the pump axis, if any.
+    pub z_bend: Option<ZBend>,
     /// Shape of the outlet section.
     pub outlet_shape: OutletShape,
     /// Eccentricity of a tangential diffuser, −1 to 1 (0 for a radial one).
@@ -1659,6 +1694,32 @@ impl VoluteDesign {
         // Eq. 7.29: R_N ≈ 1.5·√(4·A₃q/π).
         let bend_radius = match input.shape {
             DischargeShape::Tangential { .. } => 0.0,
+            DischargeShape::Spline {
+                turn,
+                start_share,
+                end_share,
+            } => {
+                require(SPLINE_TURN.contains(&turn), || {
+                    format!(
+                        "the turn of a spline diffuser must lie between {:.0}° and {:.0}°, got \
+                         {:.1}°",
+                        SPLINE_TURN.start().to_degrees(),
+                        SPLINE_TURN.end().to_degrees(),
+                        turn.to_degrees()
+                    )
+                })?;
+                require(
+                    SPLINE_SHARE.contains(&start_share) && SPLINE_SHARE.contains(&end_share),
+                    || {
+                        format!(
+                            "the shares of a spline diffuser must lie between {} and {}",
+                            SPLINE_SHARE.start(),
+                            SPLINE_SHARE.end()
+                        )
+                    },
+                )?;
+                0.0
+            }
             DischargeShape::Radial { axis_angle } => {
                 require((0.0..=80f64.to_radians()).contains(&axis_angle), || {
                     format!(
@@ -1721,6 +1782,22 @@ impl VoluteDesign {
                 )
             })?;
         }
+        if let Some(b) = input.z_bend {
+            require(
+                b.extent.is_finite()
+                    && b.radius.is_finite()
+                    && b.radius > 0.0
+                    && Z_BEND_ANGLE.contains(&b.angle),
+                || {
+                    format!(
+                        "the z-bend needs a positive radius and an angle between {:.0}° and \
+                         {:.0}°",
+                        Z_BEND_ANGLE.start().to_degrees(),
+                        Z_BEND_ANGLE.end().to_degrees()
+                    )
+                },
+            )?;
+        }
         if let OutletShape::Rectangular { aspect } = input.outlet_shape {
             require(OUTLET_ASPECT.contains(&aspect), || {
                 format!(
@@ -1736,7 +1813,7 @@ impl VoluteDesign {
                 StraightWall::Centered => 0.0,
                 StraightWall::Outer => 1.0,
             },
-            DischargeShape::Radial { .. } => 0.0,
+            DischargeShape::Radial { .. } | DischargeShape::Spline { .. } => 0.0,
         });
         require((-1.0..=1.0).contains(&eccentricity), || {
             format!("the eccentricity must lie between −1 and 1, got {eccentricity:.2}")
@@ -1752,6 +1829,7 @@ impl VoluteDesign {
             growth: input.growth,
             height_offset,
             z_alignment: input.z_alignment,
+            z_bend: input.z_bend,
             outlet_shape: input.outlet_shape,
             eccentricity,
             base_form,

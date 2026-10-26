@@ -14,7 +14,7 @@ use super::section::Bend;
 use super::stress::WallStress;
 use super::{
     CrossSections, CutwaterShape, DiffuserGrowth, DischargeShape, OutletShape, SectionSize,
-    VoluteDesign, VoluteInput, ZAlignment,
+    VoluteDesign, VoluteInput, ZAlignment, ZBend,
 };
 use crate::outlet::ImpellerOutlet;
 use crate::{DesignError, Param};
@@ -714,6 +714,38 @@ impl VoluteGeometry {
         let mut free = input.clone();
         free.diffuser.flange_height = Param::Auto;
         let first = Self::build_with_length(basis, &free)?;
+        // A spline has no straight part after a bend: the length that puts the outlet
+        // face at H, by bisection.
+        if matches!(first.design.diffuser.shape, DischargeShape::Spline { .. }) {
+            let reach = |length: f64| -> Result<f64, DesignError> {
+                let mut trial = free.clone();
+                trial.diffuser.length = Param::Manual(length);
+                Ok(Self::build_with_length(basis, &trial)?.outlet_height)
+            };
+            let base = first.design.diffuser.length;
+            let (mut lo, mut hi) = (0.2 * base, 8.0 * base);
+            let (at_lo, at_hi) = (reach(lo)?, reach(hi)?);
+            if !((at_lo.min(at_hi))..=(at_lo.max(at_hi))).contains(&height) {
+                return Err(DesignError::InvalidInput(format!(
+                    "the flange height H = {:.1} mm cannot be reached with a spline diffuser: \
+                     between {:.1} mm and {:.1} mm",
+                    height * 1e3,
+                    at_lo.min(at_hi) * 1e3,
+                    at_lo.max(at_hi) * 1e3
+                )));
+            }
+            let rising = at_hi > at_lo;
+            for _ in 0..40 {
+                let mid = 0.5 * (lo + hi);
+                if (reach(mid)? < height) == rising {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
+            }
+            free.diffuser.length = Param::Manual(0.5 * (lo + hi));
+            return Self::build_with_length(basis, &free);
+        }
         let bend = first.design.diffuser.bend_radius * first.nozzle_bend;
         let at_bend = first.outlet_height - (first.nozzle_length - bend);
         let length = bend + (height - at_bend);
@@ -1124,9 +1156,11 @@ impl VoluteGeometry {
                     .collect()
             }
         };
-        let outlet_height = nozzle
-            .last()
-            .map_or(0.0, |n| n.center.truncate().dot(n.tangent.truncate()));
+        let outlet_height = nozzle.last().map_or(0.0, |n| {
+            n.center
+                .truncate()
+                .dot(n.tangent.truncate().normalize_or_zero())
+        });
 
         // Turn the whole volute about the pump axis, by default so that the discharge
         // points vertically up. Wrap angles stay measured from the cutwater.
@@ -1203,6 +1237,21 @@ impl VoluteGeometry {
 
         let mut warnings = design.warnings.clone();
         warnings.extend(intersection_warning);
+        if design.diffuser.z_bend.is_some() {
+            warnings.push(
+                "the CAD kernel builds the flow domain of a diffuser with an axial bend but \
+                 not yet its casing"
+                    .into(),
+            );
+        }
+        if matches!(design.diffuser.shape, DischargeShape::Spline { .. }) {
+            warnings.push(
+                "the CAD kernel is slow and unreliable on a spline diffuser (minutes to \
+                 half an hour, depending on the turn): export the CAD solids with a radial \
+                 or tangential discharge"
+                    .into(),
+            );
+        }
         if nozzle_length > design.diffuser.length * (1.0 + 1e-9) {
             warnings.push(format!(
                 "the bend of the radial discharge ({:.0} mm) is longer than the diffuser \
@@ -1503,6 +1552,145 @@ fn cutwater(
 /// A point of the diffuser centerline and its unit tangent.
 type PathPoint = (DVec3, DVec3);
 
+/// The axial profile z(s) of a z-bend along the horizontal length of the diffuser, and
+/// its slope: flat for `flat` from the throat, then the round of radius R through the
+/// angle α, then straight at that angle. The flat run is whatever makes the extension
+/// at the outlet, `length` along, what was asked for.
+struct ZProfile {
+    flat: f64,
+    radius: f64,
+    angle: f64,
+}
+
+impl ZProfile {
+    fn new(bend: ZBend, length: f64) -> Result<Self, DesignError> {
+        let (r, a) = (bend.radius, bend.angle);
+        let round_run = r * a.sin();
+        if length < round_run {
+            return Err(DesignError::Infeasible(format!(
+                "the round of the z-bend ({:.1} mm long) does not fit in the diffuser \
+                 ({:.1} mm)",
+                round_run * 1e3,
+                length * 1e3
+            )));
+        }
+        let at = |flat: f64| Self {
+            flat,
+            radius: r,
+            angle: a,
+        };
+        let (low, high) = (at(length - round_run).z(length), at(0.0).z(length));
+        if !(low..=high).contains(&bend.extent) {
+            return Err(DesignError::Infeasible(format!(
+                "the axial extension of the z-bend must lie between {:.1} mm and {:.1} mm for \
+                 this radius, angle and length, got {:.1} mm",
+                low * 1e3,
+                high * 1e3,
+                bend.extent * 1e3
+            )));
+        }
+        // z at the outlet falls as the flat run grows: bisection.
+        let (mut lo, mut hi) = (0.0, length - round_run);
+        for _ in 0..80 {
+            let mid = 0.5 * (lo + hi);
+            if at(mid).z(length) > bend.extent {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        Ok(at(0.5 * (lo + hi)))
+    }
+
+    fn z(&self, s: f64) -> f64 {
+        let x = s - self.flat;
+        let run = self.radius * self.angle.sin();
+        if x <= 0.0 {
+            0.0
+        } else if x < run {
+            self.radius - (self.radius * self.radius - x * x).sqrt()
+        } else {
+            self.radius * (1.0 - self.angle.cos()) + (x - run) * self.angle.tan()
+        }
+    }
+
+    fn slope(&self, s: f64) -> f64 {
+        let x = s - self.flat;
+        let run = self.radius * self.angle.sin();
+        if x <= 0.0 {
+            0.0
+        } else if x < run {
+            x / (self.radius * self.radius - x * x).sqrt()
+        } else {
+            self.angle.tan()
+        }
+    }
+}
+
+/// A centerline of a fourth-degree Bézier curve from `start` along `tangent` that turns
+/// `turn` toward `outward`, scaled to `length`, at `count + 1` equal steps of its length.
+/// The control points: 0 and 4 the ends, 2 where the two straight legs of equal length
+/// meet, 1 and 3 at the shares of the way from the ends to it.
+fn spline_path(
+    start: DVec3,
+    tangent: DVec3,
+    outward: DVec3,
+    turn: f64,
+    shares: [f64; 2],
+    length: f64,
+    count: usize,
+) -> Vec<PathPoint> {
+    // In the plane (along the tangent, outward) with legs of length 1.
+    let (p0, d_end) = (DVec2::ZERO, DVec2::new(turn.cos(), turn.sin()));
+    let p2 = DVec2::new(1.0, 0.0);
+    let p4 = p2 + d_end;
+    let p = [p0, p0.lerp(p2, shares[0]), p2, p4.lerp(p2, shares[1]), p4];
+    let at = |t: f64| -> (DVec2, DVec2) {
+        let u = 1.0 - t;
+        let b = [
+            u.powi(4),
+            4.0 * u.powi(3) * t,
+            6.0 * u * u * t * t,
+            4.0 * u * t.powi(3),
+            t.powi(4),
+        ];
+        let db = [
+            -4.0 * u.powi(3),
+            4.0 * u.powi(3) - 12.0 * u * u * t,
+            12.0 * u * u * t - 12.0 * u * t * t,
+            12.0 * u * t * t - 4.0 * t.powi(3),
+            4.0 * t.powi(3),
+        ];
+        let position = p.iter().zip(b).map(|(q, w)| *q * w).sum::<DVec2>();
+        let slope = p.iter().zip(db).map(|(q, w)| *q * w).sum::<DVec2>();
+        (position, slope.normalize())
+    };
+    // Arc length by fine steps, then each equal step by interpolation.
+    const FINE: usize = 2000;
+    let samples: Vec<(DVec2, DVec2)> = (0..=FINE).map(|i| at(i as f64 / FINE as f64)).collect();
+    let mut cumulative = vec![0.0];
+    for w in samples.windows(2) {
+        cumulative.push(cumulative.last().copied().unwrap_or(0.0) + (w[1].0 - w[0].0).length());
+    }
+    let scale = length / cumulative.last().copied().unwrap_or(1.0);
+    (0..=count)
+        .map(|k| {
+            let s = cumulative.last().copied().unwrap_or(0.0) * k as f64 / count as f64;
+            let i = cumulative.partition_point(|c| *c < s).clamp(1, FINE);
+            let w = ((s - cumulative[i - 1]) / (cumulative[i] - cumulative[i - 1]).max(1e-300))
+                .clamp(0.0, 1.0);
+            let (q, d) = (
+                samples[i - 1].0.lerp(samples[i].0, w),
+                samples[i - 1].1.lerp(samples[i].1, w).normalize(),
+            );
+            (
+                start + (tangent * q.x + outward * q.y) * scale,
+                tangent * d.x + outward * d.y,
+            )
+        })
+        .collect()
+}
+
 /// Centerline of the discharge diffuser in the midplane: positions and unit tangents
 /// at `count + 1` equal steps of its length, the turning angle of the bend and the
 /// length. A straight diffuser follows the flow at the throat; a radial one first turns
@@ -1516,8 +1704,25 @@ fn centerline(
     count: usize,
 ) -> Result<(Vec<PathPoint>, f64, f64), DesignError> {
     let total = design.diffuser.length;
+    if let DischargeShape::Spline {
+        turn,
+        start_share,
+        end_share,
+    } = design.diffuser.shape
+    {
+        let path = spline_path(
+            start,
+            tangent,
+            outward,
+            turn,
+            [start_share, end_share],
+            total,
+            count,
+        );
+        return Ok((lifted(design, path, total)?, turn, total));
+    }
     let (bend, radius) = match design.diffuser.shape {
-        DischargeShape::Tangential { .. } => (0.0, 0.0),
+        DischargeShape::Tangential { .. } | DischargeShape::Spline { .. } => (0.0, 0.0),
         DischargeShape::Radial { axis_angle } => {
             let radius = design.diffuser.bend_radius;
             let center = start + outward * radius;
@@ -1575,7 +1780,32 @@ fn centerline(
             }
         })
         .collect();
-    Ok((points, bend, length))
+    Ok((lifted(design, points, length)?, bend, length))
+}
+
+/// The centerline `path` of the horizontal plane carried along the pump axis by the
+/// z-bend of the design, if it has one, with the tangents turned to follow it.
+fn lifted(
+    design: &VoluteDesign,
+    path: Vec<PathPoint>,
+    length: f64,
+) -> Result<Vec<PathPoint>, DesignError> {
+    let Some(bend) = design.diffuser.z_bend else {
+        return Ok(path);
+    };
+    let profile = ZProfile::new(bend, length)?;
+    let count = path.len() - 1;
+    Ok(path
+        .into_iter()
+        .enumerate()
+        .map(|(k, (position, tangent))| {
+            let s = length * k as f64 / count as f64;
+            (
+                position + DVec3::Z * profile.z(s),
+                (tangent + DVec3::Z * profile.slope(s)).normalize(),
+            )
+        })
+        .collect())
 }
 
 /// Sections of the discharge diffuser: the throat outline blends into a circle while
@@ -1605,7 +1835,7 @@ fn nozzle(
     // throat; it turns with the tangent along a bend.
     let u0 = (radial - axis * radial.dot(axis)).normalize();
     let side = axis.cross(DVec3::Z).dot(u0).signum();
-    let across = |t: DVec3| t.cross(DVec3::Z) * side;
+    let across = |t: DVec3| t.cross(DVec3::Z).normalize() * side;
     let (path, bend, length) = centerline(design, start, axis, u0, NOZZLE_SECTIONS)?;
     // Offsets across the axis of the straight walls: the cutwater side passes through
     // the stagnation point, the outer one through the outermost point of the throat.
@@ -1699,11 +1929,13 @@ fn nozzle(
             let lowest = blend.iter().map(|p| p.x).fold(f64::INFINITY, f64::min) * scale;
             let highest = blend.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max) * scale;
             let u = across(tangent);
+            // Up across the section: the pump axis made perpendicular to the centerline.
+            let v = (DVec3::Z - tangent * DVec3::Z.dot(tangent)).normalize();
             let e = design.diffuser.eccentricity;
             let shift = match design.diffuser.shape {
                 DischargeShape::Tangential { .. } if e < 0.0 => -e * (inner - lowest),
                 DischargeShape::Tangential { .. } => e * (outer - highest),
-                DischargeShape::Radial { .. } => 0.0,
+                DischargeShape::Radial { .. } | DischargeShape::Spline { .. } => 0.0,
             };
             // The height offset grows from nothing at the throat, with no slope there so
             // that the diffuser leaves along the spiral, to its full value over the first
@@ -1723,7 +1955,7 @@ fn nozzle(
                 tangent,
                 points: blend
                     .iter()
-                    .map(|p| center + u * (p.x * scale) + DVec3::Z * (p.y * scale))
+                    .map(|p| center + u * (p.x * scale) + v * (p.y * scale))
                     .collect(),
                 area: std::f64::consts::PI * radius * radius,
             }
@@ -2145,6 +2377,164 @@ mod tests {
         // Out of range is refused.
         let mut input = unturned();
         input.diffuser.eccentricity = Param::Manual(1.2);
+        assert!(VoluteGeometry::build(&reference_basis(), &input).is_err());
+    }
+
+    fn z_bend(extent_mm: f64, radius_mm: f64, angle_deg: f64) -> Option<ZBend> {
+        Some(ZBend {
+            extent: extent_mm * 1e-3,
+            radius: radius_mm * 1e-3,
+            angle: angle_deg.to_radians(),
+        })
+    }
+
+    #[test]
+    fn a_z_bend_carries_the_diffuser_along_the_pump_axis() {
+        let plain = with_diffuser(|_| {});
+        let bent = with_diffuser(|d| d.z_bend = z_bend(30.0, 80.0, 25.0));
+        let (first, last) = (&bent.nozzle[0], bent.nozzle.last().unwrap());
+        // The throat is the throat, and the centerline leaves it flat.
+        for (a, b) in plain.nozzle[0].points.iter().zip(&first.points) {
+            assert!(a.distance(*b) < 1e-12);
+        }
+        assert!(first.tangent.z.abs() < 1e-12);
+        // It ends the extension asked for away from the plane of the volute, at the
+        // angle asked for, with the horizontal path as it was.
+        let end_plain = plain.nozzle.last().unwrap().center;
+        assert_relative_eq!(last.center.z - end_plain.z, 0.03, epsilon = 1e-9);
+        assert_relative_eq!(last.tangent.z.asin(), 25f64.to_radians(), epsilon = 1e-9);
+        assert!(last.center.truncate().distance(end_plain.truncate()) < 1e-9);
+        assert_relative_eq!(bent.outlet_height, plain.outlet_height, epsilon = 1e-9);
+        // The sections stay circles of the same area, now square to the tilted centerline.
+        for (k, (a, b)) in plain.nozzle.iter().zip(&bent.nozzle).enumerate() {
+            assert_relative_eq!(a.area, b.area, epsilon = 1e-12);
+            // The throat itself lies in the radial plane of the spiral.
+            for p in b.points.iter().filter(|_| k > 0) {
+                assert!((*p - b.center).dot(b.tangent).abs() < 1e-9);
+            }
+        }
+        // It rises smoothly: no step in height between sections.
+        let rise: Vec<f64> = bent
+            .nozzle
+            .windows(2)
+            .map(|w| w[1].center.z - w[0].center.z)
+            .collect();
+        assert!(rise.iter().all(|r| *r >= -1e-12));
+        assert!(rise.windows(2).all(|r| r[1] >= r[0] - 1e-9), "{rise:?}");
+        // What cannot be built is refused: too much for the length, too little for the
+        // round, a round longer than the diffuser.
+        for (extent, radius, angle) in [(500.0, 80.0, 25.0), (1.0, 80.0, 25.0), (30.0, 900.0, 25.0)]
+        {
+            let mut input = unturned();
+            input.diffuser.z_bend = z_bend(extent, radius, angle);
+            assert!(
+                VoluteGeometry::build(&reference_basis(), &input).is_err(),
+                "{extent} {radius} {angle}"
+            );
+        }
+    }
+
+    fn spline(turn_deg: f64) -> DischargeShape {
+        DischargeShape::Spline {
+            turn: turn_deg.to_radians(),
+            start_share: 0.5,
+            end_share: 0.5,
+        }
+    }
+
+    #[test]
+    fn a_spline_diffuser_leaves_the_throat_along_the_flow_and_turns_as_asked() {
+        let g = with_diffuser(|d| d.shape = spline(60.0));
+        let (first, last) = (&g.nozzle[0], g.nozzle.last().unwrap());
+        // It leaves the throat along the path of the spiral, as the other shapes do.
+        let straight = with_discharge(DischargeShape::Tangential {
+            straight_wall: StraightWall::Centered,
+        });
+        assert!(first.tangent.dot(straight.nozzle[0].tangent) > 1.0 - 1e-9);
+        // It ends the turn further round, toward the outside of the volute.
+        let turned = first.tangent.angle_between(last.tangent);
+        assert_relative_eq!(turned, 60f64.to_radians(), epsilon = 1e-6);
+        assert_relative_eq!(g.nozzle_bend, 60f64.to_radians(), epsilon = 1e-12);
+        // Its length along the centerline is the length of the diffuser.
+        let along: f64 = g
+            .nozzle
+            .windows(2)
+            .map(|w| w[0].center.distance(w[1].center))
+            .sum();
+        assert!(
+            along < g.nozzle_length && along > 0.97 * g.nozzle_length,
+            "{along}"
+        );
+        // The steps are of equal length, and the tangent follows the path.
+        let steps: Vec<f64> = g
+            .nozzle
+            .windows(2)
+            .map(|w| w[0].center.distance(w[1].center))
+            .collect();
+        let mean = steps.iter().sum::<f64>() / steps.len() as f64;
+        assert!(
+            steps.iter().all(|s| (s / mean - 1.0).abs() < 0.05),
+            "{steps:?}"
+        );
+        // The areas are the same as ever.
+        let radial = with_discharge(DischargeShape::Radial { axis_angle: 0.0 });
+        assert_relative_eq!(
+            last.area,
+            radial.nozzle.last().unwrap().area,
+            epsilon = 1e-12
+        );
+        // Left to turn itself, the volute turns so that the outlet points vertically up.
+        let mut input = VoluteInput::default();
+        input.diffuser.shape = spline(60.0);
+        let auto = VoluteGeometry::build(&reference_basis(), &input).unwrap();
+        assert!(auto.nozzle_axis.y > 0.99, "{:?}", auto.nozzle_axis);
+    }
+
+    #[test]
+    fn the_shares_of_a_spline_change_its_shape_not_its_ends() {
+        let a = with_diffuser(|d| d.shape = spline(60.0));
+        let b = with_diffuser(|d| {
+            d.shape = DischargeShape::Spline {
+                turn: 60f64.to_radians(),
+                start_share: 0.2,
+                end_share: 0.8,
+            }
+        });
+        let k = a.nozzle.len() / 2;
+        assert!(a.nozzle[k].center.distance(b.nozzle[k].center) > 2e-4);
+        assert_relative_eq!(a.nozzle_length, b.nozzle_length, epsilon = 1e-12);
+        let turn = |g: &VoluteGeometry| {
+            g.nozzle[0]
+                .tangent
+                .angle_between(g.nozzle.last().unwrap().tangent)
+        };
+        assert_relative_eq!(turn(&a), turn(&b), epsilon = 1e-6);
+        // Out of range is refused.
+        let mut input = unturned();
+        input.diffuser.shape = spline(200.0);
+        assert!(VoluteGeometry::build(&reference_basis(), &input).is_err());
+        input.diffuser.shape = DischargeShape::Spline {
+            turn: 1.0,
+            start_share: 0.0,
+            end_share: 0.5,
+        };
+        assert!(VoluteGeometry::build(&reference_basis(), &input).is_err());
+    }
+
+    #[test]
+    fn a_flange_height_sets_the_length_of_a_spline_diffuser() {
+        let free = with_diffuser(|d| d.shape = spline(60.0));
+        let wanted = free.outlet_height + 0.04;
+        let g = with_diffuser(|d| {
+            d.shape = spline(60.0);
+            d.flange_height = Param::Manual(wanted);
+        });
+        assert_relative_eq!(g.outlet_height, wanted, epsilon = 1e-6);
+        assert!(g.nozzle_length > free.nozzle_length);
+        // Out of reach is refused.
+        let mut input = unturned();
+        input.diffuser.shape = spline(60.0);
+        input.diffuser.flange_height = Param::Manual(100.0);
         assert!(VoluteGeometry::build(&reference_basis(), &input).is_err());
     }
 
