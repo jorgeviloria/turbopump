@@ -266,7 +266,7 @@ const WALL_ALIGNMENT_BAND: f64 = 3.0 * std::f64::consts::PI / 180.0;
 
 /// Turn by which the channels of a double volute reach into the discharge diffuser, so
 /// that the solids overlap where they meet, rad.
-const CHANNEL_OVERLAP: f64 = 1.5 * std::f64::consts::PI / 180.0;
+pub const CHANNEL_OVERLAP: f64 = 1.5 * std::f64::consts::PI / 180.0;
 
 /// A value at the lower side of the cutwater (the lowest plane), at its upper side (the
 /// highest) and their mean over the planes.
@@ -399,6 +399,11 @@ impl VoluteGeometry {
     /// first two reach a little into the third. With a rib that stops short of the throat
     /// there is one more, the whole section from the end of the rib, before the diffuser.
     pub fn channels(&self) -> Vec<Vec<Vec<DVec3>>> {
+        self.channels_with(CHANNEL_OVERLAP)
+    }
+
+    /// [`Self::channels`] with each piece of spiral reaching `overlap` rad into the diffuser.
+    fn channels_with(&self, overlap: f64) -> Vec<Vec<Vec<DVec3>>> {
         // An internal spiral starts inside the diffuser: they cut each other.
         let joined =
             matches!(self.design.cutwater_shape, CutwaterShape::Tangent) && self.bend.is_none();
@@ -414,22 +419,22 @@ impl VoluteGeometry {
         }
         if self.design.rib.is_none() {
             // A sharp or rounded cutwater: the spiral cuts the diffuser.
-            return vec![self.extended(&self.sections), self.nozzle_rings()];
+            return vec![self.extended(&self.sections, overlap), self.nozzle_rings()];
         }
         // A double volute of sections the rib cuts is one channel with the rib in it, as
         // the CAD model builds it.
         if self.design.free_double().is_some() {
-            return self.lofts();
+            return self.lofts_with(overlap);
         }
         // The throat of the first partial volute and the start of the outer channel
         // share the angle of the rib nose: the channel takes over there. A rib that
         // stops short of the throat lets the two channels run into the whole section.
         let mut pieces = vec![
-            self.extended(&self.followed_by(&self.outer_channel)),
-            self.extended(&self.inner_sections),
+            self.extended(&self.followed_by(&self.outer_channel), overlap),
+            self.extended(&self.inner_sections, overlap),
         ];
         if !self.merged.is_empty() {
-            pieces.push(self.extended(&self.merged));
+            pieces.push(self.extended(&self.merged, overlap));
         }
         pieces.push(self.nozzle_rings());
         pieces
@@ -439,11 +444,15 @@ impl VoluteGeometry {
     /// A double volute lofts its whole sections as one spiral, and the rib
     /// ([`Self::rib`]) is cut out of it.
     pub fn lofts(&self) -> Vec<Vec<Vec<DVec3>>> {
+        self.lofts_with(CHANNEL_OVERLAP)
+    }
+
+    fn lofts_with(&self, overlap: f64) -> Vec<Vec<Vec<DVec3>>> {
         if self.design.rib.is_none() {
-            return self.channels();
+            return self.channels_with(overlap);
         }
         vec![
-            self.extended(&self.followed_by(&self.envelope)),
+            self.extended(&self.followed_by(&self.envelope), overlap),
             self.nozzle_rings(),
         ]
     }
@@ -454,14 +463,14 @@ impl VoluteGeometry {
         first.iter().chain(sections).cloned().collect()
     }
 
-    /// Rings of `sections` and one more turned on by [`CHANNEL_OVERLAP`], reaching into
-    /// the discharge diffuser.
-    fn extended(&self, sections: &[VoluteSection]) -> Vec<Vec<DVec3>> {
+    /// Rings of `sections` and one more turned on by `overlap` rad, reaching into the
+    /// discharge diffuser.
+    fn extended(&self, sections: &[VoluteSection], overlap: f64) -> Vec<Vec<DVec3>> {
         let sign = self.basis.rotation_sign;
         let mut rings: Vec<Vec<DVec3>> = sections.iter().map(|s| s.points(sign)).collect();
         if let Some(last) = sections.last() {
             let beyond = VoluteSection {
-                angle: last.angle + CHANNEL_OVERLAP,
+                angle: last.angle + overlap,
                 ..last.clone()
             };
             rings.push(beyond.points(sign));
@@ -628,11 +637,38 @@ impl VoluteGeometry {
     /// side of the spiral sections moves inward too; the CAD model cuts the flow domain
     /// and the space of the impeller out of the solid these outlines enclose.
     pub fn casing_lofts(&self) -> Vec<Vec<Vec<DVec3>>> {
+        self.casing_lofts_with(CHANNEL_OVERLAP)
+    }
+
+    /// The lofts of [`Self::casing_lofts`] with each piece of spiral reaching `overlap`
+    /// rad into the discharge diffuser. The union of the pieces of such a casing is
+    /// sensitive to that angle where the sections have many corners: a few values give
+    /// a solid and the ones between them do not, so the CAD model tries several.
+    pub fn casing_lofts_with(&self, overlap: f64) -> Vec<Vec<Vec<DVec3>>> {
         let t = self.design.wall_thickness;
-        self.lofts()
+        self.lofts_with(overlap)
             .iter()
-            .map(|rings| rings.iter().map(|ring| offset_ring(ring, t)).collect())
+            .map(|rings| {
+                rings
+                    .iter()
+                    .map(|ring| {
+                        // The wall as it is, or with the dents of the section filled when
+                        // the offset turns itself inside out there.
+                        let wall = offset_ring(ring, t);
+                        if crosses_itself(&wall) {
+                            offset_ring(&convexified(ring), t)
+                        } else {
+                            wall
+                        }
+                    })
+                    .collect()
+            })
             .collect()
+    }
+
+    /// Whether a section has a radius-based or line-segment side.
+    pub fn has_polyline_sides(&self) -> bool {
+        self.design.cross_sections.has_polyline_sides()
     }
 
     /// Angle by which the mean direction of the two walls at the cutwater tip lies above
@@ -801,6 +837,85 @@ fn fillet_diameter_warning(effective: f64, minimum: f64, d2: f64) -> Option<Stri
             minimum / d2
         )
     })
+}
+
+/// Whether the closed planar outline `points` crosses itself.
+pub fn crosses_itself(points: &[DVec3]) -> bool {
+    let n = points.len();
+    if n < 4 {
+        return false;
+    }
+    let origin = points[0];
+    let normal = (1..n - 1)
+        .map(|i| (points[i] - origin).cross(points[i + 1] - origin))
+        .sum::<DVec3>()
+        .normalize_or_zero();
+    let u = (points[1] - points[0]).normalize_or_zero();
+    let v = normal.cross(u);
+    let flat: Vec<DVec2> = points
+        .iter()
+        .map(|q| DVec2::new((*q - origin).dot(u), (*q - origin).dot(v)))
+        .collect();
+    for i in 0..n {
+        let (a, b) = (flat[i], flat[(i + 1) % n]);
+        for j in (i + 2)..n {
+            if i == 0 && j == n - 1 {
+                continue;
+            }
+            let (c, d) = (flat[j], flat[(j + 1) % n]);
+            let (r, s) = (b - a, d - c);
+            let den = r.perp_dot(s);
+            if den.abs() < 1e-30 {
+                continue;
+            }
+            let t = (c - a).perp_dot(s) / den;
+            let w = (c - a).perp_dot(r) / den;
+            if t > 1e-9 && t < 1.0 - 1e-9 && w > 1e-9 && w < 1.0 - 1e-9 {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// `ring` with the dents of its walls filled: every point that turns the wrong way, the
+/// reflex corners of a section with a base and a flank, or a wall that bulges in, is
+/// brought onto the chord of its neighbours until the outline is convex. The points
+/// keep their number and order, so a corner that was filled stays a point of its run.
+/// The wall of the casing round such a section follows the filled outline: offset
+/// outward as it is, a dent with a radius smaller than the wall thickness turns the
+/// offset inside out, and the loft through such outlines is not a solid. Sections that
+/// are convex as they are come out the same.
+pub fn convexified(ring: &[DVec3]) -> Vec<DVec3> {
+    let n = ring.len();
+    if n < 4 {
+        return ring.to_vec();
+    }
+    let center = ring.iter().copied().sum::<DVec3>() / n as f64;
+    let normal = (0..n)
+        .map(|i| (ring[i] - center).cross(ring[(i + 1) % n] - center))
+        .sum::<DVec3>()
+        .normalize();
+    let mut points = ring.to_vec();
+    // A turn of less than this (in cross product over length²) is a straight run, not a
+    // dent: the sampled curves of the convex sections wobble a little.
+    let tolerance = 2e-3;
+    for _ in 0..400 {
+        let mut moved = false;
+        for i in 0..n {
+            let (a, b, c) = (points[(i + n - 1) % n], points[i], points[(i + 1) % n]);
+            let (e, f) = (b - a, c - b);
+            let turn = e.cross(f).dot(normal) / (e.length() * f.length()).max(1e-30);
+            if turn < -tolerance {
+                points[i] = 0.5 * (a + c);
+                moved = true;
+            }
+        }
+        if !moved {
+            break;
+        }
+    }
+    points
 }
 
 /// The closed planar outline `ring` offset outward by `distance` in its plane: each
@@ -2275,6 +2390,47 @@ mod tests {
         let mut input = unturned();
         input.cross_section = CrossSectionInput::single(shape);
         VoluteGeometry::build(&reference_basis(), &input).unwrap()
+    }
+
+    #[test]
+    fn the_casing_walls_of_radius_and_segment_sections_do_not_cross_themselves() {
+        for shape in [
+            SectionShape::symmetric(SideShape::RadiusBased(Default::default())),
+            SectionShape::symmetric(SideShape::LineSegments {
+                points: crate::volute::section::default_segments(),
+            }),
+        ] {
+            let g = geometry(shape.clone());
+            assert!(g.has_polyline_sides());
+            for ring in g.casing_lofts().iter().flatten() {
+                assert!(!crosses_itself(ring), "{shape:?}");
+            }
+        }
+        assert!(!geometry(SectionShape::default()).has_polyline_sides());
+    }
+
+    #[test]
+    fn filling_the_dents_of_an_outline_leaves_a_convex_one_alone_and_straightens_a_dent() {
+        let square = |dent: f64| -> Vec<DVec3> {
+            [
+                (0.0, 0.0),
+                (0.5, 0.0),
+                (1.0, 0.0),
+                (1.0, 0.5),
+                (1.0, 1.0),
+                (0.5, 1.0 - dent),
+                (0.0, 1.0),
+                (0.0, 0.5),
+            ]
+            .iter()
+            .map(|&(x, y)| DVec3::new(x, y, 0.0))
+            .collect()
+        };
+        assert_eq!(convexified(&square(0.0)), square(0.0));
+        let filled = convexified(&square(0.2));
+        assert!((filled[5].y - 1.0).abs() < 1e-9, "{:?}", filled[5]);
+        // The offset of the filled outline stays a simple outline.
+        assert!(!crosses_itself(&offset_ring(&filled, 0.3)));
     }
 
     #[test]

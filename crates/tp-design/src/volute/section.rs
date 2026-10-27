@@ -1685,6 +1685,20 @@ pub struct CrossSections {
 }
 
 impl CrossSections {
+    /// Whether an active section has a radius-based or line-segment side.
+    pub fn has_polyline_sides(&self) -> bool {
+        let free = |side: &SideShape| {
+            matches!(
+                side,
+                SideShape::RadiusBased(_) | SideShape::LineSegments { .. }
+            )
+        };
+        self.definitions.iter().any(|d| match &d.shape {
+            SectionShape::Sides { left, right } => free(left) || right.as_ref().is_some_and(free),
+            SectionShape::RoundExternal(_) | SectionShape::RoundInternal(_) => false,
+        })
+    }
+
     /// Checks and orders the active definitions of `input` for an inlet of width `b3` on
     /// radius `rz`.
     pub fn new(input: &CrossSectionInput, b3: f64, rz: f64) -> Result<Self, DesignError> {
