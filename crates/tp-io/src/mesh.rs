@@ -422,6 +422,22 @@ pub fn volute_view_triangles(g: &VoluteGeometry) -> Vec<Triangle> {
         if diffuser && let Some(last) = shown.last() {
             cap(&mut own, last);
         }
+        // The tip a fillet rounds off is small next to the triangles of the walls: the ones
+        // that reach the sliver are cut into small ones, so that those wholly inside it can
+        // go.
+        let reach_of_sliver = sliver_box(slices);
+        let own: Vec<Triangle> = own
+            .into_iter()
+            .flat_map(|t| match reach_of_sliver {
+                Some((lo, hi))
+                    if t.iter().all(|q| q.z >= lo.z && q.z <= hi.z)
+                        && triangle_box_overlaps(&t, lo.truncate(), hi.truncate()) =>
+                {
+                    subdivided(t, SLIVER_SPLITS)
+                }
+                _ => vec![t],
+            })
+            .collect();
         // Only triangles wholly inside go, so that no hole opens along the edge: what
         // is left pokes a little into the opaque body or into the other channel.
         out.extend(own.into_iter().filter(|t| {
@@ -432,6 +448,16 @@ pub fn volute_view_triangles(g: &VoluteGeometry) -> Vec<Triangle> {
             let s = plane(c.z);
             if outline(c.z).is_some_and(|body| t.iter().all(|q| inside(body, q.truncate()))) {
                 return false;
+            }
+            // The tip a fillet rounds off: the walls are cut at the arc, so what lies in
+            // the sliver between it and the sharp tip is not there.
+            if !s.removed.is_empty() {
+                let sliver: Vec<DVec2> = s.removed.iter().map(|q| q.truncate()).collect();
+                if t.iter().all(|q| {
+                    inside(&sliver, q.truncate()) || edge_distance(&sliver, q.truncate()) < 3e-4
+                }) {
+                    return false;
+                }
             }
             // A spiral wall inside the diffuser, or a diffuser wall inside the spiral.
             let (other, toward_axis) = if diffuser {
@@ -444,6 +470,57 @@ pub fn volute_view_triangles(g: &VoluteGeometry) -> Vec<Triangle> {
         }));
     }
     out
+}
+
+/// How many times the triangles that reach the sliver of a fillet are split in four.
+const SLIVER_SPLITS: u32 = 4;
+
+/// The box (low and high corner) that holds the slivers a fillet cuts off the wedge in
+/// every plane, a little larger; `None` without a fillet.
+fn sliver_box(slices: &[tp_design::volute::CutwaterSlice]) -> Option<(DVec3, DVec3)> {
+    let points = slices.iter().flat_map(|s| s.removed.iter().copied());
+    let (lo, hi) = points.fold(
+        (DVec3::splat(f64::INFINITY), DVec3::splat(f64::NEG_INFINITY)),
+        |(lo, hi), p| (lo.min(p), hi.max(p)),
+    );
+    (lo.x.is_finite()).then(|| (lo - DVec3::splat(1e-3), hi + DVec3::splat(1e-3)))
+}
+
+/// Whether the box of the triangle `t` overlaps the box `lo`..`hi` in the plane.
+fn triangle_box_overlaps(t: &Triangle, lo: DVec2, hi: DVec2) -> bool {
+    let (tlo, thi) = t.iter().fold(
+        (DVec2::splat(f64::INFINITY), DVec2::splat(f64::NEG_INFINITY)),
+        |(l, h), q| (l.min(q.truncate()), h.max(q.truncate())),
+    );
+    tlo.x <= hi.x && thi.x >= lo.x && tlo.y <= hi.y && thi.y >= lo.y
+}
+
+/// The triangle `t` split in four, `levels` times: the same surface in smaller pieces.
+fn subdivided(t: Triangle, levels: u32) -> Vec<Triangle> {
+    let mut out = vec![t];
+    for _ in 0..levels {
+        out = out
+            .into_iter()
+            .flat_map(|[a, b, c]| {
+                let (ab, bc, ca) = ((a + b) / 2.0, (b + c) / 2.0, (c + a) / 2.0);
+                [[a, ab, ca], [ab, b, bc], [ca, bc, c], [ab, bc, ca]]
+            })
+            .collect();
+    }
+    out
+}
+
+/// Distance from `p` to the edges of the closed polygon `outline`.
+fn edge_distance(outline: &[DVec2], p: DVec2) -> f64 {
+    let n = outline.len();
+    (0..n)
+        .map(|i| {
+            let (a, b) = (outline[i], outline[(i + 1) % n]);
+            let ab = b - a;
+            let t = ((p - a).dot(ab) / ab.length_squared().max(1e-30)).clamp(0.0, 1.0);
+            p.distance(a + ab * t)
+        })
+        .fold(f64::INFINITY, f64::min)
 }
 
 /// Whether `p` lies inside the closed polygon `outline`.
@@ -697,6 +774,41 @@ pub(crate) mod tests {
         let mut input = tp_design::volute::VoluteInput::default();
         edit(&mut input);
         VoluteGeometry::build(&basis, &input).unwrap()
+    }
+
+    #[test]
+    fn the_walls_stop_at_the_arc_of_a_fillet() {
+        use tp_design::volute::CutwaterShape;
+        let g = reference_volute(|v| {
+            v.cutwater.shape = CutwaterShape::Fillet {
+                radius: tp_design::Param::Manual(0.0015),
+            };
+        });
+        // Triangles wholly in the sliver the round cuts off the wedge, or along its edges
+        // (the walls run along them), in the nearest plane.
+        let in_sliver = |triangles: &[Triangle]| {
+            triangles
+                .iter()
+                .filter(|t| {
+                    let c = (t[0] + t[1] + t[2]) / 3.0;
+                    let s = g
+                        .cutwater_slices
+                        .iter()
+                        .min_by(|a, b| (a.z - c.z).abs().total_cmp(&(b.z - c.z).abs()))
+                        .unwrap();
+                    let sliver: Vec<DVec2> = s.removed.iter().map(|q| q.truncate()).collect();
+                    t.iter().all(|q| {
+                        inside(&sliver, q.truncate()) || edge_distance(&sliver, q.truncate()) < 3e-4
+                    })
+                })
+                .count()
+        };
+        let full: Vec<Triangle> = volute_triangles(&g)
+            .into_iter()
+            .flat_map(|t| subdivided(t, SLIVER_SPLITS))
+            .collect();
+        assert!(in_sliver(&full) > 0, "the full surface reaches the tip");
+        assert_eq!(in_sliver(&volute_view_triangles(&g)), 0);
     }
 
     #[test]
