@@ -480,6 +480,12 @@ impl CutwaterShape {
         matches!(self, Self::Rounded { .. } | Self::Fillet { .. })
     }
 
+    /// Whether the CAD rounds the intersection edge of the walls (a fillet): the nose is
+    /// the arc of that radius tangent to both walls, wherever that leaves it.
+    pub fn is_fillet(&self) -> bool {
+        matches!(self, Self::Fillet { .. })
+    }
+
     /// The radius of the rounded edge.
     pub fn radius(&self) -> Option<Param<f64>> {
         match self {

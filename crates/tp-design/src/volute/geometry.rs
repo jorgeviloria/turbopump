@@ -775,6 +775,20 @@ fn short_wrap_warning(shape: CutwaterShape, start: f64) -> Option<String> {
     })
 }
 
+/// The warning for a fillet that leaves the cutwater at the diameter `effective`, m,
+/// below the least `minimum` of Gülich Table 10.2, for an impeller of diameter `d2`.
+fn fillet_diameter_warning(effective: f64, minimum: f64, d2: f64) -> Option<String> {
+    (effective < minimum * (1.0 - 1e-9)).then(|| {
+        format!(
+            "the fillet leaves an effective cutwater diameter d_z/d₂ = {:.3}, below the {:.3} \
+             of Gülich Table 10.2: expect pressure pulsations and hydraulic excitation forces; \
+             start the spiral later or use a smaller radius",
+            effective / d2,
+            minimum / d2
+        )
+    })
+}
+
 /// The closed planar outline `ring` offset outward by `distance` in its plane: each
 /// point moves along the bisector of the normals of its two edges, by `distance` over
 /// the cosine of half the turn between them (a mitred corner). The outlines are convex.
@@ -1214,13 +1228,33 @@ impl VoluteGeometry {
                     cutwater.nose_distance = mid.nose_distance;
                 }
             }
+            if design.cutwater_shape.is_fillet() {
+                let mid = slices
+                    .iter()
+                    .find(|s| (s.z - zm).abs() < 1e-12 && !s.outline.is_empty())
+                    .ok_or_else(|| {
+                        DesignError::Infeasible(format!(
+                            "a fillet of {:.1} mm does not fit between the walls of the \
+                             spiral and the diffuser in the midplane: use a smaller radius or \
+                             a sharp cutwater",
+                            design.nose_radius * 1e3
+                        ))
+                    })?;
+                cutwater.radius = design.nose_radius;
+                cutwater.nose_center = mid.nose_centre;
+                cutwater.nose_distance = mid.nose_distance;
+            }
             let body = super::cutwater::body_outlines(
                 &design,
                 &slices,
                 (walls, &nozzle),
                 sign,
                 zm,
-                design.cutwater_side_radius,
+                if design.cutwater_shape.is_fillet() {
+                    0.0
+                } else {
+                    design.cutwater_side_radius
+                },
                 BODY_STEPS,
             );
             (slices, body)
@@ -1370,7 +1404,7 @@ impl VoluteGeometry {
             nose_center: turn(cutwater.nose_center),
             ..cutwater
         };
-        let cutwater_slices = cutwater_slices
+        let cutwater_slices: Vec<CutwaterSlice> = cutwater_slices
             .into_iter()
             .map(|s| CutwaterSlice {
                 tip: turn(s.tip),
@@ -1378,6 +1412,8 @@ impl VoluteGeometry {
                 spiral_wall: s.spiral_wall.into_iter().map(turn).collect(),
                 diffuser_wall: s.diffuser_wall.into_iter().map(turn).collect(),
                 nose_centre: turn(s.nose_centre),
+                removed: s.removed.into_iter().map(turn).collect(),
+                joins: s.joins.map(|(a, b)| (turn(a), turn(b))),
                 ..s
             })
             .collect();
@@ -1410,6 +1446,19 @@ impl VoluteGeometry {
         let mut warnings = design.warnings.clone();
         warnings.extend(intersection_warning);
         warnings.extend(short_wrap_warning(design.cutwater_shape, start));
+        if design.cutwater_shape.is_fillet() {
+            // A fillet sets the diameter at which the cutwater stands: the nearest point of
+            // its nose to the axis in any plane.
+            let nearest = cutwater_slices
+                .iter()
+                .map(|s| s.nose_distance)
+                .fold(f64::INFINITY, f64::min);
+            warnings.extend(fillet_diameter_warning(
+                2.0 * nearest,
+                design.min_cutwater_diameter,
+                basis.impeller_diameter,
+            ));
+        }
         if design.diffuser.z_bend.is_some() {
             warnings.push(
                 "the CAD kernel builds the flow domain of a diffuser with an axial bend but \
@@ -1690,7 +1739,11 @@ fn cutwater(
     // A rounded nose of radius ρ whose innermost point lies on the cutwater circle d_z
     // (Gülich Fig. 7.41b: the flow stagnates on the nose at r'_z = r_z + e₃/2 when
     // ρ = e₃/2), joined to the tip by its tangents.
-    let radius = design.nose_radius;
+    let radius = if design.cutwater_shape.is_fillet() {
+        0.0
+    } else {
+        design.nose_radius
+    };
     let (nose_center, nose_distance) = if radius > 0.0 {
         let c = DVec3::new(design.cutwater_diameter / 2.0 + radius, 0.0, zm);
         // The nose stays inside the wedge: its centre no farther out than the tip.
@@ -2252,6 +2305,17 @@ mod tests {
             }
         }
         cases
+    }
+
+    #[test]
+    fn a_fillet_below_the_table_10_2_diameter_is_warned_of() {
+        let warning = fillet_diameter_warning(0.180, 0.190, 0.172).expect("below the minimum");
+        assert!(
+            warning.contains("1.047") && warning.contains("1.105"),
+            "{warning}"
+        );
+        assert!(fillet_diameter_warning(0.195, 0.190, 0.172).is_none());
+        assert!(fillet_diameter_warning(0.190, 0.190, 0.172).is_none());
     }
 
     #[test]

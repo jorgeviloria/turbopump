@@ -44,6 +44,11 @@ const SPIRAL_SUBDIVISIONS: usize = 4;
 const DIFFUSER_SUBDIVISIONS: usize = 24;
 /// Points on each face of the body.
 const FACE_POINTS: usize = 48;
+/// Points on each wall of the head of a fillet, and on its arc.
+const FILLET_WALL_POINTS: usize = 23;
+const FILLET_ARC_POINTS: usize = 17;
+/// How far the head of a fillet runs back along the walls, in radii.
+const FILLET_HEAD: f64 = 8.0;
 /// Width of the smooth maximum that runs the faces into the walls, in nose thicknesses.
 const SMOOTHING: f64 = 0.25;
 
@@ -80,6 +85,13 @@ pub struct CutwaterSlice {
     pub diffuser_wall: Vec<DVec3>,
     /// Centre of the nose circle in this plane; the tip for a sharp cutwater.
     pub nose_centre: DVec3,
+    /// For a fillet: the points where its arc touches the spiral wall and the diffuser
+    /// wall.
+    pub joins: Option<(DVec3, DVec3)>,
+    /// For a fillet: the sliver of the sharp wedge the round cuts off, closed (the tip,
+    /// along the spiral wall to the arc, round it, and back along the diffuser wall).
+    /// Empty otherwise.
+    pub removed: Vec<DVec3>,
 }
 
 impl CutwaterSlice {
@@ -87,13 +99,13 @@ impl CutwaterSlice {
     /// crosses the inner wall of the diffuser, so that the part before the crossing,
     /// which lies inside the diffuser, is left out (a sharp cutwater).
     pub fn trimmed_spiral_wall(&self) -> Vec<DVec3> {
-        trimmed(&self.spiral_wall, self.tip)
+        trimmed(&self.spiral_wall, self.joins.map_or(self.tip, |j| j.0))
     }
 
     /// The inner wall of the diffuser from the tip downstream: the wall trimmed where it
     /// crosses the outer wall of the spiral.
     pub fn trimmed_diffuser_wall(&self) -> Vec<DVec3> {
-        trimmed(&self.diffuser_wall, self.tip)
+        trimmed(&self.diffuser_wall, self.joins.map_or(self.tip, |j| j.1))
     }
 }
 
@@ -126,6 +138,13 @@ pub(super) fn slices(
     let levels: Vec<f64> = (0..SLICES)
         .map(|k| midplane - half + 2.0 * half * k as f64 / (SLICES - 1) as f64)
         .collect();
+    if design.cutwater_shape.is_fillet() {
+        let slices = levels
+            .into_iter()
+            .filter_map(|z| Walls::at(outlines, nozzle, sign, z)?.fillet_slice(design, sign, z))
+            .collect();
+        return (slices, None);
+    }
     let rounded = design.cutwater_shape.is_rounded();
     // The nose centre is set in the midplane and kept in the other planes.
     let mid = Walls::at(outlines, nozzle, sign, midplane);
@@ -332,6 +351,133 @@ impl Walls {
         Some(centre)
     }
 
+    /// The cutwater of a fillet in this plane: the sharp wedge with its tip rounded by the
+    /// circle of radius ρ tangent to both walls. The slice has the sharp tip and wedge;
+    /// its outline is the head of the tongue, from `FILLET_HEAD` radii back along each
+    /// wall to the round, and `removed` the sliver of the sharp wedge the round cuts
+    /// off. `None` where the walls do not cross or the round does not fit between them
+    /// (the radius is too large for the length of wall).
+    fn fillet_slice(&self, design: &VoluteDesign, sign: f64, z: f64) -> Option<CutwaterSlice> {
+        let mut slice = self.slice(design, sign, z, None)?;
+        let r = design.nose_radius;
+        if r <= 0.0 {
+            return Some(slice);
+        }
+        let (s, d) = self.tip();
+        let (ts, td) = (
+            direction(&self.spiral, s.segment),
+            direction(&self.diffuser, d.segment),
+        );
+        let wedge = ts.dot(td).clamp(-1.0, 1.0).acos();
+        let bisector = (ts + td).normalize_or_zero();
+        if wedge < 1e-3 || bisector == DVec2::ZERO {
+            return None;
+        }
+        let (spiral, diffuser) = (Path::from(&self.spiral, s), Path::from(&self.diffuser, d));
+        // The centre is r from both walls: Newton from the centre of the circle between
+        // straight walls.
+        let gaps = |c: DVec2| {
+            DVec2::new(
+                distance_to(&spiral.points, c) - r,
+                distance_to(&diffuser.points, c) - r,
+            )
+        };
+        let mut c = s.point + bisector * (r / (0.5 * wedge).sin());
+        for _ in 0..40 {
+            let v = gaps(c);
+            if v.length() < 1e-12 {
+                break;
+            }
+            let h = 1e-7;
+            let (jx, jy) = (
+                (gaps(c + DVec2::X * h) - v) / h,
+                (gaps(c + DVec2::Y * h) - v) / h,
+            );
+            let det = jx.x * jy.y - jy.x * jx.y;
+            if det.abs() < 1e-12 {
+                return None;
+            }
+            c += DVec2::new(
+                (-v.x * jy.y + jy.x * v.y) / det,
+                (-jx.x * v.y + jx.y * v.x) / det,
+            );
+        }
+        if gaps(c).length() > 1e-9 {
+            return None;
+        }
+        // Where the circle touches each wall, and how far from the tip along it.
+        let touch = |path: &Path| -> Option<(f64, DVec2)> {
+            let (k, p) = nearest_on(&path.points, c);
+            let l = path.lengths[k] + path.points[k].distance(p);
+            // Short of the end of the wall, and past the tip.
+            (l > 1e-9 && l < path.length - FILLET_HEAD * r).then_some((l, p))
+        };
+        let ((l_s, t_s), (l_d, t_d)) = (touch(&spiral)?, touch(&diffuser)?);
+        // The arc through the direction of the tip, from one wall to the other.
+        let angle = |p: DVec2| (p - c).to_angle();
+        let wrap = |a: f64| {
+            (a + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI
+        };
+        let (a0, to_d) = (angle(t_s), wrap(angle(t_d) - angle(t_s)));
+        let toward_tip = wrap(angle(s.point) - a0);
+        let sweep = if toward_tip.signum() == to_d.signum() && toward_tip.abs() <= to_d.abs() {
+            to_d
+        } else {
+            to_d - std::f64::consts::TAU * to_d.signum()
+        };
+        let arc: Vec<DVec2> = (0..FILLET_ARC_POINTS)
+            .map(|i| {
+                c + DVec2::from_angle(a0 + sweep * i as f64 / (FILLET_ARC_POINTS - 1) as f64) * r
+            })
+            .collect();
+        // The head: back along the spiral wall to the arc, round it, and out along the
+        // diffuser wall.
+        let reach = FILLET_HEAD * r;
+        let wall = |path: &Path, from: f64, outward: bool| -> Vec<DVec2> {
+            (0..FILLET_WALL_POINTS)
+                .map(|i| {
+                    let t = (i + 1) as f64 / FILLET_WALL_POINTS as f64;
+                    let l = if outward {
+                        from + reach * t
+                    } else {
+                        from + reach * (1.0 - t)
+                    };
+                    path.point(l).0
+                })
+                .collect()
+        };
+        let at = |p: &DVec2| DVec3::new(p.x, p.y, z);
+        slice.outline = wall(&spiral, l_s, false)
+            .iter()
+            .chain(&arc)
+            .chain(&wall(&diffuser, l_d, true))
+            .map(at)
+            .collect();
+        // The sliver the round removes from the sharp wedge.
+        let along = |path: &Path, to: f64| -> Vec<DVec2> {
+            let n = 4;
+            (0..=n)
+                .map(|i| path.point(to * i as f64 / n as f64).0)
+                .collect()
+        };
+        slice.removed = along(&spiral, l_s)
+            .into_iter()
+            .chain(arc.iter().copied().skip(1))
+            .chain(along(&diffuser, l_d).into_iter().rev().skip(1))
+            .map(|p| at(&p))
+            .collect();
+        slice.joins = Some((at(&t_s), at(&t_d)));
+        slice.nose_centre = at(&c);
+        slice.min_thickness = 2.0 * r;
+        slice.join_length = 0.5 * (l_s + l_d);
+        slice.nose_distance = slice
+            .outline
+            .iter()
+            .map(|p| p.truncate().length())
+            .fold(f64::INFINITY, f64::min);
+        Some(slice)
+    }
+
     fn slice(
         &self,
         design: &VoluteDesign,
@@ -364,6 +510,8 @@ impl Walls {
                 spiral_wall,
                 diffuser_wall,
                 nose_centre: at(s.point),
+                joins: None,
+                removed: Vec::new(),
             });
         };
         let body = self.body(design, sign, centre)?;
@@ -384,6 +532,8 @@ impl Walls {
             spiral_wall,
             diffuser_wall,
             nose_centre: at(centre),
+            joins: None,
+            removed: Vec::new(),
         })
     }
 
@@ -1100,6 +1250,69 @@ mod tests {
             let (a, b) = ((w[1] - w[0]).normalize(), (w[2] - w[1]).normalize());
             a.dot(b).clamp(-1.0, 1.0).acos()
         })
+    }
+
+    #[test]
+    fn a_fillet_rounds_the_tip_with_an_arc_tangent_to_both_walls() {
+        for shape in discharges() {
+            let g = build(|v| {
+                v.diffuser.shape = shape;
+                v.cutwater.shape = CutwaterShape::Fillet {
+                    radius: Param::Manual(0.0015),
+                };
+            });
+            assert_eq!(g.cutwater_slices.len(), SLICES);
+            for s in &g.cutwater_slices {
+                let (c, r) = (s.nose_centre.truncate(), 0.0015);
+                let (t_s, t_d) = s.joins.expect("a fillet touches both walls");
+                // The centre is r from both walls, which the arc touches.
+                let flat = |w: &[DVec3]| w.iter().map(|p| p.truncate()).collect::<Vec<_>>();
+                let spiral = flat(&s.trimmed_spiral_wall());
+                let diffuser = flat(&s.trimmed_diffuser_wall());
+                assert!((distance_to(&spiral, c) - r).abs() < 1e-8, "z = {}", s.z);
+                assert!((distance_to(&diffuser, c) - r).abs() < 1e-8, "z = {}", s.z);
+                assert!((t_s.truncate().distance(c) - r).abs() < 1e-8);
+                assert!((t_d.truncate().distance(c) - r).abs() < 1e-8);
+                // The walls start at the arc, and the round cuts the tip off: the sliver
+                // is closed and the nearest point of the nose is behind the tip.
+                assert_eq!(spiral[0], t_s.truncate());
+                assert_eq!(diffuser[0], t_d.truncate());
+                assert!(s.removed.len() > 4);
+                assert!(s.nose_centre.distance(s.tip) > r);
+                assert_eq!(s.outline.len(), 2 * FILLET_WALL_POINTS + FILLET_ARC_POINTS);
+            }
+            // The effective diameter follows the round, not d_z.
+            let values = g.cutwater_values().unwrap();
+            let nearest = g
+                .cutwater_slices
+                .iter()
+                .map(|s| s.nose_distance)
+                .fold(f64::INFINITY, f64::min);
+            assert!((values.least_diameter - 2.0 * nearest).abs() < 1e-12);
+            assert!(values.least_diameter <= 2.0 * g.cutwater.nose_distance + 1e-12);
+        }
+    }
+
+    #[test]
+    fn a_fillet_is_not_warned_of_while_the_cutwater_stands_above_the_minimum() {
+        let g = build(|v| {
+            v.cutwater.shape = CutwaterShape::Fillet {
+                radius: Param::Manual(0.0015),
+            }
+        });
+        let effective = g.cutwater_values().unwrap().least_diameter;
+        assert!(effective >= g.design.min_cutwater_diameter);
+        assert!(g.warnings.iter().all(|w| !w.contains("fillet leaves")));
+    }
+
+    #[test]
+    fn a_fillet_that_does_not_fit_between_the_walls_is_refused() {
+        let mut input = VoluteInput::default();
+        input.cutwater.shape = CutwaterShape::Fillet {
+            radius: Param::Manual(0.5),
+        };
+        let err = VoluteGeometry::build(&reference_basis(), &input);
+        assert!(err.is_err(), "a 500 mm fillet cannot fit");
     }
 
     #[test]
