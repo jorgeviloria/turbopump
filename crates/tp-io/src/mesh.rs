@@ -370,8 +370,8 @@ pub fn rib_triangles(g: &VoluteGeometry) -> Vec<Triangle> {
 /// pieces of wall that lie inside another channel or inside the body of the cutwater
 /// near it, so that the cutwater shows as it is built. Not a closed surface.
 pub fn volute_view_triangles(g: &VoluteGeometry) -> Vec<Triangle> {
-    let mut out = view_walls(g);
-    out.extend(fillet_nose_triangles(g));
+    let (mut out, cut) = view_walls_cut(g);
+    out.extend(fillet_nose_surface(g, cut));
     out
 }
 
@@ -379,7 +379,31 @@ pub fn volute_view_triangles(g: &VoluteGeometry) -> Vec<Triangle> {
 /// to plane, an open strip that closes the walls where they are cut. Empty for any
 /// other cutwater.
 pub fn fillet_nose_triangles(g: &VoluteGeometry) -> Vec<Triangle> {
-    let arcs = g.fillet_nose();
+    fillet_nose_surface(g, None)
+}
+
+/// The nose of a fillet as [`fillet_nose_triangles`], carried on to the heights `cut`
+/// where the walls were cut away, with a cap of the cut wedge at each end: the flow now
+/// fills the wedge, so the surface closes over it.
+fn fillet_nose_surface(g: &VoluteGeometry, cut: Option<(f64, f64)>) -> Vec<Triangle> {
+    let mut arcs = g.fillet_nose();
+    if let Some((lo, hi)) = cut
+        && let (Some(first), Some(last)) = (arcs.first().cloned(), arcs.last().cloned())
+    {
+        let at = |ring: &[DVec3], z: f64| -> Vec<DVec3> {
+            ring.iter().map(|p| DVec3::new(p.x, p.y, z)).collect()
+        };
+        let (first_z, last_z) = (first[0].z, last[0].z);
+        let mut rings = Vec::new();
+        if lo < first_z {
+            rings.push(at(&first, lo));
+        }
+        rings.extend(arcs.iter().map(|a| at(a, a[0].z.clamp(lo, hi))));
+        if hi > last_z {
+            rings.push(at(&last, hi));
+        }
+        arcs = rings;
+    }
     // Outward normals, into the flow: the planes run from −z to +z and the outline runs
     // counter-clockwise or not as the body's does.
     let body = g.cutwater_body();
@@ -402,17 +426,59 @@ pub fn fillet_nose_triangles(g: &VoluteGeometry) -> Vec<Triangle> {
             }
         }
     }
+    // The wedge the round cuts off, closed at the two heights of the cut: the flow fills
+    // it between the caps, which face into it.
+    if let Some((lo, hi)) = cut {
+        let slices = &g.cutwater_slices;
+        for (slice, z, up) in [(slices.first(), lo, true), (slices.last(), hi, false)] {
+            let Some(slice) = slice else { continue };
+            let ring: Vec<DVec3> = slice
+                .removed
+                .iter()
+                .map(|p| DVec3::new(p.x, p.y, z))
+                .collect();
+            if ring.len() < 3 {
+                continue;
+            }
+            let centre = ring.iter().copied().sum::<DVec3>() / ring.len() as f64;
+            for i in 0..ring.len() {
+                let t = [centre, ring[i], ring[(i + 1) % ring.len()]];
+                let facing_up = (t[1] - t[0]).cross(t[2] - t[0]).z > 0.0;
+                if (t[1] - t[0]).cross(t[2] - t[0]).length_squared() < 1e-24 {
+                    continue;
+                }
+                out.push(if facing_up == up {
+                    t
+                } else {
+                    [t[0], t[2], t[1]]
+                });
+            }
+        }
+    }
     out
 }
 
-/// The inner surface of the walls for viewing, without the pieces the cutwater replaces.
-fn view_walls(g: &VoluteGeometry) -> Vec<Triangle> {
+/// The inner surface of the walls for viewing, without the pieces the cutwater replaces,
+/// and for a fillet the heights between which the walls were cut away where the round
+/// replaces them.
+fn view_walls_cut(g: &VoluteGeometry) -> (Vec<Triangle>, Option<(f64, f64)>) {
     let all = volute_triangles(g);
     let slices = &g.cutwater_slices;
     let channels = g.channels();
     if slices.is_empty() || channels.len() < 2 || g.bend.is_some() {
-        return all;
+        return (all, None);
     }
+    // The wedge a fillet cuts off in each plane, and the heights of the channel.
+    let slivers: Vec<Option<Sliver>> = slices.iter().map(|s| sliver_of(&s.removed)).collect();
+    let sliver_reach = sliver_box(slices);
+    let (channel_lo, channel_hi) = g
+        .rings()
+        .into_iter()
+        .flatten()
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| {
+            (lo.min(p.z), hi.max(p.z))
+        });
+    let mut cut_range: Option<(f64, f64)> = None;
     // Near the cutwater only: within twice the reach of its body from the tip.
     let reach = slices
         .iter()
@@ -463,22 +529,40 @@ fn view_walls(g: &VoluteGeometry) -> Vec<Triangle> {
         if diffuser && let Some(last) = shown.last() {
             cap(&mut own, last);
         }
-        // The tip a fillet rounds off is small next to the triangles of the walls: the ones
-        // that reach the sliver are cut into small ones, so that those wholly inside it can
-        // go.
-        let reach_of_sliver = sliver_box(slices);
-        let own: Vec<Triangle> = own
-            .into_iter()
-            .flat_map(|t| match reach_of_sliver {
-                Some((lo, hi))
-                    if t.iter().all(|q| q.z >= lo.z && q.z <= hi.z)
-                        && triangle_box_overlaps(&t, lo.truncate(), hi.truncate()) =>
-                {
-                    subdivided(t, SLIVER_SPLITS)
+        // The tip a fillet rounds off: the walls are cut at the round, along the edges of
+        // the wedge it removes, exactly, plane by plane.
+        let mut cut = Vec::with_capacity(own.len());
+        for t in own {
+            let c = (t[0] + t[1] + t[2]) / 3.0;
+            let Some((lo, hi)) = sliver_reach else {
+                cut.push(t);
+                continue;
+            };
+            if !triangle_box_overlaps(&t, lo.truncate(), hi.truncate()) {
+                cut.push(t);
+                continue;
+            }
+            let k = slices
+                .iter()
+                .enumerate()
+                .min_by(|a, b| (a.1.z - c.z).abs().total_cmp(&(b.1.z - c.z).abs()))
+                .map_or(0, |(k, _)| k);
+            match &slivers[k] {
+                Some(sliver) => {
+                    let (kept, gone) = cut_triangle(&t, sliver);
+                    cut.extend(kept);
+                    if let Some((a, b)) = gone {
+                        let (a, b) = (a.max(channel_lo), b.min(channel_hi));
+                        if a < b {
+                            cut_range =
+                                Some(cut_range.map_or((a, b), |(l, h)| (l.min(a), h.max(b))));
+                        }
+                    }
                 }
-                _ => vec![t],
-            })
-            .collect();
+                None => cut.push(t),
+            }
+        }
+        let own = cut;
         // Only triangles wholly inside go, so that no hole opens along the edge: what
         // is left pokes a little into the opaque body or into the other channel.
         out.extend(own.into_iter().filter(|t| {
@@ -490,16 +574,6 @@ fn view_walls(g: &VoluteGeometry) -> Vec<Triangle> {
             if outline(c.z).is_some_and(|body| t.iter().all(|q| inside(body, q.truncate()))) {
                 return false;
             }
-            // The tip a fillet rounds off: the walls are cut at the arc, so what lies in
-            // the sliver between it and the sharp tip is not there.
-            if !s.removed.is_empty() {
-                let sliver: Vec<DVec2> = s.removed.iter().map(|q| q.truncate()).collect();
-                if t.iter().all(|q| {
-                    inside(&sliver, q.truncate()) || edge_distance(&sliver, q.truncate()) < 3e-4
-                }) {
-                    return false;
-                }
-            }
             // A spiral wall inside the diffuser, or a diffuser wall inside the spiral.
             let (other, toward_axis) = if diffuser {
                 (&s.spiral_wall, true)
@@ -510,11 +584,119 @@ fn view_walls(g: &VoluteGeometry) -> Vec<Triangle> {
             !t.iter().all(|q| beside(&other, q.truncate(), toward_axis))
         }));
     }
+    (out, cut_range)
+}
+
+/// How far the wedge a fillet cuts off is widened for the cut, m, so that the walls that
+/// bound it, which lie along its edges, go with it.
+const SLIVER_MARGIN: f64 = 1e-4;
+
+/// The wedge a fillet cuts off in one plane: the half-planes of its convex hull, each a
+/// point on the edge and the outward normal, counter-clockwise.
+struct Sliver {
+    edges: Vec<(DVec2, DVec2)>,
+}
+
+fn sliver_of(removed: &[DVec3]) -> Option<Sliver> {
+    let points: Vec<DVec2> = removed.iter().map(|p| p.truncate()).collect();
+    let hull = convex_hull(&points);
+    let n = hull.len();
+    (n >= 3).then(|| Sliver {
+        edges: (0..n)
+            .map(|i| {
+                let (a, b) = (hull[i], hull[(i + 1) % n]);
+                let e = (b - a).normalize_or_zero();
+                (a, DVec2::new(e.y, -e.x))
+            })
+            .collect(),
+    })
+}
+
+/// The convex hull of the points, counter-clockwise.
+fn convex_hull(points: &[DVec2]) -> Vec<DVec2> {
+    let mut sorted = points.to_vec();
+    sorted.sort_by(|a, b| a.x.total_cmp(&b.x).then(a.y.total_cmp(&b.y)));
+    sorted.dedup_by(|a, b| a.distance(*b) < 1e-12);
+    if sorted.len() < 3 {
+        return sorted;
+    }
+    let turn = |o: DVec2, a: DVec2, b: DVec2| (a - o).perp_dot(b - o);
+    let mut hull: Vec<DVec2> = Vec::new();
+    for pass in 0..2 {
+        let start = hull.len();
+        let iter: Box<dyn Iterator<Item = &DVec2>> = if pass == 0 {
+            Box::new(sorted.iter())
+        } else {
+            Box::new(sorted.iter().rev())
+        };
+        for &p in iter {
+            while hull.len() >= start + 2
+                && turn(hull[hull.len() - 2], hull[hull.len() - 1], p) <= 0.0
+            {
+                hull.pop();
+            }
+            hull.push(p);
+        }
+        hull.pop();
+    }
+    hull
+}
+
+/// The polygon `poly` (planar, in 3D) clipped to where `keep` is not negative: the
+/// edges cross it where it changes sign, linearly.
+fn clip(poly: &[DVec3], keep: impl Fn(DVec3) -> f64) -> Vec<DVec3> {
+    let mut out = Vec::new();
+    for i in 0..poly.len() {
+        let (a, b) = (poly[i], poly[(i + 1) % poly.len()]);
+        let (fa, fb) = (keep(a), keep(b));
+        if fa >= 0.0 {
+            out.push(a);
+        }
+        if (fa >= 0.0) != (fb >= 0.0) {
+            out.push(a + (b - a) * (fa / (fa - fb)));
+        }
+    }
     out
 }
 
-/// How many times the triangles that reach the sliver of a fillet are split in four.
-const SLIVER_SPLITS: u32 = 4;
+/// The triangle without the wedge, in pieces, and the heights between which part of it
+/// lay inside the wedge. The part outside is taken edge by edge of the wedge, so the
+/// pieces do not overlap.
+fn cut_triangle(t: &Triangle, sliver: &Sliver) -> (Vec<Triangle>, Option<(f64, f64)>) {
+    let beyond = |i: usize, p: DVec3| {
+        let (a, n) = sliver.edges[i];
+        (p.truncate() - a).dot(n) - SLIVER_MARGIN
+    };
+    // Wholly past one edge of the wedge: none of it is inside.
+    if (0..sliver.edges.len()).any(|i| t.iter().all(|q| beyond(i, *q) >= 0.0)) {
+        return (vec![*t], None);
+    }
+    let mut rest = t.to_vec();
+    let mut kept = Vec::new();
+    for i in 0..sliver.edges.len() {
+        let outside = clip(&rest, |p| beyond(i, p));
+        for k in 1..outside.len().saturating_sub(1) {
+            let piece = [outside[0], outside[k], outside[k + 1]];
+            if (piece[1] - piece[0])
+                .cross(piece[2] - piece[0])
+                .length_squared()
+                > 1e-24
+            {
+                kept.push(piece);
+            }
+        }
+        rest = clip(&rest, |p| -beyond(i, p));
+        if rest.len() < 3 {
+            return (kept, None);
+        }
+    }
+    let range = rest
+        .iter()
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| {
+            (lo.min(p.z), hi.max(p.z))
+        });
+    (kept, Some(range))
+}
 
 /// The box (low and high corner) that holds the slivers a fillet cuts off the wedge in
 /// every plane, a little larger; `None` without a fillet.
@@ -524,7 +706,8 @@ fn sliver_box(slices: &[tp_design::volute::CutwaterSlice]) -> Option<(DVec3, DVe
         (DVec3::splat(f64::INFINITY), DVec3::splat(f64::NEG_INFINITY)),
         |(lo, hi), p| (lo.min(p), hi.max(p)),
     );
-    (lo.x.is_finite()).then(|| (lo - DVec3::splat(1e-3), hi + DVec3::splat(1e-3)))
+    lo.x.is_finite()
+        .then(|| (lo - DVec3::splat(2e-4), hi + DVec3::splat(2e-4)))
 }
 
 /// Whether the box of the triangle `t` overlaps the box `lo`..`hi` in the plane.
@@ -534,34 +717,6 @@ fn triangle_box_overlaps(t: &Triangle, lo: DVec2, hi: DVec2) -> bool {
         |(l, h), q| (l.min(q.truncate()), h.max(q.truncate())),
     );
     tlo.x <= hi.x && thi.x >= lo.x && tlo.y <= hi.y && thi.y >= lo.y
-}
-
-/// The triangle `t` split in four, `levels` times: the same surface in smaller pieces.
-fn subdivided(t: Triangle, levels: u32) -> Vec<Triangle> {
-    let mut out = vec![t];
-    for _ in 0..levels {
-        out = out
-            .into_iter()
-            .flat_map(|[a, b, c]| {
-                let (ab, bc, ca) = ((a + b) / 2.0, (b + c) / 2.0, (c + a) / 2.0);
-                [[a, ab, ca], [ab, b, bc], [ca, bc, c], [ab, bc, ca]]
-            })
-            .collect();
-    }
-    out
-}
-
-/// Distance from `p` to the edges of the closed polygon `outline`.
-fn edge_distance(outline: &[DVec2], p: DVec2) -> f64 {
-    let n = outline.len();
-    (0..n)
-        .map(|i| {
-            let (a, b) = (outline[i], outline[(i + 1) % n]);
-            let ab = b - a;
-            let t = ((p - a).dot(ab) / ab.length_squared().max(1e-30)).clamp(0.0, 1.0);
-            p.distance(a + ab * t)
-        })
-        .fold(f64::INFINITY, f64::min)
 }
 
 /// Whether `p` lies inside the closed polygon `outline`.
@@ -841,10 +996,13 @@ pub(crate) mod tests {
                 assert!(p.truncate().length() >= nearest - 1e-6);
             }
         }
+        let (walls, cut) = view_walls_cut(&g);
         assert_eq!(
             volute_view_triangles(&g).len(),
-            view_walls(&g).len() + nose.len()
+            walls.len() + fillet_nose_surface(&g, cut).len()
         );
+        // Carried on to the heights of the cut, with a cap at each end, it is more.
+        assert!(fillet_nose_surface(&g, cut).len() > nose.len());
         // The rounded cutwater keeps its body and has no strip.
         let rounded = reference_volute(|_| {});
         assert!(!cutwater_triangles(&rounded).is_empty());
@@ -859,31 +1017,93 @@ pub(crate) mod tests {
                 radius: tp_design::Param::Manual(0.0015),
             };
         });
-        // Triangles wholly in the sliver the round cuts off the wedge, or along its edges
-        // (the walls run along them), in the nearest plane.
-        let in_sliver = |triangles: &[Triangle]| {
-            triangles
-                .iter()
-                .filter(|t| {
-                    let c = (t[0] + t[1] + t[2]) / 3.0;
-                    let s = g
-                        .cutwater_slices
-                        .iter()
-                        .min_by(|a, b| (a.z - c.z).abs().total_cmp(&(b.z - c.z).abs()))
-                        .unwrap();
-                    let sliver: Vec<DVec2> = s.removed.iter().map(|q| q.truncate()).collect();
-                    t.iter().all(|q| {
-                        inside(&sliver, q.truncate()) || edge_distance(&sliver, q.truncate()) < 3e-4
-                    })
-                })
-                .count()
-        };
-        let full: Vec<Triangle> = volute_triangles(&g)
-            .into_iter()
-            .flat_map(|t| subdivided(t, SLIVER_SPLITS))
+        let (walls, cut) = view_walls_cut(&g);
+        let (lo, hi) = cut.expect("the walls are cut where the round replaces them");
+        assert!(lo < hi);
+        // Nothing of the cut walls lies inside the wedge the round removes, narrowed a
+        // little: the pieces are cut along its edges, not at the triangles'.
+        let slivers: Vec<_> = g
+            .cutwater_slices
+            .iter()
+            .map(|s| sliver_of(&s.removed))
             .collect();
-        assert!(in_sliver(&full) > 0, "the full surface reaches the tip");
-        assert_eq!(in_sliver(&view_walls(&g)), 0);
+        for t in &walls {
+            let c = (t[0] + t[1] + t[2]) / 3.0;
+            let k = g
+                .cutwater_slices
+                .iter()
+                .enumerate()
+                .min_by(|a, b| (a.1.z - c.z).abs().total_cmp(&(b.1.z - c.z).abs()))
+                .unwrap()
+                .0;
+            let sliver = slivers[k].as_ref().unwrap();
+            let deep = sliver
+                .edges
+                .iter()
+                .all(|(a, n)| (c.truncate() - *a).dot(*n) < -2.0 * SLIVER_MARGIN);
+            assert!(!deep, "a piece of wall inside the wedge at {c:?}");
+        }
+    }
+
+    #[test]
+    fn cutting_a_triangle_keeps_exactly_what_lies_outside_the_wedge() {
+        // A wedge the unit square, a triangle across its corner.
+        let sliver = sliver_of(&[
+            DVec3::new(0.0, 0.0, 0.0),
+            DVec3::new(1.0, 0.0, 0.0),
+            DVec3::new(1.0, 1.0, 0.0),
+            DVec3::new(0.0, 1.0, 0.0),
+        ])
+        .unwrap();
+        let t: Triangle = [
+            DVec3::new(-1.0, -1.0, 0.0),
+            DVec3::new(2.0, -0.5, 3.0),
+            DVec3::new(0.5, 2.0, 6.0),
+        ];
+        let (kept, gone) = cut_triangle(&t, &sliver);
+        let (lo, hi) = gone.expect("part of it is inside");
+        assert!(lo >= 0.0 && hi <= 6.0 && lo < hi);
+        let area = |t: &Triangle| 0.5 * (t[1] - t[0]).cross(t[2] - t[0]).z.abs();
+        // A grid over the triangle: a point is in a piece exactly when it is outside the
+        // widened square, and no point is in two.
+        let contains = |t: &Triangle, p: DVec2| {
+            let s = |a: DVec3, b: DVec3| (b - a).truncate().perp_dot(p - a.truncate());
+            let (d0, d1, d2) = (s(t[0], t[1]), s(t[1], t[2]), s(t[2], t[0]));
+            (d0 >= 0.0 && d1 >= 0.0 && d2 >= 0.0) || (d0 <= 0.0 && d1 <= 0.0 && d2 <= 0.0)
+        };
+        let m = SLIVER_MARGIN;
+        let mut checked = 0;
+        for i in 0..60 {
+            for j in 0..60 {
+                let (u, v) = ((i as f64 + 0.5) / 60.0, (j as f64 + 0.5) / 60.0);
+                // Not on an edge of the triangle itself, where rounding decides.
+                if u + v > 0.999 {
+                    continue;
+                }
+                let p = (t[0] * (1.0 - u - v) + t[1] * u + t[2] * v).truncate();
+                let inside = p.x > -m && p.x < 1.0 + m && p.y > -m && p.y < 1.0 + m;
+                let near_edge = [p.x, p.x - 1.0, p.y, p.y - 1.0]
+                    .iter()
+                    .any(|d| d.abs() < 2.0 * m);
+                if near_edge {
+                    continue;
+                }
+                let hits = kept.iter().filter(|k| contains(k, p)).count();
+                assert_eq!(hits, usize::from(!inside), "at {p:?}");
+                checked += 1;
+            }
+        }
+        assert!(checked > 1000);
+        // Nothing lost: the pieces and the part inside are the triangle.
+        let outside: f64 = kept.iter().map(area).sum();
+        assert!(outside < area(&t) && outside > 0.5 * area(&t));
+        // A triangle clear of the wedge comes back whole.
+        let far: Triangle = [
+            DVec3::new(5.0, 5.0, 0.0),
+            DVec3::new(6.0, 5.0, 0.0),
+            DVec3::new(5.0, 6.0, 0.0),
+        ];
+        assert_eq!(cut_triangle(&far, &sliver), (vec![far], None));
     }
 
     #[test]
