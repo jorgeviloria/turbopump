@@ -1430,22 +1430,33 @@ fn cutwater(
                     })
             });
             ui.end_row();
+            let fillet = input.cutwater.shape.is_fillet();
             if let CutwaterShape::Rounded { radius } | CutwaterShape::Fillet { radius } =
                 &mut input.cutwater.shape
             {
                 param_f64(
                     ui,
                     tr("Nose radius ρ"),
-                    tr(
-                        "Automatic: e₃/2, a nose as thick as the cutwater; its innermost point \
-                        stays on the cutwater circle d_z",
-                    ),
+                    if fillet {
+                        tr(
+                            "Radius of the round at the crossing of the two walls: the arc \
+                            touches both, so the cutwater stands where the walls leave it. \
+                            Automatic: e₃/2",
+                        )
+                    } else {
+                        tr(
+                            "Automatic: e₃/2, a nose as thick as the cutwater; its innermost \
+                            point stays on the cutwater circle d_z",
+                        )
+                    },
                     radius,
                     Length,
                     g.map(|g| g.cutwater.radius),
                     &units,
                     0.0001..=0.1,
                 );
+            }
+            if matches!(input.cutwater.shape, CutwaterShape::Rounded { .. }) {
                 param_f64(
                     ui,
                     tr("Spiral share"),

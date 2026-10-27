@@ -3153,6 +3153,10 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ),
     ("Nose radius ρ", "Radio de la nariz ρ"),
     (
+        "Radius of the round at the crossing of the two walls: the arc touches both, so the cutwater stands where the walls leave it. Automatic: e₃/2",
+        "Radio del redondeo en el cruce de las dos paredes: el arco toca a ambas, así que el corte de agua queda donde lo dejan las paredes. Automático: e₃/2",
+    ),
+    (
         "Automatic: e₃/2, a nose as thick as the cutwater; its innermost point stays on the cutwater circle d_z",
         "Automático: e₃/2, una nariz tan gruesa como el corte de agua; su punto más interior queda sobre el círculo d_z",
     ),
@@ -4801,6 +4805,10 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
     (
         "the spiral wall crosses the diffuser wall more than once in {} of {} planes, so there are several intersection curves: move the start of the spiral, reduce the height offset or raise the base form factor",
         "la pared de la espiral cruza la del difusor más de una vez en {} de {} planos, así que hay varias curvas de intersección: conviene mover el inicio de la espiral, reducir el desplazamiento radial o subir el factor de forma de la base",
+    ),
+    (
+        "the fillet leaves an effective cutwater diameter d_z/d₂ = {}, below the {} of Gülich Table 10.2: expect pressure pulsations and hydraulic excitation forces; start the spiral later or use a smaller radius",
+        "el empalme deja un diámetro efectivo del corte de agua d_z/d₂ = {}, por debajo del {} de la Tabla 10.2 de Gülich: cabe esperar pulsaciones de presión y fuerzas hidráulicas de excitación; conviene empezar la espiral más tarde o usar un radio menor",
     ),
     (
         "the spiral wraps {}° from its start to the throat, less than the {}° a sharp or rounded cutwater needs: start the spiral earlier",

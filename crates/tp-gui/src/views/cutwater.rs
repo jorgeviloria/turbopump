@@ -190,7 +190,8 @@ fn dragged(
 
 /// The grips a cutwater of this shape has.
 fn grips(g: &VoluteGeometry) -> &'static [Grip] {
-    if g.cutwater.radius <= 0.0 {
+    // A fillet takes its radius from its field: its nose follows the walls, not the points.
+    if g.cutwater.radius <= 0.0 || g.design.cutwater_shape.is_fillet() {
         &[]
     } else if matches!(
         g.design.cutwater_nose,

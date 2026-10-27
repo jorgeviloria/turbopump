@@ -535,6 +535,43 @@ fn cutwater_3d() {
     save(&mut harness, "cutwater-zebra");
 }
 
+/// The fillet cutwater: its page, and the 3D view of the nose the arc rounds at the
+/// crossing of the two walls.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn cutwater_fillet() {
+    let mut project = tp_gui::default_project();
+    let id = project.components()[1].id();
+    let mut input = project.volute_input(id).unwrap();
+    input.cutwater.shape = tp_design::volute::CutwaterShape::Fillet {
+        radius: tp_design::Param::Auto,
+    };
+    project.set_volute(id, input).unwrap();
+    let path = std::env::temp_dir().join("turbopump-cutwater-fillet.tpj");
+    project.save(&path).unwrap();
+    let mut harness = Harness::builder()
+        .with_size([1440.0, 900.0])
+        .with_pixels_per_point(1.5)
+        .with_theme(egui::Theme::Dark)
+        .wgpu()
+        .build_eframe(|cc| TurbopumpApp::new(cc, Some(&path)));
+    harness.run();
+    for _ in 0..6 {
+        harness.get_by_label_contains("Accept step").click();
+        harness.run();
+    }
+    harness.get_by_label("Volute 1").click();
+    harness.run();
+    for _ in 0..4 {
+        harness.get_by_label_contains("Accept step").click();
+        harness.run();
+    }
+    save(&mut harness, "cutwater-fillet");
+    harness.get_by_label_contains("View in 3D").click();
+    harness.run_steps(6);
+    save(&mut harness, "cutwater-fillet-3d");
+}
+
 /// The cross-section step: the default trapezoid, then a radius-based section with a
 /// second definition of line segments, its corners ready to drag.
 #[test]
