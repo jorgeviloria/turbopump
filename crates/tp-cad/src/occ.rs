@@ -59,12 +59,19 @@ impl Shape {
     /// many B-spline faces this takes seconds; the plain Gauss rule is fast but can be
     /// off by percent.
     pub fn volume(&self) -> f64 {
-        ffi::volume(&self.0, 1e-3)
+        crate::profile::op("volume 1e-3", || ffi::volume(&self.0, 1e-3))
     }
 
     /// Volume with a chosen relative error (smaller is slower; 0 = plain Gauss rule).
     pub fn volume_with_tolerance(&self, eps: f64) -> f64 {
-        ffi::volume(&self.0, eps)
+        crate::profile::op(
+            if eps > 0.0 {
+                "volume eps"
+            } else {
+                "volume gauss"
+            },
+            || ffi::volume(&self.0, eps),
+        )
     }
 
     /// Volume of each solid of the shape, mm³.
@@ -86,13 +93,16 @@ impl Shape {
 
     /// Whether OCCT's checker finds the shape topologically and geometrically valid.
     pub fn is_valid(&self) -> bool {
-        ffi::is_valid(&self.0)
+        crate::profile::op("is_valid", || ffi::is_valid(&self.0))
     }
 
     /// Copy repaired by shape healing: small gaps, edges out of tolerance and wrongly
     /// oriented faces closed or fixed.
     pub fn fixed(&self) -> Result<Shape, CadError> {
-        op("shape fix", ffi::fix_shape(&self.0))
+        op(
+            "shape fix",
+            crate::profile::op("fix", || ffi::fix_shape(&self.0)),
+        )
     }
 
     /// Copy rotated by `angle` (rad) about the z axis.
@@ -103,7 +113,9 @@ impl Shape {
     /// `samples` points along each edge, in the order of OCCT's indexed edge map; empty
     /// for degenerate edges.
     pub fn edge_samples(&self, samples: usize) -> Vec<Vec<DVec3>> {
-        let flat = ffi::edge_samples(&self.0, samples.max(1));
+        let flat = crate::profile::op("edge_samples", || {
+            ffi::edge_samples(&self.0, samples.max(1))
+        });
         flat.chunks(samples.max(1))
             .map(|chunk| {
                 if chunk.iter().any(|p| p.x.is_nan()) {
@@ -132,8 +144,10 @@ impl Shape {
     /// milliseconds a point.
     pub fn boundary_distances(&self, points: &[DVec3]) -> Result<Vec<f64>, CadError> {
         let points: Vec<ffi::P3> = points.iter().map(|p| p3(*p)).collect();
-        ffi::boundary_distances(&self.0, &points)
-            .map_err(|e| CadError::Operation(e.what().to_owned()))
+        crate::profile::op("boundary_distances", || {
+            ffi::boundary_distances(&self.0, &points)
+        })
+        .map_err(|e| CadError::Operation(e.what().to_owned()))
     }
 
     /// The shape with the edges at positions `edges` of [`Self::edge_samples`] rounded
@@ -143,7 +157,10 @@ impl Shape {
             .iter()
             .map(|&i| u32::try_from(i + 1).map_err(|_| CadError::Input("edge index".into())))
             .collect::<Result<_, _>>()?;
-        op("fillet", ffi::fillet_edges(&self.0, &indices, radius))
+        op(
+            "fillet",
+            crate::profile::op("fillet", || ffi::fillet_edges(&self.0, &indices, radius)),
+        )
     }
 
     /// Boolean difference `self − tool`.
@@ -170,7 +187,10 @@ impl Shape {
     /// A copy with its own geometry, for an attempt that must not touch the original:
     /// a boolean may widen the tolerances of its inputs in place.
     pub fn copied(&self) -> Result<Shape, CadError> {
-        op("copy", ffi::copy_shape(&self.0))
+        op(
+            "copy",
+            crate::profile::op("copy", || ffi::copy_shape(&self.0)),
+        )
     }
 
     /// `self` less all the `tools`, in one operation.
@@ -194,7 +214,9 @@ fn boolean(
     let what = ["boolean cut", "boolean fuse", "boolean common"][usize::from(code)];
     op(
         what,
-        ffi::boolean_op(&list(arguments), &list(tools), code, fuzzy),
+        crate::profile::op(what, || {
+            ffi::boolean_op(&list(arguments), &list(tools), code, fuzzy)
+        }),
     )
 }
 
@@ -229,7 +251,10 @@ pub fn spline_edge(points: &[DVec3], periodic: bool) -> Result<Shape, CadError> 
         return Err(CadError::Input("spline points coincide".into()));
     }
     let pts: Vec<ffi::P3> = points.iter().map(|&p| p3(p)).collect();
-    op("spline edge", ffi::spline_edge(&pts, periodic))
+    op(
+        "spline edge",
+        crate::profile::op("spline", || ffi::spline_edge(&pts, periodic)),
+    )
 }
 
 /// Straight edge from `a` to `b`.
@@ -276,7 +301,10 @@ pub fn cylinder(
 
 /// Solid of revolution of a planar face through 360° about the z axis.
 pub fn revolve_z(face: &Shape) -> Result<Shape, CadError> {
-    op("revolution", ffi::revolve_z(&face.0))
+    op(
+        "revolution",
+        crate::profile::op("revolution", || ffi::revolve_z(&face.0)),
+    )
 }
 
 /// Closed solid lofted through closed section `wires`: B-spline side surfaces through
@@ -286,7 +314,10 @@ pub fn loft(wires: &[Shape]) -> Result<Shape, CadError> {
         return Err(CadError::Input("a loft needs at least two sections".into()));
     }
     let refs: Vec<&Shape> = wires.iter().collect();
-    op("loft", ffi::loft_solid(&list(&refs)))
+    op(
+        "loft",
+        crate::profile::op("loft", || ffi::loft_solid(&list(&refs))),
+    )
 }
 
 fn path_str(path: &Path) -> Result<&str, CadError> {

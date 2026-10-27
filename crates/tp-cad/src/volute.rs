@@ -158,9 +158,19 @@ fn first_sound<T>(
     sound: impl Fn(&T) -> bool,
     repair: impl Fn(&T) -> Option<T>,
 ) -> Result<T, CadError> {
+    first_sound_over(&FUZZY_GAPS, attempt, sound, repair)
+}
+
+/// As [`first_sound`], over the gaps `gaps`.
+fn first_sound_over<T>(
+    gaps: &[f64],
+    attempt: impl Fn(f64) -> Result<T, CadError>,
+    sound: impl Fn(&T) -> bool,
+    repair: impl Fn(&T) -> Option<T>,
+) -> Result<T, CadError> {
     let mut fallback = None;
     let mut error = None;
-    for fuzzy in FUZZY_GAPS {
+    for &fuzzy in gaps {
         match attempt(fuzzy) {
             Ok(result) if sound(&result) => return Ok(result),
             Ok(result) => {
@@ -179,8 +189,14 @@ fn first_sound<T>(
 
 /// Builds the volute channel and its flow domain from the geometry.
 pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
+    let result = crate::profile::stage("volute flow domain", || flow_domain(g));
+    crate::profile::report("the volute flow domain");
+    result
+}
+
+fn flow_domain(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
     let breaks = g.ring_breaks();
-    let lofts = loft_pieces(&g.lofts(), &breaks)?;
+    let lofts = crate::profile::stage("lofts", || loft_pieces(&g.lofts(), &breaks))?;
 
     // Ring between the impeller outlet and the cutwater circle, as wide as the volute
     // inlet, with the bend and neck of an internal volute. It reaches slightly into the
@@ -194,11 +210,13 @@ pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
     let pieces: f64 = lofts.iter().map(|l| l.volume_with_tolerance(0.0)).sum();
     let ring_volume = ring.volume_with_tolerance(0.0);
     let whole = |channel: &Shape| channel.volume_with_tolerance(0.0) > 0.9 * pieces;
-    let mut joined = first_sound(
-        |fuzzy| occ::fuse_all_fuzzy(&lofts, fuzzy),
-        |channel| channel.is_valid() && channel.solid_count() == 1 && whole(channel),
-        |channel| channel.fixed().ok(),
-    )?;
+    let mut joined = crate::profile::stage("channel fuse", || {
+        first_sound(
+            |fuzzy| occ::fuse_all_fuzzy(&lofts, fuzzy),
+            |channel| channel.is_valid() && channel.solid_count() == 1 && whole(channel),
+            |channel| channel.fixed().ok(),
+        )
+    })?;
 
     // A fillet cutwater is the union as it is, its intersection edge rounded by the
     // kernel; where the kernel cannot, the edge stays sharp.
@@ -206,7 +224,7 @@ pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
     let mut kernel_rounded = false;
     if matches!(g.design.cutwater_shape, CutwaterShape::Fillet { .. }) && g.design.rib.is_none() {
         let radius = g.design.nose_radius * MM;
-        match fillet_tip(&joined, &lofts, g, radius) {
+        match crate::profile::stage("fillet tip", || fillet_tip(&joined, &lofts, g, radius)) {
             Some((rounded, r)) => {
                 joined = rounded;
                 kernel_rounded = true;
@@ -238,7 +256,9 @@ pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
     // A fillet is rounded by the kernel or stays sharp: its body is not the design's.
     if !kernel_rounded
         && !g.design.cutwater_shape.is_fillet()
-        && let Some(body) = cutwater_body(g, (z_lo - margin) * MM, (z_hi + margin) * MM)?
+        && let Some(body) = crate::profile::stage("cutwater body", || {
+            cutwater_body(g, (z_lo - margin) * MM, (z_hi + margin) * MM)
+        })?
     {
         let (faces, noses) = cutwater_probes(g);
         tools.push((body, faces, noses));
@@ -289,8 +309,8 @@ pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
         }
         Ok(carved)
     };
-    let channel = carve(&joined, Part::Channel)?;
-    let inlet = carve(&ring, Part::Ring)?;
+    let channel = crate::profile::stage("carve channel", || carve(&joined, Part::Channel))?;
+    let inlet = crate::profile::stage("carve ring", || carve(&ring, Part::Ring))?;
     // The flow domain is what gets exported. A fuzzy fusion may move the cut body
     // again (a tapered nose, a compensated spiral), so its points must still lie on the
     // surface.
@@ -667,8 +687,13 @@ type Lofts = Vec<Vec<Vec<DVec3>>>;
 /// The outlines of the casing lofted, mm. The start of the spiral runs just inside its
 /// throat, the cutwater between them: offset outward, the two would cut into each other
 /// within one loft. Each piece is lofted in two halves, which meet on their middle
-/// outline.
-fn casing_pieces(g: &VoluteGeometry, overlap: f64) -> Result<(Vec<Shape>, Lofts), CadError> {
+/// outline. `thin`ned, the outer wall leaves out the outlines and points it can
+/// ([`CASING_TOLERANCE`]).
+fn casing_pieces(
+    g: &VoluteGeometry,
+    overlap: f64,
+    thin: bool,
+) -> Result<(Vec<Shape>, Lofts), CadError> {
     let halves: Lofts = g
         .casing_lofts_with(overlap)
         .into_iter()
@@ -681,8 +706,26 @@ fn casing_pieces(g: &VoluteGeometry, overlap: f64) -> Result<(Vec<Shape>, Lofts)
             }
         })
         .collect();
-    Ok((loft_pieces(&halves, &g.ring_breaks())?, halves))
+    if !thin {
+        return Ok((loft_pieces(&halves, &g.ring_breaks())?, halves));
+    }
+    // The outer wall only needs to keep the casing about as thick as designed: lofted
+    // through fewer outlines and points its booleans run many times faster.
+    let (thin, breaks) = crate::thin::thinned(&halves, &g.ring_breaks(), CASING_TOLERANCE);
+    crate::profile::note(|| {
+        let count = |p: &Lofts| (p.iter().map(Vec::len).sum::<usize>(), p[0][0].len());
+        format!(
+            "casing outlines x points: {:?} -> {:?}",
+            count(&halves),
+            count(&thin)
+        )
+    });
+    Ok((loft_pieces(&thin, &breaks)?, halves))
 }
+
+/// How far the outer wall of a casing may stray from the outlines offset from the flow,
+/// m: well within casting tolerances, and a small share of any wall.
+const CASING_TOLERANCE: f64 = 1e-4;
 
 /// The turns by which the pieces of spiral of a casing reach into the diffuser, rad. The
 /// union of the pieces of a section with many corners (radius based, line segments) is a
@@ -695,6 +738,12 @@ const FREE_CASING_OVERLAPS: [f64; 2] = [
 
 /// Builds the casing around the flow domain `cad` of the volute `g`.
 pub fn build_volute_casing(g: &VoluteGeometry, cad: &VoluteCad) -> Result<VoluteCasing, CadError> {
+    let result = crate::profile::stage("volute casing", || casing(g, cad));
+    crate::profile::report("the volute casing");
+    result
+}
+
+fn casing(g: &VoluteGeometry, cad: &VoluteCad) -> Result<VoluteCasing, CadError> {
     // The outer lofts of a diffuser tilted along the pump axis do not fuse into one
     // casing (tried from 10° to 25°: the casing came out in 8 pieces, with or without
     // the flange), so it is refused instead of returned broken.
@@ -710,11 +759,24 @@ pub fn build_volute_casing(g: &VoluteGeometry, cad: &VoluteCad) -> Result<Volute
     } else {
         &[tp_design::volute::CHANNEL_OVERLAP]
     };
+    // First the outer wall thinned, with the exact booleans only; where that is not a
+    // sound casing (walls of the spiral and the diffuser that run together, thinned
+    // apart), through every outline with every gap.
+    if let Ok(body) = crate::profile::stage("thinned casing body", || {
+        casing_body(g, cad, overlaps[0], true)
+    }) && body.sound
+    {
+        return crate::profile::stage("flange", || finish_casing(g, body));
+    }
     let mut fallback = None;
     let mut error = None;
     for &overlap in overlaps {
-        match casing_body(g, cad, overlap) {
-            Ok(body) if body.sound => return finish_casing(g, body),
+        match crate::profile::stage(&format!("casing body overlap {overlap:.4}"), || {
+            casing_body(g, cad, overlap, false)
+        }) {
+            Ok(body) if body.sound => {
+                return crate::profile::stage("flange", || finish_casing(g, body));
+            }
             Ok(body) => {
                 fallback.get_or_insert(body);
             }
@@ -737,9 +799,16 @@ struct CasingBody {
     sound: bool,
 }
 
-/// The casing of the pieces of spiral that reach `overlap` rad into the diffuser.
-fn casing_body(g: &VoluteGeometry, cad: &VoluteCad, overlap: f64) -> Result<CasingBody, CadError> {
-    let (mut outer, halves) = casing_pieces(g, overlap)?;
+/// The casing of the pieces of spiral that reach `overlap` rad into the diffuser; with a
+/// `thin` outer wall, by the exact booleans only.
+fn casing_body(
+    g: &VoluteGeometry,
+    cad: &VoluteCad,
+    overlap: f64,
+    thin: bool,
+) -> Result<CasingBody, CadError> {
+    let (mut outer, halves) =
+        crate::profile::stage("casing lofts", || casing_pieces(g, overlap, thin))?;
     // The wall round the bend and neck of an internal volute.
     if let Some(profile) = g.bend_casing_profile() {
         let pieces = smooth_pieces(&profile);
@@ -776,18 +845,24 @@ fn casing_body(g: &VoluteGeometry, cad: &VoluteCad, overlap: f64) -> Result<Casi
         g.design.cutwater_fillet * MM
     };
     let enclose = |fuzzy: f64| -> Result<(Shape, f64, Option<f64>), CadError> {
-        let mut whole = occ::fuse_all_fuzzy(&outer, fuzzy)?;
+        let mut whole = crate::profile::stage(&format!("outer fuse {fuzzy}"), || {
+            occ::fuse_all_fuzzy(&outer, fuzzy)
+        })?;
         // The radius it took; 0 when asked for none.
         let mut rounded = Some(0.0);
         if radius > 0.0 && !g.cutwater_slices.is_empty() {
-            rounded = fill_groove(&whole, &outer, g, radius).map(|(filled, r)| {
-                whole = filled;
-                r
-            });
+            rounded =
+                crate::profile::stage("fill groove", || fill_groove(&whole, &outer, g, radius))
+                    .map(|(filled, r)| {
+                        whole = filled;
+                        r
+                    });
         }
         let gross = whole.volume_with_tolerance(0.0);
         // The flow and the space of the impeller come out together.
-        let solid = whole.cut_all_fuzzy(&[&cad.fluid, &impeller], fuzzy)?;
+        let solid = crate::profile::stage(&format!("cut flow {fuzzy}"), || {
+            whole.cut_all_fuzzy(&[&cad.fluid, &impeller], fuzzy)
+        })?;
         Ok((solid, gross, rounded))
     };
     let sound = |(solid, gross, _): &(Shape, f64, Option<f64>)| {
@@ -795,7 +870,8 @@ fn casing_body(g: &VoluteGeometry, cad: &VoluteCad, overlap: f64) -> Result<Casi
             && solid.solid_count() == 1
             && solid.volume_with_tolerance(0.0) < gross - 0.8 * channel
     };
-    let result = first_sound(enclose, sound, |(solid, gross, rounded)| {
+    let gaps: &[f64] = if thin { &[0.0] } else { &FUZZY_GAPS };
+    let result = first_sound_over(gaps, enclose, sound, |(solid, gross, rounded)| {
         Some((solid.fixed().ok()?, *gross, *rounded))
     })?;
     Ok(CasingBody {
@@ -1463,6 +1539,35 @@ mod tests {
 
     #[test]
     #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
+    fn the_outer_wall_of_a_thinned_casing_passes_by_every_outline() {
+        let _slot = crate::test_slot::take();
+        for shape in [SectionShape::default(), SectionShape::round()] {
+            let input = VoluteInput {
+                cross_section: CrossSectionInput::single(shape.clone()),
+                ..VoluteInput::default()
+            };
+            let g = VoluteGeometry::build(&basis(), &input).unwrap();
+            let (lofts, outlines) =
+                casing_pieces(&g, tp_design::volute::CHANNEL_OVERLAP, true).unwrap();
+            for (loft, rings) in lofts.iter().zip(&outlines) {
+                let points: Vec<DVec3> = rings
+                    .iter()
+                    .step_by(2)
+                    .flat_map(|r| r.iter().step_by(3).map(|p| *p * MM))
+                    .collect();
+                let off = loft
+                    .boundary_distances(&points)
+                    .unwrap()
+                    .into_iter()
+                    .fold(0.0, f64::max);
+                // The loft's own approximation adds a little to the spline's.
+                assert!(off < 2.0 * CASING_TOLERANCE * MM, "{shape:?}: {off} mm");
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
     fn the_casing_of_radius_and_segment_sections_is_one_solid() {
         let _slot = crate::test_slot::take();
         use tp_design::volute::{RadiusSide, SideShape, VoluteKind, section};
@@ -1514,7 +1619,7 @@ mod tests {
             let g = VoluteGeometry::build(&basis(), &input).unwrap();
             let radius = g.design.cutwater_fillet * MM;
             approx::assert_relative_eq!(radius, g.design.wall_thickness * MM);
-            let (pieces, _) = casing_pieces(&g, tp_design::volute::CHANNEL_OVERLAP).unwrap();
+            let (pieces, _) = casing_pieces(&g, tp_design::volute::CHANNEL_OVERLAP, true).unwrap();
             // As the casing does: the first fusion that takes the fillet.
             let (whole, (filled, took)) = FUZZY_GAPS
                 .into_iter()

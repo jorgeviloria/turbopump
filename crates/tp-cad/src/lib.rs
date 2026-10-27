@@ -10,6 +10,8 @@ mod diffuser;
 mod impeller;
 mod joined;
 mod occ;
+mod profile;
+mod thin;
 mod volute;
 
 pub use diffuser::{DiffuserCad, build_diffuser};
