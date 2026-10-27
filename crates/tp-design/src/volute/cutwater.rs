@@ -94,7 +94,25 @@ pub struct CutwaterSlice {
     pub removed: Vec<DVec3>,
 }
 
+/// The arc of the nose in the outline of a fillet (see [`Walls::fillet_slice`]): the part
+/// that runs round the circle, between the walls.
+pub(super) fn arc_of(outline: &[DVec3]) -> &[DVec3] {
+    outline
+        .get(FILLET_WALL_POINTS..FILLET_WALL_POINTS + FILLET_ARC_POINTS)
+        .unwrap_or(&[])
+}
+
 impl CutwaterSlice {
+    /// The arc that rounds the tip of a fillet in this plane, from the spiral wall to
+    /// the diffuser wall; empty for any other cutwater.
+    pub fn nose_arc(&self) -> &[DVec3] {
+        if self.joins.is_some() {
+            arc_of(&self.outline)
+        } else {
+            &[]
+        }
+    }
+
     /// The outer wall of the spiral from the tip downstream: the wall trimmed where it
     /// crosses the inner wall of the diffuser, so that the part before the crossing,
     /// which lies inside the diffuser, is left out (a sharp cutwater).

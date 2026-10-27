@@ -364,6 +364,20 @@ impl VoluteGeometry {
         self.cutwater_body.clone()
     }
 
+    /// The arcs that round the tip of a fillet from plane to plane, between the planes
+    /// too: the surface of its nose, which runs on into the walls. Empty for any other
+    /// cutwater.
+    pub fn fillet_nose(&self) -> Vec<Vec<DVec3>> {
+        if !self.design.cutwater_shape.is_fillet() {
+            return Vec::new();
+        }
+        self.cutwater_body
+            .iter()
+            .map(|o| super::cutwater::arc_of(o).to_vec())
+            .filter(|a| !a.is_empty())
+            .collect()
+    }
+
     /// The outlines of the body in the planes of the cutwater, as built: with the side
     /// endings where a plane lies close to a side wall. Empty unless rounded.
     pub fn cutwater_planes(&self) -> Vec<Vec<DVec3>> {
