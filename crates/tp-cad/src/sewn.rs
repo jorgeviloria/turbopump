@@ -1,11 +1,11 @@
 //! The flow domain of a volute sewn from its surfaces (prototype).
 //!
-//! The spiral, the discharge diffuser and the vaneless ring are lofted and revolved as
-//! open surfaces and sewn together, without boolean operations, except in a small zone
-//! round the cutwater: there the start of the spiral runs inside the beginning of the
-//! diffuser, and the three overlap. That zone is joined by a boolean union of three
-//! small solids, its faces on the planes where it meets the rest are dropped, and the
-//! rest of its faces are sewn with the others.
+//! The spiral and the vaneless ring are lofted and revolved as open surfaces and sewn
+//! together, without boolean operations, except in a zone round the cutwater: there the
+//! start of the spiral runs inside the beginning of the diffuser. That zone is the
+//! boolean union of the start of the spiral, the diffuser and that sector of the ring;
+//! its faces on the planes where it meets the rest are dropped, and the rest of its
+//! faces are sewn with the others.
 //!
 //! The spiral ends on the very outline the diffuser starts with (the throat), so the
 //! two meet edge to edge. The ring meets the spiral along the inlet points, at r'_z and
@@ -23,6 +23,10 @@ use crate::volute::{MM, VoluteCad, fillet_tip, section_wire};
 
 /// Gap the sewing closes between the edges of neighbouring faces, mm.
 const SEWING_TOLERANCE: f64 = 1e-2;
+
+/// How far from r'_z the points of a face of the zone may lie for it to count as an
+/// inlet chord, mm.
+const INLET_TOLERANCE: f64 = 1e-2;
 
 /// Turn past the beginning of the diffuser kept in the zone beyond the diffuser's
 /// pieces, rad.
@@ -103,24 +107,37 @@ pub fn build_volute_sewn(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
     let half = g.design.inlet_width / 2.0;
     let zm = g.basis.midplane;
     let at = |r: f64, z: f64| DVec3::new(r * MM, 0.0, z * MM);
-    // The ring swept from `from` through `turn` (rad) in the sense of rotation.
-    let sweep = |shape: Shape, from: f64, turn: f64| -> Result<Shape, CadError> {
-        let start = if sign > 0.0 { from } else { from - turn };
-        occ::revolve_z_by(&shape.rotated_z(start)?, turn)
-    };
 
-    // The zone, joined by booleans: the start of the spiral and the whole diffuser (with
-    // the cutwater rounded, for a fillet), then the ring, a little past r'_z so that it
-    // overlaps the inlet chords. The diffuser is lofted whole, as one surface through
-    // all its outlines: lofted in two pieces its walls part by up to 0.2 mm between them.
+    // The zone, joined by a boolean union: the start of the spiral and the whole diffuser
+    // (with the cutwater rounded, for a fillet), the ring between the throat and the
+    // split outline, and between the throat and the start of the spiral a sliver along
+    // r'_z, half as thick as the lip by which the ring reaches past r'_z, where the
+    // inner wall of the diffuser rises off r'_z. The diffuser is lofted whole, as one surface through all
+    // its outlines: lofted in two pieces its walls part by up to 0.2 mm between them.
     let start = occ::loft(&wires(&spiral[..=split])?)?;
     let diffuser = occ::loft(&wires(&nozzle)?)?;
-    let pieces = [start, diffuser];
-    let mut channel = crate::volute::first_sound(
-        |fuzzy| occ::fuse_all_fuzzy(&pieces, fuzzy),
+    let gap = past(spiral[0][0]);
+    let lip = 0.02 * g.design.inlet_width;
+    let sliver = {
+        // Half the lip: a sliver as thick as the lip would run face to face with the
+        // ring and leave its faces inside the union.
+        let (inner, outer) = (r3, r3 + 0.5 * lip);
+        let face = occ::planar_face(&occ::wire(&[
+            occ::line_edge(at(inner, zm - half), at(outer, zm - half))?,
+            occ::line_edge(at(outer, zm - half), at(outer, zm + half))?,
+            occ::line_edge(at(outer, zm + half), at(inner, zm + half))?,
+            occ::line_edge(at(inner, zm + half), at(inner, zm - half))?,
+        ])?)?;
+        let from = if sign > 0.0 { throat } else { throat - gap };
+        occ::revolve_z_by(&face.rotated_z(from)?, gap)?
+    };
+    let channel = crate::volute::first_sound(
+        |fuzzy| occ::fuse_all_fuzzy(&[start.copied()?, diffuser.copied()?], fuzzy),
         |c| c.is_valid() && c.solid_count() == 1,
         |c| c.fixed().ok(),
     )?;
+    let pieces = [start, diffuser];
+    let mut channel = channel;
     let mut warnings = Vec::new();
     if let CutwaterShape::Fillet { .. } = g.design.cutwater_shape {
         match fillet_tip(&channel, &pieces, g, g.design.nose_radius * MM) {
@@ -131,29 +148,48 @@ pub fn build_volute_sewn(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
             ),
         }
     }
-    let lip = 0.02 * g.design.inlet_width;
-    let rectangle = occ::planar_face(&occ::wire(&[
-        occ::line_edge(at(r2, zm - half), at(r3 + lip, zm - half))?,
-        occ::line_edge(at(r3 + lip, zm - half), at(r3 + lip, zm + half))?,
-        occ::line_edge(at(r3 + lip, zm + half), at(r2, zm + half))?,
-        occ::line_edge(at(r2, zm + half), at(r2, zm - half))?,
-    ])?)?;
-    let zone_sweep = past(spiral[split][0]);
-    let ring_sector = sweep(rectangle, throat, zone_sweep)?;
+    let channel = crate::volute::first_sound(
+        |fuzzy| channel.fuse_fuzzy(&sliver, fuzzy),
+        |z| z.is_valid() && z.solid_count() == 1,
+        |z| z.fixed().ok(),
+    )?;
+    // The ring between the throat and the split outline, reaching a little past r'_z so
+    // that it overlaps the inlet chords, less what of that lip would stand out of the
+    // channel (through the walls of a small round section, beside the inner wall of
+    // the diffuser where it runs wider than the inlet).
+    let sector = |inner: f64, outer: f64, low: f64, high: f64| -> Result<Shape, CadError> {
+        let face = occ::planar_face(&occ::wire(&[
+            occ::line_edge(at(inner, low), at(outer, low))?,
+            occ::line_edge(at(outer, low), at(outer, high))?,
+            occ::line_edge(at(outer, high), at(inner, high))?,
+            occ::line_edge(at(inner, high), at(inner, low))?,
+        ])?)?;
+        let turn = past(spiral[split][0]);
+        let from = if sign > 0.0 { throat } else { throat - turn };
+        occ::revolve_z_by(&face.rotated_z(from)?, turn)
+    };
+    let ring_sector = sector(r2, r3 + lip, zm - half, zm + half)?;
+    let inside = sector(0.5 * r2, r3, zm - 2.0 * half, zm + 2.0 * half)?;
+    let poking = ring_sector.cut_all_fuzzy(&[&channel, &inside], 0.0)?;
+    let ring_sector = if poking.volume_with_tolerance(0.0) > 1e-6 {
+        ring_sector.cut(&poking)?
+    } else {
+        ring_sector
+    };
     let zone = crate::volute::first_sound(
         |fuzzy| channel.fuse_fuzzy(&ring_sector, fuzzy),
         |z| z.is_valid() && z.solid_count() == 1,
         |z| z.fixed().ok(),
     )?;
-    // Its faces on the planes where it meets the rest: the throat and the split outline
-    // of the spiral.
+    // Its faces on the planes where it meets the rest (the throat and the split outline
+    // of the spiral), and any inlet chord the union left on r'_z inside the ring.
     let meridional = |a: f64| {
         let normal = DVec3::new(-a.sin(), a.cos(), 0.0);
         move |(n, p): (DVec3, DVec3)| n.dot(normal).abs() > 1.0 - 1e-6 && n.dot(p).abs() < 1e-3
     };
     let on_throat = meridional(throat);
     let on_split = meridional(split_angle);
-    let dropped: Vec<u32> = zone
+    let mut dropped: Vec<u32> = zone
         .face_planes()
         .into_iter()
         .enumerate()
@@ -162,10 +198,23 @@ pub fn build_volute_sewn(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
             (on_throat(plane) || on_split(plane)).then_some(i as u32)
         })
         .collect();
+    let triangles = zone.triangles(0.2)?;
+    let faces = zone.triangle_faces();
+    let mut off_inlet = vec![0.0f64; zone.face_count()];
+    for (t, &f) in triangles.iter().zip(&faces) {
+        for p in t {
+            let off = (p.truncate().length() - r3 * MM).abs();
+            off_inlet[f as usize] = off_inlet[f as usize].max(off);
+        }
+    }
+    let chords: Vec<u32> = (0..off_inlet.len() as u32)
+        .filter(|i| off_inlet[*i as usize] < INLET_TOLERANCE && !dropped.contains(i))
+        .collect();
+    dropped.extend(chords);
     let zone_faces = zone.faces_except(&dropped)?;
 
     // The rest, as open surfaces: the spiral from the split outline to the throat without
-    // its inlet chords, the ring from the split outline round to the throat, open on
+    // its inlet chords, and the ring from the split outline round to the throat, open on
     // r'_z.
     let open_wire = |ring: &[DVec3]| -> Result<Shape, CadError> {
         let points: Vec<DVec3> = ring.iter().map(|p| *p * MM).collect();
@@ -189,14 +238,23 @@ pub fn build_volute_sewn(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
             .map(|r| open_wire(r))
             .collect::<Result<Vec<_>, _>>()?,
     )?;
-    let ring_edges = occ::wire(&[
-        occ::line_edge(at(r3, zm + half), at(r2, zm + half))?,
-        occ::line_edge(at(r2, zm + half), at(r2, zm - half))?,
-        occ::line_edge(at(r2, zm - half), at(r3, zm - half))?,
-    ])?;
-    let ring_rest = sweep(ring_edges, split_angle, TAU - zone_sweep)?;
+    let zone_turn = past(spiral[split][0]);
+    let ring = {
+        let edges = occ::wire(&[
+            occ::line_edge(at(r3, zm + half), at(r2, zm + half))?,
+            occ::line_edge(at(r2, zm + half), at(r2, zm - half))?,
+            occ::line_edge(at(r2, zm - half), at(r3, zm - half))?,
+        ])?;
+        let turn = TAU - zone_turn;
+        let from = if sign > 0.0 {
+            split_angle
+        } else {
+            split_angle - turn
+        };
+        occ::revolve_z_by(&edges.rotated_z(from)?, turn)?
+    };
 
-    let sewn = occ::sew(&[&zone_faces, &spiral_rest, &ring_rest], SEWING_TOLERANCE)?;
+    let sewn = occ::sew(&[&zone_faces, &spiral_rest, &ring], SEWING_TOLERANCE)?;
     let open = sewn.free_edges(9)?;
     if !open.is_empty() {
         let at: Vec<String> = open
@@ -237,7 +295,9 @@ mod tests {
     use super::*;
     use tp_design::Param;
     use tp_design::outlet::ImpellerOutlet;
-    use tp_design::volute::{AreaLaw, DischargeShape, StraightWall, VoluteInput};
+    use tp_design::volute::{
+        AreaLaw, CrossSectionInput, DischargeShape, SectionShape, StraightWall, VoluteInput,
+    };
 
     fn basis() -> ImpellerOutlet {
         ImpellerOutlet {
@@ -261,8 +321,14 @@ mod tests {
     fn the_sewn_flow_domain_is_the_boolean_one() {
         let _slot = crate::test_slot::take();
         type Edit = fn(&mut VoluteInput);
-        let cases: [(&str, Edit); 5] = [
+        let cases: [(&str, Edit); 7] = [
             ("trapezoid", |_| {}),
+            ("round", |v| {
+                v.cross_section = CrossSectionInput::single(SectionShape::round())
+            }),
+            ("rectangular", |v| {
+                v.cross_section = CrossSectionInput::single(SectionShape::rectangular())
+            }),
             ("tangential", |v| {
                 v.diffuser.shape = DischargeShape::Tangential {
                     straight_wall: StraightWall::Inner,
@@ -289,6 +355,11 @@ mod tests {
                     radius: Param::Manual(0.0015),
                 },
             ] {
+                // The fillet of a rectangular section does not come out yet (nor as
+                // a boolean union).
+                if name == "rectangular" && shape.is_fillet() {
+                    continue;
+                }
                 let mut input = VoluteInput::default();
                 edit(&mut input);
                 input.cutwater.shape = shape;
@@ -305,7 +376,8 @@ mod tests {
                 let (a, b) = (sewn.fluid.volume(), boolean.fluid.volume());
                 assert!((a / b - 1.0).abs() < 1e-3, "{case}: {a} vs {b}");
                 // The same walls: the boolean spiral is lofted 1.5° into the diffuser,
-                // which bends its last stretch by a tenth of a millimetre.
+                // which bends its last stretch by a tenth of a millimetre (the flat side
+                // walls of a rectangular one by 0.4 mm).
                 let points: Vec<DVec3> = sewn
                     .fluid
                     .triangles(0.5)
@@ -320,7 +392,7 @@ mod tests {
                     .unwrap()
                     .into_iter()
                     .fold(0.0, f64::max);
-                assert!(off < 0.2, "{case}: {off} mm");
+                assert!(off < 0.5, "{case}: {off} mm");
             }
         }
     }
