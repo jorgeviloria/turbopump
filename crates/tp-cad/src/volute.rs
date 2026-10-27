@@ -201,8 +201,7 @@ pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
     )?;
 
     // A fillet cutwater is the union as it is, its intersection edge rounded by the
-    // kernel; where the kernel cannot, the body of a rounded cutwater is cut as for
-    // that shape.
+    // kernel; where the kernel cannot, the edge stays sharp.
     let mut notes = Vec::new();
     let mut kernel_rounded = false;
     if matches!(g.design.cutwater_shape, CutwaterShape::Fillet { .. }) && g.design.rib.is_none() {
@@ -219,8 +218,7 @@ pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
                 }
             }
             None => notes.push(
-                "the CAD kernel could not round the cutwater edge: the body of a rounded \
-                 cutwater is cut instead"
+                "the CAD kernel could not round the cutwater edge: the CAD keeps it sharp"
                     .to_owned(),
             ),
         }
@@ -237,7 +235,9 @@ pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
     // Each tool with the points its cut must leave on the surface of the channel and
     // of the ring.
     let mut tools: Vec<(Shape, Vec<DVec3>, Vec<DVec3>)> = Vec::new();
+    // A fillet is rounded by the kernel or stays sharp: its body is not the design's.
     if !kernel_rounded
+        && !g.design.cutwater_shape.is_fillet()
         && let Some(body) = cutwater_body(g, (z_lo - margin) * MM, (z_hi + margin) * MM)?
     {
         let (faces, noses) = cutwater_probes(g);
@@ -2023,7 +2023,7 @@ mod tests {
 
     #[test]
     #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
-    fn a_fillet_cutwater_falls_back_to_the_body_where_the_kernel_cannot_round() {
+    fn a_fillet_cutwater_stays_sharp_where_the_kernel_cannot_round() {
         use tp_design::volute::CutwaterShape;
         let _slot = crate::test_slot::take();
         let mut input = VoluteInput {
