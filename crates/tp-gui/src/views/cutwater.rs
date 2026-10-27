@@ -496,7 +496,10 @@ impl CutwaterPage {
                 );
                 if self.all_planes {
                     for (k, s) in slices.iter().enumerate() {
-                        if k == plane || s.outline.is_empty() {
+                        // A fillet's arc lies in another place in each plane, with the same
+                        // radius: drawn together they would look like several radii.
+                        if k == plane || s.outline.is_empty() || g.design.cutwater_shape.is_fillet()
+                        {
                             continue;
                         }
                         let closed = if g.design.cutwater_shape.is_fillet() {
