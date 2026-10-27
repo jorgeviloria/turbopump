@@ -11,6 +11,8 @@
 #include <string>
 
 #include <BRepAdaptor_Curve.hxx>
+#include <BRepAdaptor_Surface.hxx>
+#include <gp_Pln.hxx>
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
@@ -277,6 +279,157 @@ std::unique_ptr<Shape> loft_solid(const ShapeList &wires) {
       fail("loft", "the closed blade solid is not valid");
     }
     return wrap(solid, "loft");
+  });
+}
+
+// The faces lofted through closed or open section `wires`, without end caps: one face
+// per edge of the sections.
+std::unique_ptr<Shape> loft_shell(const ShapeList &wires) {
+  return guard("loft shell", [&] {
+    if (wires.items.size() < 2) {
+      fail("loft shell", "needs at least two sections");
+    }
+    BRepOffsetAPI_ThruSections loft(false, false, 1e-6);
+    loft.CheckCompatibility(true);
+    for (const auto &w : wires.items) {
+      loft.AddWire(TopoDS::Wire(w));
+    }
+    loft.Build();
+    if (!loft.IsDone()) {
+      fail("loft shell", "surfaces through the sections failed");
+    }
+    return wrap(loft.Shape(), "loft shell");
+  });
+}
+
+// The faces of all `shapes` sewn where their edges lie within `tolerance` of each other.
+std::unique_ptr<Shape> sew_shapes(const ShapeList &shapes, double tolerance) {
+  return guard("sewing", [&] {
+    BRepBuilderAPI_Sewing sewing(tolerance);
+    for (const auto &s : shapes.items) {
+      sewing.Add(s);
+    }
+    sewing.Perform();
+    return wrap(sewing.SewedShape(), "sewing");
+  });
+}
+
+// The solid bounded by the closed shells of `shape`, its faces facing out.
+std::unique_ptr<Shape> make_solid(const Shape &shape) {
+  return guard("solid", [&] {
+    BRepBuilderAPI_MakeSolid make;
+    int shells = 0;
+    for (TopExp_Explorer e(shape.shape, TopAbs_SHELL); e.More(); e.Next()) {
+      make.Add(TopoDS::Shell(e.Current()));
+      ++shells;
+    }
+    if (shells == 0 || !make.IsDone()) {
+      fail("solid", "no shell to close");
+    }
+    ShapeFix_Solid fix(make.Solid());
+    fix.Perform();
+    TopoDS_Shape solid = fix.Solid();
+    if (signed_volume(solid) < 0.0) {
+      solid.Reverse();
+    }
+    return wrap(solid, "solid");
+  });
+}
+
+// `samples` points along each edge of the shells of `shape` that bounds only one face:
+// where its surface is open.
+rust::Vec<P3> free_edge_samples(const Shape &shape, std::size_t samples) {
+  return guard("free edges", [&] {
+    ShapeAnalysis_FreeBounds bounds(shape.shape, false, false);
+    TopoDS_Compound all;
+    BRep_Builder builder;
+    builder.MakeCompound(all);
+    for (const TopoDS_Compound &wires : {bounds.GetClosedWires(), bounds.GetOpenWires()}) {
+      if (!wires.IsNull()) {
+        builder.Add(all, wires);
+      }
+    }
+    return edge_samples(Shape{all}, samples);
+  });
+}
+
+// For each triangle of the last triangulation of `shape`, in the order of `triangles`,
+// the index of its face in OCCT's indexed face map, from 0.
+rust::Vec<std::uint32_t> triangle_faces(const Shape &shape) {
+  NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces;
+  TopExp::MapShapes(shape.shape, TopAbs_FACE, faces);
+  rust::Vec<std::uint32_t> out;
+  for (TopExp_Explorer f(shape.shape, TopAbs_FACE); f.More(); f.Next()) {
+    const TopoDS_Face &face = TopoDS::Face(f.Current());
+    TopLoc_Location location;
+    const occ::handle<Poly_Triangulation> facets = BRep_Tool::Triangulation(face, location);
+    if (facets.IsNull()) {
+      continue;
+    }
+    const auto index = static_cast<std::uint32_t>(faces.FindIndex(face) - 1);
+    for (int i = 1; i <= facets->NbTriangles(); ++i) {
+      out.push_back(index);
+    }
+  }
+  return out;
+}
+
+// `shape` swept about the z axis through `angle` (rad): a wire into faces, a face into a
+// solid.
+std::unique_ptr<Shape> revolve_z_by(const Shape &shape, double angle) {
+  return guard("revolution", [&] {
+    BRepPrimAPI_MakeRevol revol(shape.shape, gp::OZ(), angle);
+    revol.Build();
+    if (!revol.IsDone()) {
+      fail("revolution", "failed");
+    }
+    return wrap(revol.Shape(), "revolution");
+  });
+}
+
+// For each face of `shape`, in OCCT's indexed face map: 1 if planar, else 0, then the
+// plane's normal and a point on it (zeros for others): seven numbers a face.
+rust::Vec<double> face_planes(const Shape &shape) {
+  NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces;
+  TopExp::MapShapes(shape.shape, TopAbs_FACE, faces);
+  rust::Vec<double> out;
+  for (int i = 1; i <= faces.Extent(); ++i) {
+    BRepAdaptor_Surface surface(TopoDS::Face(faces(i)));
+    if (surface.GetType() == GeomAbs_Plane) {
+      const gp_Pln plane = surface.Plane();
+      const gp_Dir n = plane.Axis().Direction();
+      const gp_Pnt p = plane.Location();
+      for (double v : {1.0, n.X(), n.Y(), n.Z(), p.X(), p.Y(), p.Z()}) {
+        out.push_back(v);
+      }
+    } else {
+      for (int k = 0; k < 7; ++k) {
+        out.push_back(0.0);
+      }
+    }
+  }
+  return out;
+}
+
+// The faces of `shape` whose indices (from 0, in OCCT's indexed face map) are not in
+// `dropped`, as a compound.
+std::unique_ptr<Shape> faces_except(const Shape &shape, rust::Slice<const std::uint32_t> dropped) {
+  return guard("faces", [&] {
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces;
+    TopExp::MapShapes(shape.shape, TopAbs_FACE, faces);
+    TopoDS_Compound kept;
+    BRep_Builder builder;
+    builder.MakeCompound(kept);
+    for (int i = 1; i <= faces.Extent(); ++i) {
+      bool drop = false;
+      for (std::uint32_t d : dropped) {
+        drop = drop || int(d) + 1 == i;
+      }
+      if (!drop) {
+        builder.Add(kept, faces(i));
+      }
+    }
+    return wrap(kept, "faces");
   });
 }
 

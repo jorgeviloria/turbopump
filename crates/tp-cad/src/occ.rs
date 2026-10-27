@@ -139,6 +139,45 @@ impl Shape {
             .collect())
     }
 
+    /// The face of each triangle of the last [`Self::triangles`], as indices from 0.
+    pub fn triangle_faces(&self) -> Vec<u32> {
+        ffi::triangle_faces(&self.0)
+    }
+
+    /// The edges of the shells of the shape that bound only one face, `samples` points
+    /// each: where the surface is open. Empty for a closed shell or solid.
+    pub fn free_edges(&self, samples: usize) -> Result<Vec<Vec<DVec3>>, CadError> {
+        let flat = ffi::free_edge_samples(&self.0, samples.max(1))
+            .map_err(|e| CadError::Operation(e.what().to_owned()))?;
+        Ok(flat
+            .chunks(samples.max(1))
+            .filter(|chunk| !chunk.iter().any(|p| p.x.is_nan()))
+            .map(|chunk| chunk.iter().map(|p| DVec3::new(p.x, p.y, p.z)).collect())
+            .collect())
+    }
+
+    /// For each face, in the order of OCCT's indexed face map, its plane as a normal and
+    /// a point on it; `None` for a face that is not planar.
+    pub fn face_planes(&self) -> Vec<Option<(DVec3, DVec3)>> {
+        ffi::face_planes(&self.0)
+            .chunks(7)
+            .map(|f| {
+                (f[0] > 0.5).then(|| (DVec3::new(f[1], f[2], f[3]), DVec3::new(f[4], f[5], f[6])))
+            })
+            .collect()
+    }
+
+    /// The faces of the shape but those at `dropped` (indices as in [`Self::face_planes`]),
+    /// as a compound.
+    pub fn faces_except(&self, dropped: &[u32]) -> Result<Shape, CadError> {
+        op("faces", ffi::faces_except(&self.0, dropped))
+    }
+
+    /// The solid the closed shells of the shape bound, facing out.
+    pub fn solid(&self) -> Result<Shape, CadError> {
+        op("solid", ffi::make_solid(&self.0))
+    }
+
     /// Distance from each of `points` to the nearest face of the shape: to its surface,
     /// whether the point lies inside or outside. Slow on large shapes: tens of
     /// milliseconds a point.
@@ -299,6 +338,12 @@ pub fn cylinder(
     )
 }
 
+/// `shape` swept about the z axis through `angle` (rad), counter-clockwise: a wire into
+/// faces, a face into a solid.
+pub fn revolve_z_by(shape: &Shape, angle: f64) -> Result<Shape, CadError> {
+    op("revolution", ffi::revolve_z_by(&shape.0, angle))
+}
+
 /// Solid of revolution of a planar face through 360° about the z axis.
 pub fn revolve_z(face: &Shape) -> Result<Shape, CadError> {
     op(
@@ -317,6 +362,26 @@ pub fn loft(wires: &[Shape]) -> Result<Shape, CadError> {
     op(
         "loft",
         crate::profile::op("loft", || ffi::loft_solid(&list(&refs))),
+    )
+}
+
+/// The faces lofted through section `wires` (closed or open), without end caps.
+pub fn loft_shell(wires: &[Shape]) -> Result<Shape, CadError> {
+    if wires.len() < 2 {
+        return Err(CadError::Input("a loft needs at least two sections".into()));
+    }
+    let refs: Vec<&Shape> = wires.iter().collect();
+    op(
+        "loft shell",
+        crate::profile::op("loft shell", || ffi::loft_shell(&list(&refs))),
+    )
+}
+
+/// The faces of `shapes` sewn where their edges lie within `tolerance` (mm).
+pub fn sew(shapes: &[&Shape], tolerance: f64) -> Result<Shape, CadError> {
+    op(
+        "sewing",
+        crate::profile::op("sew", || ffi::sew_shapes(&list(shapes), tolerance)),
     )
 }
 
@@ -354,6 +419,34 @@ mod tests {
     use super::*;
     use approx::assert_relative_eq;
     use std::f64::consts::PI;
+
+    #[test]
+    fn lofted_faces_and_caps_sew_into_a_closed_solid() {
+        let (bottom, top) = (circle(10.0, 0.0, 0.0), circle(10.0, 20.0, 0.0));
+        let side = loft_shell(&[
+            circle(10.0, 0.0, 0.0),
+            circle(10.0, 10.0, 0.0),
+            circle(10.0, 20.0, 0.0),
+        ])
+        .unwrap();
+        // Open at both ends until capped.
+        let open = sew(&[&side], 1e-3).unwrap();
+        assert_eq!(open.free_edges(5).unwrap().len(), 2);
+        let caps = [planar_face(&bottom).unwrap(), planar_face(&top).unwrap()];
+        let shell = sew(&[&side, &caps[0], &caps[1]], 1e-3).unwrap();
+        assert!(shell.free_edges(5).unwrap().is_empty());
+        let solid = shell.solid().unwrap();
+        assert!(solid.is_valid());
+        assert_relative_eq!(solid.volume(), PI * 100.0 * 20.0, max_relative = 1e-3);
+        // Every triangle knows its face: the side and the two caps.
+        let triangles = solid.triangles(0.1).unwrap();
+        let faces = solid.triangle_faces();
+        assert_eq!(faces.len(), triangles.len());
+        let mut distinct = faces.clone();
+        distinct.sort_unstable();
+        distinct.dedup();
+        assert_eq!(distinct.len(), solid.face_count());
+    }
 
     /// Rectangle (r from 10 to 20, z from 0 to 5) in the xz plane.
     fn ring_profile() -> Shape {

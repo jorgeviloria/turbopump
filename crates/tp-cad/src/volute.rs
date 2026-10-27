@@ -18,7 +18,7 @@ use crate::CadError;
 use crate::occ::{self, Shape};
 
 /// Millimetres per metre: the CAD model is built in millimetres.
-const MM: f64 = 1000.0;
+pub(crate) const MM: f64 = 1000.0;
 
 /// CAD solids of one volute, in millimetres.
 #[derive(Debug)]
@@ -58,7 +58,7 @@ impl VoluteCasing {
 }
 
 /// Closed wire through one section: one edge per smooth piece of the outline.
-fn section_wire(ring: &[DVec3], breaks: &[usize]) -> Result<Shape, CadError> {
+pub(crate) fn section_wire(ring: &[DVec3], breaks: &[usize]) -> Result<Shape, CadError> {
     let points: Vec<DVec3> = ring.iter().map(|p| *p * MM).collect();
     if breaks.len() < 2 {
         return occ::wire(&[occ::spline_edge(&points, true)?]);
@@ -134,7 +134,7 @@ fn smooth_pieces(points: &[DVec2]) -> Vec<Vec<DVec2>> {
 /// leaves the throat, the diffuser and the start of the spiral share their side walls
 /// for a stretch, and lofted walls run nearly coincident with each other or with the
 /// inlet ring.
-const FUZZY_GAPS: [f64; 5] = [0.0, 1e-3, 1e-4, 1e-2, 1e-1];
+pub(crate) const FUZZY_GAPS: [f64; 5] = [0.0, 1e-3, 1e-4, 1e-2, 1e-1];
 
 /// One solid lofted through each sequence of outlines.
 fn loft_pieces(pieces: &[Vec<Vec<DVec3>>], breaks: &[usize]) -> Result<Vec<Shape>, CadError> {
@@ -153,7 +153,7 @@ fn loft_pieces(pieces: &[Vec<Vec<DVec3>>], breaks: &[usize]) -> Result<Vec<Shape
 /// The first attempt over [`FUZZY_GAPS`] whose result is `sound`, or turns sound once
 /// `repair`ed, else the first that built at all. Repairing a nearly valid result by
 /// shape healing costs far less than a boolean operation with the next gap.
-fn first_sound<T>(
+pub(crate) fn first_sound<T>(
     attempt: impl Fn(f64) -> Result<T, CadError>,
     sound: impl Fn(&T) -> bool,
     repair: impl Fn(&T) -> Option<T>,
@@ -1030,7 +1030,7 @@ fn tip_edges(whole: &Shape, pieces: &[Shape], g: &VoluteGeometry) -> Vec<usize> 
 /// `channel` with its cutwater edge rounded by the kernel, and the radius it took, mm: the
 /// edges of the tip that run across the height, with `radius` or a part of it if this
 /// one is too much; `None` if the kernel builds nothing sound.
-fn fillet_tip(
+pub(crate) fn fillet_tip(
     channel: &Shape,
     pieces: &[Shape],
     g: &VoluteGeometry,
