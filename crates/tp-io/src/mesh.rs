@@ -225,6 +225,10 @@ pub fn volute_triangles(g: &VoluteGeometry) -> Vec<Triangle> {
 /// across the inlet width ([`VoluteGeometry::cutwater_body`]) and closed at the
 /// outermost planes. Empty unless rounded.
 pub fn cutwater_triangles(g: &VoluteGeometry) -> Vec<Triangle> {
+    // A fillet has no body: its nose is a surface of the walls ([`fillet_nose_triangles`]).
+    if g.design.cutwater_shape.is_fillet() {
+        return Vec::new();
+    }
     let body = g.cutwater_body();
     let rings: Vec<&Vec<DVec3>> = body.iter().collect();
     let mut out = Vec::new();
@@ -366,6 +370,43 @@ pub fn rib_triangles(g: &VoluteGeometry) -> Vec<Triangle> {
 /// pieces of wall that lie inside another channel or inside the body of the cutwater
 /// near it, so that the cutwater shows as it is built. Not a closed surface.
 pub fn volute_view_triangles(g: &VoluteGeometry) -> Vec<Triangle> {
+    let mut out = view_walls(g);
+    out.extend(fillet_nose_triangles(g));
+    out
+}
+
+/// The surface of the nose of a fillet: the arc that rounds the tip, lofted from plane
+/// to plane, an open strip that closes the walls where they are cut. Empty for any
+/// other cutwater.
+pub fn fillet_nose_triangles(g: &VoluteGeometry) -> Vec<Triangle> {
+    let arcs = g.fillet_nose();
+    // Outward normals, into the flow: the planes run from −z to +z and the outline runs
+    // counter-clockwise or not as the body's does.
+    let body = g.cutwater_body();
+    let Some(first) = body.first() else {
+        return Vec::new();
+    };
+    let n = first.len();
+    let counter_clockwise = (0..n)
+        .map(|i| first[i].truncate().perp_dot(first[(i + 1) % n].truncate()))
+        .sum::<f64>()
+        > 0.0;
+    let mut out = Vec::new();
+    for pair in arcs.windows(2) {
+        let (a, b) = (&pair[0], &pair[1]);
+        for i in 0..a.len().min(b.len()).saturating_sub(1) {
+            if counter_clockwise {
+                quad(&mut out, a[i], a[i + 1], b[i + 1], b[i]);
+            } else {
+                quad(&mut out, b[i], b[i + 1], a[i + 1], a[i]);
+            }
+        }
+    }
+    out
+}
+
+/// The inner surface of the walls for viewing, without the pieces the cutwater replaces.
+fn view_walls(g: &VoluteGeometry) -> Vec<Triangle> {
     let all = volute_triangles(g);
     let slices = &g.cutwater_slices;
     let channels = g.channels();
@@ -777,6 +818,40 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_fillet_has_no_body_of_its_own_but_a_nose_in_the_walls() {
+        use tp_design::volute::CutwaterShape;
+        let g = reference_volute(|v| {
+            v.cutwater.shape = CutwaterShape::Fillet {
+                radius: tp_design::Param::Manual(0.0015),
+            };
+        });
+        // No solid to draw apart, as for a rounded cutwater.
+        assert!(cutwater_triangles(&g).is_empty());
+        // The nose is a strip of the surface of the walls: between the planes too, along
+        // the arc, no nearer to the axis than the nearest point of the nose.
+        let nose = fillet_nose_triangles(&g);
+        assert!(!nose.is_empty());
+        let nearest = g
+            .cutwater_slices
+            .iter()
+            .map(|s| s.nose_distance)
+            .fold(f64::INFINITY, f64::min);
+        for t in &nose {
+            for p in t {
+                assert!(p.truncate().length() >= nearest - 1e-6);
+            }
+        }
+        assert_eq!(
+            volute_view_triangles(&g).len(),
+            view_walls(&g).len() + nose.len()
+        );
+        // The rounded cutwater keeps its body and has no strip.
+        let rounded = reference_volute(|_| {});
+        assert!(!cutwater_triangles(&rounded).is_empty());
+        assert!(fillet_nose_triangles(&rounded).is_empty());
+    }
+
+    #[test]
     fn the_walls_stop_at_the_arc_of_a_fillet() {
         use tp_design::volute::CutwaterShape;
         let g = reference_volute(|v| {
@@ -808,7 +883,7 @@ pub(crate) mod tests {
             .flat_map(|t| subdivided(t, SLIVER_SPLITS))
             .collect();
         assert!(in_sliver(&full) > 0, "the full surface reaches the tip");
-        assert_eq!(in_sliver(&volute_view_triangles(&g)), 0);
+        assert_eq!(in_sliver(&view_walls(&g)), 0);
     }
 
     #[test]
