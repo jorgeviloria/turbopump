@@ -499,8 +499,17 @@ impl CutwaterPage {
                         if k == plane || s.outline.is_empty() {
                             continue;
                         }
-                        let mut closed = s.outline.iter().map(|p| p.truncate()).collect::<Vec<_>>();
-                        closed.push(closed[0]);
+                        let closed = if g.design.cutwater_shape.is_fillet() {
+                            s.nose_arc()
+                                .iter()
+                                .map(|p| p.truncate())
+                                .collect::<Vec<_>>()
+                        } else {
+                            let mut closed =
+                                s.outline.iter().map(|p| p.truncate()).collect::<Vec<_>>();
+                            closed.push(closed[0]);
+                            closed
+                        };
                         plot.line(
                             Line::new(String::new(), line(&mut closed.into_iter()))
                                 .color(palette.shroud.gamma_multiply(0.35))
@@ -536,7 +545,17 @@ impl CutwaterPage {
                     .color(palette.volute)
                     .width(2.0),
                 );
-                if !shown.outline.is_empty() {
+                if g.design.cutwater_shape.is_fillet() {
+                    // The nose is the arc between the two walls, not a body of its own.
+                    plot.line(
+                        Line::new(
+                            tr("cutwater"),
+                            line(&mut shown.nose_arc().iter().map(|p| p.truncate())),
+                        )
+                        .color(palette.shroud)
+                        .width(2.4),
+                    );
+                } else if !shown.outline.is_empty() {
                     let mut closed = body.clone();
                     closed.push(body[0]);
                     plot.line(
@@ -567,7 +586,7 @@ impl CutwaterPage {
         let t = response.transform;
         super::settle(ui, ("cutwater_plot", g.basis.midplane.to_bits()), &t);
         self.transform = Some(t);
-        if !shown.outline.is_empty() {
+        if !shown.outline.is_empty() && !g.design.cutwater_shape.is_fillet() {
             fill_strip(ui, &t, &body, scale, palette.shroud.gamma_multiply(0.25));
         }
         let painter = ui.painter_at(*t.frame());
@@ -638,9 +657,16 @@ impl CutwaterPage {
             .iter()
             .filter(|s| !s.outline.is_empty())
             .collect();
+        let fillet = g.design.cutwater_shape.is_fillet();
         let rings: Vec<Vec<DVec3>> = slices
             .iter()
-            .map(|s| s.outline.iter().step_by(PREVIEW_STRIDE).copied().collect())
+            .map(|s| {
+                if fillet {
+                    s.nose_arc().to_vec()
+                } else {
+                    s.outline.iter().step_by(PREVIEW_STRIDE).copied().collect()
+                }
+            })
             .collect();
         let points: Vec<DVec3> = if rings.is_empty() {
             g.cutwater_slices
@@ -683,13 +709,18 @@ impl CutwaterPage {
         for pair in rings.windows(2) {
             let (a, b) = (&pair[0], &pair[1]);
             let n = a.len().min(b.len());
-            for i in 0..n {
+            // A fillet's nose is an open strip between the two walls.
+            for i in 0..if fillet { n.saturating_sub(1) } else { n } {
                 let j = (i + 1) % n;
                 triangles.push([a[i], a[j], b[j]]);
                 triangles.push([a[i], b[j], b[i]]);
             }
         }
-        for ring in [rings.first(), rings.last()].into_iter().flatten() {
+        for ring in [rings.first(), rings.last()]
+            .into_iter()
+            .flatten()
+            .filter(|_| !fillet)
+        {
             let n = ring.len();
             for i in 0..n / 2 {
                 let (p, q) = (ring[i], ring[i + 1]);
@@ -710,7 +741,11 @@ impl CutwaterPage {
             .collect();
         shaded.sort_by(|a, b| a.0.total_cmp(&b.0));
         let mut mesh = egui::Mesh::default();
-        let base = palette.shroud;
+        let base = if fillet {
+            palette.volute
+        } else {
+            palette.shroud
+        };
         for (_, corners, light) in shaded {
             let color = Color32::from_rgb(
                 (base.r() as f32 * light) as u8,
