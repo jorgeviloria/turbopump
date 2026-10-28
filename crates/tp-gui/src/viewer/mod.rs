@@ -760,9 +760,13 @@ impl Viewer {
     }
 }
 
-/// What the view says of the CAD model of the volute: nothing until it is asked for.
+/// What the view says of the CAD model: that it shows its quick mesh until the model is
+/// asked for, then how the model stands.
 fn cad_status(status: cad::Status<'_>) -> Option<String> {
     Some(match status {
+        cad::Status::Absent if CadView::AVAILABLE => {
+            tr("Quick preview · Generate 3D (CAD) shows the solids as they are exported").to_owned()
+        }
         cad::Status::Absent => return None,
         cad::Status::Building(seconds) => crate::i18n::tf(
             "Generating the CAD model… {} s",

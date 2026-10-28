@@ -1674,6 +1674,10 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Impeller (solid)", "Impulsor (sólido)"),
     (" · {} warnings", " · {} avisos"),
     ("Flow channel", "Canal de flujo"),
+    (
+        "Quick preview · Generate 3D (CAD) shows the solids as they are exported",
+        "Vista rápida · «Generar 3D (CAD)» muestra los sólidos tal como se exportan",
+    ),
     ("Fit", "Encuadrar"),
     (
         "Fit the model in the view",
