@@ -1646,6 +1646,29 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Remove {} from the project", "Quitar {} del proyecto"),
     ("Views", "Vistas"),
     ("Camera", "Cámara"),
+    ("CAD model", "Modelo CAD"),
+    ("Generate 3D (CAD)", "Generar 3D (CAD)"),
+    (
+        "Builds the volute as it is exported, flow domain and casing without its flange, and shows it in place of the quick mesh; hidden again when the design changes",
+        "Construye la voluta tal como se exporta, dominio de flujo y carcasa sin brida, y la muestra en lugar de la malla rápida; se oculta de nuevo cuando cambia el diseño",
+    ),
+    (
+        "Generating the CAD model… {} s",
+        "Generando el modelo CAD… {} s",
+    ),
+    (
+        "The design changed: the CAD model is hidden until generated again",
+        "El diseño cambió: el modelo CAD queda oculto hasta generarlo de nuevo",
+    ),
+    (
+        "The CAD model could not be generated: {}",
+        "No se pudo generar el modelo CAD: {}",
+    ),
+    ("sewn surfaces", "superficies cosidas"),
+    ("boolean operations", "operaciones booleanas"),
+    ("CAD model: {}, {} s", "Modelo CAD: {}, {} s"),
+    (" · {} warnings", " · {} avisos"),
+    ("Flow channel", "Canal de flujo"),
     ("Fit", "Encuadrar"),
     (
         "Fit the model in the view",

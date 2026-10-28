@@ -1299,7 +1299,13 @@ impl TurbopumpApp {
             cutwater: self
                 .active_volute()
                 .and_then(|id| self.derived.volute(id))
-                .is_some_and(|g| !g.cutwater_outline().is_empty() || g.rib.is_some()),
+                .is_some_and(|g| !g.cutwater_outline().is_empty() || g.rib.is_some())
+                && self.viewer.cad.mesh(self.derived.revision()).is_none(),
+            casing: self
+                .viewer
+                .cad
+                .mesh(self.derived.revision())
+                .is_some_and(|m| !m.casing.is_empty()),
         }
     }
 

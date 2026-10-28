@@ -90,10 +90,11 @@ enum Key {
     Sections,
     Duct,
     Cutwater,
+    Casing,
 }
 
 impl Key {
-    const ALL: [Key; 9] = [
+    const ALL: [Key; 10] = [
         Key::Blades,
         Key::Hub,
         Key::Shroud,
@@ -103,6 +104,7 @@ impl Key {
         Key::Sections,
         Key::Duct,
         Key::Cutwater,
+        Key::Casing,
     ];
 
     fn shown(self, o: &ViewOptions) -> bool {
@@ -131,6 +133,7 @@ impl Key {
             Key::Sections => None,
             Key::Duct => Some(PartId::Duct),
             Key::Cutwater => Some(PartId::Cutwater),
+            Key::Casing => Some(PartId::Casing),
         }
     }
 
@@ -163,6 +166,8 @@ pub(crate) struct Stage {
     pub volute: Option<String>,
     /// Whether the volute has the body of a rounded cutwater.
     pub cutwater: bool,
+    /// Whether the CAD model of the volute, with its casing, is shown.
+    pub casing: bool,
 }
 
 impl Stage {
@@ -189,6 +194,9 @@ impl Stage {
             let mut keys = vec![Key::Volute, Key::Sections];
             if self.cutwater {
                 keys.insert(1, Key::Cutwater);
+            }
+            if self.casing {
+                keys.insert(1, Key::Casing);
             }
             groups.push((ComponentKind::Volute, name.clone(), keys));
         }

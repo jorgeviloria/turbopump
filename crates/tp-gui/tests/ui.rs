@@ -306,7 +306,7 @@ fn the_panel_accepts_steps_and_the_column_adds_components() {
     harness.state_mut().focus_view(View::View3d);
     harness.run();
     harness.get_by_label("Side walls");
-    harness.get_by_label("Casing");
+    harness.get_by_label("Flow channel");
 }
 
 /// The labels of the property rows in sight that are cut short: their text, wider than
@@ -856,11 +856,11 @@ fn the_scene_shows_hides_and_isolates_the_parts() {
     let shown = |h: &Harness<'_, TurbopumpApp>, part: &str| {
         eye(h, part).accesskit_node().toggled() == Some(egui::accesskit::Toggled::True)
     };
-    assert!(shown(&harness, "Casing"));
+    assert!(shown(&harness, "Flow channel"));
     // The eye hides a part.
-    eye(&harness, "Casing").click();
+    eye(&harness, "Flow channel").click();
     harness.run();
-    assert!(!shown(&harness, "Casing"));
+    assert!(!shown(&harness, "Flow channel"));
     // Isolating the blades hides every other part; again, everything comes back.
     harness.get_by_label("Isolate Blades").click();
     harness.run();
@@ -869,7 +869,7 @@ fn the_scene_shows_hides_and_isolates_the_parts() {
     harness.get_by_label("Isolate Blades").click();
     harness.run();
     assert!(shown(&harness, "Hub (disk)"));
-    assert!(!shown(&harness, "Casing"), "as it was before");
+    assert!(!shown(&harness, "Flow channel"), "as it was before");
     // One blade or all of them.
     harness.get_by_label("All blades").click();
     harness.run();
@@ -879,13 +879,13 @@ fn the_scene_shows_hides_and_isolates_the_parts() {
     harness.run();
     harness.get_by_label("Show all").click();
     harness.run();
-    assert!(shown(&harness, "Casing"));
+    assert!(shown(&harness, "Flow channel"));
     harness.get_by_label("Fold the scene").click();
     harness.run();
-    assert!(harness.query_by_label("Casing").is_none());
+    assert!(harness.query_by_label("Flow channel").is_none());
     harness.get_by_label("Show the scene").click();
     harness.run();
-    eye(&harness, "Casing");
+    eye(&harness, "Flow channel");
 }
 
 /// Whether a toggle button is on, however its role reports it.
@@ -902,13 +902,13 @@ fn the_scene_sets_opacity_and_color_and_the_camera_goes_parallel() {
     harness.get_by_label("3D tab").click();
     harness.run();
     // The casing starts as glass; the button steps to opaque, then translucent.
-    assert!(is_on(&harness.get_by_label("Opacity of Casing")));
-    harness.get_by_label("Opacity of Casing").click();
+    assert!(is_on(&harness.get_by_label("Opacity of Flow channel")));
+    harness.get_by_label("Opacity of Flow channel").click();
     harness.run();
-    assert!(!is_on(&harness.get_by_label("Opacity of Casing")));
-    harness.get_by_label("Opacity of Casing").click();
+    assert!(!is_on(&harness.get_by_label("Opacity of Flow channel")));
+    harness.get_by_label("Opacity of Flow channel").click();
     harness.run();
-    assert!(is_on(&harness.get_by_label("Opacity of Casing")));
+    assert!(is_on(&harness.get_by_label("Opacity of Flow channel")));
     // The swatch opens the color and the three opacities; the color is the default one.
     harness.get_by_label("Color of Blades").click();
     harness.run();
@@ -1345,7 +1345,7 @@ fn nothing_moves_when_a_toggle_is_selected() {
     harness.run();
     for toggle in [
         "Orthographic",
-        "Opacity of Casing",
+        "Opacity of Flow channel",
         "Opacity of Blades",
         "Shaded",
         "Meridional cut",
