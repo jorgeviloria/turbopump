@@ -253,6 +253,55 @@ pub(super) fn crossing_counts(
         .collect()
 }
 
+/// The walls near the cutwater in one plane z = const, as the model has them (turned):
+/// the outer wall of the spiral from where its sections first reach the plane, and the
+/// inner wall of the diffuser, both downstream; how many times they cross and the first
+/// crossing, the tip of the cutwater in that plane.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TongueCut {
+    /// m
+    pub z: f64,
+    pub spiral: Vec<DVec3>,
+    pub diffuser: Vec<DVec3>,
+    pub crossings: usize,
+    pub tip: Option<DVec3>,
+}
+
+/// The walls of the spiral `outlines` (r, z by wrap angle) and of the diffuser `nozzle`
+/// (turned) in the plane z = `z`, the spiral turned by `rotation` for an impeller
+/// turning with `sign`.
+pub(super) fn tongue_cut(
+    outlines: &[(f64, Vec<DVec2>)],
+    nozzle: &[NozzleSection],
+    sign: f64,
+    rotation: f64,
+    z: f64,
+) -> Option<TongueCut> {
+    let spiral: Vec<DVec2> = outlines
+        .iter()
+        .filter_map(|(angle, outline)| {
+            let r = outermost_at(outline, z)?;
+            let theta = rotation + sign * angle;
+            Some(DVec2::new(r * theta.cos(), r * theta.sin()))
+        })
+        .collect();
+    let spiral = catmull_rom(&spiral, SPIRAL_SUBDIVISIONS);
+    let inner: Vec<DVec2> = nozzle.iter().filter_map(|n| innermost_at(n, z)).collect();
+    let diffuser = catmull_rom(&inner, DIFFUSER_SUBDIVISIONS);
+    if spiral.len() < 2 || diffuser.len() < 2 {
+        return None;
+    }
+    let walls = Walls { spiral, diffuser };
+    let lift = |p: &DVec2| DVec3::new(p.x, p.y, z);
+    Some(TongueCut {
+        z,
+        crossings: walls.count_crossings(),
+        tip: walls.crossing().map(|(s, _)| lift(&s.point)),
+        spiral: walls.spiral.iter().map(lift).collect(),
+        diffuser: walls.diffuser.iter().map(lift).collect(),
+    })
+}
+
 /// The two walls in one plane, as polylines (x, y) downstream.
 struct Walls {
     spiral: Vec<DVec2>,
@@ -1331,6 +1380,30 @@ mod tests {
         };
         let err = VoluteGeometry::build(&reference_basis(), &input);
         assert!(err.is_err(), "a 500 mm fillet cannot fit");
+    }
+
+    #[test]
+    fn the_cut_at_any_height_finds_the_tip_until_the_wedge_closes() {
+        let g = build(|v| v.cutwater.shape = CutwaterShape::Sharp);
+        let zm = g.basis.midplane;
+        let half = g.design.inlet_width / 2.0;
+        // In the midplane the tip is the cutwater's.
+        let mid = g.tongue_cut(zm).expect("the walls in the midplane");
+        assert_eq!(mid.crossings, 1);
+        let tip = mid.tip.expect("a tip");
+        assert!(tip.truncate().distance(g.cutwater.tip.truncate()) < 1e-6);
+        // Across the inlet width the tip stays put; well past it the wedge has closed:
+        // the spiral starts there only where it already lies inside the diffuser wall.
+        for dz in [-0.9 * half, 0.5 * half, 0.9 * half] {
+            let cut = g.tongue_cut(zm + dz).expect("the walls across the width");
+            assert_eq!(cut.crossings, 1, "{dz}");
+            assert!(cut.tip.unwrap().truncate().distance(tip.truncate()) < 1e-3);
+        }
+        for dz in [-(half + 3e-3), half + 3e-3] {
+            if let Some(cut) = g.tongue_cut(zm + dz) {
+                assert_eq!(cut.crossings, 0, "{dz}");
+            }
+        }
     }
 
     #[test]

@@ -253,6 +253,10 @@ pub struct VoluteGeometry {
     /// The body of a rounded cutwater as outlines from −z to +z, between its planes
     /// too and widening into the side walls ([`super::cutwater::body_outlines`]).
     cutwater_body: Vec<Vec<DVec3>>,
+    /// Outlines (r, z) of the spiral every degree or less over its first stretch, by
+    /// wrap angle from the cutwater: what the planes of the cutwater cut. Empty where
+    /// the cutwater does not cut the diffuser.
+    cutwater_walls: Vec<(f64, Vec<DVec2>)>,
     /// Internal sections: the bend and the neck from the inlet to the spiral, in the
     /// plane of a section (s, h), the same all round.
     pub bend: Option<Bend>,
@@ -392,6 +396,19 @@ impl VoluteGeometry {
                     .cloned()
             })
             .collect()
+    }
+
+    /// The walls near the cutwater in the plane z = `z` (m): see
+    /// [`super::cutwater::TongueCut`]. `None` where the cutwater does not cut the
+    /// diffuser, or the walls do not reach that plane.
+    pub fn tongue_cut(&self, z: f64) -> Option<super::cutwater::TongueCut> {
+        super::cutwater::tongue_cut(
+            &self.cutwater_walls,
+            &self.nozzle,
+            self.basis.rotation_sign,
+            self.rotation,
+            z,
+        )
     }
 
     /// The pieces of the flow channel, each a sequence of outlines in 3D to loft
@@ -1308,10 +1325,12 @@ impl VoluteGeometry {
         let cuts_the_diffuser = bend.is_none()
             && first <= 0.0
             && !matches!(design.cutwater_shape, CutwaterShape::Tangent);
+        let mut cutwater_walls = Vec::new();
         let (cutwater_slices, cutwater_body) = if cuts_the_diffuser {
             let end = (start + CUTWATER_SPAN).min(design.rib.as_ref().map_or(TAU, |r| r.start));
             let near = wall_outlines.partition_point(|(angle, _)| *angle <= end);
             let walls = &wall_outlines[..near];
+            cutwater_walls = walls.to_vec();
             let (slices, centre) = super::cutwater::slices(&design, walls, &nozzle, sign, zm);
             let e = 2.0 * design.nose_radius;
             let oblique = design.cutwater_obliquity;
@@ -1642,6 +1661,7 @@ impl VoluteGeometry {
             cutwater,
             cutwater_slices,
             cutwater_body,
+            cutwater_walls,
             bend,
             warnings,
         };
