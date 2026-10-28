@@ -991,8 +991,8 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ),
     ("Base form factor", "Factor de forma de la base"),
     (
-        "How round the diffuser is on its base side, toward the pump axis: 0 keeps the corners of the last section of the spiral, 1 would round that side to the circle (the limit is 0.75). It builds up over the first 30 % of the length and changes where the spiral wall crosses the diffuser wall",
-        "Cuán redondo es el difusor en su lado de la base, hacia el eje de la bomba: 0 conserva las esquinas de la última sección de la espiral, 1 redondearía ese lado hasta el círculo (el límite es 0,75). Se forma en el primer 30 % de la longitud y cambia dónde la pared de la espiral cruza la del difusor",
+        "How round the first section of the diffuser is on its base side, the inlet chord toward the pump axis: 0 keeps the flat chord of the throat, so that diffuser and spiral run along each other there; above it the chord bulges toward the axis (1: half an ellipse as deep as half the chord, at most nine tenths of the gap to the impeller), so that the diffuser crosses the start of the spiral. It fades out along the diffuser; a rounder base moves the cutwater downstream",
+        "Cuán redonda es la primera sección del difusor en su lado de la base, la cuerda de entrada hacia el eje de la bomba: 0 conserva la cuerda plana de la garganta, y difusor y espiral corren uno junto al otro allí; por encima, la cuerda se abomba hacia el eje (1: media elipse tan honda como media cuerda, como mucho nueve décimos del hueco hasta el impulsor), y el difusor corta el arranque de la espiral. Se desvanece a lo largo del difusor; una base más redonda lleva el corte de agua aguas abajo",
     ),
     ("Axial alignment", "Alineación axial"),
     (

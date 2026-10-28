@@ -25,7 +25,9 @@ const DEFAULT_SECTIONS: u32 = 36;
 /// Share of the length of the diffuser over which the height offset builds up.
 const OFFSET_REACH: f64 = 0.4;
 /// Share of the length of the diffuser over which its base side rounds.
-const BASE_REACH: f64 = 0.3;
+/// Share of the gap between the impeller and r'_z that the rounded base of the diffuser may
+/// reach into.
+const BASE_GAP_SHARE: f64 = 0.9;
 
 /// One cross section of the spiral, in its radial plane.
 #[derive(Debug, Clone, PartialEq)]
@@ -1164,8 +1166,14 @@ impl VoluteGeometry {
         // Growth of the area of the spiral per metre of the centroid path at the throat.
         let spiral_slope = (throat.size.area - before.area)
             / (position(TAU, &throat.size) - position(TAU - 0.02, &before)).length();
-        let (nozzle, nozzle_bend, nozzle_length) =
-            nozzle(&design, &throat, sign, axis, spiral_slope)?;
+        let (nozzle, nozzle_bend, nozzle_length) = nozzle(
+            &design,
+            &throat,
+            sign,
+            axis,
+            spiral_slope,
+            basis.impeller_diameter / 2.0,
+        )?;
         let nozzle_axis = nozzle.last().map_or(axis, |n| n.tangent);
         // A sharp or rounded cutwater: the spiral starts at the cutwater and cuts the
         // inner wall of the diffuser. When the wall turns away instead (a radial
@@ -2160,22 +2168,64 @@ fn lifted(
         .collect())
 }
 
-/// Sections of the discharge diffuser: the throat outline blends into a circle while
-/// the equivalent radius grows linearly along the centerline to the outlet radius. A
-/// straight diffuser keeps one wall straight or widens to both sides; a radial one
-/// stays centred on its centerline.
+/// The outline (r, z) of the throat with its base side, the inlet chord on r'_z, bulged
+/// toward the pump axis by the base form factor: half an ellipse across the chord, as
+/// deep as the factor times half the chord, at most [`BASE_GAP_SHARE`] of the gap to
+/// the impeller of radius `impeller_radius`. The inlet points stay. The outline itself
+/// for a factor of 0.
+fn rounded_base(design: &VoluteDesign, outline: &[DVec2], impeller_radius: f64) -> Vec<DVec2> {
+    let factor = design.diffuser.base_form;
+    let n = outline.len();
+    let chord = design
+        .cross_sections
+        .loft_breaks()
+        .last()
+        .copied()
+        .unwrap_or(n);
+    if factor <= 0.0 || chord + 1 >= n {
+        return outline.to_vec();
+    }
+    // The chord runs from its first point round to the first point of the outline.
+    let (a, b) = (outline[chord], outline[0]);
+    let half = 0.5 * a.distance(b);
+    let along = (b - a).normalize_or_zero();
+    let middle = (a + b) * 0.5;
+    let gap = design.stagnation_radius - impeller_radius;
+    let depth = (factor * half).min(BASE_GAP_SHARE * gap.max(0.0));
+    let mut rounded = outline.to_vec();
+    for (i, p) in outline.iter().enumerate().skip(chord + 1) {
+        let t = ((*p - middle).dot(along) / half).clamp(-1.0, 1.0);
+        rounded[i] = *p - DVec2::X * depth * (1.0 - t * t).sqrt();
+    }
+    rounded
+}
+
+/// Sections of the discharge diffuser: the throat outline, its base side rounded by the
+/// base form factor, blends into a circle while the equivalent radius grows along the
+/// centerline to the outlet radius. A straight diffuser keeps one wall straight or
+/// widens to both sides; a radial one stays centred on its centerline.
 fn nozzle(
     design: &VoluteDesign,
     throat: &VoluteSection,
     sign: f64,
     axis: DVec3,
     spiral_slope: f64,
+    impeller_radius: f64,
 ) -> Result<(Vec<NozzleSection>, f64, f64), DesignError> {
     let theta = sign * TAU;
     let radial = DVec3::new(theta.cos(), theta.sin(), 0.0);
     let local_centroid = centroid(&throat.outline);
     let throat_points: Vec<DVec2> = throat.outline.iter().map(|p| *p - local_centroid).collect();
     let throat_area = polygon_area(&throat_points).abs();
+    // The first section of the diffuser: the throat with its base rounded, which then
+    // crosses the start of the spiral instead of running along it. The area it adds
+    // fades out as the outline blends into the circle.
+    let first = VoluteSection {
+        outline: rounded_base(design, &throat.outline, impeller_radius),
+        ..throat.clone()
+    };
+    let source: Vec<DVec2> = first.outline.iter().map(|p| *p - local_centroid).collect();
+    let added = polygon_area(&source).abs() - throat_area;
     let r1 = (throat_area / std::f64::consts::PI).sqrt();
     let r2 = design.diffuser.outlet_diameter / 2.0;
     let start = DVec3::new(
@@ -2198,11 +2248,6 @@ fn nozzle(
         .iter()
         .map(|p| (*p - start).dot(u0))
         .fold(f64::NEG_INFINITY, f64::max);
-    let (x_lo, x_hi) = throat_points
-        .iter()
-        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| {
-            (lo.min(p.x), hi.max(p.x))
-        });
     // The outline the sections tend to, point for point along the rays of the throat: the
     // circle, or a rectangle of the same area with its corners on the nearest rays.
     let circle: Vec<DVec2> = match design.diffuser.outlet_shape {
@@ -2249,23 +2294,15 @@ fn nozzle(
                 return NozzleSection {
                     center: start,
                     tangent,
-                    points: throat.points(sign),
-                    area: throat_area,
+                    points: first.points(sign),
+                    area: throat_area + added,
                 };
             }
             let w = s * s * (3.0 - 2.0 * s);
-            // The base side, toward the pump axis, rounds sooner by the base form factor:
-            // full weight at its edge, none over the far half, building up from the throat.
-            let reach_b = (s / BASE_REACH).min(1.0);
-            let base = design.diffuser.base_form * reach_b * reach_b * (3.0 - 2.0 * reach_b);
-            let blend: Vec<DVec2> = throat_points
+            let blend: Vec<DVec2> = source
                 .iter()
                 .zip(&circle)
-                .map(|(t, c)| {
-                    let near = ((x_hi - t.x) / (x_hi - x_lo) * 2.0 - 1.0).clamp(0.0, 1.0);
-                    let weight = near * near * (3.0 - 2.0 * near);
-                    t.lerp(*c, w + (1.0 - w) * base * weight)
-                })
+                .map(|(t, c)| t.lerp(*c, w))
                 .collect();
             let radius = match design.diffuser.growth {
                 DiffuserGrowth::Linear => r1 + (r2 - r1) * s,
@@ -2277,6 +2314,8 @@ fn nozzle(
                     ((a0 + a * s + (a1 - a0 - a) * s * s) / PI).sqrt()
                 }
             };
+            // The area the rounded base adds fades out with the blend.
+            let radius = (radius * radius + added * (1.0 - w) / PI).sqrt();
             let scale = radius / r1 * (circle_area / polygon_area(&blend).abs()).sqrt();
             let lowest = blend.iter().map(|p| p.x).fold(f64::INFINITY, f64::min) * scale;
             let highest = blend.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max) * scale;
@@ -2708,51 +2747,49 @@ mod tests {
     }
 
     #[test]
-    fn the_base_form_factor_rounds_the_base_side_only() {
+    fn the_base_form_factor_bulges_the_first_diffuser_section_toward_the_axis() {
         let plain = with_diffuser(|_| {});
         let round = with_diffuser(|d| d.base_form = Param::Manual(0.75));
-        // The throat stays, and the area law does not change.
-        for (a, b) in plain.nozzle[0].points.iter().zip(&round.nozzle[0].points) {
+        // Without it the diffuser starts on the throat itself.
+        let throat = plain.sections.last().unwrap().points(1.0);
+        for (a, b) in plain.nozzle[0].points.iter().zip(&throat) {
             assert!(a.distance(*b) < 1e-12);
         }
-        for (a, b) in plain.nozzle.iter().zip(&round.nozzle) {
-            assert_relative_eq!(a.area, b.area, epsilon = 1e-12);
-        }
-        // Past the first steps the outline differs, more on the base side (toward the
-        // axis, small radius) than on the far side.
-        let k = 4;
+        // With it the inlet chord of the first section bulges toward the axis, by the
+        // factor times half the chord or nine tenths of the gap to the impeller,
+        // whichever is less; the inlet points and the rest of the outline stay.
+        let chord = *round.ring_breaks().last().unwrap();
+        let n = throat.len();
         let radius = |p: &DVec3| p.truncate().length();
-        let moved: Vec<f64> = plain.nozzle[k]
+        let (r2, r3) = round.inlet_ring();
+        let half = 0.5 * throat[chord].distance(throat[0]);
+        let depth = (0.75 * half).min(0.9 * (r3 - r2));
+        let first = &round.nozzle[0].points;
+        let deepest = first.iter().map(radius).fold(f64::INFINITY, f64::min);
+        assert_relative_eq!(r3 - deepest, depth, max_relative = 0.02);
+        assert!(deepest > r2, "the bulge keeps off the impeller");
+        for i in (0..=chord).chain([0]) {
+            assert!(first[i].distance(throat[i]) < 1e-12, "point {i}");
+        }
+        assert!((chord + 1..n).all(|i| radius(&first[i]) < r3 - 1e-6));
+        assert!(round.nozzle[0].area > plain.nozzle[0].area);
+        // It fades out: the outlet is the same.
+        let last = round.nozzle.len() - 1;
+        assert_relative_eq!(
+            round.nozzle[last].area,
+            plain.nozzle[last].area,
+            epsilon = 1e-12
+        );
+        for (a, b) in plain.nozzle[last]
             .points
             .iter()
-            .zip(&round.nozzle[k].points)
-            .map(|(a, b)| a.distance(*b))
-            .collect();
-        assert!(moved.iter().cloned().fold(0.0, f64::max) > 1e-3);
-        let (near, far): (Vec<f64>, Vec<f64>) = {
-            let mid = plain.nozzle[k].points.iter().map(radius).sum::<f64>()
-                / plain.nozzle[k].points.len() as f64;
-            let mut near = Vec::new();
-            let mut far = Vec::new();
-            for (p, d) in plain.nozzle[k].points.iter().zip(&moved) {
-                if radius(p) < mid {
-                    near.push(*d);
-                } else {
-                    far.push(*d);
-                }
-            }
-            (near, far)
-        };
-        let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len() as f64;
-        assert!(
-            mean(&near) > mean(&far),
-            "{} vs {}",
-            mean(&near),
-            mean(&far)
-        );
+            .zip(&round.nozzle[last].points)
+        {
+            assert!(a.distance(*b) < 1e-9);
+        }
         // Out of range is refused.
         let mut input = unturned();
-        input.diffuser.base_form = Param::Manual(0.8);
+        input.diffuser.base_form = Param::Manual(1.1);
         assert!(VoluteGeometry::build(&reference_basis(), &input).is_err());
     }
 

@@ -405,7 +405,7 @@ pub const MIN_RIB_LENGTH: f64 = 60.0 * PI / 180.0;
 /// at once and the CAD kernel cannot cut the cutwater cleanly (the flow domain comes out
 /// in four pieces), and at 0.9 the cutwater of the CAD solid lies 1.7 mm off its design
 /// with the automatic side endings; up to 0.75 it builds cleanly on the reference volute.
-pub const MAX_BASE_FORM: f64 = 0.75;
+pub const MAX_BASE_FORM: f64 = 1.0;
 
 /// Inputs of the discharge-diffuser step.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -445,10 +445,13 @@ pub struct DischargeInput {
     /// both sides, 1 with the outer wall straight; between them in proportion. Automatic:
     /// that of the wall chosen in the shape.
     pub eccentricity: Param<f64>,
-    /// Base form factor, 0 to [`MAX_BASE_FORM`]: how round the diffuser is on its base
-    /// side, toward the pump axis, over the first 30 % of its length. 0 keeps the corners
-    /// of the section of the spiral there, 1 would round that side to the circle at once. A rounder base
-    /// changes where the spiral wall crosses the diffuser wall. Automatic: 0.
+    /// Base form factor, 0 to [`MAX_BASE_FORM`]: how round the first section of the
+    /// diffuser is on its base side, the inlet chord toward the pump axis. 0 keeps the
+    /// flat chord of the throat of the spiral, so that the two run along each other
+    /// there; above it the chord bulges toward the axis by half an ellipse as deep as
+    /// the factor times half the chord (at most nine tenths of the gap to the impeller),
+    /// so that the diffuser crosses the start of the spiral; the bulge fades out along
+    /// the diffuser. Automatic: 0.
     pub base_form: Param<f64>,
 }
 

@@ -1141,10 +1141,13 @@ fn diffuser(
                 ui,
                 tr("Base form factor"),
                 tr(
-                    "How round the diffuser is on its base side, toward the pump axis: 0 keeps \
-                    the corners of the last section of the spiral, 1 would round that side to the \
-                    circle (the limit is 0.75). It builds up over the first 30 % of the length and changes where the \
-                    spiral wall crosses the diffuser wall",
+                    "How round the first section of the diffuser is on its base side, the inlet \
+                    chord toward the pump axis: 0 keeps the flat chord of the throat, so that \
+                    diffuser and spiral run along each other there; above it the chord bulges \
+                    toward the axis (1: half an ellipse as deep as half the chord, at most nine \
+                    tenths of the gap to the impeller), so that the diffuser crosses the start of \
+                    the spiral. It fades out along the diffuser; a rounder base moves the cutwater \
+                    downstream",
                 ),
                 &mut input.diffuser.base_form,
                 Dimensionless,
