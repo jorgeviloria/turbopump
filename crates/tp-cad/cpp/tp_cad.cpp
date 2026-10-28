@@ -1,11 +1,15 @@
 // OCCT operations used by tp-cad. Every entry point runs inside `guard`, so OCCT
 // exceptions reach Rust as errors that name the operation, instead of terminating the
-// process.
+// process. OCCT is built to turn signals into exceptions; `guard` does the same here,
+// so a crash inside the kernel (a fillet that reads a null pointer) fails that one
+// operation instead of the process.
+#define OCC_CONVERT_SIGNALS
 
 #include "tp-cad/cpp/tp_cad.hxx"
 #include "tp-cad/src/bridge.rs.h"
 
 #include <algorithm>
+#include <mutex>
 #include <cmath>
 #include <stdexcept>
 #include <string>
@@ -49,6 +53,8 @@
 #include <NCollection_IndexedMap.hxx>
 #include <NCollection_List.hxx>
 #include <NCollection_Sequence.hxx>
+#include <OSD.hxx>
+#include <Standard_ErrorHandler.hxx>
 #include <OSD_Parallel.hxx>
 #include <OSD_ThreadPool.hxx>
 #include <Poly_Triangulation.hxx>
@@ -96,7 +102,10 @@ const int occt_threads = [] {
 }();
 
 template <typename F> auto guard(const char *what, F &&f) -> decltype(f()) {
+  static std::once_flag signals;
+  std::call_once(signals, [] { OSD::SetSignal(OSD_SignalMode_Set, false); });
   try {
+    OCC_CATCH_SIGNALS
     return f();
   } catch (const Standard_Failure &e) {
     const char *message = e.what();

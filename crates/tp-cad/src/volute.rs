@@ -1059,6 +1059,26 @@ mod tests {
 
     #[test]
     #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
+    fn a_fillet_that_crashes_the_kernel_only_fails_that_fillet() {
+        let _slot = crate::test_slot::take();
+        // Filling the groove over this cutwater makes OCCT read a null pointer while it
+        // rounds the corners; the casing falls back instead of the process dying.
+        let mut input = VoluteInput::default();
+        input.diffuser.shape = tp_design::volute::DischargeShape::Tangential {
+            straight_wall: tp_design::volute::StraightWall::Inner,
+        };
+        input.diffuser.base_form = tp_design::Param::Manual(0.5);
+        input.cutwater.shape = tp_design::volute::CutwaterShape::Sharp;
+        let mut g = VoluteGeometry::build(&basis(), &input).unwrap();
+        g.design.flange = None;
+        let cad = build_volute(&g).unwrap();
+        let casing = build_volute_casing(&g, &cad).unwrap();
+        assert!(casing.solid.is_valid());
+        assert_eq!(casing.solid.solid_count(), 1);
+    }
+
+    #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
     fn volute_channel_and_fluid_domain_are_valid_solids() {
         let _slot = crate::test_slot::take();
         for sections in every_cross_section() {

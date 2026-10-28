@@ -91,12 +91,13 @@ impl Shape {
         ffi::count_subshapes(&self.0, 2)
     }
 
-    /// Whether OCCT's checker finds the shape topologically and geometrically valid.
-    /// What OCCT's checker finds wrong, one sub-shape per line.
+    /// What OCCT's checker finds wrong, one sub-shape and status code per line; empty
+    /// for a sound shape.
     pub fn check_report(&self) -> String {
         ffi::check_report(&self.0)
     }
 
+    /// Whether OCCT's checker finds the shape topologically and geometrically valid.
     pub fn is_valid(&self) -> bool {
         crate::profile::op("is_valid", || ffi::is_valid(&self.0))
     }
