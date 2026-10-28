@@ -22,7 +22,7 @@ pub use impeller::{
 };
 pub use joined::{join_fluid, joining_ring};
 pub use occ::{Shape, read_step, write_iges, write_step, write_stl};
-pub use sewn::build_volute_sewn;
+pub use sewn::{FlowBuild, build_volute_flow, build_volute_sewn};
 pub use volute::{VoluteCad, VoluteCasing, build_volute, build_volute_casing};
 
 /// Errors from CAD construction and export.

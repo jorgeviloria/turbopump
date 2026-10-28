@@ -285,6 +285,27 @@ pub fn build_volute_sewn(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
     })
 }
 
+/// How the flow domain of a volute was built.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlowBuild {
+    /// Sewn from its surfaces ([`build_volute_sewn`]).
+    Sewn,
+    /// Joined by boolean operations ([`crate::build_volute`]).
+    Boolean,
+}
+
+/// The flow domain of a volute sewn from its surfaces where that comes out as one
+/// valid solid, else joined by boolean operations, and which of the two it is.
+pub fn build_volute_flow(g: &VoluteGeometry) -> Result<(VoluteCad, FlowBuild), CadError> {
+    if let Ok(cad) = build_volute_sewn(g)
+        && cad.fluid.is_valid()
+        && cad.fluid.solid_count() == 1
+    {
+        return Ok((cad, FlowBuild::Sewn));
+    }
+    crate::build_volute(g).map(|cad| (cad, FlowBuild::Boolean))
+}
+
 /// Angle of `p` about the z axis, rad.
 fn angle(p: DVec3) -> f64 {
     p.y.atan2(p.x)
