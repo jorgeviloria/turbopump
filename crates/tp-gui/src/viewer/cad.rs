@@ -1,25 +1,37 @@
-//! The volute as the CAD model builds it, for the 3D view: generated when asked, in the
-//! background, and shown only while the design is the one it was built from. The view
-//! never waits for it: until it is ready, and as soon as the design changes, it shows
-//! its own mesh.
+//! The impeller and the volute as the CAD model builds them, for the 3D view: generated
+//! when asked, in the background, each shown as soon as it is ready, and only while the
+//! design is the one they were built from. The view never waits for them: until then,
+//! and as soon as the design changes, it shows its own mesh.
 
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::{Duration, Instant};
 
 use eframe::egui;
+use tp_design::impeller::ImpellerGeometry;
 use tp_design::volute::VoluteGeometry;
 
 use super::mesh::CadMesh;
 
-/// What the CAD model of the volute gave the view.
-#[derive(Debug, Clone, PartialEq)]
+/// One part of the CAD model, built.
+#[cfg_attr(not(feature = "cad"), allow(dead_code))]
+#[derive(Debug)]
+enum Piece {
+    /// The flow domain and the casing, and whether the flow domain was sewn.
+    Volute(Result<(CadMesh, bool, Vec<String>), String>),
+    /// The impeller's material: disk, cover and blades.
+    Impeller(Result<(CadMesh, Vec<String>), String>),
+}
+
+/// What the CAD model gave the view.
+#[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct Built {
     pub mesh: CadMesh,
-    /// The flow domain was sewn from its surfaces, not joined by booleans.
-    pub sewn: bool,
+    /// The flow domain of the volute was sewn from its surfaces, not joined by booleans.
+    pub sewn: Option<bool>,
     /// How long the model took, s.
     pub seconds: f64,
-    /// What the CAD kernel could not build as designed.
+    /// What the CAD kernel could not build as designed, and the parts it could not
+    /// build at all.
     pub warnings: Vec<String>,
 }
 
@@ -31,7 +43,10 @@ enum State {
     Building {
         revision: u64,
         started: Instant,
-        job: Receiver<Result<Built, String>>,
+        job: Receiver<Piece>,
+        /// Parts still to come.
+        pending: usize,
+        built: Built,
     },
     Ready {
         revision: u64,
@@ -43,7 +58,7 @@ enum State {
     },
 }
 
-/// Where the CAD model of the volute stands, for the design at a revision.
+/// Where the CAD model stands, for the design at a revision.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Status<'a> {
     /// Never asked for.
@@ -56,7 +71,7 @@ pub(crate) enum Status<'a> {
     Failed(&'a str),
 }
 
-/// The CAD model of the volute between frames.
+/// The CAD model between frames.
 #[derive(Debug, Default)]
 pub(crate) struct CadView {
     state: State,
@@ -84,44 +99,84 @@ impl CadView {
         self.generation
     }
 
-    /// Starts the model asked for, of the volute `volute` at `revision`, and takes in
-    /// one that finished.
+    /// Starts the model asked for, of the impeller `impeller` and the volute `volute` at
+    /// `revision`, and takes in the parts that finished.
     pub(crate) fn update(
         &mut self,
         revision: u64,
+        impeller: &ImpellerGeometry,
         volute: Option<&VoluteGeometry>,
         ctx: &egui::Context,
     ) {
-        if std::mem::take(&mut self.requested)
-            && let Some(g) = volute
-        {
-            self.state = start(revision, g.clone());
+        if std::mem::take(&mut self.requested) {
+            self.state = start(revision, impeller.clone(), volute.cloned());
             self.generation += 1;
         }
-        if let State::Building { revision, job, .. } = &self.state {
-            let revision = *revision;
+        let State::Building {
+            revision,
+            started,
+            job,
+            pending,
+            built,
+        } = &mut self.state
+        else {
+            return;
+        };
+        loop {
             match job.try_recv() {
-                Ok(Ok(built)) => self.state = State::Ready { revision, built },
-                Ok(Err(error)) => self.state = State::Failed { revision, error },
-                Err(TryRecvError::Disconnected) => {
-                    self.state = State::Failed {
-                        revision,
-                        error: "the CAD model stopped".to_owned(),
+                Ok(piece) => {
+                    *pending -= 1;
+                    self.generation += 1;
+                    match piece {
+                        Piece::Volute(Ok((mesh, sewn, warnings))) => {
+                            built.mesh.flow = mesh.flow;
+                            built.mesh.casing = mesh.casing;
+                            built.sewn = Some(sewn);
+                            built.warnings.extend(warnings);
+                        }
+                        Piece::Impeller(Ok((mesh, warnings))) => {
+                            built.mesh.impeller = mesh.impeller;
+                            built.warnings.extend(warnings);
+                        }
+                        Piece::Volute(Err(e)) | Piece::Impeller(Err(e)) => built.warnings.push(e),
                     }
                 }
-                Err(TryRecvError::Empty) => ctx.request_repaint_after(Duration::from_millis(200)),
+                Err(TryRecvError::Empty) if *pending > 0 => {
+                    ctx.request_repaint_after(Duration::from_millis(200));
+                    return;
+                }
+                Err(_) => break,
             }
-            if !self.building() {
-                self.generation += 1;
+            if *pending == 0 {
+                break;
             }
         }
+        let revision = *revision;
+        let mut built = std::mem::take(built);
+        built.seconds = started.elapsed().as_secs_f64();
+        self.state = if built.mesh == CadMesh::default() {
+            State::Failed {
+                revision,
+                error: built.warnings.join("; "),
+            }
+        } else {
+            State::Ready { revision, built }
+        };
+        self.generation += 1;
     }
 
-    /// The model to show for the design at `revision`: none if it was built for
-    /// another.
+    /// The parts to show for the design at `revision`, as they come: none if they were
+    /// built for another.
     pub(crate) fn mesh(&self, revision: u64) -> Option<&CadMesh> {
         match &self.state {
-            State::Ready { revision: r, built } if *r == revision => Some(&built.mesh),
+            State::Building {
+                revision: r, built, ..
+            }
+            | State::Ready { revision: r, built }
+                if *r == revision =>
+            {
+                Some(&built.mesh)
+            }
             _ => None,
         }
     }
@@ -129,7 +184,11 @@ impl CadView {
     pub(crate) fn status(&self, revision: u64) -> Status<'_> {
         match &self.state {
             State::None => Status::Absent,
-            State::Building { started, .. } => Status::Building(started.elapsed().as_secs_f32()),
+            State::Building {
+                revision: r,
+                started,
+                ..
+            } if *r == revision => Status::Building(started.elapsed().as_secs_f32()),
             State::Ready { revision: r, built } if *r == revision => Status::Ready(built),
             State::Failed { revision: r, error } if *r == revision => Status::Failed(error),
             _ => Status::Stale,
@@ -137,63 +196,88 @@ impl CadView {
     }
 }
 
-/// Builds the CAD model of `g` in the background.
+/// Builds the CAD model of the impeller `impeller` and the volute `volute` in the
+/// background, each on its own thread.
 #[cfg(feature = "cad")]
-fn start(revision: u64, g: VoluteGeometry) -> State {
+fn start(revision: u64, impeller: ImpellerGeometry, volute: Option<VoluteGeometry>) -> State {
     let (send, job) = std::sync::mpsc::channel();
+    let mut pending = 1;
+    if let Some(g) = volute {
+        pending += 1;
+        let send = send.clone();
+        std::thread::spawn(move || {
+            let _ = send.send(Piece::Volute(build_volute(&g)));
+        });
+    }
     std::thread::spawn(move || {
-        let _ = send.send(build(&g));
+        let _ = send.send(Piece::Impeller(build_impeller(&impeller)));
     });
     State::Building {
         revision,
         started: Instant::now(),
         job,
+        pending,
+        built: Built::default(),
     }
 }
 
 #[cfg(not(feature = "cad"))]
-fn start(revision: u64, _g: VoluteGeometry) -> State {
+fn start(revision: u64, _impeller: ImpellerGeometry, _volute: Option<VoluteGeometry>) -> State {
     State::Failed {
         revision,
         error: "this build has no CAD kernel".to_owned(),
     }
 }
 
-/// The flow domain (sewn where it closes, else by booleans) and the casing without its
-/// flange, which adds nothing to the flow, triangulated about as finely as the view
-/// needs: 1/600 of the impeller diameter.
+/// Triangles of `shape` (mm) about as fine as the view needs, `diameter` (m) over 600,
+/// in metres.
 #[cfg(feature = "cad")]
-fn build(g: &VoluteGeometry) -> Result<Built, String> {
-    use tp_math::DVec3;
-    let started = Instant::now();
+fn triangles(shape: &tp_cad::Shape, diameter: f64) -> Result<Vec<tp_io::mesh::Triangle>, String> {
+    Ok(shape
+        .triangles(diameter * 1e3 / 600.0)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|t| t.map(|p| p / 1e3))
+        .collect())
+}
+
+/// The flow domain (sewn where it closes, else by booleans) and the casing without its
+/// flange, which adds nothing to the flow.
+#[cfg(feature = "cad")]
+fn build_volute(g: &VoluteGeometry) -> Result<(CadMesh, bool, Vec<String>), String> {
     let (cad, how) = tp_cad::build_volute_flow(g).map_err(|e| e.to_string())?;
-    let deflection = g.basis.impeller_diameter * 1e3 / 600.0;
-    let metres = |t: Vec<[DVec3; 3]>| -> Vec<[DVec3; 3]> {
-        t.into_iter().map(|t| t.map(|p| p / 1e3)).collect()
-    };
-    let flow = metres(cad.fluid.triangles(deflection).map_err(|e| e.to_string())?);
+    let d = g.basis.impeller_diameter;
+    let flow = triangles(&cad.fluid, d)?;
     let mut bare = g.clone();
     bare.design.flange = None;
     let mut warnings = cad.warnings.clone();
     let casing = match tp_cad::build_volute_casing(&bare, &cad) {
         Ok(casing) => {
             warnings.extend(casing.warnings.iter().cloned());
-            metres(
-                casing
-                    .solid
-                    .triangles(deflection)
-                    .map_err(|e| e.to_string())?,
-            )
+            triangles(&casing.solid, d)?
         }
         Err(e) => {
             warnings.push(e.to_string());
             Vec::new()
         }
     };
-    Ok(Built {
-        mesh: CadMesh { flow, casing },
-        sewn: how == tp_cad::FlowBuild::Sewn,
-        seconds: started.elapsed().as_secs_f64(),
-        warnings,
-    })
+    let mesh = CadMesh {
+        flow,
+        casing,
+        ..CadMesh::default()
+    };
+    Ok((mesh, how == tp_cad::FlowBuild::Sewn, warnings))
+}
+
+/// The impeller's material as the CAD export builds it: disk, cover, blades and the
+/// fillets at their roots.
+#[cfg(feature = "cad")]
+fn build_impeller(g: &ImpellerGeometry) -> Result<(CadMesh, Vec<String>), String> {
+    let cad =
+        tp_cad::build_impeller(g, &tp_cad::CadOptions::default()).map_err(|e| e.to_string())?;
+    let mesh = CadMesh {
+        impeller: triangles(&cad.impeller, g.basis.outlet_diameter)?,
+        ..CadMesh::default()
+    };
+    Ok((mesh, cad.warnings))
 }

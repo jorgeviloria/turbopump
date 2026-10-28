@@ -232,6 +232,7 @@ pub(crate) fn part_name(id: PartId) -> &'static str {
         PartId::Duct => "Inlet duct",
         PartId::Cutwater => "Cutwater",
         PartId::Casing => "Casing",
+        PartId::Impeller => "Impeller (solid)",
     })
 }
 
@@ -482,7 +483,7 @@ impl Viewer {
         self.free_aspect = free.width() / free.height().max(1.0);
         let gpu = self.gpu.get_or_insert_with(|| Gpu::new(&state.device));
         let revision = derived.revision();
-        self.cad.update(revision, volute.map(|v| v.1), ui.ctx());
+        self.cad.update(revision, g, volute.map(|v| v.1), ui.ctx());
         let key = (
             revision,
             id,
@@ -703,9 +704,7 @@ impl Viewer {
         {
             plane_outline(ui, matrix, (rect, free), plane, center, radius, &p);
         }
-        if volute.is_some()
-            && let Some(text) = cad_status(self.cad.status(revision))
-        {
+        if let Some(text) = cad_status(self.cad.status(revision)) {
             let below = if self.measuring { 46.0 } else { 18.0 };
             chip(ui, free.center_top() + vec2(0.0, below), &text, &p);
         }
@@ -777,15 +776,18 @@ fn cad_status(status: cad::Status<'_>) -> Option<String> {
             &[&crate::i18n::message(error)],
         ),
         cad::Status::Ready(built) => {
-            let how = if built.sewn {
-                tr("sewn surfaces")
-            } else {
-                tr("boolean operations")
+            let seconds = format!("{:.1}", built.seconds);
+            let mut text = match built.sewn {
+                Some(sewn) => {
+                    let how = if sewn {
+                        tr("sewn surfaces")
+                    } else {
+                        tr("boolean operations")
+                    };
+                    crate::i18n::tf("CAD model: volute of {}, {} s", &[&how, &seconds])
+                }
+                None => crate::i18n::tf("CAD model: {} s", &[&seconds]),
             };
-            let mut text = crate::i18n::tf(
-                "CAD model: {}, {} s",
-                &[&how, &format!("{:.1}", built.seconds)],
-            );
             if !built.warnings.is_empty() {
                 text.push_str(&crate::i18n::tf(" · {} warnings", &[&built.warnings.len()]));
             }

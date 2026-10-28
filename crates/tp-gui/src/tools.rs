@@ -440,7 +440,7 @@ pub(crate) fn section(ui: &mut Ui, cx: ToolsCx) -> Option<Command> {
 pub(crate) fn view3d(ui: &mut Ui, viewer: &mut Viewer, cx: ToolsCx) -> Option<Command> {
     let mut command = None;
     group(ui, tr("CAD model"), |ui| {
-        let ready = cx.has_volute && crate::viewer::CadView::AVAILABLE && !viewer.cad.building();
+        let ready = cx.has_geometry && crate::viewer::CadView::AVAILABLE && !viewer.cad.building();
         if big_button(
             ui,
             Icon::Glyph(icon::CUBE),
@@ -450,8 +450,9 @@ pub(crate) fn view3d(ui: &mut Ui, viewer: &mut Viewer, cx: ToolsCx) -> Option<Co
             None,
         )
         .on_hover_text(tr(
-            "Builds the volute as it is exported, flow domain and casing without its flange, \
-             and shows it in place of the quick mesh; hidden again when the design changes",
+            "Builds the impeller and the volute as they are exported (the casing without its \
+             flange) and shows them in place of the quick mesh; hidden again when the design \
+             changes",
         ))
         .clicked()
         {

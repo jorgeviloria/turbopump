@@ -1405,8 +1405,9 @@ fn seal_cards() {
     save(&mut harness, "seal-cards");
 }
 
-/// The volute as the CAD model builds it, generated from the 3D view of a fillet
-/// cutwater: whole, then cut through the axis to show the wall of the casing.
+/// The impeller and the volute as the CAD model builds them, generated from the 3D view
+/// of a fillet cutwater: whole, then cut through the axis to show the wall of the
+/// casing and the impeller's disk and cover.
 #[test]
 #[ignore = "needs a GPU and builds the CAD model; run with --ignored"]
 fn cad_model_3d() {
@@ -1443,8 +1444,10 @@ fn cad_model_3d() {
     // It repaints while the model is being built.
     harness.run_steps(2);
     let started = std::time::Instant::now();
-    // The casing joins the scene once the model is shown.
-    while harness.query_by_label("Casing").is_none() {
+    // The casing and the solid impeller join the scene as their models come.
+    while harness.query_by_label("Casing").is_none()
+        || harness.query_by_label("Impeller (solid)").is_none()
+    {
         assert!(
             started.elapsed().as_secs() < 300,
             "the CAD model took too long"

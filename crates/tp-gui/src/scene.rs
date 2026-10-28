@@ -91,10 +91,11 @@ enum Key {
     Duct,
     Cutwater,
     Casing,
+    Impeller,
 }
 
 impl Key {
-    const ALL: [Key; 10] = [
+    const ALL: [Key; 11] = [
         Key::Blades,
         Key::Hub,
         Key::Shroud,
@@ -105,6 +106,7 @@ impl Key {
         Key::Duct,
         Key::Cutwater,
         Key::Casing,
+        Key::Impeller,
     ];
 
     fn shown(self, o: &ViewOptions) -> bool {
@@ -134,6 +136,7 @@ impl Key {
             Key::Duct => Some(PartId::Duct),
             Key::Cutwater => Some(PartId::Cutwater),
             Key::Casing => Some(PartId::Casing),
+            Key::Impeller => Some(PartId::Impeller),
         }
     }
 
@@ -168,6 +171,8 @@ pub(crate) struct Stage {
     pub cutwater: bool,
     /// Whether the CAD model of the volute, with its casing, is shown.
     pub casing: bool,
+    /// Whether the CAD model of the impeller, one solid, is shown.
+    pub impeller_solid: bool,
 }
 
 impl Stage {
@@ -177,11 +182,12 @@ impl Stage {
         if let Some(name) = &self.duct {
             groups.push((ComponentKind::InletDuct, name.clone(), vec![Key::Duct]));
         }
-        groups.push((
-            ComponentKind::Impeller,
-            self.impeller.clone(),
-            vec![Key::Blades, Key::Hub, Key::Shroud],
-        ));
+        let keys = if self.impeller_solid {
+            vec![Key::Impeller]
+        } else {
+            vec![Key::Blades, Key::Hub, Key::Shroud]
+        };
+        groups.push((ComponentKind::Impeller, self.impeller.clone(), keys));
         if let Some((name, vaned)) = &self.stator {
             let keys = if *vaned {
                 vec![Key::Vanes, Key::Walls]

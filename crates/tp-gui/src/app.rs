@@ -1300,12 +1300,21 @@ impl TurbopumpApp {
                 .active_volute()
                 .and_then(|id| self.derived.volute(id))
                 .is_some_and(|g| !g.cutwater_outline().is_empty() || g.rib.is_some())
-                && self.viewer.cad.mesh(self.derived.revision()).is_none(),
+                && self
+                    .viewer
+                    .cad
+                    .mesh(self.derived.revision())
+                    .is_none_or(|m| m.flow.is_empty()),
             casing: self
                 .viewer
                 .cad
                 .mesh(self.derived.revision())
                 .is_some_and(|m| !m.casing.is_empty()),
+            impeller_solid: self
+                .viewer
+                .cad
+                .mesh(self.derived.revision())
+                .is_some_and(|m| !m.impeller.is_empty()),
         }
     }
 

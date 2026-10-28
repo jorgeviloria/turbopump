@@ -62,16 +62,21 @@ pub(crate) enum PartId {
     Cutwater,
     /// The material of the volute casing, from the CAD model.
     Casing,
+    /// The impeller's material as one solid, from the CAD model.
+    Impeller,
 }
 
-/// The volute as the CAD model builds it, triangulated, m: what the view shows in place
-/// of its own mesh once the CAD model is generated.
+/// The impeller and the volute as the CAD model builds them, triangulated, m: what the
+/// view shows in place of its own mesh once the CAD model is generated. A part not
+/// built (yet) is empty.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct CadMesh {
     /// The flow domain: spiral, diffuser and the ring before them.
     pub flow: Vec<Triangle>,
     /// The casing round it, without its flange.
     pub casing: Vec<Triangle>,
+    /// The impeller's material: disk, cover, blades and the fillets at their roots.
+    pub impeller: Vec<Triangle>,
 }
 
 /// How one part of the model is drawn.
@@ -117,6 +122,8 @@ pub(crate) struct ViewOptions {
     pub cutwater: Part,
     /// The casing of the CAD model.
     pub casing: Part,
+    /// The impeller of the CAD model.
+    pub impeller: Part,
     /// Every blade, or only the first.
     pub all_blades: bool,
     /// Outlines and sharp edges of the parts.
@@ -139,6 +146,7 @@ impl ViewOptions {
             PartId::Duct => &self.duct,
             PartId::Cutwater => &self.cutwater,
             PartId::Casing => &self.casing,
+            PartId::Impeller => &self.impeller,
         }
     }
 
@@ -153,6 +161,7 @@ impl ViewOptions {
             PartId::Duct => &mut self.duct,
             PartId::Cutwater => &mut self.cutwater,
             PartId::Casing => &mut self.casing,
+            PartId::Impeller => &mut self.impeller,
         }
     }
 }
@@ -169,6 +178,7 @@ impl Default for ViewOptions {
             duct: Part::glass(DUCT),
             cutwater: Part::solid(CUTWATER),
             casing: Part::solid(CASING),
+            impeller: Part::solid(BLADE),
             all_blades: true,
             edges: true,
             sections: true,
@@ -433,7 +443,14 @@ pub(crate) fn build(
     cad: Option<&CadMesh>,
     options: &ViewOptions,
 ) -> MeshData {
-    let parts = impeller_parts(g);
+    // The impeller as the CAD model builds it replaces blades, disk and cover.
+    let solid = cad.map(|c| c.impeller.clone()).unwrap_or_default();
+    let mut parts = impeller_parts(g);
+    if !solid.is_empty() {
+        parts.blades.clear();
+        parts.hub.clear();
+        parts.shroud.clear();
+    }
     let blades: Vec<Triangle> = if options.all_blades {
         parts.blades.iter().flatten().copied().collect()
     } else {
@@ -442,7 +459,7 @@ pub(crate) fn build(
     let diffuser = stator.map(diffuser_parts).unwrap_or_default();
     // The flow channel as the cutwater shapes it, and the body of the cutwater; the CAD
     // model's flow domain already has the cutwater in it.
-    let cad = cad.filter(|_| volute.is_some());
+    let cad = cad.filter(|c| volute.is_some() && !c.flow.is_empty());
     let casing = match cad {
         Some(cad) => cad.flow.clone(),
         None => volute.map(volute_view_triangles).unwrap_or_default(),
@@ -454,7 +471,7 @@ pub(crate) fn build(
     };
     let material = cad.map(|c| c.casing.clone()).unwrap_or_default();
     let duct = inlet_duct.map(|d| revolved(&d.outline)).unwrap_or_default();
-    let shown: [(&[Triangle], PartId); 9] = [
+    let shown: [(&[Triangle], PartId); 10] = [
         (&blades, PartId::Blades),
         (&parts.hub, PartId::Hub),
         (&parts.shroud, PartId::Shroud),
@@ -464,6 +481,7 @@ pub(crate) fn build(
         (&duct, PartId::Duct),
         (&cutwater, PartId::Cutwater),
         (&material, PartId::Casing),
+        (&solid, PartId::Impeller),
     ];
 
     let mut mesh = MeshData::default();
@@ -510,6 +528,7 @@ pub(crate) fn build(
                 PartId::Volute if cad.is_some() => vec![casing.clone()],
                 PartId::Volute => volute.map(volute_solids).unwrap_or_default(),
                 PartId::Casing => vec![material.clone()],
+                PartId::Impeller => vec![solid.clone()],
                 // Apart from each other: one volume.
                 PartId::Vanes => stator.map(|d| vec![vane_solids(d)]).unwrap_or_default(),
                 PartId::Duct => vec![duct.clone()],
@@ -573,6 +592,7 @@ pub(crate) fn build(
         .chain(&duct)
         .chain(&cutwater)
         .chain(&material)
+        .chain(&solid)
         .flatten();
     let (min, max) = all.clone().fold(
         (DVec3::splat(f64::INFINITY), DVec3::splat(f64::NEG_INFINITY)),
