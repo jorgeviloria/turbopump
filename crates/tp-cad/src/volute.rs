@@ -222,7 +222,7 @@ fn flow_domain(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
     // kernel; where the kernel cannot, the edge stays sharp.
     let mut notes = Vec::new();
     let mut kernel_rounded = false;
-    if matches!(g.design.cutwater_shape, CutwaterShape::Fillet { .. }) && g.design.rib.is_none() {
+    if matches!(g.design.cutwater_shape, CutwaterShape::Fillet { .. }) {
         let radius = g.design.nose_radius * MM;
         match crate::profile::stage("fillet tip", || fillet_tip(&joined, &lofts, g, radius)) {
             Some((rounded, r)) => {
@@ -2253,37 +2253,50 @@ mod tests {
 
     #[test]
     #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
-    fn a_fillet_cutwater_is_rounded_by_its_sliver_where_the_kernel_cannot_round() {
-        use tp_design::volute::CutwaterShape;
+    fn a_fillet_cutwater_is_rounded_in_round_sections_and_in_a_double_volute() {
+        use tp_design::volute::{CutwaterShape, VoluteKind};
         let _slot = crate::test_slot::take();
-        let fluid = |shape: CutwaterShape| {
-            let mut input = VoluteInput {
-                cross_section: CrossSectionInput::single(SectionShape::round()),
-                ..VoluteInput::default()
+        let cases: [(&str, fn(&mut VoluteInput)); 2] = [
+            ("round", |v| {
+                v.cross_section = CrossSectionInput::single(SectionShape::round());
+            }),
+            ("double", |v| v.setup.kind = VoluteKind::Double),
+        ];
+        for (name, edit) in cases {
+            let build = |shape: CutwaterShape| {
+                let mut input = VoluteInput::default();
+                edit(&mut input);
+                input.cutwater.shape = shape;
+                let g = VoluteGeometry::build(&basis(), &input).unwrap();
+                let cad = build_volute(&g).unwrap();
+                (g, cad)
             };
-            input.cutwater.shape = shape;
-            let g = VoluteGeometry::build(&basis(), &input).unwrap();
-            build_volute(&g).unwrap()
-        };
-        let sharp = fluid(CutwaterShape::Sharp);
-        let cad = fluid(CutwaterShape::Fillet {
-            radius: tp_design::Param::Auto,
-        });
-        assert!(
-            cad.warnings.iter().all(|w| !w.contains("could not round")),
-            "{:?}",
-            cad.warnings
-        );
-        for s in [&cad.channel, &cad.fluid] {
-            assert!(s.is_valid());
-            assert_eq!(s.solid_count(), 1);
+            let (_, sharp) = build(CutwaterShape::Sharp);
+            let (g, rounded) = build(CutwaterShape::Fillet {
+                radius: tp_design::Param::Auto,
+            });
+            assert!(
+                rounded.warnings.is_empty(),
+                "{name}: {:?}",
+                rounded.warnings
+            );
+            for s in [&rounded.channel, &rounded.fluid] {
+                assert!(s.is_valid(), "{name}");
+                assert_eq!(s.solid_count(), 1, "{name}");
+            }
+            // The round adds a sliver of flow at the tip of the sharp edge.
+            let (sharp, rounded_volume) = (sharp.fluid_volume(), rounded.fluid_volume());
+            assert!(
+                rounded_volume > sharp && rounded_volume < sharp * 1.01,
+                "{name}: {rounded_volume} vs {sharp}"
+            );
+            // The casing round it is one valid solid too.
+            let casing = build_volute_casing(&g, &rounded).unwrap();
+            assert!(
+                casing.solid.is_valid() && casing.solid.solid_count() == 1,
+                "{name}"
+            );
         }
-        // The round adds a sliver of flow at the tip of the sharp edge.
-        let (sharp, rounded) = (sharp.fluid_volume(), cad.fluid_volume());
-        assert!(
-            rounded > sharp && rounded < sharp * 1.01,
-            "{rounded} vs {sharp}"
-        );
     }
 
     #[test]
