@@ -665,12 +665,41 @@ impl VoluteGeometry {
     /// a solid and the ones between them do not, so the CAD model tries several.
     pub fn casing_lofts_with(&self, overlap: f64) -> Vec<Vec<Vec<DVec3>>> {
         let t = self.design.wall_thickness;
-        self.lofts_with(overlap)
+        let lofts = self.lofts_with(overlap);
+        let last = lofts.len().saturating_sub(1);
+        // A rounded base bulges the diffuser's first sections inside the cutwater
+        // circle, where the ring is cut out of the casing anyway; offset as it is, the
+        // start of the diffuser's wall would stand out of the spiral's there, a step
+        // with its end face showing. The wall follows the flat chord instead.
+        let r_z = self.design.stagnation_radius;
+        let flat = |ring: &Vec<DVec3>| -> Vec<DVec3> {
+            ring.iter()
+                .map(|&p| {
+                    let r = p.truncate().length();
+                    if r < r_z && r > 0.0 {
+                        let k = r_z / r;
+                        DVec3::new(p.x * k, p.y * k, p.z)
+                    } else {
+                        p
+                    }
+                })
+                .collect()
+        };
+        lofts
             .iter()
-            .map(|rings| {
+            .enumerate()
+            .map(|(piece, rings)| {
+                let bulged = piece == last && self.design.diffuser.base_form > 0.0;
                 rings
                     .iter()
                     .map(|ring| {
+                        let flattened;
+                        let ring = if bulged {
+                            flattened = flat(ring);
+                            &flattened
+                        } else {
+                            ring
+                        };
                         // The wall as it is, or with the dents of the section filled when
                         // the offset turns itself inside out there.
                         let wall = offset_ring(ring, t);

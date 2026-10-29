@@ -2460,4 +2460,36 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
+    fn a_rounded_diffuser_base_leaves_no_step_in_the_casing() {
+        let _slot = crate::test_slot::take();
+        // The bulged start of the diffuser's wall stood out of the spiral's at the
+        // throat, two small end faces showing beside the ring.
+        let mut input = VoluteInput::default();
+        input.cutwater.shape = tp_design::volute::CutwaterShape::Fillet {
+            radius: tp_design::Param::Auto,
+        };
+        input.diffuser.base_form = tp_design::Param::Manual(0.5);
+        let mut g = VoluteGeometry::build(&basis(), &input).unwrap();
+        g.design.flange = None;
+        let (flow, _) = crate::build_volute_flow(&g).unwrap();
+        let casing = build_volute_casing(&g, &flow).unwrap().solid;
+        assert!(casing.is_valid() && casing.solid_count() == 1);
+        // Upright planar faces of any size (mm²): the outlet face alone.
+        let mut area = vec![0.0; casing.face_count()];
+        let triangles = casing.triangles(0.5).unwrap();
+        for (t, &f) in triangles.iter().zip(&casing.triangle_faces()) {
+            area[f as usize] += 0.5 * (t[1] - t[0]).cross(t[2] - t[0]).length();
+        }
+        let upright: Vec<f64> = casing
+            .face_planes()
+            .iter()
+            .zip(&area)
+            .filter(|(plane, a)| plane.is_some_and(|(n, _)| n.z.abs() < 0.9) && **a > 1.0)
+            .map(|(_, a)| *a)
+            .collect();
+        assert_eq!(upright.len(), 1, "{upright:?}");
+    }
 }

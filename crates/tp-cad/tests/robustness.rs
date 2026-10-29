@@ -312,3 +312,34 @@ fn sample_flow() {
         tp_cad::write_step(&c.fluid, &dir.join(format!("voluta-{name}-cosida.step"))).unwrap();
     }
 }
+
+#[test]
+#[ignore = "writes the casing of the base 0.5 fillet sample to TP_SAMPLES"]
+fn sample_casing() {
+    let dir = std::path::PathBuf::from(std::env::var("TP_SAMPLES").expect("TP_SAMPLES=<dir>"));
+    let mut input = VoluteInput::default();
+    input.cutwater.shape = CutwaterShape::Fillet {
+        radius: Param::Auto,
+    };
+    input.diffuser.base_form = Param::Manual(0.5);
+    let g = VoluteGeometry::build(&basis(), &input).unwrap();
+    let t = Instant::now();
+    let (flow, how) = tp_cad::build_volute_flow(&g).unwrap();
+    for flange in [false, true] {
+        let mut g = g.clone();
+        if !flange {
+            g.design.flange = None;
+        }
+        let casing = tp_cad::build_volute_casing(&g, &flow).unwrap();
+        println!(
+            "flange {flange}: {how:?} casing valid {} solids {} wall {:.1} mm {:.1}s warnings {:?}",
+            casing.solid.is_valid(),
+            casing.solid.solid_count(),
+            g.design.wall_thickness * 1e3,
+            t.elapsed().as_secs_f64(),
+            casing.warnings
+        );
+        let name = if flange { "con-brida" } else { "sin-brida" };
+        tp_cad::write_step(&casing.solid, &dir.join(format!("carcasa-b05-{name}.step"))).unwrap();
+    }
+}
