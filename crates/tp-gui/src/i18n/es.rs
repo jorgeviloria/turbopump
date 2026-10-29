@@ -4843,6 +4843,10 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
         "el empalme deja un diámetro efectivo del corte de agua d_z/d₂ = {}, por debajo del {} de la Tabla 10.2 de Gülich: cabe esperar pulsaciones de presión y fuerzas hidráulicas de excitación; conviene empezar la espiral más tarde o usar un radio menor",
     ),
     (
+        "the cutwater stands at an effective diameter d_z/d₂ = {}, below the {} of Gülich Table 10.2: expect pressure pulsations and hydraulic excitation forces; start the spiral later",
+        "el corte de agua queda a un diámetro efectivo d_z/d₂ = {}, por debajo del {} de la Tabla 10.2 de Gülich: cabe esperar pulsaciones de presión y fuerzas hidráulicas de excitación; conviene empezar la espiral más tarde",
+    ),
+    (
         "the spiral wraps {}° from its start to the throat, less than the {}° a sharp or rounded cutwater needs: start the spiral earlier",
         "la espiral da {}° desde su inicio hasta la garganta, menos de los {}° que necesita un corte de agua afilado o redondeado: conviene empezar la espiral antes",
     ),

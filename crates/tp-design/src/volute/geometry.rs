@@ -844,17 +844,33 @@ fn short_wrap_warning(shape: CutwaterShape, start: f64) -> Option<String> {
     })
 }
 
-/// The warning for a fillet that leaves the cutwater at the diameter `effective`, m,
-/// below the least `minimum` of Gülich Table 10.2, for an impeller of diameter `d2`.
-fn fillet_diameter_warning(effective: f64, minimum: f64, d2: f64) -> Option<String> {
+/// The warning for a cutwater that stands at the diameter `effective`, m, below the least
+/// `minimum` of Gülich Table 10.2, for an impeller of diameter `d2`. A fillet may also
+/// use a smaller radius.
+fn cutwater_diameter_warning(
+    shape: CutwaterShape,
+    effective: f64,
+    minimum: f64,
+    d2: f64,
+) -> Option<String> {
     (effective < minimum * (1.0 - 1e-9)).then(|| {
-        format!(
-            "the fillet leaves an effective cutwater diameter d_z/d₂ = {:.3}, below the {:.3} \
-             of Gülich Table 10.2: expect pressure pulsations and hydraulic excitation forces; \
-             start the spiral later or use a smaller radius",
-            effective / d2,
-            minimum / d2
-        )
+        if shape.is_fillet() {
+            format!(
+                "the fillet leaves an effective cutwater diameter d_z/d₂ = {:.3}, below the \
+                 {:.3} of Gülich Table 10.2: expect pressure pulsations and hydraulic \
+                 excitation forces; start the spiral later or use a smaller radius",
+                effective / d2,
+                minimum / d2
+            )
+        } else {
+            format!(
+                "the cutwater stands at an effective diameter d_z/d₂ = {:.3}, below the \
+                 {:.3} of Gülich Table 10.2: expect pressure pulsations and hydraulic \
+                 excitation forces; start the spiral later",
+                effective / d2,
+                minimum / d2
+            )
+        }
     })
 }
 
@@ -1602,14 +1618,19 @@ impl VoluteGeometry {
         let mut warnings = design.warnings.clone();
         warnings.extend(intersection_warning);
         warnings.extend(short_wrap_warning(design.cutwater_shape, start));
-        if design.cutwater_shape.is_fillet() {
-            // A fillet sets the diameter at which the cutwater stands: the nearest point of
-            // its nose to the axis in any plane.
+        // A rounded cutwater stands at d_z, which is warned of above; a sharp one or a fillet
+        // sets the diameter itself, the nearest point of its tip or nose to the axis in
+        // any plane.
+        if matches!(
+            design.cutwater_shape,
+            CutwaterShape::Sharp | CutwaterShape::Fillet { .. }
+        ) {
             let nearest = cutwater_slices
                 .iter()
                 .map(|s| s.nose_distance)
                 .fold(f64::INFINITY, f64::min);
-            warnings.extend(fillet_diameter_warning(
+            warnings.extend(cutwater_diameter_warning(
+                design.cutwater_shape,
                 2.0 * nearest,
                 design.min_cutwater_diameter,
                 basis.impeller_diameter,
@@ -2538,13 +2559,28 @@ mod tests {
 
     #[test]
     fn a_fillet_below_the_table_10_2_diameter_is_warned_of() {
-        let warning = fillet_diameter_warning(0.180, 0.190, 0.172).expect("below the minimum");
+        let fillet = CutwaterShape::Fillet {
+            radius: Param::Auto,
+        };
+        let warning =
+            cutwater_diameter_warning(fillet, 0.180, 0.190, 0.172).expect("below the minimum");
         assert!(
             warning.contains("1.047") && warning.contains("1.105"),
             "{warning}"
         );
-        assert!(fillet_diameter_warning(0.195, 0.190, 0.172).is_none());
-        assert!(fillet_diameter_warning(0.190, 0.190, 0.172).is_none());
+        assert!(cutwater_diameter_warning(fillet, 0.195, 0.190, 0.172).is_none());
+        assert!(cutwater_diameter_warning(fillet, 0.190, 0.190, 0.172).is_none());
+    }
+
+    #[test]
+    fn a_sharp_cutwater_below_the_table_10_2_diameter_is_warned_of_too() {
+        let warning = cutwater_diameter_warning(CutwaterShape::Sharp, 0.180, 0.190, 0.172)
+            .expect("below the minimum");
+        assert!(
+            warning.contains("1.047") && !warning.contains("smaller radius"),
+            "{warning}"
+        );
+        assert!(cutwater_diameter_warning(CutwaterShape::Sharp, 0.195, 0.190, 0.172).is_none());
     }
 
     #[test]
