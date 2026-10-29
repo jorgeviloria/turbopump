@@ -185,9 +185,36 @@ fn first_sound_over<T>(
     fallback.map_or_else(|| Err(error.expect("at least one attempt")), Ok)
 }
 
+/// Volume of the flow domain the design describes, m³, without the CAD: the spiral
+/// sections swept about the axis (Pappus), the straight diffuser and the ring between
+/// d₂ and the cutwater circle. The two overlap a little at the cutwater, so it is a
+/// check on the solid, good to a few percent, not its exact volume.
+pub fn expected_fluid_volume(g: &VoluteGeometry) -> f64 {
+    let swept = |sections: &[tp_design::volute::VoluteSection]| -> f64 {
+        sections
+            .windows(2)
+            .map(|w| {
+                let a = 0.5 * (w[0].size.area + w[1].size.area);
+                let r = 0.5 * (w[0].size.centroid_radius + w[1].size.centroid_radius);
+                a * r * (w[1].angle - w[0].angle)
+            })
+            .sum()
+    };
+    let spiral = swept(&g.sections) + swept(&g.inner_sections) + swept(&g.outer_channel);
+    let nozzle: f64 = g
+        .nozzle
+        .windows(2)
+        .map(|w| 0.5 * (w[0].area + w[1].area) * w[0].center.distance(w[1].center))
+        .sum();
+    let (inner, outer) = g.inlet_ring();
+    let ring = std::f64::consts::PI * (outer * outer - inner * inner) * g.design.inlet_width;
+    spiral + nozzle + ring
+}
+
 /// Builds the volute channel and its flow domain from the geometry.
 pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
-    let result = crate::profile::stage("volute flow domain", || flow_domain(g, true));
+    let result = crate::profile::stage("volute flow domain", || flow_domain(g, true))
+        .and_then(|cad| holds_the_design(g, &cad.fluid).map(|()| cad));
     // A rounded cutwater that does not cut cleanly leaves the flow domain unsound: build
     // it again with the edge sharp.
     let sound = |c: &VoluteCad| c.fluid.is_valid() && c.fluid.solid_count() == 1;
@@ -197,6 +224,7 @@ pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
         sharp_design.design.cutwater_shape = CutwaterShape::Sharp;
         match crate::profile::stage("volute flow domain, sharp", || {
             flow_domain(&sharp_design, false)
+                .and_then(|cad| holds_the_design(g, &cad.fluid).map(|()| cad))
         }) {
             Ok(mut sharp) if sound(&sharp) => {
                 sharp.warnings.push(
@@ -213,6 +241,26 @@ pub fn build_volute(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
     };
     crate::profile::report("the volute flow domain");
     result
+}
+
+/// Largest share by which the volume of a flow domain may part from the one the
+/// design describes ([`expected_fluid_volume`]). A boolean that drops a piece (the
+/// whole diffuser, on rectangular sections whose side walls lie in its planes) can
+/// still leave one valid solid; the designs that build differ from it by under 2.5 %.
+const VOLUME_SHARE: f64 = 0.05;
+
+/// Whether `fluid` (mm) holds about the volume the design `g` describes.
+pub(crate) fn holds_the_design(g: &VoluteGeometry, fluid: &Shape) -> Result<(), CadError> {
+    let expected = expected_fluid_volume(g) * MM.powi(3);
+    let off = fluid.volume_with_tolerance(0.0) / expected - 1.0;
+    if off.abs() > VOLUME_SHARE {
+        return Err(CadError::Operation(format!(
+            "the flow domain came out {:+.0} % off the volume of the design: the CAD kernel \
+             lost or added a piece",
+            off * 100.0
+        )));
+    }
+    Ok(())
 }
 
 /// The flow domain of the volute, with the cutwater rounded when it is a fillet and

@@ -19,7 +19,7 @@ use tp_math::DVec3;
 
 use crate::CadError;
 use crate::occ::{self, Shape};
-use crate::volute::{MM, VoluteCad, fillet_tip, section_wire};
+use crate::volute::{MM, VoluteCad, fillet_tip, holds_the_design, section_wire};
 
 /// Gap the sewing closes between the edges of neighbouring faces, mm.
 const SEWING_TOLERANCE: f64 = 1e-2;
@@ -305,6 +305,7 @@ pub fn build_volute_flow(g: &VoluteGeometry) -> Result<(VoluteCad, FlowBuild), C
     if let Ok(cad) = build_volute_sewn(g)
         && cad.fluid.is_valid()
         && cad.fluid.solid_count() == 1
+        && holds_the_design(g, &cad.fluid).is_ok()
     {
         return Ok((cad, FlowBuild::Sewn));
     }
@@ -731,6 +732,27 @@ mod tests {
                 assert!(off < 0.5, "{case}: {off} mm");
             }
         }
+    }
+
+    #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
+    fn a_boolean_that_drops_the_diffuser_is_refused() {
+        let _slot = crate::test_slot::take();
+        // The flat side walls of a rectangular section lie in the planes of the
+        // diffuser's: the boolean union keeps the spiral alone, one valid solid a third
+        // short. It must fail, and the flow domain come out sewn and whole.
+        let mut input = VoluteInput {
+            cross_section: CrossSectionInput::single(SectionShape::rectangular()),
+            ..VoluteInput::default()
+        };
+        input.cutwater.shape = CutwaterShape::Sharp;
+        input.diffuser.base_form = Param::Manual(0.5);
+        let g = VoluteGeometry::build(&basis(), &input).unwrap();
+        assert!(crate::build_volute(&g).is_err());
+        let (cad, how) = build_volute_flow(&g).unwrap();
+        assert_eq!(how, FlowBuild::Sewn);
+        let expected = crate::expected_fluid_volume(&g) * MM.powi(3);
+        assert!((cad.fluid.volume() / expected - 1.0).abs() < 0.02);
     }
 }
 
