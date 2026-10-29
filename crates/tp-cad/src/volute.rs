@@ -1027,10 +1027,26 @@ fn tip_edges(whole: &Shape, pieces: &[Shape], g: &VoluteGeometry) -> Vec<usize> 
         .collect()
 }
 
+/// `channel` with its cutwater rounded, and the radius it took, mm: by the kernel's
+/// fillet, else by adding the sliver the design's round cuts off; `None` if neither
+/// builds anything sound.
+pub(crate) fn fillet_tip(
+    channel: &Shape,
+    pieces: &[Shape],
+    g: &VoluteGeometry,
+    radius: f64,
+) -> Option<(Shape, f64)> {
+    kernel_fillet_tip(channel, pieces, g, radius).or_else(|| {
+        crate::profile::stage("round tip", || {
+            crate::rounding::round_tip(channel, g).map(|rounded| (rounded, radius))
+        })
+    })
+}
+
 /// `channel` with its cutwater edge rounded by the kernel, and the radius it took, mm: the
 /// edges of the tip that run across the height, with `radius` or a part of it if this
 /// one is too much; `None` if the kernel builds nothing sound.
-pub(crate) fn fillet_tip(
+fn kernel_fillet_tip(
     channel: &Shape,
     pieces: &[Shape],
     g: &VoluteGeometry,
@@ -2237,20 +2253,24 @@ mod tests {
 
     #[test]
     #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
-    fn a_fillet_cutwater_stays_sharp_where_the_kernel_cannot_round() {
+    fn a_fillet_cutwater_is_rounded_by_its_sliver_where_the_kernel_cannot_round() {
         use tp_design::volute::CutwaterShape;
         let _slot = crate::test_slot::take();
-        let mut input = VoluteInput {
-            cross_section: CrossSectionInput::single(SectionShape::round()),
-            ..VoluteInput::default()
+        let fluid = |shape: CutwaterShape| {
+            let mut input = VoluteInput {
+                cross_section: CrossSectionInput::single(SectionShape::round()),
+                ..VoluteInput::default()
+            };
+            input.cutwater.shape = shape;
+            let g = VoluteGeometry::build(&basis(), &input).unwrap();
+            build_volute(&g).unwrap()
         };
-        input.cutwater.shape = CutwaterShape::Fillet {
+        let sharp = fluid(CutwaterShape::Sharp);
+        let cad = fluid(CutwaterShape::Fillet {
             radius: tp_design::Param::Auto,
-        };
-        let g = VoluteGeometry::build(&basis(), &input).unwrap();
-        let cad = build_volute(&g).unwrap();
+        });
         assert!(
-            cad.warnings.iter().any(|w| w.contains("could not round")),
+            cad.warnings.iter().all(|w| !w.contains("could not round")),
             "{:?}",
             cad.warnings
         );
@@ -2258,6 +2278,12 @@ mod tests {
             assert!(s.is_valid());
             assert_eq!(s.solid_count(), 1);
         }
+        // The round adds a sliver of flow at the tip of the sharp edge.
+        let (sharp, rounded) = (sharp.fluid_volume(), cad.fluid_volume());
+        assert!(
+            rounded > sharp && rounded < sharp * 1.01,
+            "{rounded} vs {sharp}"
+        );
     }
 
     #[test]

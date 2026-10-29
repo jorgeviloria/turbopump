@@ -11,6 +11,7 @@ mod impeller;
 mod joined;
 mod occ;
 mod profile;
+mod rounding;
 mod sewn;
 mod thin;
 mod volute;
