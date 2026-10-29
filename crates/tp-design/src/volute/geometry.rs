@@ -1128,8 +1128,9 @@ impl VoluteGeometry {
         let channel = |angle: f64| -> Result<VoluteSection, DesignError> {
             let rib = design.rib.as_ref().expect("a double volute");
             let a = inner_height(angle)?;
-            let base = base_width(a + rib.thickness);
-            let rz = design.stagnation_radius + a + rib.thickness;
+            let t = rib.thickness_at(angle);
+            let base = base_width(a + t);
+            let rz = design.stagnation_radius + a + t;
             let area = rib.channel_area(angle);
             let part = super::Shape::closed(straight.slope, base, rz);
             let size = part.size(part.height_for_area(area));
@@ -1153,7 +1154,7 @@ impl VoluteGeometry {
                         .properties(angle, table.row_at(angle).whole_height)?,
                 ),
                 None => {
-                    let area = straight.area(inner_height(angle)? + rib.thickness)
+                    let area = straight.area(inner_height(angle)? + rib.thickness_at(angle))
                         + rib.channel_area(angle);
                     straight.size(straight.height_for_area(area))
                 }
@@ -1693,7 +1694,7 @@ impl VoluteGeometry {
 
 /// The rib of a double volute. Its inner face follows the outer wall of the inner volute
 /// from r'_z at the start of the inner volute, its outer face lies one rib thickness
-/// beyond. The nose and the tail are half ellipses on the conjugate semi-diameters
+/// beyond, which may change along the rib ([`super::Rib::thickness_at`]). The nose and the tail are half ellipses on the conjugate semi-diameters
 /// across the rib and along its mid line, so they meet both faces tangentially: the
 /// leading edge points along the inner volute's wall, which leaves r'_z at the flow
 /// angle α₃' (Gülich Chap. 7.8.1, item 7, asks the cutwater to match the approach
@@ -1747,7 +1748,7 @@ fn rib_plane(
     z: f64,
     start: f64,
 ) -> Result<RibPlane, DesignError> {
-    let t = rib.thickness;
+    let t = |angle: f64| rib.thickness_at(angle);
     let inner = |angle: f64| -> Result<f64, DesignError> {
         Ok(design.stagnation_radius + design.rib_height(angle)?)
     };
@@ -1762,31 +1763,47 @@ fn rib_plane(
         let angle = start + (end - start) * i as f64 / n as f64;
         let r = inner(angle)?;
         inner_face.push(at(r, angle));
-        outer_face.push(at(r + t, angle));
+        outer_face.push(at(r + t(angle), angle));
     }
     // Downstream direction of the mid line at both ends.
-    let mid = |angle: f64| -> Result<DVec3, DesignError> { Ok(at(inner(angle)? + t / 2.0, angle)) };
+    let mid = |angle: f64| -> Result<DVec3, DesignError> {
+        Ok(at(inner(angle)? + t(angle) / 2.0, angle))
+    };
     let step = 1e-4;
     let lead = (mid(start + step)? - mid(start)?).normalize();
     let trail = (mid(end)? - mid(end - step)?).normalize();
-    let length = rib.nose_length();
-    let half_ellipse = |inner: DVec3, outer: DVec3, along: DVec3, from: f64, to: f64| {
-        let centre = 0.5 * (inner + outer);
-        let across = 0.5 * (outer - inner);
-        let m = RIB_NOSE_POINTS;
-        let mut points: Vec<DVec3> = (0..=m)
-            .map(|i| {
-                let s = from + (to - from) * i as f64 / m as f64;
-                centre + across * s.cos() + along * (length * s.sin())
-            })
-            .collect();
-        // The ends are the corners of the faces, exactly.
-        points[0] = if from == 0.0 { outer } else { inner };
-        points[m] = if from == 0.0 { inner } else { outer };
-        points
-    };
-    let nose = half_ellipse(inner_face[0], outer_face[0], -lead, 0.0, PI);
-    let tail = half_ellipse(inner_face[n], outer_face[n], trail, PI, 0.0);
+    let half_ellipse =
+        |inner: DVec3, outer: DVec3, along: DVec3, length: f64, from: f64, to: f64| {
+            let centre = 0.5 * (inner + outer);
+            let across = 0.5 * (outer - inner);
+            let m = RIB_NOSE_POINTS;
+            let mut points: Vec<DVec3> = (0..=m)
+                .map(|i| {
+                    let s = from + (to - from) * i as f64 / m as f64;
+                    centre + across * s.cos() + along * (length * s.sin())
+                })
+                .collect();
+            // The ends are the corners of the faces, exactly.
+            points[0] = if from == 0.0 { outer } else { inner };
+            points[m] = if from == 0.0 { inner } else { outer };
+            points
+        };
+    let nose = half_ellipse(
+        inner_face[0],
+        outer_face[0],
+        -lead,
+        rib.nose_length(),
+        0.0,
+        PI,
+    );
+    let tail = half_ellipse(
+        inner_face[n],
+        outer_face[n],
+        trail,
+        rib.tail_length(),
+        PI,
+        0.0,
+    );
     Ok(RibPlane {
         z,
         inner_face,
@@ -3636,6 +3653,48 @@ mod tests {
     }
 
     #[test]
+    fn a_tapered_rib_keeps_its_thickness_in_the_faces_and_the_channel() {
+        let mut input = unturned();
+        input.setup.kind = crate::volute::VoluteKind::Double;
+        input.setup.rib_thickness = crate::Param::Manual(0.004);
+        input.setup.rib_middle_thickness = crate::Param::Manual(0.007);
+        input.setup.rib_end_thickness = crate::Param::Manual(0.006);
+        input.setup.rib_tail_ratio = crate::Param::Manual(2.0);
+        let g = VoluteGeometry::build(&reference_basis(), &input).unwrap();
+        let rib = g.design.rib.unwrap();
+        let r = g.rib.as_ref().unwrap();
+        let radius = |p: &DVec3| p.truncate().length();
+        // The faces run evenly from the nose to the end of the rib.
+        for (k, (i, o)) in r.inner_face.iter().zip(&r.outer_face).enumerate() {
+            let a = rib.start + rib.length * k as f64 / RIB_FACE_POINTS as f64;
+            assert_relative_eq!(radius(o) - radius(i), rib.thickness_at(a), epsilon = 1e-9);
+        }
+        // The tail is an ellipse twice as long as half the end thickness.
+        let end = 0.5 * (r.inner_face[RIB_FACE_POINTS] + r.outer_face[RIB_FACE_POINTS]);
+        assert_relative_eq!(
+            r.tail[RIB_NOSE_POINTS / 2].distance(end),
+            0.006,
+            max_relative = 1e-6
+        );
+        // The outer channel keeps its area beyond the thicker rib.
+        for c in &g.outer_channel {
+            let inner = g.design.section(c.angle).unwrap();
+            let gap = c.outline.iter().map(|p| p.x).fold(f64::INFINITY, f64::min)
+                - if c.angle > rib.start {
+                    inner.outer_radius
+                } else {
+                    g.design.stagnation_radius
+                };
+            assert_relative_eq!(gap, rib.thickness_at(c.angle), epsilon = 1e-6);
+            assert_relative_eq!(
+                polygon_area(&c.outline).abs(),
+                rib.channel_area(c.angle),
+                max_relative = 1e-5
+            );
+        }
+    }
+
+    #[test]
     fn rectangles_and_trapezoids_build_as_a_double_volute() {
         for shape in [SectionShape::rectangular(), SectionShape::default()] {
             let mut input = unturned();
@@ -3724,7 +3783,7 @@ mod tests {
                     .map(|p| p.x)
                     .fold(f64::NEG_INFINITY, f64::max);
                 let a = g.design.rib_height(sec.angle).unwrap();
-                let cut = rz + a + rib.thickness;
+                let cut = rz + a + rib.thickness_at(sec.angle);
                 // The outer channel has the area the design gives it, beyond the rib.
                 let outer = envelope_integral(&g, sec.angle, cut, r_max, |_| 1.0);
                 assert_relative_eq!(outer, rib.channel_area(sec.angle), max_relative = 0.02);

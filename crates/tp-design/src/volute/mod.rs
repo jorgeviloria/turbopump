@@ -205,11 +205,20 @@ pub struct VoluteSetupInput {
     /// channels join there. Files saved with `rib_wrap` read it as this length.
     #[serde(alias = "rib_wrap")]
     pub rib_length: Param<f64>,
-    /// Thickness of the rib of a double volute, m.
+    /// Thickness of the rib of a double volute at its nose, m.
     pub rib_thickness: Param<f64>,
-    /// Length over thickness of the elliptic nose and tail of the rib: 1 for a
-    /// semicircle.
+    /// Thickness of the rib halfway along it, m; automatic: the mean of the nose and
+    /// the tail.
+    pub rib_middle_thickness: Param<f64>,
+    /// Thickness of the rib at its tail, m; automatic: the nose's.
+    pub rib_end_thickness: Param<f64>,
+    /// Length over thickness of the elliptic nose of the rib: 1 for a semicircle.
     pub rib_nose_ratio: Param<f64>,
+    /// Length over thickness of the elliptic tail of the rib; automatic: the nose's.
+    pub rib_tail_ratio: Param<f64>,
+    /// Radius of the fillet where the rib meets the walls of the volute, m; automatic:
+    /// 0, sharp corners. Castings round them anyway, and the CAD rounds them with it.
+    pub rib_corner_radius: Param<f64>,
     /// Outlet area of the outer channel of a double volute over the throat area of the
     /// first partial volute.
     pub channel_area_ratio: Param<f64>,
@@ -785,10 +794,16 @@ pub struct Rib {
     pub start: f64,
     /// Length of the rib from its nose, rad: the whole inner volute (`wrap`) or less.
     pub length: f64,
-    /// m
+    /// Thickness at the nose, m.
     pub thickness: f64,
-    /// Length over thickness of the elliptic nose and tail.
+    /// Thickness halfway along the rib and at its tail, m.
+    pub middle_thickness: f64,
+    pub end_thickness: f64,
+    /// Length over thickness of the elliptic nose and of the elliptic tail.
     pub nose_ratio: f64,
+    pub tail_ratio: f64,
+    /// Radius of the fillet between the rib and the walls, m; 0 for sharp corners.
+    pub corner_radius: f64,
     /// Throat of the first partial volute, at the rib nose, corrected for the rib like a
     /// cutwater (eq. 7.28).
     pub outer_throat: SectionSize,
@@ -813,10 +828,36 @@ impl Rib {
         self.length < self.wrap - 1e-9
     }
 
-    /// Length of the nose ahead of the start of the inner volute, and of the tail after
-    /// the throat, m.
+    /// Length of the nose ahead of the start of the inner volute, m.
     pub fn nose_length(&self) -> f64 {
         self.nose_ratio * self.thickness / 2.0
+    }
+
+    /// Length of the tail after the end of the rib, m.
+    pub fn tail_length(&self) -> f64 {
+        self.tail_ratio * self.end_thickness / 2.0
+    }
+
+    /// Thickness of the rib at wrap angle `angle`, m: the parabola through the nose,
+    /// middle and tail thicknesses along the rib, kept to its ends outside it.
+    pub fn thickness_at(&self, angle: f64) -> f64 {
+        let s = ((angle - self.start) / self.length).clamp(0.0, 1.0);
+        let t = self.thickness * (2.0 * s - 1.0) * (s - 1.0)
+            + self.middle_thickness * 4.0 * s * (1.0 - s)
+            + self.end_thickness * s * (2.0 * s - 1.0);
+        // A middle far from the ends could bend the parabola below them.
+        t.max(
+            0.5 * self
+                .thickness
+                .min(self.middle_thickness)
+                .min(self.end_thickness),
+        )
+    }
+
+    /// Whether the thickness changes along the rib.
+    pub fn is_tapered(&self) -> bool {
+        (self.middle_thickness - self.thickness).abs() > 1e-12
+            || (self.end_thickness - self.thickness).abs() > 1e-12
     }
 
     /// Area of the outer channel at wrap angle `angle` between the rib nose and 2π.
@@ -1518,10 +1559,42 @@ impl VoluteDesign {
                         outer_throat.height * 1e3
                     )
                 })?;
+                let end_thickness = setup.rib_end_thickness.resolve(|| thickness);
+                let middle_thickness = setup
+                    .rib_middle_thickness
+                    .resolve(|| 0.5 * (thickness + end_thickness));
+                require(end_thickness > 0.0 && middle_thickness > 0.0, || {
+                    "the rib thickness must be positive along the rib".into()
+                })?;
+                let thickest = middle_thickness.max(end_thickness);
+                require(outer_throat.height > 1.5 * thickest, || {
+                    format!(
+                        "the rib ({:.1} mm along it) is too thick for the {:.1} mm high \
+                         throat of the first partial volute",
+                        thickest * 1e3,
+                        outer_throat.height * 1e3
+                    )
+                })?;
                 let nose_ratio = setup.rib_nose_ratio.resolve(|| 1.0);
                 require((1.0..=5.0).contains(&nose_ratio), || {
                     format!("the nose ratio of the rib must lie between 1 and 5, got {nose_ratio}")
                 })?;
+                let tail_ratio = setup.rib_tail_ratio.resolve(|| nose_ratio);
+                require((1.0..=5.0).contains(&tail_ratio), || {
+                    format!("the tail ratio of the rib must lie between 1 and 5, got {tail_ratio}")
+                })?;
+                let corner_radius = setup.rib_corner_radius.resolve(|| 0.0);
+                require(
+                    (0.0..=thickness.min(end_thickness)).contains(&corner_radius),
+                    || {
+                        format!(
+                            "the corner fillet of the rib must lie between 0 and its thinnest end, \
+                         {:.1} mm, got {:.1} mm",
+                            thickness.min(end_thickness) * 1e3,
+                            corner_radius * 1e3
+                        )
+                    },
+                )?;
                 let ratio = setup.channel_area_ratio.resolve(|| 1.0);
                 require((0.8..=3.0).contains(&ratio), || {
                     format!(
@@ -1534,7 +1607,11 @@ impl VoluteDesign {
                     start,
                     length,
                     thickness,
+                    middle_thickness,
+                    end_thickness,
                     nose_ratio,
+                    tail_ratio,
+                    corner_radius,
                     outer_throat,
                     channel_inlet_area: outer_throat.area
                         - section.area_below(outer_throat.height, thickness),
@@ -2206,7 +2283,7 @@ impl VoluteDesign {
                 let area = rib.channel_area(angle);
                 let height = shape.height_for_area(area);
                 let perimeter = shape.wetted_perimeter(height) + self.inlet_width;
-                let radius = section.outer_radius + rib.thickness + height / 2.0;
+                let radius = section.outer_radius + rib.thickness_at(angle) + height / 2.0;
                 sum += (rib.start / TAU / area).powi(3) * perimeter * radius;
             }
         }
@@ -2890,6 +2967,47 @@ mod tests {
             })
             .is_err()
         );
+    }
+
+    #[test]
+    fn a_rib_tapers_along_a_parabola_through_its_three_thicknesses() {
+        let plain = double_with(|_| {}).unwrap().rib.unwrap();
+        // Automatic: the same thickness all along, the tail like the nose, sharp corners.
+        assert!(!plain.is_tapered());
+        assert_relative_eq!(plain.end_thickness, plain.thickness);
+        assert_relative_eq!(plain.tail_ratio, plain.nose_ratio);
+        assert_eq!(plain.corner_radius, 0.0);
+        let rib = double_with(|v| {
+            v.setup.rib_thickness = Param::Manual(0.004);
+            v.setup.rib_middle_thickness = Param::Manual(0.007);
+            v.setup.rib_end_thickness = Param::Manual(0.005);
+            v.setup.rib_tail_ratio = Param::Manual(3.0);
+            v.setup.rib_corner_radius = Param::Manual(0.002);
+        })
+        .unwrap()
+        .rib
+        .unwrap();
+        assert!(rib.is_tapered());
+        assert_relative_eq!(rib.thickness_at(rib.start), 0.004, epsilon = 1e-12);
+        assert_relative_eq!(
+            rib.thickness_at(rib.start + rib.length / 2.0),
+            0.007,
+            epsilon = 1e-12
+        );
+        assert_relative_eq!(rib.thickness_at(rib.end()), 0.005, epsilon = 1e-12);
+        // Outside the rib it keeps the thickness of its ends.
+        assert_relative_eq!(rib.thickness_at(0.0), 0.004, epsilon = 1e-12);
+        assert_relative_eq!(rib.tail_length(), 1.5 * 0.005, epsilon = 1e-12);
+        // An automatic middle is the mean of the ends.
+        let mean = double_with(|v| v.setup.rib_end_thickness = Param::Manual(0.008))
+            .unwrap()
+            .rib
+            .unwrap();
+        assert_relative_eq!(mean.middle_thickness, 0.5 * (mean.thickness + 0.008));
+        // A corner fillet thicker than the rib, or a tail ratio out of range, is refused.
+        assert!(double_with(|v| v.setup.rib_corner_radius = Param::Manual(0.02)).is_err());
+        assert!(double_with(|v| v.setup.rib_tail_ratio = Param::Manual(0.5)).is_err());
+        assert!(double_with(|v| v.setup.rib_end_thickness = Param::Manual(0.03)).is_err());
     }
 
     #[test]

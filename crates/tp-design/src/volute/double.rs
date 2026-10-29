@@ -252,7 +252,7 @@ impl FreeDouble {
         measure: Measure,
         target: Target,
     ) -> Result<(f64, f64), DesignError> {
-        let t = rib.thickness;
+        let t = rib.thickness_at(angle);
         let outer = rib.channel_area(angle);
         let wanted = match target {
             Target::Swirl(x) | Target::Area(x) => x,

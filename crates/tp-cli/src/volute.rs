@@ -56,8 +56,12 @@ pub(crate) struct VoluteArgs {
     /// rib_length (length of the rib of a double volute from its nose, which is always 180° from the cutwater; 180° reaches the throat, less stops the rib short of the discharge diffuser), rib (rib thickness),
     /// rib_comp (on or off: the first partial volute grows by the rib from rib_comp_start
     /// to the nose, so the outer channel starts with the area of the rule), rib_comp_start,
-    /// rib_nose (length over thickness of the elliptic nose and tail of the rib, 1 for a
-    /// semicircle), channel_ratio (outlet area of the outer channel over the first
+    /// rib_nose (length over thickness of the elliptic nose of the rib, 1 for a
+    /// semicircle), rib_tail (the same for its tail, over the end thickness; automatic:
+    /// rib_nose), rib_middle and rib_end (rib thickness halfway along it and at its tail;
+    /// the thickness follows a parabola through the three), rib_corner (radius of the
+    /// fillet where the rib meets the side walls; 0, the default, for sharp corners),
+    /// channel_ratio (outlet area of the outer channel over the first
     /// throat), discharge (spline:TURN[,START,END], a Bézier centerline turning TURN degrees with shares START and END from 0.1 to 0.9; radial, the default, with the outlet on the pump centerline,
     /// or radial:DEGREES from the line through the pump axis; tangential, opening to both
     /// sides; tangential:inner or tangential:outer with that wall straight), bend (bend radius of a radial discharge), outlet_shape (round, or rectangular[:ASPECT] with the height along the pump axis over the width, the same area as the round outlet and no round flange), z_bend (none, or EXTENT,RADIUS,ANGLE: the centerline of the diffuser runs flat, rounds off with RADIUS through ANGLE degrees and goes on straight, ending EXTENT along the pump axis), eccentricity (−1 to 1 for a tangential diffuser: −1 with the cutwater wall straight, 0 opening to both sides, 1 with the outer wall straight), base_form (0 to 1: how far the inlet chord of the first diffuser section bulges toward the pump axis, so that the diffuser crosses the start of the spiral), height_offset (Δr_C: the diffuser shifted across its centerline, away from the pump axis when positive, to give the cutwater room), z_align (centric, or manual:OFFSET[,quadratic]: the outlet shifted along the pump axis), growth (area of the diffuser from the throat: linear, the default, or matched, which starts with the slope of the spiral), rotation (angle
@@ -775,6 +779,10 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
         "rib_length" | "rib_wrap" => input.setup.rib_length = quantity(Angle)?,
         "rib" => input.setup.rib_thickness = quantity(Length)?,
         "rib_nose" => input.setup.rib_nose_ratio = quantity(Dimensionless)?,
+        "rib_tail" => input.setup.rib_tail_ratio = quantity(Dimensionless)?,
+        "rib_middle" => input.setup.rib_middle_thickness = quantity(Length)?,
+        "rib_end" => input.setup.rib_end_thickness = quantity(Length)?,
+        "rib_corner" => input.setup.rib_corner_radius = quantity(Length)?,
         "channel_ratio" => input.setup.channel_area_ratio = quantity(Dimensionless)?,
         "rib_comp" => input.setup.rib_compensation = on_off(value)?,
         "rib_comp_start" => input.setup.rib_compensation_start = quantity(Angle)?,
@@ -869,9 +877,9 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
                  wall, \
                  fillet, type, \
                  rib_length, rib, \
-                 rib_nose, channel_ratio, discharge, bend, growth, height_offset, z_align, \
-                 base_form, eccentricity, outlet_shape, z_bend, rotation, cutwater, nose, cut, \
-                 gap, handle, height, \
+                 rib_nose, rib_tail, rib_middle, rib_end, rib_corner, channel_ratio, discharge, \
+                 bend, growth, height_offset, z_align, base_form, eccentricity, outlet_shape, \
+                 z_bend, rotation, cutwater, nose, cut, gap, handle, height, \
                  dn, flange, flange_d, flange_t, bolt_circle, bolt_hole, bolts, pressure, \
                  allowable"
             ));
@@ -1167,17 +1175,38 @@ fn print_report(name: &str, id: ComponentId, g: &VoluteGeometry, units: &Display
                 s(Angle, start)
             );
         }
+        let ellipse = |ratio: f64| {
+            if ratio > 1.0 {
+                format!("elliptic {ratio:.2}:1")
+            } else {
+                "semicircular".to_string()
+            }
+        };
         if let Some(r) = &g.rib {
             println!(
-                "           {} nose and tail (length {}): tip at {}   nearest to the axis {}",
-                if rib.nose_ratio > 1.0 {
-                    format!("elliptic {:.2}:1", rib.nose_ratio)
-                } else {
-                    "semicircular".to_string()
-                },
+                "           {} nose (length {}): tip at {}   nearest to the axis {}",
+                ellipse(rib.nose_ratio),
                 s(Length, rib.nose_length()),
                 s(Angle, r.nose_angle),
                 s(Length, r.nose_distance)
+            );
+        }
+        println!(
+            "           {} tail (length {})   corners {}",
+            ellipse(rib.tail_ratio),
+            s(Length, rib.tail_length()),
+            if rib.corner_radius > 0.0 {
+                format!("filleted with {}", s(Length, rib.corner_radius))
+            } else {
+                "sharp".to_string()
+            }
+        );
+        if rib.is_tapered() {
+            println!(
+                "           rib thickness: nose {}   middle {}   tail {}",
+                s(Length, rib.thickness),
+                s(Length, rib.middle_thickness),
+                s(Length, rib.end_thickness)
             );
         }
     }

@@ -619,11 +619,22 @@ fn volute_designs_and_exports() {
         "type=double",
         "--set",
         "rib_nose=2",
+        "--set",
+        "rib_end=7 mm",
+        "--set",
+        "rib_corner=2 mm",
         "--dry-run",
         "--export",
         double_dir.to_str().unwrap(),
     ]));
-    assert!(double.contains("elliptic 2.00:1 nose and tail"), "{double}");
+    assert!(double.contains("elliptic 2.00:1 nose"), "{double}");
+    // The tail follows the nose; the rib tapers to its end and its corners are filleted.
+    assert!(double.contains("elliptic 2.00:1 tail"), "{double}");
+    assert!(double.contains("tail 7.000 mm"), "{double}");
+    assert!(
+        double.contains("corners filleted with 2.000 mm"),
+        "{double}"
+    );
     let points = std::fs::read_to_string(double_dir.join("volute.txt")).unwrap();
     assert!(points.contains("[rib outline thickness="), "{points}");
     let bad = turbopump(&["volute", file_arg, "--set", "shape=hexagon"]);
