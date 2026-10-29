@@ -1041,6 +1041,40 @@ fn content(
                             s(Area, rib.channel_outlet_area)
                         ),
                     );
+                    if rib.is_tapered() {
+                        value_row(
+                            ui,
+                            tr("Rib thickness along it"),
+                            tf(
+                                "nose {} · middle {} · tail {}",
+                                &[
+                                    &s(Length, rib.thickness),
+                                    &s(Length, rib.middle_thickness),
+                                    &s(Length, rib.end_thickness),
+                                ],
+                            ),
+                        );
+                    }
+                    value_row(
+                        ui,
+                        tr("Rib tail"),
+                        tf(
+                            "{}:1 ellipse {} long",
+                            &[
+                                &format!("{:.2}", rib.tail_ratio),
+                                &s(Length, rib.tail_length()),
+                            ],
+                        ),
+                    );
+                    value_row(
+                        ui,
+                        tr("Rib corners"),
+                        if rib.corner_radius > 0.0 {
+                            tf("fillet {}", &[&s(Length, rib.corner_radius)])
+                        } else {
+                            tr("sharp corners").to_owned()
+                        },
+                    );
                     if let Some(r) = &v.rib {
                         value_row(
                             ui,

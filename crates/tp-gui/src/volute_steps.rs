@@ -178,16 +178,62 @@ fn setup(
                 );
                 param_f64(
                     ui,
+                    tr("Rib middle thickness"),
+                    tr(
+                        "Halfway along the rib; the thickness follows a parabola through the \
+                        nose, the middle and the tail. Automatic: the mean of the ends",
+                    ),
+                    &mut input.setup.rib_middle_thickness,
+                    Length,
+                    rib.map(|r| r.middle_thickness),
+                    &units,
+                    0.0005..=0.1,
+                );
+                param_f64(
+                    ui,
+                    tr("Rib end thickness"),
+                    tr("At the tail of the rib; automatic: the nose's"),
+                    &mut input.setup.rib_end_thickness,
+                    Length,
+                    rib.map(|r| r.end_thickness),
+                    &units,
+                    0.0005..=0.1,
+                );
+                param_f64(
+                    ui,
                     tr("Rib nose length/thickness"),
                     tr(
-                        "Elliptic nose and tail of the rib: 1 for a semicircle, longer for a \
-                        nose less sensitive to the flow angle (Gülich Chap. 7.8.1, item 7)",
+                        "Elliptic nose of the rib: 1 for a semicircle, longer for a nose less \
+                        sensitive to the flow angle (Gülich Chap. 7.8.1, item 7)",
                     ),
                     &mut input.setup.rib_nose_ratio,
                     Dimensionless,
                     rib.map(|r| r.nose_ratio),
                     &units,
                     1.0..=5.0,
+                );
+                param_f64(
+                    ui,
+                    tr("Rib tail length/thickness"),
+                    tr("Elliptic tail of the rib, over its end thickness; automatic: the nose's"),
+                    &mut input.setup.rib_tail_ratio,
+                    Dimensionless,
+                    rib.map(|r| r.tail_ratio),
+                    &units,
+                    1.0..=5.0,
+                );
+                param_f64(
+                    ui,
+                    tr("Rib corner fillet"),
+                    tr(
+                        "Radius where the rib meets the side walls; the CAD rounds those corners \
+                        with it. Automatic: 0, sharp corners",
+                    ),
+                    &mut input.setup.rib_corner_radius,
+                    Length,
+                    rib.map(|r| r.corner_radius),
+                    &units,
+                    0.0..=0.05,
                 );
                 param_f64(
                     ui,
