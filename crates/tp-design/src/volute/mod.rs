@@ -469,11 +469,10 @@ pub enum CutwaterShape {
     /// That edge rounded with `radius`, m (automatic: e₃/2, a nose as thick as the
     /// cutwater).
     Rounded { radius: Param<f64> },
-    /// The same rounded edge with the CAD built as its kernel's fillet: the spiral and
-    /// the diffuser are joined, trimmed at their intersection, and the edge is rounded
-    /// with `radius`, m (automatic: e₃/2). The design draws the nose as for `Rounded`;
-    /// where the kernel cannot round the edge, the CAD builds the body of a rounded
-    /// cutwater instead.
+    /// The edge rounded by an arc of `radius`, m (automatic: e₃/2) tangent to both walls,
+    /// so that the cutwater stands where they cross. The CAD joins the spiral and the
+    /// diffuser and rounds the edge with the kernel's fillet; where the kernel cannot,
+    /// it adds the sliver of the wedge the arc cuts off.
     Fillet { radius: Param<f64> },
 }
 
