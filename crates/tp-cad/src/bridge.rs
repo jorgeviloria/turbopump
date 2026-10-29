@@ -76,6 +76,12 @@ pub(crate) mod ffi {
         fn boundary_distances(shape: &Shape, points: &[P3]) -> Result<Vec<f64>>;
         /// Rounds the edges of the indexed edge map with `radius`.
         fn fillet_edges(shape: &Shape, edges: &[u32], radius: f64) -> Result<UniquePtr<Shape>>;
+        fn fillet_edges_evolving(
+            shape: &Shape,
+            edges: &[u32],
+            first: &[f64],
+            last: &[f64],
+        ) -> Result<UniquePtr<Shape>>;
 
         /// Volume; `eps` > 0 integrates adaptively to that relative error.
         fn volume(shape: &Shape, eps: f64) -> f64;

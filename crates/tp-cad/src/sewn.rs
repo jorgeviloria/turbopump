@@ -53,13 +53,18 @@ pub fn build_volute_sewn(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
     }
     let radius = g.design.nose_radius * MM;
     if !g.design.cutwater_shape.is_fillet() || radius <= 0.0 {
-        return sewn_with(g, 0.0);
+        return sewn_with(g, 0.0, 1.0);
     }
     // A large fillet reaches into the strip of the ring beside the cutwater, and the
     // ring no longer sews to the zone: a smaller one, said so, rather than none.
     let mut failed = None;
-    for share in FILLET_SHARES {
-        match sewn_with(g, share * radius) {
+    // The kernel takes a radius shrinking toward the side walls at some shares and not
+    // at others close by: several, before a smaller radius.
+    let attempts = FILLET_SHARES
+        .iter()
+        .flat_map(|&share| WALL_SHARES.iter().map(move |&wall| (share, wall)));
+    for (share, wall) in attempts {
+        match sewn_with(g, share * radius, wall) {
             Ok(mut cad) => {
                 if share < 1.0 && !cad.warnings.iter().any(|w| w.contains("rounded with")) {
                     cad.warnings.push(format!(
@@ -78,12 +83,16 @@ pub fn build_volute_sewn(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
     Err(failed.expect("at least one radius"))
 }
 
+/// Shares of the fillet radius left at the side walls the sewn flow domain tries, in
+/// order, where the cutwater edge is a V (a rounded diffuser base).
+const WALL_SHARES: [f64; 3] = [0.6, 0.3, 0.2];
+
 /// Shares of the fillet radius the sewn flow domain tries, largest first.
 const FILLET_SHARES: [f64; 4] = [1.0, 0.75, 0.5, 0.25];
 
 /// [`build_volute_sewn`] with the cutwater rounded with `radius`, mm (0: as designed
 /// for a sharp cutwater).
-fn sewn_with(g: &VoluteGeometry, radius: f64) -> Result<VoluteCad, CadError> {
+fn sewn_with(g: &VoluteGeometry, radius: f64, wall_share: f64) -> Result<VoluteCad, CadError> {
     let sign = g.basis.rotation_sign;
     let breaks = g.ring_breaks();
     let spiral: Vec<Vec<DVec3>> = g.sections.iter().map(|s| s.points(sign)).collect();
@@ -177,7 +186,7 @@ fn sewn_with(g: &VoluteGeometry, radius: f64) -> Result<VoluteCad, CadError> {
     let mut channel = channel;
     let mut warnings = Vec::new();
     if let CutwaterShape::Fillet { .. } = g.design.cutwater_shape {
-        match fillet_tip(&channel, &pieces, g, radius) {
+        match fillet_tip(&channel, &pieces, g, radius, wall_share) {
             Some((rounded, r)) => {
                 channel = rounded;
                 if r < radius * (1.0 - 1e-9) {
@@ -801,8 +810,9 @@ mod tests {
     fn a_rounded_diffuser_base_takes_the_fillet_at_the_tip() {
         let _slot = crate::test_slot::take();
         // With a base form factor the walls meet along a V across the width: its arms
-        // take the fillet, and a radius the ring strip cannot take comes out smaller.
-        for (radius, rounded) in [(Param::Auto, None), (Param::Manual(0.003), Some(1.5))] {
+        // take the fillet, shrinking toward the side walls so that a radius the ring
+        // strip beside them could not take still rounds the tip whole.
+        for radius in [Param::Auto, Param::Manual(0.003)] {
             let mut input = VoluteInput::default();
             input.cutwater.shape = CutwaterShape::Fillet { radius };
             input.diffuser.base_form = Param::Manual(0.5);
@@ -810,16 +820,7 @@ mod tests {
             let (cad, how) = build_volute_flow(&g).unwrap();
             assert_eq!(how, FlowBuild::Sewn);
             assert!(cad.fluid.is_valid() && cad.fluid.solid_count() == 1);
-            match rounded {
-                None => assert!(cad.warnings.is_empty(), "{:?}", cad.warnings),
-                Some(r) => assert!(
-                    cad.warnings
-                        .iter()
-                        .any(|w| w.contains(&format!("rounded with {r:.1} mm"))),
-                    "{:?}",
-                    cad.warnings
-                ),
-            }
+            assert!(cad.warnings.is_empty(), "{:?}", cad.warnings);
             let mut sharp = input.clone();
             sharp.cutwater.shape = CutwaterShape::Sharp;
             let sharp = build_volute_flow(&VoluteGeometry::build(&basis(), &sharp).unwrap())

@@ -324,7 +324,9 @@ fn flow_domain(g: &VoluteGeometry, round: bool) -> Result<VoluteCad, CadError> {
         let kernel = if g.design.cutwater_shape.is_simple() {
             None
         } else {
-            crate::profile::stage("fillet tip", || fillet_tip(&joined, &lofts, g, radius))
+            crate::profile::stage("fillet tip", || {
+                fillet_tip(&joined, &lofts, g, radius, FILLET_WALL_SHARE)
+            })
         };
         let rounded = kernel.or_else(|| {
             crate::profile::stage("round tip", || {
@@ -1077,12 +1079,15 @@ fn tip_edges(whole: &Shape, pieces: &[Shape], g: &VoluteGeometry) -> Vec<usize> 
 
 /// `channel` with its cutwater edge rounded by the kernel, and the radius it took, mm: the
 /// edges of the tip that run across the height, with `radius` or a part of it if this
-/// one is too much; `None` if the kernel builds nothing sound.
+/// one is too much; `None` if the kernel builds nothing sound. Where the edge is a V
+/// (a rounded diffuser base), its arms are tried first with a radius shrinking to
+/// `wall_share` of it at the side walls.
 pub(crate) fn fillet_tip(
     channel: &Shape,
     pieces: &[Shape],
     g: &VoluteGeometry,
     radius: f64,
+    wall_share: f64,
 ) -> Option<(Shape, f64)> {
     let samples = channel.edge_samples(17);
     let across: Vec<usize> = tip_edges(channel, pieces, g)
@@ -1112,19 +1117,41 @@ pub(crate) fn fillet_tip(
             e[0].truncate().distance(e[e.len() - 1].truncate()) > 1.0
         })
         .collect();
-    let mut choices = vec![across.clone()];
+    // The arms first with a radius that shrinks toward the side walls, the way the
+    // central fillet of a cutwater hands over to patches at its sides: the full one
+    // at the tip, where it matters, without reaching into the strip of the ring
+    // beside the walls.
+    let zm = g.basis.midplane * MM;
+    let mut choices: Vec<(Vec<usize>, bool)> = vec![(across.clone(), false)];
     if !arms.is_empty() && arms != across {
-        choices.push(arms);
+        choices.insert(0, (arms.clone(), true));
+        choices.push((arms, false));
     }
     let before = channel.volume_with_tolerance(0.0);
     let sound =
         |f: &Shape| f.is_valid() && f.solid_count() == 1 && f.volume_with_tolerance(0.0) > before;
     [1.0, 0.75, 0.5, 0.25].into_iter().find_map(|share| {
         let r = share * radius;
-        choices.iter().find_map(|edges| {
+        choices.iter().find_map(|(edges, shrinking)| {
+            let rounded = if *shrinking {
+                let radii: Vec<(f64, f64)> = edges
+                    .iter()
+                    .map(|&k| {
+                        let e = &samples[k];
+                        let (a, b) = (e[0], e[e.len() - 1]);
+                        if (a.z - zm).abs() < (b.z - zm).abs() {
+                            (r, wall_share * r)
+                        } else {
+                            (wall_share * r, r)
+                        }
+                    })
+                    .collect();
+                channel.filleted_evolving(edges, &radii).ok()?
+            } else {
+                channel.filleted(edges, r).ok()?
+            };
             // The kernel may leave the faces round the ends of a rounded V out of
             // tolerance; shape healing sets them right.
-            let rounded = channel.filleted(edges, r).ok()?;
             let rounded = if sound(&rounded) {
                 rounded
             } else {
@@ -1134,6 +1161,10 @@ pub(crate) fn fillet_tip(
         })
     })
 }
+
+/// Share of the fillet radius left where the arms of a V-shaped cutwater edge reach
+/// the side walls, for the boolean flow domain.
+const FILLET_WALL_SHARE: f64 = 0.6;
 
 /// `whole` with the groove over the cutwater filled and rounded with `radius`, mm, and
 /// the radius it took: along all its edges if OCCT can, else along those across the

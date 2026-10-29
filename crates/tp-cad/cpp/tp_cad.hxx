@@ -64,6 +64,10 @@ rust::Vec<P3> free_edge_samples(const Shape &shape, std::size_t samples);
 rust::Vec<double> boundary_distances(const Shape &shape, rust::Slice<const P3> points);
 std::unique_ptr<Shape> fillet_edges(const Shape &shape, rust::Slice<const std::uint32_t> edges,
                                     double radius);
+std::unique_ptr<Shape> fillet_edges_evolving(const Shape &shape,
+                                             rust::Slice<const std::uint32_t> edges,
+                                             rust::Slice<const double> first,
+                                             rust::Slice<const double> last);
 
 double volume(const Shape &shape, double eps);
 rust::Vec<double> solid_volumes(const Shape &shape);
