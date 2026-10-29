@@ -6,7 +6,6 @@ use std::time::Instant;
 
 use tp_cad::{build_volute, build_volute_casing};
 use tp_design::Param;
-use tp_design::impeller::edge::EdgeShape;
 use tp_design::outlet::ImpellerOutlet;
 use tp_design::volute::{
     CrossSectionInput, CutwaterShape, ExternalRound, SectionShape, VoluteGeometry, VoluteInput,
@@ -34,14 +33,13 @@ fn basis() -> ImpellerOutlet {
 #[ignore = "timing benchmark, minutes long"]
 fn volute_cad_timings() {
     type Edit = fn(&mut VoluteInput);
-    let cases: [(&str, Edit); 6] = [
+    let cases: [(&str, Edit); 5] = [
         ("trapezoid", |_| {}),
         ("round external", |v| {
             v.cross_section =
                 CrossSectionInput::single(SectionShape::RoundExternal(ExternalRound::default()))
         }),
         ("double", |v| v.setup.kind = VoluteKind::Double),
-        ("tapered nose", |v| v.cutwater.nose_shape = EdgeShape::TAPER),
         ("sharp", |v| v.cutwater.shape = CutwaterShape::Sharp),
         ("fillet", |v| {
             v.cutwater.shape = CutwaterShape::Fillet {

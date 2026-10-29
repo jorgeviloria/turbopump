@@ -1347,47 +1347,7 @@ impl VoluteGeometry {
             let near = wall_outlines.partition_point(|(angle, _)| *angle <= end);
             let walls = &wall_outlines[..near];
             cutwater_walls = walls.to_vec();
-            let (slices, centre) = super::cutwater::slices(&design, walls, &nozzle, sign, zm);
-            let e = 2.0 * design.nose_radius;
-            let oblique = design.cutwater_obliquity;
-            if centre.is_some() && oblique != 0.0 && !super::cutwater::sound(&slices, e) {
-                // The most it can lean, by bisection.
-                let leans = |obliquity: f64| {
-                    let mut leaning = design.clone();
-                    leaning.cutwater_obliquity = obliquity;
-                    let (slices, _) = super::cutwater::slices(&leaning, walls, &nozzle, sign, zm);
-                    super::cutwater::sound(&slices, e)
-                };
-                let (mut lo, mut hi) = (0.0, oblique);
-                for _ in 0..12 {
-                    let mid = 0.5 * (lo + hi);
-                    if leans(mid) {
-                        lo = mid;
-                    } else {
-                        hi = mid;
-                    }
-                }
-                return Err(DesignError::Infeasible(format!(
-                    "the cutwater cannot lean {:.0}°: past about {:.0}° it gets thinner than \
-                     its nose in some plane, where the walls leave it no room",
-                    oblique.to_degrees(),
-                    lo.to_degrees().trunc()
-                )));
-            }
-            if let Some(centre) = centre {
-                let mid = slices
-                    .iter()
-                    .find(|s| (s.z - zm).abs() < 1e-12 && !s.outline.is_empty())
-                    .ok_or_else(|| {
-                        DesignError::Infeasible(
-                            "the rounded cutwater does not reach the walls in the midplane: use \
-                             a sharp or tangent cutwater"
-                                .into(),
-                        )
-                    })?;
-                cutwater.nose_center = DVec3::new(centre.x, centre.y, zm);
-                cutwater.nose_distance = mid.nose_distance;
-            }
+            let slices = super::cutwater::slices(&design, walls, &nozzle, sign, zm);
             // The tip and the wedge where the walls really cross in the midplane.
             if let Some(mid) = slices.iter().find(|s| (s.z - zm).abs() < 1e-12) {
                 cutwater.tip = mid.tip;
@@ -1422,11 +1382,7 @@ impl VoluteGeometry {
                 (walls, &nozzle),
                 sign,
                 zm,
-                if design.cutwater_shape.is_fillet() {
-                    0.0
-                } else {
-                    design.cutwater_side_radius
-                },
+                0.0,
                 BODY_STEPS,
             );
             (slices, body)
@@ -4025,37 +3981,30 @@ mod tests {
     }
 
     #[test]
-    fn a_rounded_cutwater_has_its_nose_on_the_cutwater_circle() {
+    fn a_rounded_cutwater_stands_where_the_walls_cross_like_a_sharp_one() {
         let mut input = unturned();
         input.cutwater.shape = CutwaterShape::Sharp;
         let sharp = VoluteGeometry::build(&reference_basis(), &input).unwrap();
         let g = VoluteGeometry::build(&reference_basis(), &unturned()).unwrap();
         let (c, d) = (g.cutwater, &g.design);
-        // Default: rounded with ρ = e₃/2, so the nose is centred on r'_z.
+        // Default: rounded with ρ = e₃/2.
+        assert!(d.cutwater_shape.is_fillet());
         assert_relative_eq!(c.radius, d.cutwater_thickness / 2.0);
-        assert_relative_eq!(c.nose_distance, d.cutwater_diameter / 2.0, epsilon = 1e-9);
-        // The nose circle moves off r'_z only as far as its innermost point needs to
-        // reach d_z.
-        assert_relative_eq!(c.nose_center.y, 0.0, epsilon = 1e-12);
-        assert!((c.nose_center.x - d.stagnation_radius).abs() < 0.1 * c.radius);
         // The spiral starts at the cutwater and leaves the diffuser past it, at the
-        // tip of the sharp wedge, a few millimetres outside r'_z.
+        // tip of the sharp wedge, a few millimetres outside r'_z, wherever the shape.
         assert!(g.start_angle < 5f64.to_radians());
         assert_eq!(c.tip, sharp.cutwater.tip);
+        assert_eq!(c.wedge, sharp.cutwater.wedge);
+        assert_eq!(g.start_angle, sharp.start_angle);
         assert!(c.angle > 5f64.to_radians() && c.angle < 30f64.to_radians());
         let tip = c.tip.truncate().length();
         assert!(tip > d.stagnation_radius && tip < 1.08 * d.stagnation_radius);
         assert!(c.wedge > 1f64.to_radians() && c.wedge < 20f64.to_radians());
-        // The body of the nose in the midplane; a sharp cutwater adds none.
-        assert!(!g.cutwater_outline().is_empty());
-        assert!(sharp.cutwater_outline().is_empty());
         assert_eq!(sharp.cutwater_slices.len(), super::super::cutwater::SLICES);
-        // Too large a radius reaches the tip.
-        input.cutwater.shape = CutwaterShape::Rounded {
+        // Too large a radius does not fit between the walls.
+        input.cutwater.shape = CutwaterShape::Fillet {
             radius: crate::Param::Manual(0.02),
         };
         assert!(VoluteGeometry::build(&reference_basis(), &input).is_err());
-        // Two pieces now: the spiral reaches into the diffuser.
-        assert_eq!(g.channels().len(), 2);
     }
 }

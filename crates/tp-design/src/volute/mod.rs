@@ -456,7 +456,9 @@ pub struct DischargeInput {
 }
 
 /// Shape of the cutwater where the spiral meets the discharge diffuser (Gülich Chap.
-/// 7.8.1, item 7, and Fig. 7.41b).
+/// 7.8.1, item 7, and Fig. 7.41b). Sharp and fillet share one principle: the cutwater
+/// stands where the outer wall of the spiral crosses the inner wall of the diffuser,
+/// and only the way it closes there changes.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CutwaterShape {
@@ -466,22 +468,16 @@ pub enum CutwaterShape {
     /// The spiral starts at the cutwater and cuts the inner wall of the diffuser: a
     /// sharp edge along their intersection.
     Sharp,
-    /// That edge rounded with `radius`, m (automatic: e₃/2, a nose as thick as the
-    /// cutwater).
-    Rounded { radius: Param<f64> },
-    /// The edge rounded by an arc of `radius`, m (automatic: e₃/2) tangent to both walls,
-    /// so that the cutwater stands where they cross. The CAD joins the spiral and the
-    /// diffuser and rounds the edge with the kernel's fillet; where the kernel cannot,
-    /// it adds the sliver of the wedge the arc cuts off.
+    /// That edge rounded by an arc of `radius`, m (automatic: e₃/2) tangent to both
+    /// walls, so that the cutwater stands where they cross. The CAD joins the spiral and
+    /// the diffuser and rounds the edge with the kernel's fillet; where the kernel
+    /// cannot, it adds the sliver of the wedge the arc cuts off. Shown as "rounded";
+    /// projects saved with the former rounded body (`rounded`) read as this.
+    #[serde(alias = "rounded")]
     Fillet { radius: Param<f64> },
 }
 
 impl CutwaterShape {
-    /// Whether the edge is rounded, with a nose designed as a body.
-    pub fn is_rounded(&self) -> bool {
-        matches!(self, Self::Rounded { .. } | Self::Fillet { .. })
-    }
-
     /// Whether the CAD rounds the intersection edge of the walls (a fillet): the nose is
     /// the arc of that radius tangent to both walls, wherever that leaves it.
     pub fn is_fillet(&self) -> bool {
@@ -491,7 +487,7 @@ impl CutwaterShape {
     /// The radius of the rounded edge.
     pub fn radius(&self) -> Option<Param<f64>> {
         match self {
-            Self::Rounded { radius } | Self::Fillet { radius } => Some(*radius),
+            Self::Fillet { radius } => Some(*radius),
             _ => None,
         }
     }
@@ -499,7 +495,7 @@ impl CutwaterShape {
 
 impl Default for CutwaterShape {
     fn default() -> Self {
-        CutwaterShape::Rounded {
+        CutwaterShape::Fillet {
             radius: Param::Auto,
         }
     }
@@ -517,38 +513,16 @@ pub struct CutwaterInput {
     /// Incidence i₃ between the cutwater camber line and the approaching flow, rad
     /// (eq. T7.7.6; ±3°).
     pub incidence: Param<f64>,
-    /// Share of the thickness a rounded cutwater lacks past the tip of the wedge that
-    /// its spiral side takes, 0 to 1; the diffuser side takes the rest. Automatic: ½.
-    pub share: Param<f64>,
-    /// Obliquity ε of a rounded cutwater and of the rib nose, rad: the angle between
-    /// the edge and the pump axis, unrolled onto the cutwater circle (Gülich Table 10.2
-    /// asks for ε > 35° against pressure pulsations). For ε > 0 the edge lies further
-    /// downstream toward +z. Automatic: 0, an edge parallel to the axis.
+    /// Obliquity ε of the rib nose of a double volute, rad: the angle between the edge
+    /// and the pump axis, unrolled onto the cutwater circle (Gülich Table 10.2 asks for
+    /// ε > 35° against pressure pulsations). For ε > 0 the edge lies further downstream
+    /// toward +z. Automatic: 0, an edge parallel to the axis.
     pub obliquity: Param<f64>,
     /// Wrap angle from the cutwater where the spiral of a sharp or rounded cutwater
     /// starts, rad: before its outer wall crosses the inner wall of the diffuser in
     /// every plane across the inlet width. Automatic: 3°, or the latest start the walls
     /// allow if that is too late.
     pub spiral_start: Param<f64>,
-    /// Radius of the side endings of a rounded cutwater: toward each side wall of the
-    /// channel its body widens with this round between its faces and the wall, m; 0
-    /// leaves the sharp corner. Automatic: the nose radius ρ in a single volute whose
-    /// sections take them ([`SectionShape::takes_side_endings`]), 0 for the others,
-    /// which the CAD kernel does not cut cleanly.
-    pub side_radius: Param<f64>,
-    /// Shape of the nose of a rounded cutwater, as a blade edge on a body as thick as
-    /// the nose: elliptic (round by default), tapered, Bézier or blunt. Gülich asks for
-    /// an elliptic profile (Chap. 7.8.1, item 7). The pressure face of the shape is the
-    /// diffuser side.
-    #[serde(default = "round_nose")]
-    pub nose_shape: crate::impeller::edge::EdgeShape,
-    /// How the faces of a rounded cutwater run into the walls.
-    pub join: Continuity,
-}
-
-/// A round nose: an ellipse of ratio 1.
-fn round_nose() -> crate::impeller::edge::EdgeShape {
-    crate::impeller::edge::EdgeShape::Ellipse { ratio: 1.0 }
 }
 
 impl Default for CutwaterInput {
@@ -556,25 +530,10 @@ impl Default for CutwaterInput {
         Self {
             shape: CutwaterShape::default(),
             incidence: Param::Auto,
-            share: Param::Auto,
             obliquity: Param::Auto,
             spiral_start: Param::Auto,
-            side_radius: Param::Auto,
-            nose_shape: round_nose(),
-            join: Continuity::default(),
         }
     }
-}
-
-/// How smoothly a surface runs into another.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Continuity {
-    /// Tangent: the curvature may jump where they meet.
-    #[default]
-    G1,
-    /// Tangent and of the same curvature.
-    G2,
 }
 
 /// Inputs of the wall-thickness step.
@@ -864,16 +823,8 @@ pub struct VoluteDesign {
     pub cutwater_shape: CutwaterShape,
     /// Rounding radius of the cutwater nose; 0 unless rounded, m.
     pub nose_radius: f64,
-    /// Share of the missing thickness on the spiral side of a rounded cutwater.
-    pub cutwater_share: f64,
-    /// Obliquity ε of a rounded cutwater and of the rib nose, rad.
+    /// Obliquity ε of the rib nose, rad.
     pub cutwater_obliquity: f64,
-    /// Radius of the side endings of a rounded cutwater, m.
-    pub cutwater_side_radius: f64,
-    /// Shape of the nose of a rounded cutwater.
-    pub cutwater_nose: crate::impeller::edge::EdgeShape,
-    /// How its faces run into the walls.
-    pub cutwater_join: Continuity,
     pub diffuser: DischargeDiffuser,
     pub wall_thickness: f64,
     /// Radius of the fillet on the outside of the casing over the cutwater, m.
@@ -1663,29 +1614,6 @@ impl VoluteDesign {
         require(nose_radius >= 0.0, || {
             "the cutwater radius cannot be negative".into()
         })?;
-        let cutwater_share = input.cutwater.share.resolve(|| 0.5);
-        require((0.0..=1.0).contains(&cutwater_share), || {
-            "the share of the spiral side of the cutwater must lie between 0 and 1".into()
-        })?;
-        // Automatic only where the CAD kernel cuts them cleanly: in a single volute (with
-        // the rib of a double one it leaves the body about the radius off its design),
-        // of sections that take them.
-        let takes = rib_wrap.is_none()
-            && cross_sections
-                .definitions()
-                .iter()
-                .all(|d| d.shape.takes_side_endings());
-        let cutwater_side_radius = input
-            .cutwater
-            .side_radius
-            .resolve(|| if takes { nose_radius } else { 0.0 });
-        require(cutwater_side_radius >= 0.0, || {
-            "the radius of the side endings of the cutwater cannot be negative".into()
-        })?;
-        let cutwater_nose = input.cutwater.nose_shape;
-        cutwater_nose
-            .validate()
-            .map_err(|e| DesignError::InvalidInput(format!("the nose of the cutwater: {e}")))?;
         let cutwater_obliquity = input.cutwater.obliquity.resolve(|| 0.0);
         require(cutwater_obliquity.abs() <= MAX_OBLIQUITY, || {
             format!(
@@ -1823,11 +1751,7 @@ impl VoluteDesign {
             cutwater_angle,
             cutwater_shape,
             nose_radius,
-            cutwater_share,
             cutwater_obliquity,
-            cutwater_side_radius,
-            cutwater_nose,
-            cutwater_join: input.cutwater.join,
             diffuser,
             wall_thickness,
             cutwater_fillet,

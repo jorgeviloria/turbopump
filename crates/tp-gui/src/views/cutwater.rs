@@ -13,7 +13,7 @@ use egui_plot::{
     HLine, Line, LineStyle, Plot, PlotBounds, PlotPoint, PlotPoints, PlotTransform, Points, VLine,
 };
 use tp_design::Param;
-use tp_design::volute::{CutwaterShape, CutwaterSlice, VoluteGeometry, VoluteInput};
+use tp_design::volute::{CutwaterSlice, VoluteGeometry, VoluteInput};
 use tp_math::{DVec2, DVec3};
 use tp_project::ComponentId;
 use tp_units::{DisplayUnits, QuantityKind};
@@ -32,10 +32,6 @@ const PREVIEW_STRIDE: usize = 3;
 /// A point of the cutwater to drag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Grip {
-    /// The innermost point of the nose, on the cutwater circle d_z.
-    Nose,
-    /// The leading point of the nose, ρ ahead of its centre.
-    Radius,
     /// A point on the camber line, for the blade angle α₃B.
     Camber,
 }
@@ -58,8 +54,6 @@ pub(crate) struct CutwaterPage {
     pitch: f32,
     /// The plane z to show in the 3D view, asked for with its button.
     pub open_3d: Option<f64>,
-    /// Why the last obliquity asked for could not be built.
-    lean_limit: Option<String>,
 }
 
 impl Default for CutwaterPage {
@@ -70,7 +64,6 @@ impl Default for CutwaterPage {
             dragging: None,
             transform: None,
             frame: true,
-            lean_limit: None,
             yaw: -0.6,
             pitch: 0.9,
             open_3d: None,
@@ -96,11 +89,6 @@ struct Nose {
     along: DVec2,
     camber: DVec2,
     radius: f64,
-    /// The innermost point of the nose in the midplane.
-    innermost: DVec2,
-    /// Length of the shape of the nose along the camber line over the radius: 1 for a
-    /// round one, 0 for a blunt one.
-    length: f64,
 }
 
 impl Nose {
@@ -109,36 +97,18 @@ impl Nose {
         let radial = centre.normalize();
         let along = DVec2::new(-radial.y, radial.x) * g.basis.rotation_sign;
         let (s, c) = g.design.cutwater_angle.sin_cos();
-        let mid = g
-            .cutwater_slices
-            .iter()
-            .find(|s| (s.z - g.basis.midplane).abs() < 1e-12);
-        let innermost = mid
-            .and_then(|s| {
-                s.outline
-                    .iter()
-                    .map(|p| p.truncate())
-                    .min_by(|a, b| a.length().total_cmp(&b.length()))
-            })
-            .unwrap_or(centre - radial * g.cutwater.radius);
-        let length = tp_design::impeller::edge::EdgeProfile::new(g.design.cutwater_nose, 2.0)
-            .map_or(1.0, |p| p.length());
         Self {
             centre,
             radial,
             along,
             camber: along * c + radial * s,
             radius: g.cutwater.radius,
-            innermost,
-            length,
         }
     }
 
     /// Where each point to drag lies.
     fn grip(&self, grip: Grip) -> DVec2 {
         match grip {
-            Grip::Nose => self.innermost,
-            Grip::Radius => self.centre - self.camber * (self.length * self.radius),
             Grip::Camber => self.centre + self.camber * (CAMBER_REACH * self.radius),
         }
     }
@@ -160,25 +130,6 @@ fn dragged(
 ) -> Option<VoluteInput> {
     let mut next = input.clone();
     match grip {
-        Grip::Nose => {
-            let dz = 2.0 * p.length();
-            if dz <= g.basis.impeller_diameter {
-                return None;
-            }
-            next.setup.cutwater_diameter = Param::Manual(dz);
-        }
-        Grip::Radius => {
-            // The innermost point stays on d_z while the radius changes, and the centre
-            // of the nose and its leading point scale with it: the leading point moves
-            // from the innermost one along (rise·r̂ − length·c), by the radius.
-            let fixed = nose.innermost;
-            let rise = (nose.centre - fixed).dot(nose.radial) / nose.radius.max(1e-12);
-            let way = nose.radial * rise - nose.camber * nose.length;
-            let radius = ((p - fixed).dot(way) / way.length_squared()).max(1e-4);
-            next.cutwater.shape = CutwaterShape::Rounded {
-                radius: Param::Manual(radius),
-            };
-        }
         Grip::Camber => {
             let incidence = (nose.angle_to(p) - g.design.cutwater_flow_angle)
                 .clamp(-MAX_INCIDENCE, MAX_INCIDENCE);
@@ -188,20 +139,10 @@ fn dragged(
     (next != *input).then_some(next)
 }
 
-/// The grips a cutwater of this shape has.
-fn grips(g: &VoluteGeometry) -> &'static [Grip] {
-    // A fillet takes its radius from its field: its nose follows the walls, not the points.
-    if g.cutwater.radius <= 0.0 || g.design.cutwater_shape.is_fillet() {
-        &[]
-    } else if matches!(
-        g.design.cutwater_nose,
-        tp_design::impeller::edge::EdgeShape::Cut
-    ) {
-        // A blunt nose has no leading point.
-        &[Grip::Nose, Grip::Camber]
-    } else {
-        &[Grip::Nose, Grip::Radius, Grip::Camber]
-    }
+/// The grips a cutwater of this shape has: none, since a rounded one takes its radius from
+/// its field and its nose follows the walls, not points to drag.
+fn grips(_g: &VoluteGeometry) -> &'static [Grip] {
+    &[]
 }
 
 /// How a measure compares with its guideline.
@@ -303,48 +244,17 @@ impl CutwaterPage {
             }
             ui.checkbox(&mut self.all_planes, tr("All planes"));
             if ui
-                .button(format!("{}  {}", crate::theme::icon::CUBE, tr("View in 3D")))
-                .on_hover_text(tr("The 3D view on the cutwater, cut across the axis at this plane"))
+                .button(format!(
+                    "{}  {}",
+                    crate::theme::icon::CUBE,
+                    tr("View in 3D")
+                ))
+                .on_hover_text(tr(
+                    "The 3D view on the cutwater, cut across the axis at this plane",
+                ))
                 .clicked()
             {
                 self.open_3d = Some(slices[plane].z);
-            }
-            if input.cutwater.shape.is_rounded() {
-                ui.separator();
-                let mut share = g.design.cutwater_share;
-                let response = ui
-                    .add(egui::Slider::new(&mut share, 0.0..=1.0).text(tr("spiral share")))
-                    .on_hover_text(tr(
-                        "Share of the missing thickness the spiral side of the body takes past the tip; the diffuser side takes the rest",
-                    ));
-                if response.changed() {
-                    let mut next = input.clone();
-                    next.cutwater.share = Param::Manual(share);
-                    edit = Some(next);
-                }
-                // The obliquity only as far as the walls leave room: a lean they cannot
-                // take keeps the last one and says how far it goes.
-                let mut lean = g.design.cutwater_obliquity.to_degrees();
-                let most = tp_design::volute::MAX_OBLIQUITY.to_degrees();
-                let response = ui
-                    .add(egui::Slider::new(&mut lean, -most..=most).suffix("°").text(tr("obliquity ε")))
-                    .on_hover_text(tr(
-                        "Angle between the edge and the pump axis, unrolled onto d_z; Gülich Table 10.2 asks for more than 35° against pressure pulsations",
-                    ));
-                if response.changed() {
-                    let mut next = input.clone();
-                    next.cutwater.obliquity = Param::Manual(lean.to_radians());
-                    match VoluteGeometry::build(&g.basis, &next) {
-                        Ok(_) => {
-                            self.lean_limit = None;
-                            edit = Some(next);
-                        }
-                        Err(e) => self.lean_limit = Some(crate::i18n::message(&e.to_string())),
-                    }
-                }
-                if let Some(limit) = &self.lean_limit {
-                    ui.colored_label(ui.visuals().warn_fg_color, limit);
-                }
             }
         });
 
@@ -610,8 +520,6 @@ impl CutwaterPage {
         }
         if let Some(grip) = active {
             response.response.clone().on_hover_text(match grip {
-                Grip::Nose => tr("Innermost point of the nose: drag outward or inward to set the cutwater circle d_z"),
-                Grip::Radius => tr("Leading point of the nose: drag to set its radius ρ"),
                 Grip::Camber => tr("Camber line: turn it to set the incidence i₃ against the flow"),
             });
             ui.ctx().set_cursor_icon(if self.dragging.is_some() {
@@ -1139,25 +1047,4 @@ fn incidence_plot(
                     .width(2.0),
             );
         });
-}
-
-#[cfg(test)]
-impl CutwaterPage {
-    /// The point to drag `grip` as last drawn, in screen points.
-    pub(crate) fn grip_position(&self, g: &VoluteGeometry, grip: Grip, scale: f64) -> Option<Pos2> {
-        self.screen(Nose::of(g).grip(grip), scale)
-    }
-
-    /// Where a point of the volute (x, y) lies on the plot as last drawn.
-    pub(crate) fn screen(&self, p: DVec2, scale: f64) -> Option<Pos2> {
-        Some(self.transform?.position_from_point(&to_plot(p, scale)))
-    }
-}
-
-/// The nose of `g`: its centre, outward, downstream and along the camber line, and its
-/// radius.
-#[cfg(test)]
-pub(crate) fn nose_frame(g: &VoluteGeometry) -> (DVec2, DVec2, DVec2, DVec2, f64) {
-    let n = Nose::of(g);
-    (n.centre, n.radial, n.along, n.camber, n.radius)
 }

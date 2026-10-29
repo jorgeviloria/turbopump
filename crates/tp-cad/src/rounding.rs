@@ -33,7 +33,7 @@ const FUZZY: [f64; 4] = [0.0, 0.02, 0.05, 0.1];
 const MOST_GROWTH: f64 = 0.01;
 
 /// `channel` with the sliver of the fillet added, if that is one valid solid that only
-/// grew a little.
+/// grew a little, by no more than the sliver.
 pub(crate) fn round_tip(channel: &Shape, g: &VoluteGeometry) -> Option<Shape> {
     let wires = sliver_wires(g).ok()?;
     // The kernel's unions come out wrong with the sliver lofted through all the planes
@@ -44,6 +44,7 @@ pub(crate) fn round_tip(channel: &Shape, g: &VoluteGeometry) -> Option<Shape> {
         .collect::<Result<Vec<_>, _>>()
         .ok()?;
     let before = channel.volume_with_tolerance(0.0);
+    let sliver: f64 = slabs.iter().map(|s| s.volume_with_tolerance(0.0)).sum();
     FUZZY.into_iter().find_map(|fuzzy| {
         let mut pieces = vec![channel.copied().ok()?];
         for slab in &slabs {
@@ -54,7 +55,8 @@ pub(crate) fn round_tip(channel: &Shape, g: &VoluteGeometry) -> Option<Shape> {
         (whole.is_valid()
             && whole.solid_count() == 1
             && after > before
-            && after < before * (1.0 + MOST_GROWTH))
+            && after < before * (1.0 + MOST_GROWTH)
+            && after - before < sliver)
             .then_some(whole)
     })
 }

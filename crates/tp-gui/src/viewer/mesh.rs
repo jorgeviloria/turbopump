@@ -768,14 +768,15 @@ mod tests {
             .iter()
             .find_map(|c| derived.volute(c.id()))
             .unwrap();
-        // The casing is glass by default: only the blades and the cutwater are capped.
+        // The casing is glass by default: only the blades are capped (a rounded cutwater
+        // has no body of its own).
         let glass = build(&g, None, None, Some(v), None, &ViewOptions::default());
-        assert_eq!(glass.caps.len(), 2);
+        assert_eq!(glass.caps.len(), 1);
         let mut options = ViewOptions::default();
         options.volute.opacity = Opacity::Opaque;
         let opaque = build(&g, None, None, Some(v), None, &options);
         // One cap for each channel: they overlap where the spiral meets the diffuser.
-        assert_eq!(opaque.caps.len(), 2 + v.channels().len());
+        assert_eq!(opaque.caps.len(), 1 + v.channels().len());
         for cap in &opaque.caps {
             let triangles: Vec<Triangle> = opaque.closures
                 [cap.range.start as usize..cap.range.end as usize]
@@ -833,48 +834,6 @@ mod tests {
         assert_eq!(part.opacity, Opacity::Glass);
         // The duct reaches upstream of the eye: the bounds grow that way.
         assert!(with.radius > without.radius);
-    }
-
-    #[test]
-    fn the_cutwater_is_a_part_of_its_own_and_caps_a_cut() {
-        let project = crate::default_project();
-        let mut derived = crate::derived::Derived::default();
-        derived.update(&project);
-        let impeller = project.components()[0].id();
-        let volute = project.components()[1].id();
-        let (g, v) = (
-            derived.geometry(impeller).unwrap(),
-            derived.volute(volute).unwrap(),
-        );
-        let options = ViewOptions::default();
-        let mesh = build(g, None, None, Some(v), None, &options);
-        let part = mesh
-            .parts
-            .iter()
-            .find(|p| p.id == PartId::Cutwater)
-            .expect("a cutwater part");
-        assert!(part.range.end > part.range.start);
-        // Opaque by default: a closed volume for the caps of a cut, in its own shade.
-        let shade = rgba(linear(options.cutwater.color).map(|c| c * CAP_SHADE), 1.0);
-        assert!(
-            mesh.caps
-                .iter()
-                .any(|c| { c.color.iter().zip(shade).all(|(a, b)| (a - b).abs() < 1e-6) })
-        );
-        // The casing leaves out the walls the cutwater replaces.
-        let full = tp_io::mesh::volute_triangles(v).len();
-        let shown = mesh.parts.iter().find(|p| p.id == PartId::Volute).unwrap();
-        assert!(((shown.range.end - shown.range.start) / 3) < full as u32);
-        // Hidden, it draws nothing.
-        let hidden = ViewOptions {
-            cutwater: Part {
-                shown: false,
-                ..options.cutwater
-            },
-            ..options
-        };
-        let mesh = build(g, None, None, Some(v), None, &hidden);
-        assert!(mesh.parts.iter().all(|p| p.id != PartId::Cutwater));
     }
 
     #[test]

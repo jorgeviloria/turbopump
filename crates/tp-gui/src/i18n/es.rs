@@ -3180,8 +3180,8 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Bend turns", "Giro del codo"),
     ("Centerline length", "Longitud de la línea media"),
     (
-        "Tangent: the spiral starts where it clears the diffuser. Sharp: the spiral cuts the diffuser wall. Rounded: the same edge rounded by an arc of radius ρ tangent to both walls, so the cutwater stands where the walls cross. Body: a nose of radius ρ on the cutwater circle, its body never thinner than the nose and running smoothly into both walls (Gülich Fig. 7.41b)",
-        "Tangente: la espiral empieza donde deja libre el difusor. Afilado: la espiral corta la pared del difusor. Redondeado: la misma arista redondeada por un arco de radio ρ tangente a las dos paredes, así que el corte de agua queda donde se cruzan las paredes. Cuerpo: una nariz de radio ρ sobre el círculo del corte de agua, con un cuerpo nunca más fino que la nariz que se une suavemente a las dos paredes (Gülich Fig. 7.41b)",
+        "Tangent: the spiral starts where it clears the diffuser. Sharp: the spiral cuts the diffuser wall. Rounded: the same edge rounded by an arc of radius ρ tangent to both walls, so the cutwater stands where the walls cross",
+        "Tangente: la espiral empieza donde deja libre el difusor. Afilado: la espiral corta la pared del difusor. Redondeado: la misma arista redondeada por un arco de radio ρ tangente a las dos paredes, así que el corte de agua queda donde se cruzan las paredes",
     ),
     ("Nose radius ρ", "Radio de la nariz ρ"),
     (
@@ -4270,6 +4270,18 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
     (
         "the groove over the cutwater is rounded with {} mm, the most the CAD kernel takes there",
         "la hendidura sobre el corte de agua queda redondeada con {} mm, lo más que acepta ahí el núcleo CAD",
+    ),
+    (
+        "the CAD keeps the cutwater of sections of radii and segments sharp",
+        "el CAD deja afilado el corte de agua de las secciones de radios y segmentos",
+    ),
+    (
+        "the CAD kernel could not cut the rounded cutwater cleanly: the CAD keeps it sharp",
+        "el núcleo CAD no pudo recortar limpio el corte de agua redondeado: el CAD lo deja afilado",
+    ),
+    (
+        "the CAD kernel could not build the casing around the rounded cutwater: the casing fits a sharp one",
+        "el núcleo CAD no pudo construir la carcasa alrededor del corte de agua redondeado: la carcasa se ajusta a uno afilado",
     ),
     (
         "the groove over the cutwater could not be rounded: it stays sharp",

@@ -1099,10 +1099,6 @@ fn content(
                         "sharp, tip at {} with a wedge of {}",
                         &[&s(Angle, c.angle), &s(Angle, c.wedge)],
                     ),
-                    CutwaterShape::Rounded { .. } => tf(
-                        "body with ρ {}, tip at {} with a wedge of {}",
-                        &[&s(Length, c.radius), &s(Angle, c.angle), &s(Angle, c.wedge)],
-                    ),
                     CutwaterShape::Fillet { .. } => tf(
                         "rounded with ρ {}, tip at {} with a wedge of {}",
                         &[&s(Length, c.radius), &s(Angle, c.angle), &s(Angle, c.wedge)],

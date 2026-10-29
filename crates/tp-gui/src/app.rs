@@ -2207,11 +2207,8 @@ mod tests {
     }
 
     #[test]
-    fn the_cutwater_step_opens_its_page_and_its_points_drag() {
-        use crate::views::cutwater::{Grip, nose_frame};
+    fn the_cutwater_step_opens_its_page() {
         use crate::views::front::FrontPage;
-        use tp_design::volute::CutwaterShape;
-        use tp_math::DVec2;
         let mut harness = Harness::builder()
             .with_size([1440.0, 900.0])
             .build_eframe(|cc| TurbopumpApp::new(cc, None));
@@ -2222,77 +2219,6 @@ mod tests {
         harness.run();
         assert_eq!(harness.state().view, View::FrontView);
         assert_eq!(harness.state().front.page, FrontPage::Cutwater);
-        let scale = |app: &TurbopumpApp| {
-            app.doc
-                .project()
-                .display_units
-                .to_display(QuantityKind::Length, 1.0)
-        };
-        let input = |app: &TurbopumpApp| app.doc.project().volute_input(volute).unwrap();
-        let geometry = |app: &TurbopumpApp| app.derived.volute(volute).unwrap().clone();
-        // Screen points of the grip and of where it is dragged to.
-        let points = |app: &TurbopumpApp, grip: Grip, to: DVec2| {
-            let g = geometry(app);
-            let page = &app.front.cutwater;
-            (
-                page.grip_position(&g, grip, scale(app)).unwrap(),
-                page.screen(to, scale(app)).unwrap(),
-            )
-        };
-
-        // The innermost point of the nose, 3 mm outward: d_z grows by 6 mm.
-        let g = geometry(harness.state());
-        let (centre, radial, _, _, radius) = nose_frame(&g);
-        let before = g.design.cutwater_diameter;
-        let nose = centre - radial * radius;
-        let (from, to) = points(harness.state(), Grip::Nose, nose + radial * 0.003);
-        drag_by(&mut harness, from, to - from);
-        let after = geometry(harness.state()).design.cutwater_diameter;
-        assert!((after - before - 0.006).abs() < 0.001, "{before} → {after}");
-        assert!(matches!(
-            input(harness.state()).setup.cutwater_diameter,
-            tp_design::Param::Manual(_)
-        ));
-        // One drag, one undo step.
-        harness.state_mut().doc.undo();
-        harness.run();
-        assert_eq!(
-            input(harness.state()).setup.cutwater_diameter,
-            tp_design::Param::Auto
-        );
-
-        // The camber point turned 2° toward the outside: 2° of incidence.
-        let g = geometry(harness.state());
-        let (centre, radial, along, _, radius) = nose_frame(&g);
-        let turned = g.design.cutwater_angle + 2f64.to_radians();
-        let target = centre + (along * turned.cos() + radial * turned.sin()) * (6.0 * radius);
-        let (from, to) = points(harness.state(), Grip::Camber, target);
-        drag_by(&mut harness, from, to - from);
-        let d = geometry(harness.state()).design;
-        let incidence = d.cutwater_angle - d.cutwater_flow_angle;
-        assert!(
-            (incidence - 2f64.to_radians()).abs() < 0.3f64.to_radians(),
-            "{}",
-            incidence.to_degrees()
-        );
-
-        // The leading point of the nose pulled forward: a larger radius, the innermost
-        // point kept on d_z.
-        let g = geometry(harness.state());
-        let (centre, radial, _, camber, radius) = nose_frame(&g);
-        let fixed = centre - radial * radius;
-        let target = fixed + (radial - camber) * (1.5 * radius);
-        let (from, to) = points(harness.state(), Grip::Radius, target);
-        drag_by(&mut harness, from, to - from);
-        let CutwaterShape::Rounded {
-            radius: tp_design::Param::Manual(r),
-        } = input(harness.state()).cutwater.shape
-        else {
-            panic!("a radius set by hand");
-        };
-        assert!((r / radius - 1.5).abs() < 0.1, "{r} vs {radius}");
-        let after = geometry(harness.state());
-        assert!((after.cutwater.nose_distance - after.design.cutwater_diameter / 2.0).abs() < 1e-6);
     }
 
     #[test]

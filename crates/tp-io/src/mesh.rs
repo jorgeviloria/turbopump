@@ -1003,10 +1003,9 @@ pub(crate) mod tests {
         );
         // Carried on to the heights of the cut, with a cap at each end, it is more.
         assert!(fillet_nose_surface(&g, cut).len() > nose.len());
-        // The rounded cutwater keeps its body and has no strip.
-        let rounded = reference_volute(|_| {});
-        assert!(!cutwater_triangles(&rounded).is_empty());
-        assert!(fillet_nose_triangles(&rounded).is_empty());
+        // A sharp cutwater has no strip.
+        let sharp = reference_volute(|v| v.cutwater.shape = CutwaterShape::Sharp);
+        assert!(fillet_nose_triangles(&sharp).is_empty());
     }
 
     #[test]
@@ -1128,64 +1127,6 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn the_cutwater_body_is_a_closed_surface_as_thick_as_its_nose() {
-        use tp_design::volute::{CrossSectionInput, CutwaterShape, SectionShape};
-        for sections in [
-            CrossSectionInput::default(),
-            CrossSectionInput::single(SectionShape::round()),
-        ] {
-            let volume = |triangles: &[Triangle]| {
-                triangles
-                    .iter()
-                    .map(|t| t[0].dot(t[1].cross(t[2])))
-                    .sum::<f64>()
-                    .abs()
-                    / 6.0
-            };
-            // With its side endings the body is closed and a little larger; round
-            // sections have none by default.
-            let ended = reference_volute(|v| v.cross_section = sections.clone());
-            let with_endings = cutwater_triangles(&ended);
-            assert!(closed(&with_endings));
-            let g = reference_volute(|v| {
-                v.cross_section = sections.clone();
-                v.cutwater.side_radius = tp_design::Param::Manual(0.0);
-            });
-            let body = cutwater_triangles(&g);
-            assert!(!body.is_empty());
-            assert!(closed(&body));
-            if ended.design.cutwater_side_radius > 0.0 {
-                assert!(volume(&with_endings) > volume(&body));
-            } else {
-                assert!((volume(&with_endings) - volume(&body)).abs() < 1e-15);
-            }
-            // Without them, about the area of the midplane outline times the width of
-            // the planes.
-            let volume = volume(&body);
-            let mid = &g.cutwater_slices[g.cutwater_slices.len() / 2];
-            let n = mid.outline.len();
-            let area = 0.5
-                * (0..n)
-                    .map(|i| {
-                        mid.outline[i]
-                            .truncate()
-                            .perp_dot(mid.outline[(i + 1) % n].truncate())
-                    })
-                    .sum::<f64>()
-                    .abs();
-            let first = g.cutwater_slices.first().unwrap().z;
-            let last = g.cutwater_slices.last().unwrap().z;
-            let estimate = area * (last - first);
-            assert!(
-                (volume / estimate - 1.0).abs() < 0.25,
-                "{volume} vs {estimate}"
-            );
-        }
-        let sharp = reference_volute(|v| v.cutwater.shape = CutwaterShape::Sharp);
-        assert!(cutwater_triangles(&sharp).is_empty());
-    }
-
-    #[test]
     fn the_rib_is_a_closed_surface_across_the_height_of_the_sections() {
         let g = reference_volute(|v| v.setup.kind = tp_design::volute::VoluteKind::Double);
         let mesh = rib_triangles(&g);
@@ -1209,37 +1150,6 @@ pub(crate) mod tests {
         let share = volume / (area * height);
         assert!(share > 0.4 && share < 0.9, "{volume} of {}", area * height);
         assert!(rib_triangles(&reference_volute(|_| {})).is_empty());
-    }
-
-    #[test]
-    fn the_view_of_the_volute_leaves_out_the_walls_the_cutwater_replaces() {
-        let g = reference_volute(|_| {});
-        let all = volute_triangles(&g);
-        let view = volute_view_triangles(&g);
-        assert!(view.len() < all.len());
-        // Only near the cutwater: most of the volute stays.
-        assert!(
-            view.len() as f64 > 0.9 * all.len() as f64,
-            "{} of {}",
-            view.len(),
-            all.len()
-        );
-        // No triangle of the walls is left wholly inside the body in the midplane.
-        let mid = &g.cutwater_slices[g.cutwater_slices.len() / 2];
-        let body: Vec<DVec2> = mid.outline.iter().map(|p| p.truncate()).collect();
-        for t in &view {
-            let c = (t[0] + t[1] + t[2]) / 3.0;
-            if (c.z - mid.z).abs() < 1e-3 {
-                assert!(!t.iter().all(|q| inside(&body, q.truncate())), "{c}");
-            }
-        }
-        // A tangent cutwater is drawn as it is.
-        let tangent =
-            reference_volute(|v| v.cutwater.shape = tp_design::volute::CutwaterShape::Tangent);
-        assert_eq!(
-            volute_view_triangles(&tangent).len(),
-            volute_triangles(&tangent).len()
-        );
     }
 
     #[test]
