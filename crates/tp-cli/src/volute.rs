@@ -48,11 +48,11 @@ pub(crate) struct VoluteArgs {
     /// by comp_e from comp_start to the throat), comp_e, comp_start, arcs (off or the
     /// number of circular arcs of the outer contour), sections, correction (on or off),
     /// length (along the diffuser centerline) and
-    /// outlet (discharge diffuser), incidence (cutwater), obliquity (of a rounded
+    /// outlet (discharge diffuser), incidence (cutwater), obliquity (of a body
     /// cutwater and the rib nose: the angle of the edge to the pump axis), spiral_start
-    /// (where the spiral of a sharp or rounded cutwater starts), side_radius (the round
-    /// where a rounded cutwater meets the side walls; 0 for none), nose_shape (of a
-    /// rounded cutwater, as a blade edge: round, ellipse:R, taper, bezier, cut), join (g1
+    /// (where the spiral of a sharp, rounded or body cutwater starts), side_radius (the round
+    /// where a body cutwater meets the side walls; 0 for none), nose_shape (of a
+    /// body cutwater, as a blade edge: round, ellipse:R, taper, bezier, cut), join (g1
     /// or g2: how its faces run into the walls), wall, fillet
     /// (radius rounding the outside of the casing over the cutwater; 0 for none), type
     /// (single or double),
@@ -65,7 +65,7 @@ pub(crate) struct VoluteArgs {
     /// or radial:DEGREES from the line through the pump axis; tangential, opening to both
     /// sides; tangential:inner or tangential:outer with that wall straight), bend (bend radius of a radial discharge), outlet_shape (round, or rectangular[:ASPECT] with the height along the pump axis over the width, the same area as the round outlet and no round flange), z_bend (none, or EXTENT,RADIUS,ANGLE: the centerline of the diffuser runs flat, rounds off with RADIUS through ANGLE degrees and goes on straight, ending EXTENT along the pump axis), eccentricity (−1 to 1 for a tangential diffuser: −1 with the cutwater wall straight, 0 opening to both sides, 1 with the outer wall straight), base_form (0 to 1: how far the inlet chord of the first diffuser section bulges toward the pump axis, so that the diffuser crosses the start of the spiral), height_offset (Δr_C: the diffuser shifted across its centerline, away from the pump axis when positive, to give the cutwater room), z_align (centric, or manual:OFFSET[,quadratic]: the outlet shifted along the pump axis), growth (area of the diffuser from the throat: linear, the default, or matched, which starts with the slope of the spiral), rotation (angle
     /// of the cutwater from the x axis; auto turns the discharge vertically up), cutwater
-    /// (tangent, sharp or rounded), nose (radius of a rounded cutwater), height (H, the
+    /// (tangent, sharp, rounded or body), nose (radius of a rounded or body cutwater), height (H, the
     /// outlet face from the pump axis, which sets the diffuser length), dn (on: round the
     /// automatic outlet to the nearest nominal size), flange (on or off), flange_d
     /// (outer diameter), flange_t (thickness), bolt_circle, bolt_hole and bolts, pressure
@@ -824,22 +824,25 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
             input.cutwater.shape = match value {
                 "tangent" => CutwaterShape::Tangent,
                 "sharp" => CutwaterShape::Sharp,
-                "rounded" => CutwaterShape::Rounded {
+                // Rounded is the arc tangent to both walls; fillet is its former name.
+                "rounded" | "fillet" => CutwaterShape::Fillet {
                     radius: input.cutwater.shape.radius().unwrap_or(Param::Auto),
                 },
-                "fillet" => CutwaterShape::Fillet {
+                "body" => CutwaterShape::Rounded {
                     radius: input.cutwater.shape.radius().unwrap_or(Param::Auto),
                 },
                 _ => {
                     return Err(format!(
-                        "cutwater must be tangent, sharp, rounded or fillet, got {value:?}"
+                        "cutwater must be tangent, sharp, rounded or body, got {value:?}"
                     ));
                 }
             }
         }
         "nose" => {
-            input.cutwater.shape = CutwaterShape::Rounded {
-                radius: quantity(Length)?,
+            let radius = quantity(Length)?;
+            input.cutwater.shape = match input.cutwater.shape {
+                CutwaterShape::Fillet { .. } => CutwaterShape::Fillet { radius },
+                _ => CutwaterShape::Rounded { radius },
             }
         }
         _ => {
@@ -956,8 +959,8 @@ fn print_report(name: &str, id: ComponentId, g: &VoluteGeometry, units: &Display
             "           {} cutwater: tip at {} ({} from the axis), wedge {}{}   nearest to the axis {}",
             match shape {
                 CutwaterShape::Sharp => "sharp",
-                CutwaterShape::Fillet { .. } => "fillet",
-                _ => "rounded",
+                CutwaterShape::Fillet { .. } => "rounded",
+                _ => "body",
             },
             s(Angle, c.angle),
             s(Length, c.tip.truncate().length()),
@@ -981,7 +984,7 @@ fn print_report(name: &str, id: ComponentId, g: &VoluteGeometry, units: &Display
             s(Angle, g.start_angle)
         );
     }
-    // Across the inlet width: where the walls cross, and the body of a rounded cutwater.
+    // Across the inlet width: where the walls cross, and the body of a body-shaped cutwater.
     let slices = &g.cutwater_slices;
     if !slices.is_empty() {
         let range = |f: &dyn Fn(&tp_design::volute::CutwaterSlice) -> f64| {

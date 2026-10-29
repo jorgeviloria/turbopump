@@ -3148,8 +3148,8 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "redondeado con ρ {}, punta a {} con una cuña de {}",
     ),
     (
-        "fillet with ρ {}, tip at {} with a wedge of {}",
-        "empalme con ρ {}, punta a {} con una cuña de {}",
+        "body with ρ {}, tip at {} with a wedge of {}",
+        "cuerpo con ρ {}, punta a {} con una cuña de {}",
     ),
     (
         "radial, bend R_N {} turning {}, axis at {}",
@@ -3180,8 +3180,8 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Bend turns", "Giro del codo"),
     ("Centerline length", "Longitud de la línea media"),
     (
-        "Tangent: the spiral starts where it clears the diffuser. Sharp: the spiral cuts the diffuser wall. Rounded: a nose of radius ρ on the cutwater circle, its body never thinner than the nose and running smoothly into both walls (Gülich Fig. 7.41b). Fillet: the same nose, and the CAD joins the spiral and the diffuser and rounds their intersection edge with the radius",
-        "Tangente: la espiral empieza donde deja libre el difusor. Afilado: la espiral corta la pared del difusor. Redondeado: una nariz de radio ρ sobre el círculo del corte de agua, con un cuerpo nunca más fino que la nariz que se une suavemente a las dos paredes (Gülich Fig. 7.41b). Empalme: la misma nariz, y el CAD une la espiral y el difusor y redondea su arista de intersección con el radio",
+        "Tangent: the spiral starts where it clears the diffuser. Sharp: the spiral cuts the diffuser wall. Rounded: the same edge rounded by an arc of radius ρ tangent to both walls, so the cutwater stands where the walls cross. Body: a nose of radius ρ on the cutwater circle, its body never thinner than the nose and running smoothly into both walls (Gülich Fig. 7.41b)",
+        "Tangente: la espiral empieza donde deja libre el difusor. Afilado: la espiral corta la pared del difusor. Redondeado: la misma arista redondeada por un arco de radio ρ tangente a las dos paredes, así que el corte de agua queda donde se cruzan las paredes. Cuerpo: una nariz de radio ρ sobre el círculo del corte de agua, con un cuerpo nunca más fino que la nariz que se une suavemente a las dos paredes (Gülich Fig. 7.41b)",
     ),
     ("Nose radius ρ", "Radio de la nariz ρ"),
     (
@@ -3218,6 +3218,7 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("radial", "radial"),
     ("sharp", "afilado"),
     ("rounded", "redondeado"),
+    ("body", "cuerpo"),
     ("fillet", "empalme"),
     (
         "the cutwater radius cannot be negative",

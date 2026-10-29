@@ -1395,18 +1395,18 @@ fn cutwater(
                 tr("Shape"),
                 tr(
                     "Tangent: the spiral starts where it clears the diffuser. Sharp: the spiral \
-                 cuts the diffuser wall. Rounded: a nose of radius ρ on the cutwater circle, \
-                 its body never thinner than the nose and running smoothly into both walls \
-                 (Gülich Fig. 7.41b). Fillet: the same nose, and the CAD joins the spiral \
-                 and the diffuser and rounds their intersection edge with the radius",
+                 cuts the diffuser wall. Rounded: the same edge rounded by an arc of radius ρ \
+                 tangent to both walls, so the cutwater stands where the walls cross. Body: a \
+                 nose of radius ρ on the cutwater circle, its body never thinner than the \
+                 nose and running smoothly into both walls (Gülich Fig. 7.41b)",
                 ),
             );
             let text = |shape: &CutwaterShape| {
                 tr(match shape {
                     CutwaterShape::Tangent => "tangent",
                     CutwaterShape::Sharp => "sharp",
-                    CutwaterShape::Rounded { .. } => "rounded",
-                    CutwaterShape::Fillet { .. } => "fillet",
+                    CutwaterShape::Fillet { .. } => "rounded",
+                    CutwaterShape::Rounded { .. } => "body",
                 })
             };
             let current = input.cutwater.shape;
@@ -1417,10 +1417,10 @@ fn cutwater(
                         for option in [
                             CutwaterShape::Tangent,
                             CutwaterShape::Sharp,
-                            CutwaterShape::Rounded {
+                            CutwaterShape::Fillet {
                                 radius: Param::Auto,
                             },
-                            CutwaterShape::Fillet {
+                            CutwaterShape::Rounded {
                                 radius: Param::Auto,
                             },
                         ] {
