@@ -62,7 +62,9 @@ pub(crate) struct VoluteArgs {
     /// or radial:DEGREES from the line through the pump axis; tangential, opening to both
     /// sides; tangential:inner or tangential:outer with that wall straight), bend (bend radius of a radial discharge), outlet_shape (round, or rectangular[:ASPECT] with the height along the pump axis over the width, the same area as the round outlet and no round flange), z_bend (none, or EXTENT,RADIUS,ANGLE: the centerline of the diffuser runs flat, rounds off with RADIUS through ANGLE degrees and goes on straight, ending EXTENT along the pump axis), eccentricity (−1 to 1 for a tangential diffuser: −1 with the cutwater wall straight, 0 opening to both sides, 1 with the outer wall straight), base_form (0 to 1: how far the inlet chord of the first diffuser section bulges toward the pump axis, so that the diffuser crosses the start of the spiral), height_offset (Δr_C: the diffuser shifted across its centerline, away from the pump axis when positive, to give the cutwater room), z_align (centric, or manual:OFFSET[,quadratic]: the outlet shifted along the pump axis), growth (area of the diffuser from the throat: linear, the default, or matched, which starts with the slope of the spiral), rotation (angle
     /// of the cutwater from the x axis; auto turns the discharge vertically up), cutwater
-    /// (tangent, sharp or rounded), nose (radius of a rounded cutwater), height (H, the
+    /// (tangent, sharp, rounded or simple), nose (radius of a rounded cutwater), cut (how far
+    /// back from the tip a simple cutwater cuts the walls) and handle (the handles of its
+    /// curve, as a share of the cut), height (H, the
     /// outlet face from the pump axis, which sets the diffuser length), dn (on: round the
     /// automatic outlet to the nearest nominal size), flange (on or off), flange_d
     /// (outer diameter), flange_t (thickness), bolt_circle, bolt_hole and bolts, pressure
@@ -816,9 +818,16 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
                 "rounded" | "fillet" => CutwaterShape::Fillet {
                     radius: input.cutwater.shape.radius().unwrap_or(Param::Auto),
                 },
+                "simple" => match input.cutwater.shape {
+                    simple @ CutwaterShape::Simple { .. } => simple,
+                    _ => CutwaterShape::Simple {
+                        cut: Param::Auto,
+                        handle: Param::Auto,
+                    },
+                },
                 _ => {
                     return Err(format!(
-                        "cutwater must be tangent, sharp or rounded, got {value:?}"
+                        "cutwater must be tangent, sharp, rounded or simple, got {value:?}"
                     ));
                 }
             }
@@ -827,6 +836,18 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
             input.cutwater.shape = CutwaterShape::Fillet {
                 radius: quantity(Length)?,
             }
+        }
+        "cut" | "handle" => {
+            let (mut cut, mut handle) = match input.cutwater.shape {
+                CutwaterShape::Simple { cut, handle } => (cut, handle),
+                _ => (Param::Auto, Param::Auto),
+            };
+            if key == "cut" {
+                cut = quantity(Length)?;
+            } else {
+                handle = quantity(Dimensionless)?;
+            }
+            input.cutwater.shape = CutwaterShape::Simple { cut, handle };
         }
         _ => {
             return Err(format!(
@@ -838,7 +859,8 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
                  fillet, type, \
                  rib_length, rib, \
                  rib_nose, channel_ratio, discharge, bend, growth, height_offset, z_align, \
-                 base_form, eccentricity, outlet_shape, z_bend, rotation, cutwater, nose, height, \
+                 base_form, eccentricity, outlet_shape, z_bend, rotation, cutwater, nose, cut, \
+                 handle, height, \
                  dn, flange, flange_d, flange_t, bolt_circle, bolt_hole, bolts, pressure, \
                  allowable"
             ));
@@ -942,6 +964,7 @@ fn print_report(name: &str, id: ComponentId, g: &VoluteGeometry, units: &Display
             "           {} cutwater: tip at {} ({} from the axis), wedge {}{}   nearest to the axis {}",
             match shape {
                 CutwaterShape::Sharp => "sharp",
+                CutwaterShape::Simple { .. } => "simple",
                 _ => "rounded",
             },
             s(Angle, c.angle),

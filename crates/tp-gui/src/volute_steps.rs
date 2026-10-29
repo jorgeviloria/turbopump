@@ -1396,7 +1396,8 @@ fn cutwater(
                 tr(
                     "Tangent: the spiral starts where it clears the diffuser. Sharp: the spiral \
                  cuts the diffuser wall. Rounded: the same edge rounded by an arc of radius ρ \
-                 tangent to both walls, so the cutwater stands where the walls cross",
+                 tangent to both walls, so the cutwater stands where the walls cross. Simple: the \
+                 walls are cut back from the tip and a smooth curve joins them, tangent to both",
                 ),
             );
             let text = |shape: &CutwaterShape| {
@@ -1404,6 +1405,7 @@ fn cutwater(
                     CutwaterShape::Tangent => "tangent",
                     CutwaterShape::Sharp => "sharp",
                     CutwaterShape::Fillet { .. } => "rounded",
+                    CutwaterShape::Simple { .. } => "simple",
                 })
             };
             let current = input.cutwater.shape;
@@ -1416,6 +1418,10 @@ fn cutwater(
                             CutwaterShape::Sharp,
                             CutwaterShape::Fillet {
                                 radius: Param::Auto,
+                            },
+                            CutwaterShape::Simple {
+                                cut: Param::Auto,
+                                handle: Param::Auto,
                             },
                         ] {
                             let same =
@@ -1441,6 +1447,34 @@ fn cutwater(
                     g.map(|g| g.cutwater.radius),
                     &units,
                     0.0001..=0.1,
+                );
+            }
+            if let CutwaterShape::Simple { cut, handle } = &mut input.cutwater.shape {
+                param_f64(
+                    ui,
+                    tr("Cut back"),
+                    tr(
+                        "How far back from the tip along each wall the cutwater starts: the \
+                        walls end there and a smooth curve joins them. Automatic: 3 e₃",
+                    ),
+                    cut,
+                    Length,
+                    g.map(|g| g.design.cutwater_cut),
+                    &units,
+                    0.001..=0.2,
+                );
+                param_f64(
+                    ui,
+                    tr("Handles"),
+                    tr(
+                        "Length of the handles of the curve, as a share of the cut: shorter \
+                        ones close the nose more tightly. Automatic: ½",
+                    ),
+                    handle,
+                    Dimensionless,
+                    g.map(|g| g.design.cutwater_handle),
+                    &units,
+                    0.05..=1.0,
                 );
             }
             if !matches!(input.cutwater.shape, CutwaterShape::Tangent) {

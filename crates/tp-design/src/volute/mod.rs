@@ -475,13 +475,28 @@ pub enum CutwaterShape {
     /// projects saved with the former rounded body (`rounded`) read as this.
     #[serde(alias = "rounded")]
     Fillet { radius: Param<f64> },
+    /// The edge closed by a cubic curve between the two walls, cut `cut` back from the
+    /// tip along each (m; automatic: 3 e₃) and tangent to both there, its handles
+    /// `handle` times the cut long (0 to 1; automatic: ½). The same rounding in every
+    /// plane, but a smooth curve and not an arc, as a blade edge drawn between the walls.
+    Simple {
+        #[serde(default)]
+        cut: Param<f64>,
+        #[serde(default)]
+        handle: Param<f64>,
+    },
 }
 
 impl CutwaterShape {
     /// Whether the CAD rounds the intersection edge of the walls (a fillet): the nose is
     /// the arc of that radius tangent to both walls, wherever that leaves it.
     pub fn is_fillet(&self) -> bool {
-        matches!(self, Self::Fillet { .. })
+        matches!(self, Self::Fillet { .. } | Self::Simple { .. })
+    }
+
+    /// Whether the tip is closed by a cubic between the walls ([`Self::Simple`]).
+    pub fn is_simple(&self) -> bool {
+        matches!(self, Self::Simple { .. })
     }
 
     /// The radius of the rounded edge.
@@ -500,6 +515,12 @@ impl Default for CutwaterShape {
         }
     }
 }
+
+/// Handle of the cubic of a simple cutwater, as a share of its cut, when automatic.
+pub const SIMPLE_HANDLE: f64 = 0.5;
+
+/// Cut of a simple cutwater, as a multiple of its thickness e₃, when automatic.
+pub const SIMPLE_CUT: f64 = 3.0;
 
 /// Largest obliquity of the cutwater, rad: past it the edge runs nearly round the
 /// circumference.
@@ -823,6 +844,10 @@ pub struct VoluteDesign {
     pub cutwater_shape: CutwaterShape,
     /// Rounding radius of the cutwater nose; 0 unless rounded, m.
     pub nose_radius: f64,
+    /// How far back from the tip a simple cutwater cuts the walls, m; 0 for any other.
+    pub cutwater_cut: f64,
+    /// Handles of the cubic of a simple cutwater, as a share of the cut.
+    pub cutwater_handle: f64,
     /// Obliquity ε of the rib nose, rad.
     pub cutwater_obliquity: f64,
     pub diffuser: DischargeDiffuser,
@@ -1614,6 +1639,21 @@ impl VoluteDesign {
         require(nose_radius >= 0.0, || {
             "the cutwater radius cannot be negative".into()
         })?;
+        let (cutwater_cut, cutwater_handle) = match cutwater_shape {
+            CutwaterShape::Simple { cut, handle } => (
+                cut.resolve(|| SIMPLE_CUT * cutwater_thickness),
+                handle.resolve(|| SIMPLE_HANDLE),
+            ),
+            _ => (0.0, SIMPLE_HANDLE),
+        };
+        if cutwater_shape.is_simple() {
+            require(cutwater_cut > 0.0, || {
+                "the cut of the cutwater must be positive".into()
+            })?;
+            require(cutwater_handle > 0.0 && cutwater_handle <= 1.0, || {
+                "the handles of the cutwater must lie between 0 and 1 of its cut".into()
+            })?;
+        }
         let cutwater_obliquity = input.cutwater.obliquity.resolve(|| 0.0);
         require(cutwater_obliquity.abs() <= MAX_OBLIQUITY, || {
             format!(
@@ -1751,6 +1791,8 @@ impl VoluteDesign {
             cutwater_angle,
             cutwater_shape,
             nose_radius,
+            cutwater_cut,
+            cutwater_handle,
             cutwater_obliquity,
             diffuser,
             wall_thickness,

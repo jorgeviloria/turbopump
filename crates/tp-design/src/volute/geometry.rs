@@ -854,7 +854,7 @@ fn cutwater_diameter_warning(
     d2: f64,
 ) -> Option<String> {
     (effective < minimum * (1.0 - 1e-9)).then(|| {
-        if shape.is_fillet() {
+        if shape.is_fillet() && !shape.is_simple() {
             format!(
                 "the fillet leaves an effective cutwater diameter d_z/d₂ = {:.3}, below the \
                  {:.3} of Gülich Table 10.2: expect pressure pulsations and hydraulic \
@@ -1365,12 +1365,21 @@ impl VoluteGeometry {
                     .iter()
                     .find(|s| (s.z - zm).abs() < 1e-12 && !s.outline.is_empty())
                     .ok_or_else(|| {
-                        DesignError::Infeasible(format!(
-                            "a fillet of {:.1} mm does not fit between the walls of the \
-                             spiral and the diffuser in the midplane: use a smaller radius or \
-                             a sharp cutwater",
-                            design.nose_radius * 1e3
-                        ))
+                        DesignError::Infeasible(if design.cutwater_shape.is_simple() {
+                            format!(
+                                "a cut of {:.1} mm does not fit the walls of the spiral and \
+                                 the diffuser in the midplane: use a shorter cut or a sharp \
+                                 cutwater",
+                                design.cutwater_cut * 1e3
+                            )
+                        } else {
+                            format!(
+                                "a fillet of {:.1} mm does not fit between the walls of the \
+                                 spiral and the diffuser in the midplane: use a smaller radius \
+                                 or a sharp cutwater",
+                                design.nose_radius * 1e3
+                            )
+                        })
                     })?;
                 cutwater.radius = design.nose_radius;
                 cutwater.nose_center = mid.nose_centre;
@@ -1579,7 +1588,7 @@ impl VoluteGeometry {
         // any plane.
         if matches!(
             design.cutwater_shape,
-            CutwaterShape::Sharp | CutwaterShape::Fillet { .. }
+            CutwaterShape::Sharp | CutwaterShape::Fillet { .. } | CutwaterShape::Simple { .. }
         ) {
             let nearest = cutwater_slices
                 .iter()

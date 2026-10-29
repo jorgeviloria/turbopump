@@ -3148,6 +3148,10 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "redondeado con ρ {}, punta a {} con una cuña de {}",
     ),
     (
+        "simple, cut {} back, tip at {} with a wedge of {}",
+        "simple, recorte de {} hacia atrás, punta a {} con una cuña de {}",
+    ),
+    (
         "body with ρ {}, tip at {} with a wedge of {}",
         "cuerpo con ρ {}, punta a {} con una cuña de {}",
     ),
@@ -3180,10 +3184,18 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Bend turns", "Giro del codo"),
     ("Centerline length", "Longitud de la línea media"),
     (
-        "Tangent: the spiral starts where it clears the diffuser. Sharp: the spiral cuts the diffuser wall. Rounded: the same edge rounded by an arc of radius ρ tangent to both walls, so the cutwater stands where the walls cross",
-        "Tangente: la espiral empieza donde deja libre el difusor. Afilado: la espiral corta la pared del difusor. Redondeado: la misma arista redondeada por un arco de radio ρ tangente a las dos paredes, así que el corte de agua queda donde se cruzan las paredes",
+        "Tangent: the spiral starts where it clears the diffuser. Sharp: the spiral cuts the diffuser wall. Rounded: the same edge rounded by an arc of radius ρ tangent to both walls, so the cutwater stands where the walls cross. Simple: the walls are cut back from the tip and a smooth curve joins them, tangent to both",
+        "Tangente: la espiral empieza donde deja libre el difusor. Afilado: la espiral corta la pared del difusor. Redondeado: la misma arista redondeada por un arco de radio ρ tangente a las dos paredes, así que el corte de agua queda donde se cruzan las paredes. Simple: las paredes se recortan hacia atrás desde la punta y una curva suave las une, tangente a ambas",
     ),
     ("Nose radius ρ", "Radio de la nariz ρ"),
+    (
+        "How far back from the tip along each wall the cutwater starts: the walls end there and a smooth curve joins them. Automatic: 3 e₃",
+        "A qué distancia de la punta, por cada pared, empieza el corte de agua: las paredes terminan ahí y una curva suave las une. Automático: 3 e₃",
+    ),
+    (
+        "Length of the handles of the curve, as a share of the cut: shorter ones close the nose more tightly. Automatic: ½",
+        "Longitud de las manos de la curva, como fracción del recorte: más cortas cierran la nariz con más curvatura. Automático: ½",
+    ),
     (
         "Radius of the round at the crossing of the two walls: the arc touches both, so the cutwater stands where the walls leave it. Automatic: e₃/2",
         "Radio del redondeo en el cruce de las dos paredes: el arco toca a ambas, así que el corte de agua queda donde lo dejan las paredes. Automático: e₃/2",
@@ -3219,6 +3231,9 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("sharp", "afilado"),
     ("rounded", "redondeado"),
     ("body", "cuerpo"),
+    ("simple", "simple"),
+    ("Cut back", "Recorte"),
+    ("Handles", "Manos"),
     ("fillet", "empalme"),
     (
         "the cutwater radius cannot be negative",

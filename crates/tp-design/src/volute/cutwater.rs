@@ -44,6 +44,8 @@ const DIFFUSER_SUBDIVISIONS: usize = 24;
 /// Points on each wall of the head of a fillet, and on its arc.
 const FILLET_WALL_POINTS: usize = 23;
 const FILLET_ARC_POINTS: usize = 17;
+/// Points the cubic of a simple cutwater is sampled at, before its spacing.
+const FINE_POINTS: usize = 400;
 /// How far the head of a fillet runs back along the walls, in radii.
 const FILLET_HEAD: f64 = 8.0;
 /// The cutwater in one plane z = const, in the plane of the design (the cutwater on
@@ -361,6 +363,9 @@ impl Walls {
     /// off. `None` where the walls do not cross or the round does not fit between them
     /// (the radius is too large for the length of wall).
     fn fillet_slice(&self, design: &VoluteDesign, sign: f64, z: f64) -> Option<CutwaterSlice> {
+        if design.cutwater_shape.is_simple() {
+            return self.simple_slice(design, sign, z);
+        }
         let mut slice = self.slice(sign, z)?;
         let r = design.nose_radius;
         if r <= 0.0 {
@@ -473,6 +478,107 @@ impl Walls {
         slice.nose_centre = at(&c);
         slice.min_thickness = 2.0 * r;
         slice.join_length = 0.5 * (l_s + l_d);
+        slice.nose_distance = slice
+            .outline
+            .iter()
+            .map(|p| p.truncate().length())
+            .fold(f64::INFINITY, f64::min);
+        Some(slice)
+    }
+
+    /// The cutwater of a simple edge in this plane: the walls cut `cutwater_cut` back from
+    /// the tip along each, and a cubic from one cut to the other, tangent to both walls
+    /// there, its handles pointing back toward the tip. The slice has the structure of a
+    /// fillet's: `joins` at the cuts, the cubic where the arc of a fillet would be, and
+    /// `removed`, the sliver of the sharp wedge the cubic cuts off. `None` where the
+    /// walls are too short for the cut.
+    fn simple_slice(&self, design: &VoluteDesign, sign: f64, z: f64) -> Option<CutwaterSlice> {
+        let mut slice = self.slice(sign, z)?;
+        let (s, d) = self.tip();
+        let (spiral, diffuser) = (Path::from(&self.spiral, s), Path::from(&self.diffuser, d));
+        let l = design.cutwater_cut;
+        let reach = (0.5 * l).min(spiral.length - l).min(diffuser.length - l);
+        if l <= 1e-9 || reach <= 1e-9 {
+            return None;
+        }
+        let ((p0, ts), (p3, td)) = (spiral.point(l), diffuser.point(l));
+        let h = design.cutwater_handle * l;
+        let (p1, p2) = (p0 - ts * h, p3 - td * h);
+        let cubic = |u: f64| {
+            let v = 1.0 - u;
+            p0 * (v * v * v) + p1 * (3.0 * v * v * u) + p2 * (3.0 * v * u * u) + p3 * (u * u * u)
+        };
+        // Spaced by half its length and half its turning, so that the points are closer
+        // together round the nose, where the curve turns most.
+        let fine: Vec<DVec2> = (0..=FINE_POINTS)
+            .map(|i| cubic(i as f64 / FINE_POINTS as f64))
+            .collect();
+        let steps: Vec<(f64, f64)> = fine
+            .windows(3)
+            .map(|w| {
+                let (a, b) = (
+                    (w[1] - w[0]).normalize_or_zero(),
+                    (w[2] - w[1]).normalize_or_zero(),
+                );
+                (w[1].distance(w[0]), a.dot(b).clamp(-1.0, 1.0).acos())
+            })
+            .collect();
+        let (length, turn) = steps
+            .iter()
+            .fold((0.0, 0.0), |(l, t), (dl, dt)| (l + dl, t + dt));
+        let mut cumulative = vec![0.0];
+        for (dl, dt) in &steps {
+            let last = cumulative[cumulative.len() - 1];
+            cumulative.push(last + 0.5 * dl / length.max(1e-30) + 0.5 * dt / turn.max(1e-30));
+        }
+        let total = cumulative[cumulative.len() - 1].max(1e-30);
+        let arc: Vec<DVec2> = (0..FILLET_ARC_POINTS)
+            .map(|i| {
+                let target = total * i as f64 / (FILLET_ARC_POINTS - 1) as f64;
+                let k = cumulative
+                    .partition_point(|&c| c < target)
+                    .min(cumulative.len() - 1);
+                fine[k + 1]
+            })
+            .collect();
+        let (mut arc, last) = (arc, FILLET_ARC_POINTS - 1);
+        arc[0] = p0;
+        arc[last] = p3;
+        let wall = |path: &Path, outward: bool| -> Vec<DVec2> {
+            (0..FILLET_WALL_POINTS)
+                .map(|i| {
+                    let t = (i + 1) as f64 / FILLET_WALL_POINTS as f64;
+                    let along = if outward {
+                        l + reach * t
+                    } else {
+                        l + reach * (1.0 - t)
+                    };
+                    path.point(along).0
+                })
+                .collect()
+        };
+        let at = |p: &DVec2| DVec3::new(p.x, p.y, z);
+        slice.outline = wall(&spiral, false)
+            .iter()
+            .chain(&arc)
+            .chain(&wall(&diffuser, true))
+            .map(at)
+            .collect();
+        let along = |path: &Path, to: f64| -> Vec<DVec2> {
+            let n = 4;
+            (0..=n)
+                .map(|i| path.point(to * i as f64 / n as f64).0)
+                .collect()
+        };
+        slice.removed = along(&spiral, l)
+            .into_iter()
+            .chain(arc.iter().copied().skip(1))
+            .chain(along(&diffuser, l).into_iter().rev().skip(1))
+            .map(|p| at(&p))
+            .collect();
+        slice.joins = Some((at(&p0), at(&p3)));
+        slice.nose_centre = at(&(0.5 * (p0 + p3)));
+        slice.join_length = l;
         slice.nose_distance = slice
             .outline
             .iter()
@@ -1023,6 +1129,72 @@ mod tests {
             shapes.push(DischargeShape::Tangential { straight_wall });
         }
         shapes
+    }
+
+    #[test]
+    fn a_simple_cutwater_closes_the_tip_with_a_cubic_tangent_to_the_walls() {
+        for shape in discharges() {
+            let g = build(|v| {
+                v.diffuser.shape = shape;
+                v.cutwater.shape = CutwaterShape::Simple {
+                    cut: Param::Manual(0.012),
+                    handle: Param::Manual(0.5),
+                };
+            });
+            assert_eq!(g.cutwater_slices.len(), SLICES, "{shape:?}");
+            let sharp = build(|v| {
+                v.diffuser.shape = shape;
+                v.cutwater.shape = CutwaterShape::Sharp;
+            });
+            // The same tip and the same start of the spiral as a sharp cutwater.
+            assert_eq!(g.cutwater.tip, sharp.cutwater.tip, "{shape:?}");
+            assert_eq!(g.start_angle, sharp.start_angle, "{shape:?}");
+            for s in &g.cutwater_slices {
+                let (j_spiral, j_diffuser) = s.joins.expect("the cuts");
+                let arc = s.nose_arc();
+                assert_eq!(arc.len(), FILLET_ARC_POINTS);
+                assert!(
+                    arc[0].distance(j_spiral) < 1e-12
+                        && arc[arc.len() - 1].distance(j_diffuser) < 1e-12
+                );
+                // Cut back from the tip along each wall.
+                for join in [j_spiral, j_diffuser] {
+                    let back = join.distance(s.tip);
+                    assert!(back > 0.9 * 0.012 * 0.9 && back <= 0.012 * 1.001, "{back}");
+                }
+                // Tangent to each wall at its cut, and smooth between: the curve turns
+                // gently from point to point.
+                let direction = |a: DVec3, b: DVec3| (b - a).truncate().normalize();
+                let (w_spiral, w_diffuser) = (s.trimmed_spiral_wall(), s.trimmed_diffuser_wall());
+                let wall_dir = |wall: &[DVec3], join: DVec3| {
+                    let k = wall
+                        .iter()
+                        .enumerate()
+                        .min_by(|a, b| a.1.distance(join).total_cmp(&b.1.distance(join)))
+                        .map_or(0, |(k, _)| k);
+                    direction(wall[k.saturating_sub(1)], wall[(k + 1).min(wall.len() - 1)])
+                };
+                let at_spiral = direction(arc[0], arc[1]);
+                let at_diffuser = direction(arc[arc.len() - 2], arc[arc.len() - 1]);
+                assert!(
+                    at_spiral.dot(wall_dir(&w_spiral, j_spiral)).abs() > 0.995,
+                    "{shape:?} z {}: spiral {:?}",
+                    s.z,
+                    at_spiral.dot(wall_dir(&w_spiral, j_spiral))
+                );
+                assert!(at_diffuser.dot(wall_dir(&w_diffuser, j_diffuser)).abs() > 0.995);
+                let worst = arc
+                    .windows(3)
+                    .map(|w| {
+                        direction(w[0], w[1])
+                            .dot(direction(w[1], w[2]))
+                            .clamp(-1.0, 1.0)
+                            .acos()
+                    })
+                    .fold(0.0, f64::max);
+                assert!(worst < 35f64.to_radians(), "{worst}");
+            }
+        }
     }
 
     #[test]
