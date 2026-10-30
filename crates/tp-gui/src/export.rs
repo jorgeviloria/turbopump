@@ -348,6 +348,8 @@ mod cad {
         step: bool,
         iges: bool,
         stl: bool,
+        /// Also the flow domains split into named boundaries, a file each.
+        boundaries: bool,
         fillet: Param<f64>,
         balance_holes: bool,
         /// Material density, kg/m³.
@@ -362,6 +364,7 @@ mod cad {
                 step: true,
                 iges: false,
                 stl: false,
+                boundaries: true,
                 fillet: Param::Auto,
                 balance_holes: false,
                 density: 7850.0,
@@ -401,6 +404,7 @@ mod cad {
         options: &CadOptions,
         folder: &Path,
         formats: &[&str],
+        boundaries: bool,
     ) -> Result<CadReport, String> {
         let cad = tp_cad::build_impeller(g, options).map_err(|e| e.to_string())?;
         let mut problems_of_duct = Vec::new();
@@ -482,7 +486,44 @@ mod cad {
                 }
             }
         }
+        // The flow domains split into named boundaries, one file each.
+        let mut boundary_problems = Vec::new();
+        if boundaries {
+            let dir = folder.join("boundaries");
+            let mut domains = vec![(
+                tr("flow domain"),
+                "impeller",
+                &cad.fluid,
+                tp_cad::impeller_patches(g, &cad.fluid),
+            )];
+            if let (Some((v, _, _)), Some(vg)) = (&volute, volute_geometry) {
+                domains.push((
+                    tr("volute flow domain"),
+                    "volute",
+                    &v.fluid,
+                    tp_cad::volute_patches(vg, &v.fluid),
+                ));
+            }
+            for (label, stem, shape, patches) in domains {
+                let written = patches.and_then(|patches| {
+                    formats
+                        .iter()
+                        .map(|format| {
+                            tp_cad::write_patches(shape, &patches, &dir, stem, format, deflection)
+                        })
+                        .collect::<Result<Vec<_>, _>>()
+                });
+                match written {
+                    Ok(groups) => files.extend(groups.into_iter().flatten()),
+                    Err(e) => boundary_problems.push(tf(
+                        "the named boundaries of the {} could not be written: {}",
+                        &[&label, &e],
+                    )),
+                }
+            }
+        }
         let mut problems: Vec<String> = cad.warnings.clone();
+        problems.extend(boundary_problems);
         problems.extend(problems_of_duct);
         problems.extend(joined_warnings);
         if let Some((volute, casing, _)) = &volute {
@@ -583,6 +624,7 @@ mod cad {
                     .into_iter()
                     .filter_map(|(on, f)| on.then_some(f))
                     .collect();
+            let boundaries = self.boundaries;
             let (tx, rx) = channel();
             let ctx = ctx.clone();
             let spawned = std::thread::Builder::new()
@@ -596,6 +638,7 @@ mod cad {
                         &options,
                         &folder,
                         &formats,
+                        boundaries,
                     );
                     let result = result.map(|mut report| {
                         report.problems.extend(note);
@@ -735,6 +778,10 @@ mod cad {
                 ui.checkbox(&mut self.iges, tr("IGES"));
                 ui.checkbox(&mut self.stl, tr("STL"));
             });
+            ui.checkbox(&mut self.boundaries, tr("Named boundaries"))
+                .on_hover_text(tr(
+                    "Also writes the flow domains split into named boundaries (inflow, outflow, hub, shroud, blade, spiral, diffuser, cutwater…), a file each, in a folder called boundaries",
+                ));
             ui.add_space(6.0);
 
             let any_format = self.step || self.iges || self.stl;
@@ -933,6 +980,7 @@ mod cad {
                 &CadOptions::default(),
                 &folder,
                 &["step"],
+                false,
             )
             .unwrap();
             // Impeller, flow domain, volute and its casing, then the four wear rings.
@@ -962,6 +1010,46 @@ mod cad {
             assert!(report.impeller_volume > 0.0 && report.fluid_volume > 0.0);
             // The vanes are off by default and so is their line.
             assert!(report.back_vanes.is_none());
+            std::fs::remove_dir_all(&folder).unwrap();
+        }
+
+        #[test]
+        fn cad_export_writes_the_named_boundaries_of_the_flow_domains() {
+            let project = default_project();
+            let mut derived = Derived::default();
+            derived.update(&project);
+            let g = derived.geometry(project.components()[0].id()).unwrap();
+            let folder =
+                std::env::temp_dir().join(format!("tp-gui-cad-named-{}", std::process::id()));
+            let volute = derived.volute(project.components()[1].id());
+            let report = run(
+                g,
+                None,
+                None,
+                volute,
+                &CadOptions::default(),
+                &folder,
+                &["stl"],
+                true,
+            )
+            .unwrap();
+            let named = |stem: &str, name: &str| {
+                report
+                    .files
+                    .iter()
+                    .any(|f| f.ends_with(format!("boundaries/{stem}-{name}.stl")))
+            };
+            for name in ["Inflow", "Outflow", "Hub", "Shroud", "Blade"] {
+                assert!(named("impeller", name), "impeller {name}");
+            }
+            for name in ["Inflow", "Outflow", "Spiral", "Diffuser"] {
+                assert!(named("volute", name), "volute {name}");
+            }
+            assert!(
+                report.problems.iter().all(|p| p.contains("did not fit")),
+                "{:?}",
+                report.problems
+            );
             std::fs::remove_dir_all(&folder).unwrap();
         }
 
@@ -1008,6 +1096,7 @@ mod cad {
                 &CadOptions::default(),
                 &folder,
                 &["step"],
+                false,
             )
             .unwrap();
             assert!(report.back_vanes.is_some_and(|v| v > 0.0));

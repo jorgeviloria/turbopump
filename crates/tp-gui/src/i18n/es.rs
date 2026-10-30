@@ -3231,6 +3231,15 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("sharp", "afilado"),
     ("rounded", "redondeado"),
     ("body", "cuerpo"),
+    ("Named boundaries", "Fronteras con nombre"),
+    (
+        "Also writes the flow domains split into named boundaries (inflow, outflow, hub, shroud, blade, spiral, diffuser, cutwater…), a file each, in a folder called boundaries",
+        "Escribe además los dominios de flujo divididos en fronteras con nombre (entrada, salida, cubo, carcasa, álabe, espiral, difusor, corte de agua…), un archivo cada una, en una carpeta llamada boundaries",
+    ),
+    (
+        "the named boundaries of the {} could not be written: {}",
+        "no se pudieron escribir las fronteras con nombre de {}: {}",
+    ),
     ("simple", "simple"),
     ("Cut back", "Recorte"),
     ("Handles", "Manos"),

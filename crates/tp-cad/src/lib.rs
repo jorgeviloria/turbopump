@@ -10,6 +10,7 @@ mod diffuser;
 mod impeller;
 mod joined;
 mod occ;
+mod patches;
 mod profile;
 mod rounding;
 mod sewn;
@@ -23,6 +24,7 @@ pub use impeller::{
 };
 pub use joined::{join_fluid, joining_ring};
 pub use occ::{Shape, read_step, write_iges, write_step, write_stl};
+pub use patches::{Patch, impeller_patches, volute_patches, write_patches};
 pub use sewn::{FlowBuild, build_volute_flow, build_volute_sewn};
 pub use volute::{VoluteCad, VoluteCasing, build_volute, build_volute_casing};
 

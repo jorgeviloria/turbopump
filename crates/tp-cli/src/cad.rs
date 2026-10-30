@@ -66,6 +66,36 @@ pub(crate) struct CadArgs {
     /// Material density for the masses of the impeller and the volute casing.
     #[arg(long, default_value = "7850 kg/m3")]
     density: String,
+    /// Leave out the flow domains split into named boundaries (inflow, outflow, hub,
+    /// shroud, blade, spiral, diffuser, cutwater…), a file each in a `boundaries` folder.
+    #[arg(long)]
+    no_boundaries: bool,
+}
+
+/// Writes the named boundaries of a flow domain, a file each, into `dir/boundaries`;
+/// says what could not be written.
+fn write_boundaries(
+    shape: &Shape,
+    patches: Result<Vec<tp_cad::Patch>, tp_cad::CadError>,
+    dir: &Path,
+    stem: &str,
+    formats: &[Format],
+    deflection: f64,
+) -> bool {
+    let dir = dir.join("boundaries");
+    let written = patches.and_then(|patches| {
+        formats.iter().try_for_each(|format| {
+            tp_cad::write_patches(shape, &patches, &dir, stem, format.extension(), deflection)
+                .map(drop)
+        })
+    });
+    match written {
+        Ok(()) => true,
+        Err(e) => {
+            println!("  warning: the named boundaries of {stem} were not written: {e}");
+            false
+        }
+    }
 }
 
 fn length(text: &Option<String>, units: &DisplayUnits) -> Result<Option<f64>, String> {
@@ -239,6 +269,16 @@ pub(crate) fn run(args: CadArgs) -> CliResult {
                 write(shape, &path, format, deflection)?;
             }
         }
+        if !args.no_boundaries {
+            warned |= !write_boundaries(
+                &cad.fluid,
+                tp_cad::impeller_patches(&geometry, &cad.fluid),
+                &dir,
+                "impeller",
+                &args.format,
+                deflection,
+            );
+        }
         // One flow domain for CFD: with the side chambers and the volute after them.
         let next = project
             .components()
@@ -369,6 +409,16 @@ pub(crate) fn run(args: CadArgs) -> CliResult {
             write(&cad.fluid, &path, format, deflection)?;
             let path = base.join(format!("{stem}-casing.{}", format.extension()));
             write(&casing.solid, &path, format, deflection)?;
+        }
+        if !args.no_boundaries {
+            warned |= !write_boundaries(
+                &cad.fluid,
+                tp_cad::volute_patches(&geometry, &cad.fluid),
+                &base,
+                &stem,
+                &args.format,
+                deflection,
+            );
         }
         println!();
     }
