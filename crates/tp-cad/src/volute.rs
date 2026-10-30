@@ -200,7 +200,28 @@ pub fn expected_fluid_volume(g: &VoluteGeometry) -> f64 {
             })
             .sum()
     };
-    let spiral = swept(&g.sections) + swept(&g.inner_sections) + swept(&g.outer_channel);
+    let spiral = if g.design.free_double().is_some() {
+        // One channel of whole sections from the rib nose on, with the rib carved out of
+        // it, as the CAD builds it: the rib's plan area over its height.
+        let rib = g.rib.as_ref().map_or(0.0, |rib| {
+            let area = |plane: &tp_design::volute::RibPlane| {
+                let o = plane.outline();
+                let n = o.len();
+                0.5 * (0..n)
+                    .map(|i| o[i].x * o[(i + 1) % n].y - o[(i + 1) % n].x * o[i].y)
+                    .sum::<f64>()
+                    .abs()
+            };
+            rib.planes
+                .windows(2)
+                .map(|w| 0.5 * (area(&w[0]) + area(&w[1])) * (w[1].z - w[0].z).abs())
+                .sum()
+        });
+        let first = &g.sections[..g.sections.len().saturating_sub(1)];
+        swept(first) + swept(&g.envelope) - rib
+    } else {
+        swept(&g.sections) + swept(&g.inner_sections) + swept(&g.outer_channel)
+    };
     let nozzle: f64 = g
         .nozzle
         .windows(2)
