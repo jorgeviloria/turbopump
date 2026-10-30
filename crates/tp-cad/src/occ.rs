@@ -230,27 +230,6 @@ impl Shape {
 
     /// The shape with the edges at positions `edges` of [`Self::edge_samples`] rounded
     /// with `radius`, mm.
-    /// `self` with the edges `edges` rounded, each with a radius running linearly from
-    /// the first of its pair `radii` at the start of the edge to the second at its end.
-    pub fn filleted_evolving(
-        &self,
-        edges: &[usize],
-        radii: &[(f64, f64)],
-    ) -> Result<Shape, CadError> {
-        let indices: Vec<u32> = edges
-            .iter()
-            .map(|&i| u32::try_from(i + 1).map_err(|_| CadError::Input("edge index".into())))
-            .collect::<Result<_, _>>()?;
-        let first: Vec<f64> = radii.iter().map(|r| r.0).collect();
-        let last: Vec<f64> = radii.iter().map(|r| r.1).collect();
-        op(
-            "fillet",
-            crate::profile::op("fillet", || {
-                ffi::fillet_edges_evolving(&self.0, &indices, &first, &last)
-            }),
-        )
-    }
-
     pub fn filleted(&self, edges: &[usize], radius: f64) -> Result<Shape, CadError> {
         let indices: Vec<u32> = edges
             .iter()

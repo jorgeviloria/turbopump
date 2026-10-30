@@ -840,35 +840,6 @@ std::unique_ptr<Shape> fillet_edges(const Shape &shape, rust::Slice<const std::u
   });
 }
 
-// `shape` with each edge of `edges` (indices into OCCT's indexed edge map, from 1)
-// rounded with a radius that runs linearly from `first` at the start of the edge to
-// `last` at its end.
-std::unique_ptr<Shape> fillet_edges_evolving(const Shape &shape,
-                                             rust::Slice<const std::uint32_t> edges,
-                                             rust::Slice<const double> first,
-                                             rust::Slice<const double> last) {
-  return guard("fillet", [&] {
-    if (first.size() != edges.size() || last.size() != edges.size()) {
-      fail("fillet", "one pair of radii per edge");
-    }
-    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> map;
-    TopExp::MapShapes(shape.shape, TopAbs_EDGE, map);
-    BRepFilletAPI_MakeFillet fillet(shape.shape);
-    for (std::size_t k = 0; k < edges.size(); ++k) {
-      std::uint32_t index = edges[k];
-      if (index < 1 || int(index) > map.Extent()) {
-        fail("fillet", "edge index out of range");
-      }
-      fillet.Add(first[k], last[k], TopoDS::Edge(map(int(index))));
-    }
-    fillet.Build();
-    if (!fillet.IsDone()) {
-      fail("fillet", "the rounded edges could not be built");
-    }
-    return wrap(fillet.Shape(), "fillet");
-  });
-}
-
 std::size_t count_subshapes(const Shape &shape, std::uint8_t kind) {
   static const TopAbs_ShapeEnum kinds[] = {TopAbs_SOLID, TopAbs_SHELL, TopAbs_FACE, TopAbs_EDGE};
   if (kind >= 4) {
