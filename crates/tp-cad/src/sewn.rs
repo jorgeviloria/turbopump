@@ -51,6 +51,39 @@ pub fn build_volute_sewn(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
             "the sewn flow domain takes single volutes with a sharp or fillet cutwater".into(),
         ));
     }
+    let radius = g.design.nose_radius * MM;
+    if !g.design.cutwater_shape.is_fillet() || radius <= 0.0 {
+        return sewn_with(g, 0.0);
+    }
+    // A large fillet reaches into the strip of the ring beside the cutwater, and the
+    // ring no longer sews to the zone: a smaller one, said so, rather than none.
+    let mut failed = None;
+    for share in FILLET_SHARES {
+        match sewn_with(g, share * radius) {
+            Ok(mut cad) => {
+                if share < 1.0 && !cad.warnings.iter().any(|w| w.contains("rounded with")) {
+                    cad.warnings.push(format!(
+                        "the cutwater is rounded with {:.1} mm, the most the CAD kernel takes \
+                         there",
+                        share * radius
+                    ));
+                }
+                return Ok(cad);
+            }
+            Err(e) => {
+                failed.get_or_insert(e);
+            }
+        }
+    }
+    Err(failed.expect("at least one radius"))
+}
+
+/// Shares of the fillet radius the sewn flow domain tries, largest first.
+const FILLET_SHARES: [f64; 4] = [1.0, 0.75, 0.5, 0.25];
+
+/// [`build_volute_sewn`] with the cutwater rounded with `radius`, mm (0: as designed
+/// for a sharp cutwater).
+fn sewn_with(g: &VoluteGeometry, radius: f64) -> Result<VoluteCad, CadError> {
     let sign = g.basis.rotation_sign;
     let breaks = g.ring_breaks();
     let spiral: Vec<Vec<DVec3>> = g.sections.iter().map(|s| s.points(sign)).collect();
@@ -144,8 +177,16 @@ pub fn build_volute_sewn(g: &VoluteGeometry) -> Result<VoluteCad, CadError> {
     let mut channel = channel;
     let mut warnings = Vec::new();
     if let CutwaterShape::Fillet { .. } = g.design.cutwater_shape {
-        match fillet_tip(&channel, &pieces, g, g.design.nose_radius * MM) {
-            Some((rounded, _)) => channel = rounded,
+        match fillet_tip(&channel, &pieces, g, radius) {
+            Some((rounded, r)) => {
+                channel = rounded;
+                if r < radius * (1.0 - 1e-9) {
+                    warnings.push(format!(
+                        "the cutwater is rounded with {r:.1} mm, the most the CAD kernel takes \
+                         there"
+                    ));
+                }
+            }
             None => warnings.push(
                 "the CAD kernel could not round the cutwater edge: the CAD keeps it sharp"
                     .to_owned(),
@@ -753,6 +794,40 @@ mod tests {
         assert_eq!(how, FlowBuild::Sewn);
         let expected = crate::expected_fluid_volume(&g) * MM.powi(3);
         assert!((cad.fluid.volume() / expected - 1.0).abs() < 0.02);
+    }
+
+    #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
+    fn a_rounded_diffuser_base_takes_the_fillet_at_the_tip() {
+        let _slot = crate::test_slot::take();
+        // With a base form factor the walls meet along a V across the width: its arms
+        // take the fillet, and a radius the ring strip cannot take comes out smaller.
+        for (radius, rounded) in [(Param::Auto, None), (Param::Manual(0.003), Some(1.5))] {
+            let mut input = VoluteInput::default();
+            input.cutwater.shape = CutwaterShape::Fillet { radius };
+            input.diffuser.base_form = Param::Manual(0.5);
+            let g = VoluteGeometry::build(&basis(), &input).unwrap();
+            let (cad, how) = build_volute_flow(&g).unwrap();
+            assert_eq!(how, FlowBuild::Sewn);
+            assert!(cad.fluid.is_valid() && cad.fluid.solid_count() == 1);
+            match rounded {
+                None => assert!(cad.warnings.is_empty(), "{:?}", cad.warnings),
+                Some(r) => assert!(
+                    cad.warnings
+                        .iter()
+                        .any(|w| w.contains(&format!("rounded with {r:.1} mm"))),
+                    "{:?}",
+                    cad.warnings
+                ),
+            }
+            let mut sharp = input.clone();
+            sharp.cutwater.shape = CutwaterShape::Sharp;
+            let sharp = build_volute_flow(&VoluteGeometry::build(&basis(), &sharp).unwrap())
+                .unwrap()
+                .0;
+            // Rounding the tip of the casing hands its corner to the flow.
+            assert!(cad.fluid.volume() > sharp.fluid.volume());
+        }
     }
 }
 

@@ -1101,16 +1101,37 @@ pub(crate) fn fillet_tip(
     if across.is_empty() || radius <= 0.0 {
         return None;
     }
+    // With a rounded diffuser base the walls meet along a V whose point is the tip at
+    // mid-height and whose arms run back to the corners, beside a corner edge of the
+    // diffuser that also runs across the height: the arms alone, then.
+    let arms: Vec<usize> = across
+        .iter()
+        .copied()
+        .filter(|&k| {
+            let e = &samples[k];
+            e[0].truncate().distance(e[e.len() - 1].truncate()) > 1.0
+        })
+        .collect();
+    let mut choices = vec![across.clone()];
+    if !arms.is_empty() && arms != across {
+        choices.push(arms);
+    }
     let before = channel.volume_with_tolerance(0.0);
+    let sound =
+        |f: &Shape| f.is_valid() && f.solid_count() == 1 && f.volume_with_tolerance(0.0) > before;
     [1.0, 0.75, 0.5, 0.25].into_iter().find_map(|share| {
         let r = share * radius;
-        channel
-            .filleted(&across, r)
-            .ok()
-            .filter(|f| {
-                f.is_valid() && f.solid_count() == 1 && f.volume_with_tolerance(0.0) > before
-            })
-            .map(|f| (f, r))
+        choices.iter().find_map(|edges| {
+            // The kernel may leave the faces round the ends of a rounded V out of
+            // tolerance; shape healing sets them right.
+            let rounded = channel.filleted(edges, r).ok()?;
+            let rounded = if sound(&rounded) {
+                rounded
+            } else {
+                rounded.fixed().ok().filter(|f| sound(f))?
+            };
+            Some((rounded, r))
+        })
     })
 }
 
