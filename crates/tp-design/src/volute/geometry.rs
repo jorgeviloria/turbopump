@@ -401,6 +401,20 @@ impl VoluteGeometry {
     /// The walls near the cutwater in the plane z = `z` (m): see
     /// [`super::cutwater::TongueCut`]. `None` where the cutwater does not cut the
     /// diffuser, or the walls do not reach that plane.
+    /// The rails of a simple cutwater in `n` planes across the inlet width (see
+    /// [`super::cutwater::CutwaterRails`]); `None` for any other cutwater.
+    pub fn cutwater_rails(&self, n: usize) -> Option<super::cutwater::CutwaterRails> {
+        super::cutwater::rails(
+            &self.design,
+            &self.cutwater_walls,
+            &self.nozzle,
+            self.basis.rotation_sign,
+            self.rotation,
+            self.basis.midplane,
+            n,
+        )
+    }
+
     pub fn tongue_cut(&self, z: f64) -> Option<super::cutwater::TongueCut> {
         super::cutwater::tongue_cut(
             &self.cutwater_walls,
@@ -1591,6 +1605,7 @@ impl VoluteGeometry {
                 nose_centre: turn(s.nose_centre),
                 removed: s.removed.into_iter().map(turn).collect(),
                 joins: s.joins.map(|(a, b)| (turn(a), turn(b))),
+                join_tangents: s.join_tangents.map(|(a, b)| (turn(a), turn(b))),
                 ..s
             })
             .collect();

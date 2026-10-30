@@ -39,7 +39,7 @@ use crate::pump::correlations::{CorrelationInfo, Verification};
 use crate::{DesignError, Param};
 use tp_units::STANDARD_GRAVITY;
 
-pub use cutwater::CutwaterSlice;
+pub use cutwater::{CutwaterRails, CutwaterSlice};
 pub use geometry::{
     AcrossWidth, CHANNEL_OVERLAP, CutwaterValues, FlowSection, NozzleSection, RibPlane,
     ThroatJunction, VoluteGeometry, VoluteSection,

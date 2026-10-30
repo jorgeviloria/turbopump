@@ -84,6 +84,9 @@ pub struct CutwaterSlice {
     /// For a fillet: the points where its arc touches the spiral wall and the diffuser
     /// wall.
     pub joins: Option<(DVec3, DVec3)>,
+    /// For a simple edge: the unit direction of each wall at its cut, along the wall
+    /// toward the tip (into the part the cubic closes). `None` otherwise.
+    pub join_tangents: Option<(DVec3, DVec3)>,
     /// For a fillet: the sliver of the sharp wedge the round cuts off, closed (the tip,
     /// along the spiral wall to the arc, round it, and back along the diffuser wall).
     /// Empty otherwise.
@@ -235,21 +238,7 @@ pub(super) fn tongue_cut(
     rotation: f64,
     z: f64,
 ) -> Option<TongueCut> {
-    let spiral: Vec<DVec2> = outlines
-        .iter()
-        .filter_map(|(angle, outline)| {
-            let r = outermost_at(outline, z)?;
-            let theta = rotation + sign * angle;
-            Some(DVec2::new(r * theta.cos(), r * theta.sin()))
-        })
-        .collect();
-    let spiral = catmull_rom(&spiral, SPIRAL_SUBDIVISIONS);
-    let inner: Vec<DVec2> = nozzle.iter().filter_map(|n| innermost_at(n, z)).collect();
-    let diffuser = catmull_rom(&inner, DIFFUSER_SUBDIVISIONS);
-    if spiral.len() < 2 || diffuser.len() < 2 {
-        return None;
-    }
-    let walls = Walls { spiral, diffuser };
+    let walls = Walls::turned(outlines, nozzle, sign, rotation, z)?;
     let lift = |p: &DVec2| DVec3::new(p.x, p.y, z);
     Some(TongueCut {
         z,
@@ -273,7 +262,78 @@ struct Station {
     point: DVec2,
 }
 
+/// Where each wall of a simple cutwater is cut, plane by plane across the inlet width:
+/// the rails a surface closing the cutwater runs between, and the direction of each
+/// wall there toward the tip (the tangent edges of CAESES's custom fillet). From −z to
+/// +z, as turned in the volute; m.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CutwaterRails {
+    pub spiral: Vec<DVec3>,
+    pub diffuser: Vec<DVec3>,
+    pub spiral_to_tip: Vec<DVec3>,
+    pub diffuser_to_tip: Vec<DVec3>,
+}
+
+/// The rails of a simple cutwater in `n` planes across the inlet width, on the walls of
+/// the spiral `outlines` (r, z by wrap angle, turned by `rotation`) and of the diffuser
+/// `nozzle` (turned), the same planes as [`slices`] when `n` is [`SLICES`]. `None`
+/// unless the cutwater is simple, or where a plane has no cut.
+pub(super) fn rails(
+    design: &VoluteDesign,
+    outlines: &[(f64, Vec<DVec2>)],
+    nozzle: &[NozzleSection],
+    sign: f64,
+    rotation: f64,
+    midplane: f64,
+    n: usize,
+) -> Option<CutwaterRails> {
+    if !design.cutwater_shape.is_simple() || n < 2 {
+        return None;
+    }
+    let half = 0.5 * design.inlet_width * (1.0 - EDGE_MARGIN);
+    let mut rails = CutwaterRails {
+        spiral: Vec::with_capacity(n),
+        diffuser: Vec::with_capacity(n),
+        spiral_to_tip: Vec::with_capacity(n),
+        diffuser_to_tip: Vec::with_capacity(n),
+    };
+    for k in 0..n {
+        let z = midplane - half + 2.0 * half * k as f64 / (n - 1) as f64;
+        let slice =
+            Walls::turned(outlines, nozzle, sign, rotation, z)?.simple_slice(design, sign, z)?;
+        let ((s, d), (ts, td)) = (slice.joins?, slice.join_tangents?);
+        rails.spiral.push(s);
+        rails.diffuser.push(d);
+        rails.spiral_to_tip.push(ts);
+        rails.diffuser_to_tip.push(td);
+    }
+    Some(rails)
+}
+
 impl Walls {
+    /// The walls in the plane z = `z` as turned in the volute: the spiral `outlines`
+    /// turned by `rotation`, the diffuser `nozzle` already turned.
+    fn turned(
+        outlines: &[(f64, Vec<DVec2>)],
+        nozzle: &[NozzleSection],
+        sign: f64,
+        rotation: f64,
+        z: f64,
+    ) -> Option<Self> {
+        let spiral: Vec<DVec2> = outlines
+            .iter()
+            .filter_map(|(angle, outline)| {
+                let r = outermost_at(outline, z)?;
+                let theta = rotation + sign * angle;
+                Some(DVec2::new(r * theta.cos(), r * theta.sin()))
+            })
+            .collect();
+        let spiral = catmull_rom(&spiral, SPIRAL_SUBDIVISIONS);
+        let inner: Vec<DVec2> = nozzle.iter().filter_map(|n| innermost_at(n, z)).collect();
+        let diffuser = catmull_rom(&inner, DIFFUSER_SUBDIVISIONS);
+        (spiral.len() >= 2 && diffuser.len() >= 2).then_some(Self { spiral, diffuser })
+    }
+
     fn at(
         outlines: &[(f64, Vec<DVec2>)],
         nozzle: &[NozzleSection],
@@ -589,6 +649,7 @@ impl Walls {
             .map(|p| at(&p))
             .collect();
         slice.joins = Some((at(&p0), at(&p3)));
+        slice.join_tangents = Some(((-ts).extend(0.0), (-td).extend(0.0)));
         slice.nose_centre = at(&(0.5 * (p0 + p3)));
         slice.join_length = 0.5 * (l_s + l_d);
         slice.nose_distance = slice
@@ -627,6 +688,7 @@ impl Walls {
             diffuser_wall,
             nose_centre: at(s.point),
             joins: None,
+            join_tangents: None,
             removed: Vec::new(),
         })
     }
@@ -1265,6 +1327,82 @@ mod tests {
                 assert!(arc[arc.len() - 1].distance(j_diffuser) < 1e-12);
             }
         }
+    }
+
+    fn simple_across(width: f64) -> CutwaterShape {
+        CutwaterShape::Simple {
+            cut: Param::Manual(width),
+            handle: Param::Auto,
+            measure: CutMeasure::Across,
+        }
+    }
+
+    #[test]
+    fn the_rails_of_a_simple_cutwater_run_along_each_wall_the_gap_apart() {
+        let width = 0.003;
+        for shape in discharges() {
+            let g = build(|v| {
+                v.diffuser.shape = shape;
+                v.cutwater.shape = simple_across(width);
+            });
+            let rails = g.cutwater_rails(21).expect("rails");
+            assert_eq!(rails.spiral.len(), 21, "{shape:?}");
+            assert_eq!(rails.diffuser.len(), 21, "{shape:?}");
+            // Rising across the inlet width, inside its side walls.
+            let (half, zm) = (g.design.inlet_width / 2.0, g.basis.midplane);
+            assert!(rails.spiral.windows(2).all(|w| w[1].z > w[0].z));
+            assert!(rails.spiral.iter().all(|p| (p.z - zm).abs() < half));
+            for i in 0..21 {
+                let (s, d) = (rails.spiral[i], rails.diffuser[i]);
+                assert!((s.z - d.z).abs() < 1e-12);
+                let cut = g.tongue_cut(s.z).expect("walls");
+                let flat = |w: &[DVec3]| w.iter().map(|p| p.truncate()).collect::<Vec<_>>();
+                let (spiral, diffuser) = (flat(&cut.spiral), flat(&cut.diffuser));
+                // On its own wall, the gap away from the other.
+                assert!(distance_to(&spiral, s.truncate()) < 1e-6, "{shape:?} {i}");
+                assert!(distance_to(&diffuser, d.truncate()) < 1e-6, "{shape:?} {i}");
+                assert!((distance_to(&diffuser, s.truncate()) - width).abs() < 1e-3 * width);
+                assert!((distance_to(&spiral, d.truncate()) - width).abs() < 1e-3 * width);
+                // Along its wall in the plane, toward the tip.
+                let tip = cut.tip.expect("a tip");
+                for (p, t) in [(s, rails.spiral_to_tip[i]), (d, rails.diffuser_to_tip[i])] {
+                    assert!((t.length() - 1.0).abs() < 1e-9 && t.z.abs() < 1e-12);
+                    assert!(t.dot(tip - p) > 0.0, "{shape:?} {i}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_rails_pass_through_the_cuts_of_the_planes() {
+        let g = build(|v| v.cutwater.shape = simple_across(0.003));
+        let rails = g.cutwater_rails(SLICES).expect("rails");
+        for (k, s) in g.cutwater_slices.iter().enumerate() {
+            let (a, b) = s.joins.expect("the cuts");
+            assert!(a.distance(rails.spiral[k]) < 1e-12, "{k}");
+            assert!(b.distance(rails.diffuser[k]) < 1e-12, "{k}");
+        }
+    }
+
+    #[test]
+    fn only_a_simple_cutwater_has_rails() {
+        for shape in [
+            CutwaterShape::Sharp,
+            CutwaterShape::Fillet {
+                radius: Param::Auto,
+            },
+        ] {
+            let g = build(|v| v.cutwater.shape = shape);
+            assert!(g.cutwater_rails(9).is_none(), "{shape:?}");
+        }
+        let along = build(|v| {
+            v.cutwater.shape = CutwaterShape::Simple {
+                cut: Param::Auto,
+                handle: Param::Auto,
+                measure: CutMeasure::Along,
+            }
+        });
+        assert!(along.cutwater_rails(9).is_some());
     }
 
     #[test]

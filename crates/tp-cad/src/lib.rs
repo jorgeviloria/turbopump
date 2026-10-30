@@ -13,6 +13,7 @@ mod joined;
 mod occ;
 mod patches;
 mod profile;
+mod ribbon;
 mod rounding;
 mod sewn;
 mod thin;
