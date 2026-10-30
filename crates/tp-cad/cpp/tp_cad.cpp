@@ -12,6 +12,13 @@
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
+#include <BRepAlgoAPI_Section.hxx>
+#include <BRepAlgoAPI_Splitter.hxx>
+#include <BRepClass3d_SolidClassifier.hxx>
+#include <BRepTools.hxx>
+#include <BRepClass_FaceClassifier.hxx>
+#include <GeomAPI_IntCS.hxx>
+#include <Geom_TrimmedCurve.hxx>
 #include <gp_Pln.hxx>
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
@@ -433,6 +440,129 @@ std::unique_ptr<Shape> faces_except(const Shape &shape, rust::Slice<const std::u
   });
 }
 
+// The face of `shape` at `index` (from 0, in OCCT's indexed face map).
+std::unique_ptr<Shape> face_at(const Shape &shape, std::uint32_t index) {
+  return guard("face", [&] {
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces;
+    TopExp::MapShapes(shape.shape, TopAbs_FACE, faces);
+    if (int(index) + 1 > faces.Extent()) {
+      fail("face", "index out of range");
+    }
+    return wrap(faces(int(index) + 1), "face");
+  });
+}
+
+// Where the edge `edge` crosses the face `face`, inside both: six numbers a crossing, the
+// point, its (u, v) on the surface of the face and its parameter on the edge.
+rust::Vec<double> edge_face_crossings(const Shape &edge, const Shape &face) {
+  return guard("crossings", [&] {
+    double first = 0.0, last = 0.0;
+    const TopoDS_Edge &e = TopoDS::Edge(edge.shape);
+    const occ::handle<Geom_Curve> curve = BRep_Tool::Curve(e, first, last);
+    rust::Vec<double> out;
+    if (curve.IsNull()) {
+      return out;
+    }
+    const TopoDS_Face &f = TopoDS::Face(face.shape);
+    const occ::handle<Geom_Surface> surface = BRep_Tool::Surface(f);
+    GeomAPI_IntCS crossing(new Geom_TrimmedCurve(curve, first, last), surface);
+    if (!crossing.IsDone()) {
+      return out;
+    }
+    for (int i = 1; i <= crossing.NbPoints(); ++i) {
+      double u = 0.0, v = 0.0, w = 0.0;
+      crossing.Parameters(i, u, v, w);
+      BRepClass_FaceClassifier inside(f, gp_Pnt2d(u, v), 1e-7);
+      if (inside.State() == TopAbs_OUT) {
+        continue;
+      }
+      const gp_Pnt p = crossing.Point(i);
+      for (double x : {p.X(), p.Y(), p.Z(), u, v, w}) {
+        out.push_back(x);
+      }
+    }
+    return out;
+  });
+}
+
+// The edges where the boundaries of `a` and `b` cross, as a compound.
+std::unique_ptr<Shape> section_of(const Shape &a, const Shape &b) {
+  return guard("section", [&] {
+    BRepAlgoAPI_Section section(a.shape, b.shape, false);
+    section.ComputePCurveOn1(true);
+    section.Approximation(true);
+    section.Build();
+    if (!section.IsDone()) {
+      fail("section", "failed");
+    }
+    return wrap(section.Shape(), "section");
+  });
+}
+
+// The faces of all `shapes` split along the edges of `tools`, as one shape.
+std::unique_ptr<Shape> split_by(const ShapeList &shapes, const ShapeList &tools) {
+  return guard("split", [&] {
+    BRepAlgoAPI_Splitter splitter;
+    NCollection_List<TopoDS_Shape> args, tls;
+    for (const auto &s : shapes.items) {
+      args.Append(s);
+    }
+    for (const auto &t : tools.items) {
+      tls.Append(t);
+    }
+    splitter.SetArguments(args);
+    splitter.SetTools(tls);
+    splitter.SetRunParallel(true);
+    splitter.Build();
+    if (!splitter.IsDone() || splitter.HasErrors()) {
+      fail("split", "failed");
+    }
+    return wrap(splitter.Shape(), "split");
+  });
+}
+
+// For each face of `faces` (OCCT's indexed face map), where a point well inside it lies
+// with respect to the solid `solid`: 1 inside, -1 outside, 0 on its boundary or no point
+// found; then the point.
+rust::Vec<double> face_sides(const Shape &faces, const Shape &solid, double tolerance) {
+  return guard("classify", [&] {
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> map;
+    TopExp::MapShapes(faces.shape, TopAbs_FACE, map);
+    BRepClass3d_SolidClassifier classifier(solid.shape);
+    rust::Vec<double> out;
+    for (int i = 1; i <= map.Extent(); ++i) {
+      const TopoDS_Face &face = TopoDS::Face(map(i));
+      double u0, u1, v0, v1;
+      BRepTools::UVBounds(face, u0, u1, v0, v1);
+      const occ::handle<Geom_Surface> surface = BRep_Tool::Surface(face);
+      // The sample farthest inside the face's own boundary, on a grid.
+      double side = 0.0;
+      gp_Pnt at(0, 0, 0);
+      bool found = false;
+      const int n = 9;
+      for (int a = 1; a < n && !found; ++a) {
+        for (int b = 1; b < n && !found; ++b) {
+          const double u = u0 + (u1 - u0) * ((a + 0.5 * (b % 2)) / n);
+          const double v = v0 + (v1 - v0) * (double(b) / n);
+          BRepClass_FaceClassifier inside(face, gp_Pnt2d(u, v), 1e-7);
+          if (inside.State() != TopAbs_IN) {
+            continue;
+          }
+          at = surface->Value(u, v);
+          classifier.Perform(at, tolerance);
+          const TopAbs_State state = classifier.State();
+          side = state == TopAbs_IN ? 1.0 : state == TopAbs_OUT ? -1.0 : 0.0;
+          found = state != TopAbs_ON;
+        }
+      }
+      for (double x : {side, at.X(), at.Y(), at.Z()}) {
+        out.push_back(x);
+      }
+    }
+    return out;
+  });
+}
+
 std::unique_ptr<Shape> prism_z(const Shape &face, double height) {
   return guard("extrusion", [&] {
     BRepPrimAPI_MakePrism prism(face.shape, gp_Vec(0.0, 0.0, height));
@@ -685,6 +815,48 @@ bool is_valid(const Shape &shape) {
   } catch (...) {
     return false;
   }
+}
+
+rust::String check_report(const Shape &shape) {
+  std::string out;
+  try {
+    BRepCheck_Analyzer analyzer(shape.shape);
+    const TopAbs_ShapeEnum kinds[] = {TopAbs_SOLID, TopAbs_SHELL, TopAbs_FACE, TopAbs_WIRE,
+                                      TopAbs_EDGE, TopAbs_VERTEX};
+    const char *names[] = {"solid", "shell", "face", "wire", "edge", "vertex"};
+    for (int k = 0; k < 6; ++k) {
+      NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> map;
+      TopExp::MapShapes(shape.shape, kinds[k], map);
+      for (int i = 1; i <= map.Extent(); ++i) {
+        const auto &result = analyzer.Result(map(i));
+        if (result.IsNull()) continue;
+        for (const auto &st : result->Status()) {
+          if (st != BRepCheck_NoError) {
+            out += std::string(names[k]) + " " + std::to_string(i - 1) + ": " +
+                   std::to_string(static_cast<int>(st)) + "\n";
+          }
+        }
+        if (kinds[k] == TopAbs_EDGE || kinds[k] == TopAbs_WIRE) {
+          NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces;
+          TopExp::MapShapes(shape.shape, TopAbs_FACE, faces);
+          for (int f = 1; f <= faces.Extent(); ++f) {
+            try {
+              for (const auto &st : result->StatusOnShape(faces(f))) {
+                if (st != BRepCheck_NoError) {
+                  out += std::string(names[k]) + " " + std::to_string(i - 1) + " on face " +
+                         std::to_string(f - 1) + ": " + std::to_string(static_cast<int>(st)) + "\n";
+                }
+              }
+            } catch (...) {
+            }
+          }
+        }
+      }
+    }
+  } catch (...) {
+    out += "check threw\n";
+  }
+  return rust::String(out);
 }
 
 void write_step(const Shape &shape, rust::Str path) {

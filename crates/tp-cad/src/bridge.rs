@@ -33,6 +33,11 @@ pub(crate) mod ffi {
         fn loft_shell(wires: &ShapeList) -> Result<UniquePtr<Shape>>;
         fn sew_shapes(shapes: &ShapeList, tolerance: f64) -> Result<UniquePtr<Shape>>;
         fn make_solid(shape: &Shape) -> Result<UniquePtr<Shape>>;
+        fn split_by(shapes: &ShapeList, tools: &ShapeList) -> Result<UniquePtr<Shape>>;
+        fn face_sides(faces: &Shape, solid: &Shape, tolerance: f64) -> Result<Vec<f64>>;
+        fn face_at(shape: &Shape, index: u32) -> Result<UniquePtr<Shape>>;
+        fn edge_face_crossings(edge: &Shape, face: &Shape) -> Result<Vec<f64>>;
+        fn section_of(a: &Shape, b: &Shape) -> Result<UniquePtr<Shape>>;
         fn revolve_z_by(shape: &Shape, angle: f64) -> Result<UniquePtr<Shape>>;
         fn face_planes(shape: &Shape) -> Vec<f64>;
         fn faces_except(shape: &Shape, dropped: &[u32]) -> Result<UniquePtr<Shape>>;
@@ -77,6 +82,7 @@ pub(crate) mod ffi {
         /// `kind`: 0 solid, 1 shell, 2 face, 3 edge.
         fn count_subshapes(shape: &Shape, kind: u8) -> usize;
         fn is_valid(shape: &Shape) -> bool;
+        fn check_report(shape: &Shape) -> String;
 
         fn write_step(shape: &Shape, path: &str) -> Result<()>;
         fn write_iges(shape: &Shape, path: &str) -> Result<()>;

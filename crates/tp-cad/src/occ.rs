@@ -92,6 +92,11 @@ impl Shape {
     }
 
     /// Whether OCCT's checker finds the shape topologically and geometrically valid.
+    /// What OCCT's checker finds wrong, one sub-shape per line.
+    pub fn check_report(&self) -> String {
+        ffi::check_report(&self.0)
+    }
+
     pub fn is_valid(&self) -> bool {
         crate::profile::op("is_valid", || ffi::is_valid(&self.0))
     }
@@ -171,6 +176,39 @@ impl Shape {
     /// as a compound.
     pub fn faces_except(&self, dropped: &[u32]) -> Result<Shape, CadError> {
         op("faces", ffi::faces_except(&self.0, dropped))
+    }
+
+    /// The face at `index` (as in [`Self::face_planes`]).
+    pub fn face(&self, index: u32) -> Result<Shape, CadError> {
+        op("face", ffi::face_at(&self.0, index))
+    }
+
+    /// Where this edge crosses the face `face`, inside both: the point, its (u, v) on
+    /// the face's surface and its parameter on the edge.
+    pub fn crossings(&self, face: &Shape) -> Result<Vec<(DVec3, f64, f64, f64)>, CadError> {
+        let flat = ffi::edge_face_crossings(&self.0, &face.0)
+            .map_err(|e| CadError::Operation(e.what().to_owned()))?;
+        Ok(flat
+            .chunks(6)
+            .map(|c| (DVec3::new(c[0], c[1], c[2]), c[3], c[4], c[5]))
+            .collect())
+    }
+
+    /// The edges where the boundaries of this shape and `other` cross.
+    pub fn section(&self, other: &Shape) -> Result<Shape, CadError> {
+        op("section", ffi::section_of(&self.0, &other.0))
+    }
+
+    /// For each face (as in [`Self::face_planes`]), on which side of `solid` a point
+    /// well inside it lies: 1 inside, -1 outside, 0 on its boundary (or no point
+    /// found), with the point.
+    pub fn face_sides(&self, solid: &Shape, tolerance: f64) -> Result<Vec<(i8, DVec3)>, CadError> {
+        let flat = ffi::face_sides(&self.0, &solid.0, tolerance)
+            .map_err(|e| CadError::Operation(e.what().to_owned()))?;
+        Ok(flat
+            .chunks(4)
+            .map(|c| (c[0] as i8, DVec3::new(c[1], c[2], c[3])))
+            .collect())
     }
 
     /// The solid the closed shells of the shape bound, facing out.
@@ -374,6 +412,14 @@ pub fn loft_shell(wires: &[Shape]) -> Result<Shape, CadError> {
     op(
         "loft shell",
         crate::profile::op("loft shell", || ffi::loft_shell(&list(&refs))),
+    )
+}
+
+/// The faces of `shapes` split along the edges of `tools`.
+pub fn split(shapes: &[&Shape], tools: &[&Shape]) -> Result<Shape, CadError> {
+    op(
+        "split",
+        crate::profile::op("split", || ffi::split_by(&list(shapes), &list(tools))),
     )
 }
 
