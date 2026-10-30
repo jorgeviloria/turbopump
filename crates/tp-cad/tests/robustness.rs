@@ -268,9 +268,11 @@ fn sample_surfaces() {
             },
         ),
         (
-            "rounded",
-            CutwaterShape::Rounded {
-                radius: Param::Manual(0.0015),
+            "simple",
+            CutwaterShape::Simple {
+                cut: Param::Auto,
+                handle: Param::Auto,
+                measure: CutMeasure::Along,
             },
         ),
     ] {
