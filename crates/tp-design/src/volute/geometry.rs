@@ -1342,30 +1342,40 @@ impl VoluteGeometry {
             && first <= 0.0
             && !matches!(design.cutwater_shape, CutwaterShape::Tangent);
         let mut cutwater_walls = Vec::new();
-        let (cutwater_slices, cutwater_body) = if cuts_the_diffuser {
-            let end = (start + CUTWATER_SPAN).min(design.rib.as_ref().map_or(TAU, |r| r.start));
-            let near = wall_outlines.partition_point(|(angle, _)| *angle <= end);
-            let walls = &wall_outlines[..near];
-            cutwater_walls = walls.to_vec();
-            let slices = super::cutwater::slices(&design, walls, &nozzle, sign, zm);
-            // The tip and the wedge where the walls really cross in the midplane.
-            if let Some(mid) = slices.iter().find(|s| (s.z - zm).abs() < 1e-12) {
-                cutwater.tip = mid.tip;
-                cutwater.angle = (sign * mid.tip.y.atan2(mid.tip.x)).rem_euclid(TAU);
-                cutwater.wedge = mid.wedge;
-                cutwater.spiral_angle = mid.spiral_angle;
-                cutwater.diffuser_angle = mid.diffuser_angle;
-                if cutwater.radius <= 0.0 {
-                    cutwater.nose_center = mid.tip;
-                    cutwater.nose_distance = mid.nose_distance;
+        let (cutwater_slices, cutwater_body) =
+            if cuts_the_diffuser {
+                let end = (start + CUTWATER_SPAN).min(design.rib.as_ref().map_or(TAU, |r| r.start));
+                let near = wall_outlines.partition_point(|(angle, _)| *angle <= end);
+                let walls = &wall_outlines[..near];
+                cutwater_walls = walls.to_vec();
+                let slices = super::cutwater::slices(&design, walls, &nozzle, sign, zm);
+                // The tip and the wedge where the walls really cross in the midplane.
+                if let Some(mid) = slices.iter().find(|s| (s.z - zm).abs() < 1e-12) {
+                    cutwater.tip = mid.tip;
+                    cutwater.angle = (sign * mid.tip.y.atan2(mid.tip.x)).rem_euclid(TAU);
+                    cutwater.wedge = mid.wedge;
+                    cutwater.spiral_angle = mid.spiral_angle;
+                    cutwater.diffuser_angle = mid.diffuser_angle;
+                    if cutwater.radius <= 0.0 {
+                        cutwater.nose_center = mid.tip;
+                        cutwater.nose_distance = mid.nose_distance;
+                    }
                 }
-            }
-            if design.cutwater_shape.is_fillet() {
-                let mid = slices
+                if design.cutwater_shape.is_fillet() {
+                    let mid = slices
                     .iter()
                     .find(|s| (s.z - zm).abs() < 1e-12 && !s.outline.is_empty())
                     .ok_or_else(|| {
-                        DesignError::Infeasible(if design.cutwater_shape.is_simple() {
+                        DesignError::Infeasible(if design.cutwater_shape.cut_measure()
+                            == Some(super::CutMeasure::Across)
+                        {
+                            format!(
+                                "a gap of {:.1} mm does not fit the walls of the spiral and \
+                                 the diffuser in the midplane: use a narrower gap or a sharp \
+                                 cutwater",
+                                design.cutwater_cut * 1e3
+                            )
+                        } else if design.cutwater_shape.is_simple() {
                             format!(
                                 "a cut of {:.1} mm does not fit the walls of the spiral and \
                                  the diffuser in the midplane: use a shorter cut or a sharp \
@@ -1381,23 +1391,23 @@ impl VoluteGeometry {
                             )
                         })
                     })?;
-                cutwater.radius = design.nose_radius;
-                cutwater.nose_center = mid.nose_centre;
-                cutwater.nose_distance = mid.nose_distance;
-            }
-            let body = super::cutwater::body_outlines(
-                &design,
-                &slices,
-                (walls, &nozzle),
-                sign,
-                zm,
-                0.0,
-                BODY_STEPS,
-            );
-            (slices, body)
-        } else {
-            (Vec::new(), Vec::new())
-        };
+                    cutwater.radius = design.nose_radius;
+                    cutwater.nose_center = mid.nose_centre;
+                    cutwater.nose_distance = mid.nose_distance;
+                }
+                let body = super::cutwater::body_outlines(
+                    &design,
+                    &slices,
+                    (walls, &nozzle),
+                    sign,
+                    zm,
+                    0.0,
+                    BODY_STEPS,
+                );
+                (slices, body)
+            } else {
+                (Vec::new(), Vec::new())
+            };
 
         // Sections spread over their wrap in proportion to the single spiral.
         let spread = |from: f64, to: f64| -> Vec<f64> {

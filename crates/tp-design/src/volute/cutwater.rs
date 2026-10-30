@@ -31,7 +31,7 @@
 use tp_math::{DVec2, DVec3};
 
 use super::NozzleSection;
-use super::VoluteDesign;
+use super::{CutMeasure, VoluteDesign};
 
 /// Planes across the inlet width, an odd number so that one is the midplane.
 pub const SLICES: usize = 9;
@@ -486,24 +486,36 @@ impl Walls {
         Some(slice)
     }
 
-    /// The cutwater of a simple edge in this plane: the walls cut `cutwater_cut` back from
-    /// the tip along each, and a cubic from one cut to the other, tangent to both walls
-    /// there, its handles pointing back toward the tip. The slice has the structure of a
-    /// fillet's: `joins` at the cuts, the cubic where the arc of a fillet would be, and
-    /// `removed`, the sliver of the sharp wedge the cubic cuts off. `None` where the
-    /// walls are too short for the cut.
+    /// The cutwater of a simple edge in this plane: the walls cut back from the tip, and
+    /// a cubic from one cut to the other, tangent to both walls there, its handles
+    /// pointing back toward the tip. Cut along, both walls end `cutwater_cut` back from
+    /// the tip; cut across, each ends where the other lies `cutwater_cut` away. The slice
+    /// has the structure of a fillet's: `joins` at the cuts, the cubic where the arc of a
+    /// fillet would be, and `removed`, the sliver of the sharp wedge the cubic cuts off.
+    /// `None` where the walls are too short for the cut.
     fn simple_slice(&self, design: &VoluteDesign, sign: f64, z: f64) -> Option<CutwaterSlice> {
         let mut slice = self.slice(sign, z)?;
         let (s, d) = self.tip();
         let (spiral, diffuser) = (Path::from(&self.spiral, s), Path::from(&self.diffuser, d));
-        let l = design.cutwater_cut;
-        let reach = (0.5 * l).min(spiral.length - l).min(diffuser.length - l);
-        if l <= 1e-9 || reach <= 1e-9 {
+        let cut = design.cutwater_cut;
+        let (l_s, l_d) = match design.cutwater_shape.cut_measure() {
+            Some(CutMeasure::Across) => (
+                spiral.reach_away(&diffuser.points, cut)?,
+                diffuser.reach_away(&spiral.points, cut)?,
+            ),
+            _ => (cut, cut),
+        };
+        let reach = (0.5 * l_s.min(l_d))
+            .min(spiral.length - l_s)
+            .min(diffuser.length - l_d);
+        if l_s.min(l_d) <= 1e-9 || reach <= 1e-9 {
             return None;
         }
-        let ((p0, ts), (p3, td)) = (spiral.point(l), diffuser.point(l));
-        let h = design.cutwater_handle * l;
-        let (p1, p2) = (p0 - ts * h, p3 - td * h);
+        let ((p0, ts), (p3, td)) = (spiral.point(l_s), diffuser.point(l_d));
+        let (p1, p2) = (
+            p0 - ts * (design.cutwater_handle * l_s),
+            p3 - td * (design.cutwater_handle * l_d),
+        );
         let cubic = |u: f64| {
             let v = 1.0 - u;
             p0 * (v * v * v) + p1 * (3.0 * v * v * u) + p2 * (3.0 * v * u * u) + p3 * (u * u * u)
@@ -544,7 +556,7 @@ impl Walls {
         let (mut arc, last) = (arc, FILLET_ARC_POINTS - 1);
         arc[0] = p0;
         arc[last] = p3;
-        let wall = |path: &Path, outward: bool| -> Vec<DVec2> {
+        let wall = |path: &Path, l: f64, outward: bool| -> Vec<DVec2> {
             (0..FILLET_WALL_POINTS)
                 .map(|i| {
                     let t = (i + 1) as f64 / FILLET_WALL_POINTS as f64;
@@ -558,10 +570,10 @@ impl Walls {
                 .collect()
         };
         let at = |p: &DVec2| DVec3::new(p.x, p.y, z);
-        slice.outline = wall(&spiral, false)
+        slice.outline = wall(&spiral, l_s, false)
             .iter()
             .chain(&arc)
-            .chain(&wall(&diffuser, true))
+            .chain(&wall(&diffuser, l_d, true))
             .map(at)
             .collect();
         let along = |path: &Path, to: f64| -> Vec<DVec2> {
@@ -570,15 +582,15 @@ impl Walls {
                 .map(|i| path.point(to * i as f64 / n as f64).0)
                 .collect()
         };
-        slice.removed = along(&spiral, l)
+        slice.removed = along(&spiral, l_s)
             .into_iter()
             .chain(arc.iter().copied().skip(1))
-            .chain(along(&diffuser, l).into_iter().rev().skip(1))
+            .chain(along(&diffuser, l_d).into_iter().rev().skip(1))
             .map(|p| at(&p))
             .collect();
         slice.joins = Some((at(&p0), at(&p3)));
         slice.nose_centre = at(&(0.5 * (p0 + p3)));
-        slice.join_length = l;
+        slice.join_length = 0.5 * (l_s + l_d);
         slice.nose_distance = slice
             .outline
             .iter()
@@ -660,6 +672,28 @@ impl Path {
             0.0
         };
         (a.lerp(b, t), (b - a).normalize())
+    }
+
+    /// The first length along where the polyline `other` lies `distance` away, found by
+    /// steps from the station and then by bisection; `None` if it never does.
+    fn reach_away(&self, other: &[DVec2], distance: f64) -> Option<f64> {
+        let gap = |l: f64| distance_to(other, self.point(l).0) - distance;
+        let steps = 200;
+        let step = self.length / steps as f64;
+        let mut lo = 0.0;
+        for i in 1..=steps {
+            let hi = step * i as f64;
+            if gap(hi) >= 0.0 {
+                let (mut a, mut b) = (lo, hi);
+                for _ in 0..60 {
+                    let m = 0.5 * (a + b);
+                    if gap(m) >= 0.0 { b = m } else { a = m }
+                }
+                return Some(b);
+            }
+            lo = hi;
+        }
+        None
     }
 }
 
@@ -1108,8 +1142,8 @@ mod tests {
     use crate::Param;
     use crate::volute::tests::reference_basis;
     use crate::volute::{
-        BezierSide, CrossSectionInput, CutwaterShape, DischargeShape, ExternalRound, RadiusSide,
-        SectionShape, SideShape, StraightWall, VoluteGeometry, VoluteInput, section,
+        BezierSide, CrossSectionInput, CutMeasure, CutwaterShape, DischargeShape, ExternalRound,
+        RadiusSide, SectionShape, SideShape, StraightWall, VoluteGeometry, VoluteInput, section,
     };
 
     fn build(edit: impl Fn(&mut VoluteInput)) -> VoluteGeometry {
@@ -1139,6 +1173,7 @@ mod tests {
                 v.cutwater.shape = CutwaterShape::Simple {
                     cut: Param::Manual(0.012),
                     handle: Param::Manual(0.5),
+                    measure: CutMeasure::Along,
                 };
             });
             assert_eq!(g.cutwater_slices.len(), SLICES, "{shape:?}");
@@ -1195,6 +1230,68 @@ mod tests {
                 assert!(worst < 35f64.to_radians(), "{worst}");
             }
         }
+    }
+
+    #[test]
+    fn a_simple_cutwater_cut_across_leaves_the_walls_that_far_apart() {
+        let width = 0.003;
+        for shape in discharges() {
+            let g = build(|v| {
+                v.diffuser.shape = shape;
+                v.cutwater.shape = CutwaterShape::Simple {
+                    cut: Param::Manual(width),
+                    handle: Param::Manual(0.5),
+                    measure: CutMeasure::Across,
+                };
+            });
+            assert_eq!(g.design.cutwater_cut, width);
+            assert_eq!(g.cutwater_slices.len(), SLICES, "{shape:?}");
+            for s in &g.cutwater_slices {
+                let (j_spiral, j_diffuser) = s.joins.expect("the cuts");
+                let flat = |wall: &[DVec3]| wall.iter().map(|p| p.truncate()).collect::<Vec<_>>();
+                let (spiral, diffuser) = (flat(&s.spiral_wall), flat(&s.diffuser_wall));
+                // Each wall ends where the other lies the width away.
+                for (join, other) in [(j_spiral, &diffuser), (j_diffuser, &spiral)] {
+                    let gap = distance_to(other, join.truncate());
+                    assert!(
+                        (gap - width).abs() < 1e-3 * width,
+                        "{shape:?} z {}: {gap}",
+                        s.z
+                    );
+                }
+                // Still a smooth curve between the cuts.
+                let arc = s.nose_arc();
+                assert!(arc[0].distance(j_spiral) < 1e-12);
+                assert!(arc[arc.len() - 1].distance(j_diffuser) < 1e-12);
+            }
+        }
+    }
+
+    #[test]
+    fn a_simple_cutwater_cut_across_is_e3_wide_by_default() {
+        let g = build(|v| {
+            v.cutwater.shape = CutwaterShape::Simple {
+                cut: Param::Auto,
+                handle: Param::Auto,
+                measure: CutMeasure::Across,
+            };
+        });
+        assert_eq!(g.design.cutwater_cut, g.design.cutwater_thickness);
+    }
+
+    #[test]
+    fn a_simple_cutwater_saved_without_a_measure_is_cut_along_the_walls() {
+        let shape: CutwaterShape = serde_json::from_str(
+            r#"{"type":"simple","cut":{"mode":"auto"},"handle":{"mode":"auto"}}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            shape,
+            CutwaterShape::Simple {
+                measure: CutMeasure::Along,
+                ..
+            }
+        ));
     }
 
     #[test]

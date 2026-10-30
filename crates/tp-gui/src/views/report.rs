@@ -7,7 +7,7 @@ use tp_design::impeller::loading::blade_velocities;
 use tp_design::performance::ShutoffSource;
 use tp_design::pump::{InletSection, correlations as corr};
 use tp_design::radial_thrust::RadialCollector;
-use tp_design::volute::{AreaLaw, CutwaterShape, DischargeShape, Progression};
+use tp_design::volute::{AreaLaw, CutMeasure, CutwaterShape, DischargeShape, Progression};
 use tp_project::{ComponentId, Project};
 use tp_units::{DisplayUnits, QuantityKind};
 
@@ -1102,6 +1102,17 @@ fn content(
                     CutwaterShape::Fillet { .. } => tf(
                         "rounded with ρ {}, tip at {} with a wedge of {}",
                         &[&s(Length, c.radius), &s(Angle, c.angle), &s(Angle, c.wedge)],
+                    ),
+                    CutwaterShape::Simple {
+                        measure: CutMeasure::Across,
+                        ..
+                    } => tf(
+                        "simple, gap {} wide, tip at {} with a wedge of {}",
+                        &[
+                            &s(Length, d.cutwater_cut),
+                            &s(Angle, c.angle),
+                            &s(Angle, c.wedge),
+                        ],
                     ),
                     CutwaterShape::Simple { .. } => tf(
                         "simple, cut {} back, tip at {} with a wedge of {}",

@@ -3193,8 +3193,24 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "A qué distancia de la punta, por cada pared, empieza el corte de agua: las paredes terminan ahí y una curva suave las une. Automático: 3 e₃",
     ),
     (
-        "Length of the handles of the curve, as a share of the cut: shorter ones close the nose more tightly. Automatic: ½",
-        "Longitud de las manos de la curva, como fracción del recorte: más cortas cierran la nariz con más curvatura. Automático: ½",
+        "Length of the handles of the curve, as a share of each wall's cut: shorter ones close the nose more tightly. Automatic: ½",
+        "Longitud de las manos de la curva, como fracción del recorte de cada pared: más cortas cierran la nariz con más curvatura. Automático: ½",
+    ),
+    ("Cut measured", "Medida del recorte"),
+    (
+        "Along the walls: both end the same length back from the tip. Across the gap: each ends where the other lies that far away, so the gap the curve closes keeps its width whatever the wedge",
+        "A lo largo de las paredes: las dos terminan a la misma distancia de la punta. A través del hueco: cada una termina donde la otra queda a esa distancia, así que el hueco que cierra la curva mantiene su ancho sea cual sea la cuña",
+    ),
+    ("along the walls", "a lo largo de las paredes"),
+    ("across the gap", "a través del hueco"),
+    ("Gap", "Hueco"),
+    (
+        "How wide the gap between the walls is where the cutwater starts: each wall ends where the other lies this far away, and a smooth curve joins them. Automatic: e₃",
+        "Qué ancho tiene el hueco entre las paredes donde empieza el corte de agua: cada pared termina donde la otra queda a esta distancia, y una curva suave las une. Automático: e₃",
+    ),
+    (
+        "simple, gap {} wide, tip at {} with a wedge of {}",
+        "simple, hueco de {} de ancho, punta a {} con una cuña de {}",
     ),
     (
         "Radius of the round at the crossing of the two walls: the arc touches both, so the cutwater stands where the walls leave it. Automatic: e₃/2",

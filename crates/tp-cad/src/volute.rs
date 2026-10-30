@@ -2104,6 +2104,7 @@ mod tests {
                 CutwaterShape::Simple {
                     cut: tp_design::Param::Auto,
                     handle: tp_design::Param::Auto,
+                    measure: tp_design::volute::CutMeasure::Along,
                 },
             ),
         ];

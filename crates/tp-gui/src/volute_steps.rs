@@ -8,9 +8,9 @@ use egui_plot::{Line, Plot, PlotPoints};
 use tp_design::Param;
 use tp_design::volute::stress::StressPlace;
 use tp_design::volute::{
-    AreaLaw, CutwaterShape, DiffuserGrowth, DischargeShape, MAX_ARCS, MIN_ARCS, MIN_WRAP_DEG,
-    OutletShape, Progression, StraightWall, VoluteGeometry, VoluteInput, VoluteKind, ZAlignment,
-    ZBend,
+    AreaLaw, CutMeasure, CutwaterShape, DiffuserGrowth, DischargeShape, MAX_ARCS, MIN_ARCS,
+    MIN_WRAP_DEG, OutletShape, Progression, StraightWall, VoluteGeometry, VoluteInput, VoluteKind,
+    ZAlignment, ZBend,
 };
 use tp_project::{ComponentId, DesignStep, Project};
 use tp_units::{DisplayUnits, QuantityKind};
@@ -1422,6 +1422,7 @@ fn cutwater(
                             CutwaterShape::Simple {
                                 cut: Param::Auto,
                                 handle: Param::Auto,
+                                measure: CutMeasure::Along,
                             },
                         ] {
                             let same =
@@ -1449,14 +1450,67 @@ fn cutwater(
                     0.0001..=0.1,
                 );
             }
-            if let CutwaterShape::Simple { cut, handle } = &mut input.cutwater.shape {
+            if let CutwaterShape::Simple {
+                cut,
+                handle,
+                measure,
+            } = &mut input.cutwater.shape
+            {
+                label(
+                    ui,
+                    tr("Cut measured"),
+                    tr(
+                        "Along the walls: both end the same length back from the tip. Across \
+                        the gap: each ends where the other lies that far away, so the gap the \
+                        curve closes keeps its width whatever the wedge",
+                    ),
+                );
+                let text = |m: CutMeasure| {
+                    tr(match m {
+                        CutMeasure::Along => "along the walls",
+                        CutMeasure::Across => "across the gap",
+                    })
+                };
+                let current = *measure;
+                crate::widgets::list(ui, |ui| {
+                    ComboBox::from_id_salt("volute_cutwater_measure")
+                        .selected_text(crate::widgets::noted(ui, text(current)))
+                        .show_ui(ui, |ui| {
+                            for option in [CutMeasure::Along, CutMeasure::Across] {
+                                if ui
+                                    .selectable_label(option == current, text(option))
+                                    .clicked()
+                                    && option != current
+                                {
+                                    *measure = option;
+                                    // The value means another length now.
+                                    *cut = Param::Auto;
+                                }
+                            }
+                        })
+                });
+                ui.end_row();
+                let (name, hint) = match *measure {
+                    CutMeasure::Along => (
+                        tr("Cut back"),
+                        tr(
+                            "How far back from the tip along each wall the cutwater starts: \
+                            the walls end there and a smooth curve joins them. Automatic: 3 e₃",
+                        ),
+                    ),
+                    CutMeasure::Across => (
+                        tr("Gap"),
+                        tr(
+                            "How wide the gap between the walls is where the cutwater starts: \
+                            each wall ends where the other lies this far away, and a smooth \
+                            curve joins them. Automatic: e₃",
+                        ),
+                    ),
+                };
                 param_f64(
                     ui,
-                    tr("Cut back"),
-                    tr(
-                        "How far back from the tip along each wall the cutwater starts: the \
-                        walls end there and a smooth curve joins them. Automatic: 3 e₃",
-                    ),
+                    name,
+                    hint,
                     cut,
                     Length,
                     g.map(|g| g.design.cutwater_cut),
@@ -1467,8 +1521,8 @@ fn cutwater(
                     ui,
                     tr("Handles"),
                     tr(
-                        "Length of the handles of the curve, as a share of the cut: shorter \
-                        ones close the nose more tightly. Automatic: ½",
+                        "Length of the handles of the curve, as a share of each wall's cut: \
+                        shorter ones close the nose more tightly. Automatic: ½",
                     ),
                     handle,
                     Dimensionless,

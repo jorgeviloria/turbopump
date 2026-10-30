@@ -475,16 +475,33 @@ pub enum CutwaterShape {
     /// projects saved with the former rounded body (`rounded`) read as this.
     #[serde(alias = "rounded")]
     Fillet { radius: Param<f64> },
-    /// The edge closed by a cubic curve between the two walls, cut `cut` back from the
-    /// tip along each (m; automatic: 3 e₃) and tangent to both there, its handles
-    /// `handle` times the cut long (0 to 1; automatic: ½). The same rounding in every
-    /// plane, but a smooth curve and not an arc, as a blade edge drawn between the walls.
+    /// The edge closed by a cubic curve between the two walls, cut back from the tip and
+    /// tangent to both there, its handles `handle` times each wall's cut long (0 to 1;
+    /// automatic: ½). The same rounding in every plane, but a smooth curve and not an
+    /// arc, as a blade edge drawn between the walls. `cut` is measured as `measure`
+    /// says: along each wall from the tip (m; automatic: 3 e₃) or across the gap the
+    /// walls leave (m; automatic: e₃).
     Simple {
         #[serde(default)]
         cut: Param<f64>,
         #[serde(default)]
         handle: Param<f64>,
+        #[serde(default)]
+        measure: CutMeasure,
     },
+}
+
+/// How the cut of a simple cutwater is measured.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CutMeasure {
+    /// Along each wall from the tip: both walls end the cut back from it.
+    #[default]
+    Along,
+    /// Across the gap: each wall ends where the other lies the cut away, so the gap the
+    /// curve closes is that wide whatever the wedge. The idea of the offset trim of
+    /// CAESES's volute tutorial (Friendship Systems).
+    Across,
 }
 
 impl CutwaterShape {
@@ -497,6 +514,14 @@ impl CutwaterShape {
     /// Whether the tip is closed by a cubic between the walls ([`Self::Simple`]).
     pub fn is_simple(&self) -> bool {
         matches!(self, Self::Simple { .. })
+    }
+
+    /// How the cut of a simple cutwater is measured; `None` for any other.
+    pub fn cut_measure(&self) -> Option<CutMeasure> {
+        match self {
+            Self::Simple { measure, .. } => Some(*measure),
+            _ => None,
+        }
     }
 
     /// The radius of the rounded edge.
@@ -1640,8 +1665,15 @@ impl VoluteDesign {
             "the cutwater radius cannot be negative".into()
         })?;
         let (cutwater_cut, cutwater_handle) = match cutwater_shape {
-            CutwaterShape::Simple { cut, handle } => (
-                cut.resolve(|| SIMPLE_CUT * cutwater_thickness),
+            CutwaterShape::Simple {
+                cut,
+                handle,
+                measure,
+            } => (
+                cut.resolve(|| match measure {
+                    CutMeasure::Along => SIMPLE_CUT * cutwater_thickness,
+                    CutMeasure::Across => cutwater_thickness,
+                }),
                 handle.resolve(|| SIMPLE_HANDLE),
             ),
             _ => (0.0, SIMPLE_HANDLE),

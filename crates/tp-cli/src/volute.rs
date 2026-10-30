@@ -8,7 +8,7 @@ use tp_design::Param;
 use tp_design::outlet::Reach;
 use tp_design::volute::stress::StressPlace;
 use tp_design::volute::{
-    AreaLaw, BendWall, BezierBase, BezierSide, CutwaterShape, DEFAULT_CONE_ANGLE_DEG,
+    AreaLaw, BendWall, BezierBase, BezierSide, CutMeasure, CutwaterShape, DEFAULT_CONE_ANGLE_DEG,
     DiffuserGrowth, DischargeShape, ExternalRound, InnerPosition, InternalRound, OutletShape,
     Progression, RadiusSide, SectionDefinition, SectionShape, SegmentPoint, SideShape,
     StraightWall, VoluteGeometry, VoluteInput, VoluteKind, ZAlignment, ZBend,
@@ -63,8 +63,9 @@ pub(crate) struct VoluteArgs {
     /// sides; tangential:inner or tangential:outer with that wall straight), bend (bend radius of a radial discharge), outlet_shape (round, or rectangular[:ASPECT] with the height along the pump axis over the width, the same area as the round outlet and no round flange), z_bend (none, or EXTENT,RADIUS,ANGLE: the centerline of the diffuser runs flat, rounds off with RADIUS through ANGLE degrees and goes on straight, ending EXTENT along the pump axis), eccentricity (−1 to 1 for a tangential diffuser: −1 with the cutwater wall straight, 0 opening to both sides, 1 with the outer wall straight), base_form (0 to 1: how far the inlet chord of the first diffuser section bulges toward the pump axis, so that the diffuser crosses the start of the spiral), height_offset (Δr_C: the diffuser shifted across its centerline, away from the pump axis when positive, to give the cutwater room), z_align (centric, or manual:OFFSET[,quadratic]: the outlet shifted along the pump axis), growth (area of the diffuser from the throat: linear, the default, or matched, which starts with the slope of the spiral), rotation (angle
     /// of the cutwater from the x axis; auto turns the discharge vertically up), cutwater
     /// (tangent, sharp, rounded or simple), nose (radius of a rounded cutwater), cut (how far
-    /// back from the tip a simple cutwater cuts the walls) and handle (the handles of its
-    /// curve, as a share of the cut), height (H, the
+    /// back from the tip a simple cutwater cuts the walls) or gap (instead, how wide the gap
+    /// between the walls is where it cuts them) and handle (the handles of its curve, as a
+    /// share of each wall's cut), height (H, the
     /// outlet face from the pump axis, which sets the diffuser length), dn (on: round the
     /// automatic outlet to the nearest nominal size), flange (on or off), flange_d
     /// (outer diameter), flange_t (thickness), bolt_circle, bolt_hole and bolts, pressure
@@ -823,6 +824,7 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
                     _ => CutwaterShape::Simple {
                         cut: Param::Auto,
                         handle: Param::Auto,
+                        measure: CutMeasure::Along,
                     },
                 },
                 _ => {
@@ -837,17 +839,26 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
                 radius: quantity(Length)?,
             }
         }
-        "cut" | "handle" => {
-            let (mut cut, mut handle) = match input.cutwater.shape {
-                CutwaterShape::Simple { cut, handle } => (cut, handle),
-                _ => (Param::Auto, Param::Auto),
+        // The cut along the walls, or across the gap they leave.
+        "cut" | "gap" | "handle" => {
+            let (mut cut, mut handle, mut measure) = match input.cutwater.shape {
+                CutwaterShape::Simple {
+                    cut,
+                    handle,
+                    measure,
+                } => (cut, handle, measure),
+                _ => (Param::Auto, Param::Auto, CutMeasure::Along),
             };
-            if key == "cut" {
-                cut = quantity(Length)?;
-            } else {
-                handle = quantity(Dimensionless)?;
+            match key {
+                "cut" => (cut, measure) = (quantity(Length)?, CutMeasure::Along),
+                "gap" => (cut, measure) = (quantity(Length)?, CutMeasure::Across),
+                _ => handle = quantity(Dimensionless)?,
             }
-            input.cutwater.shape = CutwaterShape::Simple { cut, handle };
+            input.cutwater.shape = CutwaterShape::Simple {
+                cut,
+                handle,
+                measure,
+            };
         }
         _ => {
             return Err(format!(
@@ -860,7 +871,7 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
                  rib_length, rib, \
                  rib_nose, channel_ratio, discharge, bend, growth, height_offset, z_align, \
                  base_form, eccentricity, outlet_shape, z_bend, rotation, cutwater, nose, cut, \
-                 handle, height, \
+                 gap, handle, height, \
                  dn, flange, flange_d, flange_t, bolt_circle, bolt_hole, bolts, pressure, \
                  allowable"
             ));

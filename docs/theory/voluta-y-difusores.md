@@ -466,6 +466,18 @@ vale 0 por defecto, y fuera de ±3° el programa avisa.
 | Afilado | la espiral empieza junto al corte de agua (3°) y corta la pared interior de la tobera; el corte de agua es la cuña entre las dos paredes, con la punta donde se cruzan |
 | Redondeado (por defecto) | la cuña afilada más un **cuerpo** con una nariz de radio $\rho$ cuyo punto más interior queda sobre el círculo $d_z$; el cuerpo nunca es más fino que la nariz y se une a las dos paredes con tangencia |
 
+**El cierre simple** (construcción propia): en cada plano las dos paredes se recortan
+hacia atrás desde la punta y una cúbica de Bézier las une, tangente a cada pared en su
+recorte, con las manos a lo largo de la pared, de longitud $m\,l$ ($m$ por defecto ½) con
+$l$ el recorte de esa pared. El recorte se mide de dos formas:
+
+- **a lo largo de las paredes:** las dos terminan a $l$ de la punta (por defecto
+  $l = 3e_3$);
+- **a través del hueco:** cada pared termina donde la otra queda a la distancia $w$
+  (por defecto $w = e_3$), así que el hueco que cierra la cúbica mide $w$ sea cual sea
+  la cuña, y cada pared tiene su propio $l$. La idea de recortar cada pared con la otra
+  desplazada es la del tutorial de volutas de CAESES (Friendship Systems).
+
 **El corte de agua redondeado** (construcción propia sobre el punto 7 del cap. 7.8.1:
 el corte de agua debe estar perfilado, ser corto y grueso salvo el radio de la nariz
 para que no se agriete, y llevar el ángulo $\alpha_{3B}$ del flujo):
