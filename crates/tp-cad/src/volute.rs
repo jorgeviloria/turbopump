@@ -187,8 +187,9 @@ fn first_sound_over<T>(
 
 /// Volume of the flow domain the design describes, m³, without the CAD: the spiral
 /// sections swept about the axis (Pappus), the straight diffuser and the ring between
-/// d₂ and the cutwater circle. The two overlap a little at the cutwater, so it is a
-/// check on the solid, good to a few percent, not its exact volume.
+/// d₂ and the cutwater circle, with the bend and neck of an internal volute. The two
+/// overlap a little at the cutwater, so it is a check on the solid, good to a few
+/// percent, not its exact volume.
 pub fn expected_fluid_volume(g: &VoluteGeometry) -> f64 {
     let swept = |sections: &[tp_design::volute::VoluteSection]| -> f64 {
         sections
@@ -220,15 +221,33 @@ pub fn expected_fluid_volume(g: &VoluteGeometry) -> f64 {
         let first = &g.sections[..g.sections.len().saturating_sub(1)];
         swept(first) + swept(&g.envelope) - rib
     } else {
-        swept(&g.sections) + swept(&g.inner_sections) + swept(&g.outer_channel)
+        // A rib that stops short of the throat leaves whole sections after it.
+        swept(&g.sections) + swept(&g.inner_sections) + swept(&g.outer_channel) + swept(&g.merged)
     };
     let nozzle: f64 = g
         .nozzle
         .windows(2)
         .map(|w| 0.5 * (w[0].area + w[1].area) * w[0].center.distance(w[1].center))
         .sum();
-    let (inner, outer) = g.inlet_ring();
-    let ring = std::f64::consts::PI * (outer * outer - inner * inner) * g.design.inlet_width;
+    // The ring the CAD revolves, with the bend and neck of an internal volute (Pappus).
+    let mut profile: Vec<tp_math::DVec2> = Vec::new();
+    for point in g.inlet_profile().into_iter().flatten() {
+        if profile
+            .last()
+            .is_none_or(|last| last.distance(point) > 1e-12)
+        {
+            profile.push(point);
+        }
+    }
+    let n = profile.len();
+    // ∬ r dA over the profile, from its edges.
+    let moment: f64 = (0..n)
+        .map(|i| {
+            let (a, b) = (profile[i], profile[(i + 1) % n]);
+            (a.x + b.x) * (a.x * b.y - b.x * a.y) / 6.0
+        })
+        .sum();
+    let ring = std::f64::consts::TAU * moment.abs();
     spiral + nozzle + ring
 }
 
