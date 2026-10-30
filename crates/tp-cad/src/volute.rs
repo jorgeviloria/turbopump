@@ -2395,7 +2395,8 @@ mod tests {
     fn a_rounded_cutwater_is_rounded_in_round_sections_and_in_a_double_volute() {
         use tp_design::volute::{CutwaterShape, VoluteKind};
         let _slot = crate::test_slot::take();
-        let cases: [(&str, fn(&mut VoluteInput)); 2] = [
+        type Setting = fn(&mut VoluteInput);
+        let cases: [(&str, Setting); 2] = [
             ("round", |v| {
                 v.cross_section = CrossSectionInput::single(SectionShape::round());
             }),
