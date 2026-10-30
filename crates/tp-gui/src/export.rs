@@ -352,6 +352,8 @@ mod cad {
         boundaries: bool,
         fillet: Param<f64>,
         balance_holes: bool,
+        /// The volute as curves and open surfaces instead of solids.
+        volute_surfaces: bool,
         /// Material density, kg/m³.
         density: f64,
         job: Option<Receiver<Result<CadReport, String>>>,
@@ -367,6 +369,7 @@ mod cad {
                 boundaries: true,
                 fillet: Param::Auto,
                 balance_holes: false,
+                volute_surfaces: true,
                 density: 7850.0,
                 job: None,
                 last: None,
@@ -405,6 +408,7 @@ mod cad {
         folder: &Path,
         formats: &[&str],
         boundaries: bool,
+        volute_surfaces: bool,
     ) -> Result<CadReport, String> {
         let cad = tp_cad::build_impeller(g, options).map_err(|e| e.to_string())?;
         let mut problems_of_duct = Vec::new();
@@ -416,7 +420,14 @@ mod cad {
             }
         });
         let volute_geometry = volute;
+        // The volute as curves and open surfaces, to model it elsewhere: no solid.
+        let surfaces = volute
+            .filter(|_| volute_surfaces)
+            .map(tp_cad::build_volute_surfaces)
+            .transpose()
+            .map_err(|e| e.to_string())?;
         let volute = volute
+            .filter(|_| !volute_surfaces)
             .map(|g| {
                 let cad = tp_cad::build_volute(g)?;
                 let casing = tp_cad::build_volute_casing(g, &cad)?;
@@ -473,6 +484,14 @@ mod cad {
                 }
             }
         }
+        if let Some(s) = &surfaces {
+            let both = s.both().map_err(|e| e.to_string())?;
+            for format in formats.iter().filter(|&&f| f != "stl") {
+                let path = folder.join(format!("volute-surfaces.{format}"));
+                write(&both, &path, format, deflection)?;
+                files.push(path);
+            }
+        }
         if let Some(d) = &diffuser {
             for format in formats {
                 let mut shapes = vec![("diffuser", &d.fluid)];
@@ -526,6 +545,9 @@ mod cad {
         problems.extend(boundary_problems);
         problems.extend(problems_of_duct);
         problems.extend(joined_warnings);
+        if let Some(s) = &surfaces {
+            problems.extend(s.warnings.iter().cloned());
+        }
         if let Some((volute, casing, _)) = &volute {
             problems.extend(volute.warnings.iter().cloned());
             problems.extend(casing.warnings.iter().cloned());
@@ -625,6 +647,7 @@ mod cad {
                     .filter_map(|(on, f)| on.then_some(f))
                     .collect();
             let boundaries = self.boundaries;
+            let volute_surfaces = self.volute_surfaces;
             let (tx, rx) = channel();
             let ctx = ctx.clone();
             let spawned = std::thread::Builder::new()
@@ -639,6 +662,7 @@ mod cad {
                         &folder,
                         &formats,
                         boundaries,
+                        volute_surfaces,
                     );
                     let result = result.map(|mut report| {
                         report.problems.extend(note);
@@ -766,11 +790,24 @@ mod cad {
                 }));
             }
             if volute.is_some() {
-                ui.label(tr(if volute_geometry.is_some() {
-                    "The volute flow domain and its casing are exported too."
-                } else {
-                    "The volute is left out until its steps are accepted."
-                }));
+                if volute_geometry.is_some() {
+                    ui.checkbox(
+                        &mut self.volute_surfaces,
+                        tr("Volute as curves and surfaces (no solid)"),
+                    )
+                    .on_hover_text(tr(
+                        "The walls trimmed and sewn at a sharp or fillet cutwater, with the \
+                         section outlines, to model the solid in another CAD system. STEP \
+                         and IGES only.",
+                    ));
+                }
+                ui.label(tr(
+                    match (volute_geometry.is_some(), self.volute_surfaces) {
+                        (false, _) => "The volute is left out until its steps are accepted.",
+                        (true, true) => "The volute is exported as curves and surfaces.",
+                        (true, false) => "The volute flow domain and its casing are exported too.",
+                    },
+                ));
             }
             ui.horizontal(|ui| {
                 ui.label(tr("Formats"));
@@ -981,6 +1018,7 @@ mod cad {
                 &folder,
                 &["step"],
                 false,
+                false,
             )
             .unwrap();
             // Impeller, flow domain, volute and its casing, then the four wear rings.
@@ -1031,6 +1069,7 @@ mod cad {
                 &folder,
                 &["stl"],
                 true,
+                false,
             )
             .unwrap();
             let named = |stem: &str, name: &str| {
@@ -1050,6 +1089,38 @@ mod cad {
                 "{:?}",
                 report.problems
             );
+            std::fs::remove_dir_all(&folder).unwrap();
+        }
+
+        #[test]
+        fn cad_export_writes_the_volute_as_curves_and_surfaces() {
+            let project = default_project();
+            let mut derived = Derived::default();
+            derived.update(&project);
+            let g = derived.geometry(project.components()[0].id()).unwrap();
+            let folder =
+                std::env::temp_dir().join(format!("tp-gui-surfaces-{}", std::process::id()));
+            let volute = derived.volute(project.components()[1].id());
+            let report = run(
+                g,
+                None,
+                None,
+                volute,
+                &CadOptions::default(),
+                &folder,
+                &["step", "igs", "stl"],
+                false,
+                true,
+            )
+            .unwrap();
+            // No volute solid, and the surfaces in STEP and IGES, not in STL.
+            assert!(report.volute_volume.is_none() && report.casing.is_none());
+            for (extension, expected) in [("step", true), ("igs", true), ("stl", false)] {
+                let path = folder.join(format!("volute-surfaces.{extension}"));
+                assert_eq!(report.files.contains(&path), expected, "{extension}");
+            }
+            let read = tp_cad::read_step(&folder.join("volute-surfaces.step")).unwrap();
+            assert!(read.face_count() >= 3);
             std::fs::remove_dir_all(&folder).unwrap();
         }
 
@@ -1096,6 +1167,7 @@ mod cad {
                 &CadOptions::default(),
                 &folder,
                 &["step"],
+                false,
                 false,
             )
             .unwrap();

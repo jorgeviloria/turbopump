@@ -32,6 +32,9 @@
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepBuilderAPI_NurbsConvert.hxx>
+#include <Geom_SurfaceOfRevolution.hxx>
+#include <Geom_TrimmedCurve.hxx>
 #include <BRepBuilderAPI_MakeSolid.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepBuilderAPI_Sewing.hxx>
@@ -400,6 +403,35 @@ std::unique_ptr<Shape> revolve_z_by(const Shape &shape, double angle) {
       fail("revolution", "failed");
     }
     return wrap(revol.Shape(), "revolution");
+  });
+}
+
+// The surfaces swept by the edges of `shape` turning a full turn about the z axis, as
+// B-spline faces bounded by their own parameters: an edge across the axis sweeps an
+// annulus that, kept a plane, only its trimming circles bound, and importers that
+// draw surfaces untrimmed show it as an endless sheet.
+std::unique_ptr<Shape> revolved_surfaces_z(const Shape &shape) {
+  return guard("revolution", [&] {
+    BRep_Builder builder;
+    TopoDS_Compound faces;
+    builder.MakeCompound(faces);
+    for (TopExp_Explorer e(shape.shape, TopAbs_EDGE); e.More(); e.Next()) {
+      double first = 0.0;
+      double last = 0.0;
+      Handle(Geom_Curve) curve = BRep_Tool::Curve(TopoDS::Edge(e.Current()), first, last);
+      if (curve.IsNull()) {
+        continue;
+      }
+      Handle(Geom_SurfaceOfRevolution) surface = new Geom_SurfaceOfRevolution(
+          new Geom_TrimmedCurve(curve, first, last), gp::OZ());
+      BRepBuilderAPI_MakeFace face(surface, 0.0, 2.0 * M_PI, first, last, 1e-7);
+      if (!face.IsDone()) {
+        fail("revolution", "a face of revolution failed");
+      }
+      BRepBuilderAPI_NurbsConvert nurbs(face.Face(), true);
+      builder.Add(faces, nurbs.Shape());
+    }
+    return wrap(faces, "revolution");
   });
 }
 
@@ -885,7 +917,12 @@ void write_iges(const Shape &shape, rust::Str path) {
   guard("IGES export", [&] {
     quiet_messages();
     IGESControl_Controller::Init();
-    IGESControl_Writer writer("MM", 1);
+    // Solids as B-rep solids (entity 186); a shape without solids, the open surfaces
+    // and curves of a volute, as trimmed surfaces (144) and curves, which every
+    // importer reads: open shells in B-rep mode come out as shells no solid holds,
+    // and importers that look for solids or trimmed surfaces find nothing.
+    TopExp_Explorer solids(shape.shape, TopAbs_SOLID);
+    IGESControl_Writer writer("MM", solids.More() ? 1 : 0);
     if (!writer.AddShape(shape.shape)) {
       fail("IGES export", "transfer failed");
     }

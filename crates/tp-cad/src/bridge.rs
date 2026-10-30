@@ -39,6 +39,7 @@ pub(crate) mod ffi {
         fn edge_face_crossings(edge: &Shape, face: &Shape) -> Result<Vec<f64>>;
         fn section_of(a: &Shape, b: &Shape) -> Result<UniquePtr<Shape>>;
         fn revolve_z_by(shape: &Shape, angle: f64) -> Result<UniquePtr<Shape>>;
+        fn revolved_surfaces_z(shape: &Shape) -> Result<UniquePtr<Shape>>;
         fn face_planes(shape: &Shape) -> Vec<f64>;
         fn faces_except(shape: &Shape, dropped: &[u32]) -> Result<UniquePtr<Shape>>;
         /// Extrusion of a planar face along +z by `height`.

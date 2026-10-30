@@ -377,6 +377,12 @@ pub fn cylinder(
     )
 }
 
+/// The surfaces the edges of `shape` sweep in a full turn about the z axis, as B-spline
+/// faces bounded by their own parameters, none of them a plane its trim alone bounds.
+pub fn revolved_surfaces_z(shape: &Shape) -> Result<Shape, CadError> {
+    op("revolution", ffi::revolved_surfaces_z(&shape.0))
+}
+
 /// `shape` swept about the z axis through `angle` (rad), counter-clockwise: a wire into
 /// faces, a face into a solid.
 pub fn revolve_z_by(shape: &Shape, angle: f64) -> Result<Shape, CadError> {

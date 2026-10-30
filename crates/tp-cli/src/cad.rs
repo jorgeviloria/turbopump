@@ -63,6 +63,11 @@ pub(crate) struct CadArgs {
     /// Chap. 9.2.2.
     #[arg(long)]
     balance_holes: bool,
+    /// Volutes as curves and surfaces instead of solids, to model them in another CAD
+    /// system: the walls trimmed and sewn at a sharp or fillet cutwater, and the
+    /// section outlines and cutwater lines. STEP and IGES only.
+    #[arg(long)]
+    surfaces: bool,
     /// Material density for the masses of the impeller and the volute casing.
     #[arg(long, default_value = "7850 kg/m3")]
     density: String,
@@ -366,6 +371,41 @@ pub(crate) fn run(args: CadArgs) -> CliResult {
             continue;
         }
         let geometry = project.compute_volute(*id).map_err(err)?;
+        let stem = if volutes.len() > 1 {
+            format!("volute-{}", id.0)
+        } else {
+            "volute".to_owned()
+        };
+        if args.surfaces {
+            println!("{name} ({id}): building curves and surfaces…");
+            let s = tp_cad::build_volute_surfaces(&geometry).map_err(|e| e.to_string())?;
+            println!(
+                "  {} surfaces{}, {} curves",
+                s.surfaces.face_count(),
+                if s.trimmed {
+                    ", the walls trimmed and sewn at the cutwater"
+                } else {
+                    ""
+                },
+                s.curves.edge_samples(2).len()
+            );
+            for w in &s.warnings {
+                println!("  warning: {w}");
+                warned = true;
+            }
+            std::fs::create_dir_all(&base).map_err(|e| format!("{}: {e}", base.display()))?;
+            let both = s.both().map_err(|e| e.to_string())?;
+            for &format in &args.format {
+                if format == Format::Stl {
+                    println!("  STL holds no curves or open surfaces: skipped");
+                    continue;
+                }
+                let path = base.join(format!("{stem}-surfaces.{}", format.extension()));
+                write(&both, &path, format, 0.0)?;
+            }
+            println!();
+            continue;
+        }
         println!("{name} ({id}): building CAD solids…");
         let cad = tp_cad::build_volute(&geometry).map_err(|e| e.to_string())?;
         println!("  Volute flow domain {:.1} cm³", cad.fluid_volume() * 1e6);
@@ -398,11 +438,6 @@ pub(crate) fn run(args: CadArgs) -> CliResult {
             }
         }
         std::fs::create_dir_all(&base).map_err(|e| format!("{}: {e}", base.display()))?;
-        let stem = if volutes.len() > 1 {
-            format!("volute-{}", id.0)
-        } else {
-            "volute".to_owned()
-        };
         let deflection = geometry.basis.impeller_diameter * 1e3 / 2000.0;
         for &format in &args.format {
             let path = base.join(format!("{stem}.{}", format.extension()));

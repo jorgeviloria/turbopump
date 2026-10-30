@@ -229,3 +229,86 @@ fn matrix() {
     }
     println!("ROW {}", row.join(";"));
 }
+
+#[test]
+#[ignore = "robustness matrix of the curves and surfaces: every case in one run"]
+fn surfaces() {
+    for (i, (name, edit)) in cases().iter().enumerate() {
+        let mut input = VoluteInput::default();
+        edit(&mut input);
+        let Ok(g) = VoluteGeometry::build(&basis(), &input) else {
+            println!("SURF {i};{name};design error");
+            continue;
+        };
+        let t = Instant::now();
+        let row = match tp_cad::build_volute_surfaces(&g) {
+            Ok(s) => format!(
+                "faces {} edges {} warnings {:?}",
+                s.surfaces.face_count(),
+                s.curves.edge_samples(2).len(),
+                s.warnings
+            ),
+            Err(e) => format!("FAIL {}", short(e)),
+        };
+        println!("SURF {i};{name};{:.1}s;{row}", t.elapsed().as_secs_f64());
+    }
+}
+
+#[test]
+#[ignore = "writes sample curves and surfaces to TP_SAMPLES"]
+fn sample_surfaces() {
+    let dir = std::path::PathBuf::from(std::env::var("TP_SAMPLES").expect("TP_SAMPLES=<dir>"));
+    std::fs::create_dir_all(&dir).unwrap();
+    for (name, shape) in [
+        ("sharp", CutwaterShape::Sharp),
+        (
+            "fillet",
+            CutwaterShape::Fillet {
+                radius: Param::Manual(0.0015),
+            },
+        ),
+        (
+            "rounded",
+            CutwaterShape::Rounded {
+                radius: Param::Manual(0.0015),
+            },
+        ),
+    ] {
+        let mut input = VoluteInput::default();
+        input.cutwater.shape = shape;
+        let g = VoluteGeometry::build(&basis(), &input).unwrap();
+        let s = tp_cad::build_volute_surfaces(&g).unwrap();
+        let both = s.both().unwrap();
+        tp_cad::write_step(&both, &dir.join(format!("voluta-{name}.step"))).unwrap();
+        tp_cad::write_iges(&both, &dir.join(format!("voluta-{name}.igs"))).unwrap();
+    }
+}
+
+#[test]
+#[ignore = "writes the sewn flow domain samples to TP_SAMPLES"]
+fn sample_flow() {
+    let dir = std::path::PathBuf::from(std::env::var("TP_SAMPLES").expect("TP_SAMPLES=<dir>"));
+    for (name, shape) in [
+        ("sharp", CutwaterShape::Sharp),
+        (
+            "fillet",
+            CutwaterShape::Fillet {
+                radius: Param::Manual(0.003),
+            },
+        ),
+    ] {
+        let mut input = VoluteInput::default();
+        input.cutwater.shape = shape;
+        let g = VoluteGeometry::build(&basis(), &input).unwrap();
+        let t = Instant::now();
+        let (c, how) = tp_cad::build_volute_flow(&g).unwrap();
+        println!(
+            "{name}: {how:?} valid {} solids {} {:.1}s warnings {:?}",
+            c.fluid.is_valid(),
+            c.fluid.solid_count(),
+            t.elapsed().as_secs_f64(),
+            c.warnings
+        );
+        tp_cad::write_step(&c.fluid, &dir.join(format!("voluta-{name}-cosida.step"))).unwrap();
+    }
+}

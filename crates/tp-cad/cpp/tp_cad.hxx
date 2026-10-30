@@ -44,6 +44,7 @@ std::unique_ptr<Shape> face_at(const Shape &shape, std::uint32_t index);
 rust::Vec<double> edge_face_crossings(const Shape &edge, const Shape &face);
 std::unique_ptr<Shape> section_of(const Shape &a, const Shape &b);
 std::unique_ptr<Shape> revolve_z_by(const Shape &shape, double angle);
+std::unique_ptr<Shape> revolved_surfaces_z(const Shape &shape);
 rust::Vec<double> face_planes(const Shape &shape);
 std::unique_ptr<Shape> faces_except(const Shape &shape, rust::Slice<const std::uint32_t> dropped);
 std::unique_ptr<Shape> prism_z(const Shape &face, double height);

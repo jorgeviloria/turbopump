@@ -1547,6 +1547,18 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "The volute is left out until its steps are accepted.",
         "La voluta se queda fuera hasta que se acepten sus pasos.",
     ),
+    (
+        "Volute as curves and surfaces (no solid)",
+        "Voluta como curvas y superficies (sin sólido)",
+    ),
+    (
+        "The walls trimmed and sewn at a sharp or fillet cutwater, with the section outlines, to model the solid in another CAD system. STEP and IGES only.",
+        "Las paredes recortadas y cosidas en un corte de agua filoso o con filete, con los contornos de las secciones, para modelar el sólido en otro programa CAD. Solo STEP e IGES.",
+    ),
+    (
+        "The volute is exported as curves and surfaces.",
+        "La voluta se exporta como curvas y superficies.",
+    ),
     ("Formats", "Formatos"),
     ("STEP", "STEP"),
     ("IGES", "IGES"),

@@ -6,6 +6,7 @@
 //! IGES writers; volumes are reported in m³.
 
 mod bridge;
+mod curves;
 mod diffuser;
 mod impeller;
 mod joined;
@@ -17,6 +18,7 @@ mod sewn;
 mod thin;
 mod volute;
 
+pub use curves::{VoluteSurfaces, build_volute_surfaces};
 pub use diffuser::{DiffuserCad, build_diffuser};
 pub use impeller::{
     BalanceHoleOptions, BalanceHoles, CadOptions, ImpellerCad, RingKind, WearRing, build_impeller,
