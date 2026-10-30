@@ -185,6 +185,10 @@ fn first_sound_over<T>(
     fallback.map_or_else(|| Err(error.expect("at least one attempt")), Ok)
 }
 
+/// Least share of the channel's volume a rounded channel must keep: the fillet of the
+/// cutwater edge takes a sliver away, never a piece.
+const FILLET_KEEPS: f64 = 0.97;
+
 /// Volume of the flow domain the design describes, m³, without the CAD: the spiral
 /// sections swept about the axis (Pappus), the straight diffuser and the ring between
 /// d₂ and the cutwater circle, with the bend and neck of an internal volute. The two
@@ -339,11 +343,21 @@ fn flow_domain(g: &VoluteGeometry, round: bool) -> Result<VoluteCad, CadError> {
         notes.push("the CAD keeps the cutwater of sections of radii and segments sharp".to_owned());
     } else if g.design.cutwater_shape.is_fillet() && round {
         let radius = g.design.nose_radius * MM;
+        // A fillet only takes a sliver away: a result that lost more lost a piece (the
+        // kernel has returned the spiral without the diffuser as one valid solid on some
+        // platforms), and does not count as rounded.
+        let whole_volume = joined.volume_with_tolerance(0.0);
+        let keeps_whole = |shape: &Shape| {
+            shape.is_valid()
+                && shape.solid_count() == 1
+                && shape.volume_with_tolerance(0.0) > FILLET_KEEPS * whole_volume
+        };
         // The kernel's fillet, for an arc; else adding the sliver the closing cuts off.
         let kernel = if g.design.cutwater_shape.is_simple() {
             None
         } else {
             crate::profile::stage("fillet tip", || fillet_tip(&joined, &lofts, g, radius))
+                .filter(|(shape, _)| keeps_whole(shape))
         };
         let rounded = kernel.or_else(|| {
             crate::profile::stage("round tip", || {
@@ -1730,6 +1744,16 @@ mod tests {
                     "{case}: {:?}",
                     casing.warnings
                 );
+                // Besides the groove, only the flange may give way (it ends flat on some
+                // platforms), and it says so.
+                assert!(
+                    casing
+                        .warnings
+                        .iter()
+                        .all(|w| w.contains("stays sharp") || w.contains("flange")),
+                    "{case}: {:?}",
+                    casing.warnings
+                );
             }
         }
     }
@@ -1813,8 +1837,13 @@ mod tests {
         let (round, _) = build(0.002);
         assert!(round.fluid.is_valid());
         assert_eq!(round.fluid.solid_count(), 1);
+        // The corners are rounded, with the whole radius or with what the kernel takes
+        // (it differs between platforms); never left sharp.
         assert!(
-            !round.warnings.iter().any(|w| w.contains("rib")),
+            round
+                .warnings
+                .iter()
+                .all(|w| !w.contains("rib") || w.contains("the most the CAD kernel takes")),
             "{:?}",
             round.warnings
         );
