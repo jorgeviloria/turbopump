@@ -297,6 +297,7 @@ const VOLUME_SHARE: f64 = 0.05;
 pub(crate) fn holds_the_design(g: &VoluteGeometry, fluid: &Shape) -> Result<(), CadError> {
     let expected = expected_fluid_volume(g) * MM.powi(3);
     let off = fluid.volume_with_tolerance(0.0) / expected - 1.0;
+    crate::profile::note(|| format!("holds the design: {:+.1} % off", off * 100.0));
     if off.abs() > VOLUME_SHARE {
         return Err(CadError::Operation(format!(
             "the flow domain came out {:+.0} % off the volume of the design: the CAD kernel \
@@ -305,6 +306,20 @@ pub(crate) fn holds_the_design(g: &VoluteGeometry, fluid: &Shape) -> Result<(), 
         )));
     }
     Ok(())
+}
+
+/// A line on a kernel result for the profile notes: valid, solids, and its volume as a
+/// share of `reference` (m³).
+fn summary(result: &Result<Shape, CadError>, reference: f64) -> String {
+    match result {
+        Ok(shape) => format!(
+            "valid {}, {} solid(s), {:.3} of the pieces",
+            shape.is_valid(),
+            shape.solid_count(),
+            shape.volume_with_tolerance(0.0) / reference
+        ),
+        Err(e) => format!("error {e}"),
+    }
 }
 
 /// The flow domain of the volute, with the cutwater rounded when it is a fillet and
@@ -324,10 +339,23 @@ fn flow_domain(g: &VoluteGeometry, round: bool) -> Result<VoluteCad, CadError> {
     // The channel and the flow domain may each need their own gap.
     let pieces: f64 = lofts.iter().map(|l| l.volume_with_tolerance(0.0)).sum();
     let ring_volume = ring.volume_with_tolerance(0.0);
+    crate::profile::note(|| {
+        let each: Vec<String> = lofts
+            .iter()
+            .map(|l| format!("{:.4e}", l.volume_with_tolerance(0.0)))
+            .collect();
+        format!("lofts [{}], ring {ring_volume:.4e}", each.join(", "))
+    });
     let whole = |channel: &Shape| channel.volume_with_tolerance(0.0) > 0.9 * pieces;
     let mut joined = crate::profile::stage("channel fuse", || {
         first_sound(
-            |fuzzy| occ::fuse_all_fuzzy(&lofts, fuzzy),
+            |fuzzy| {
+                let fused = occ::fuse_all_fuzzy(&lofts, fuzzy);
+                crate::profile::note(|| {
+                    format!("channel fuse {fuzzy}: {}", summary(&fused, pieces))
+                });
+                fused
+            },
             |channel| channel.is_valid() && channel.solid_count() == 1 && whole(channel),
             |channel| channel.fixed().ok(),
         )
@@ -359,10 +387,20 @@ fn flow_domain(g: &VoluteGeometry, round: bool) -> Result<VoluteCad, CadError> {
             crate::profile::stage("fillet tip", || fillet_tip(&joined, &lofts, g, radius))
                 .filter(|(shape, _)| keeps_whole(shape))
         };
+        let kernel_used = kernel.is_some();
         let rounded = kernel.or_else(|| {
             crate::profile::stage("round tip", || {
                 crate::rounding::round_tip(&joined, g).map(|rounded| (rounded, radius))
             })
+        });
+        crate::profile::note(|| {
+            let ratio = rounded
+                .as_ref()
+                .map(|(shape, _)| shape.volume_with_tolerance(0.0) / whole_volume);
+            format!(
+                "rounded tip, kernel {}, volume share {ratio:?}",
+                kernel_used
+            )
         });
         match rounded {
             Some((rounded, r)) => {
@@ -460,7 +498,15 @@ fn flow_domain(g: &VoluteGeometry, round: bool) -> Result<VoluteCad, CadError> {
     // only a sound flow domain, and the first that built at all.
     let (mut plain, mut built) = (None, None);
     for fuzzy in FUZZY_GAPS {
-        let Ok(fused) = inlet.fuse_fuzzy(&channel, fuzzy) else {
+        let fused = inlet.fuse_fuzzy(&channel, fuzzy);
+        crate::profile::note(|| {
+            format!(
+                "domain fuse {fuzzy}: {} (channel {:.4e})",
+                summary(&fused, pieces + ring_volume),
+                channel.volume_with_tolerance(0.0)
+            )
+        });
+        let Ok(fused) = fused else {
             continue;
         };
         for fluid in std::iter::once(fused.copied()?).chain(fused.fixed().ok()) {

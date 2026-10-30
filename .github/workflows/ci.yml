@@ -68,6 +68,10 @@ jobs:
         run: |
           cargo test --workspace
           cargo test -p tp-cad --lib -- --ignored
+        # The slow CAD tests print what each kernel step gave when they fail, to see
+        # where a platform's OCCT parts from the others.
+        env:
+          TP_CAD_PROFILE: "1"
       # On the Windows runners OCCT ran 3 to 16 times slower than on macOS depending on
       # the operation (diffuser 20 s, reference impeller 9 min, internal volute 28 min,
       # one test at a time), with the parallel booleans still faster than one thread.
