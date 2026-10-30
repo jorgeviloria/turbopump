@@ -327,19 +327,15 @@ fn flow_domain(g: &VoluteGeometry, round: bool) -> Result<VoluteCad, CadError> {
         }
     }
 
-    // The body of a rounded cutwater (unless the kernel rounded it) and the rib of a double volute are carved out of
-    // the flow domain across the whole height of the volute, each lofted through its
-    // outlines plane by plane.
-    let zs = g.rings().into_iter().flatten().map(|p| p.z);
-    let (z_lo, z_hi) = zs.fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), z| {
-        (lo.min(z), hi.max(z))
-    });
-    let margin = 0.1 * (z_hi - z_lo);
+    // The rib of a double volute is carved out of the flow domain across the whole
+    // height of the volute, lofted through its outlines plane by plane.
+    let (z_lo, z_hi) = tool_span(g);
     // Each tool with the points its cut must leave on the surface of the channel and
     // of the ring.
     let mut tools: Vec<(Shape, Vec<DVec3>, Vec<DVec3>)> = Vec::new();
-    if let Some(rib) = rib_body(g, (z_lo - margin) * MM, (z_hi + margin) * MM)? {
-        tools.push((rib, rib_probes(g), Vec::new()));
+    let rib = rib_body(g, z_lo, z_hi)?;
+    if let Some(rib) = &rib {
+        tools.push((rib.copied()?, rib_probes(g), Vec::new()));
     }
 
     // The cutwater and the rib come out of the channel and of the ring apart, before
@@ -385,6 +381,12 @@ fn flow_domain(g: &VoluteGeometry, round: bool) -> Result<VoluteCad, CadError> {
         Ok(carved)
     };
     let channel = crate::profile::stage("carve channel", || carve(&joined, Part::Channel))?;
+    let (channel, corners_rounded) = match &rib {
+        Some(rib) => crate::profile::stage("rib corners", || {
+            round_rib_corners(g, channel, rib, &mut notes)
+        }),
+        None => (channel, false),
+    };
     let inlet = crate::profile::stage("carve ring", || carve(&ring, Part::Ring))?;
     // The flow domain is what gets exported. A fuzzy fusion may move the cut body
     // again (a tapered nose, a compensated spiral), so its points must still lie on the
@@ -433,6 +435,13 @@ fn flow_domain(g: &VoluteGeometry, round: bool) -> Result<VoluteCad, CadError> {
         },
         |union| union.fixed().ok(),
     );
+    if corners_rounded {
+        notes.push(
+            "the corners of the rib are left sharp: the inlet ring joins only the channel \
+             before the rib comes out"
+                .to_owned(),
+        );
+    }
     if let Ok(fluid) = united.and_then(|union| carve(&union, Part::Domain))
         && domain(&fluid)
     {
@@ -474,6 +483,128 @@ fn flow_domain(g: &VoluteGeometry, round: bool) -> Result<VoluteCad, CadError> {
         fluid,
         warnings,
     })
+}
+
+/// The height the bodies carved out of the flow domain span, mm: the volute's, with a
+/// tenth of it to spare on each side.
+fn tool_span(g: &VoluteGeometry) -> (f64, f64) {
+    let zs = g.rings().into_iter().flatten().map(|p| p.z);
+    let (lo, hi) = zs.fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), z| {
+        (lo.min(z), hi.max(z))
+    });
+    let margin = 0.1 * (hi - lo);
+    ((lo - margin) * MM, (hi + margin) * MM)
+}
+
+/// Points sampled along each edge when looking for the corners of the rib.
+const CORNER_SAMPLES: usize = 7;
+
+/// How far from the rib the points of one of its corner edges may lie, mm.
+const CORNER_TOLERANCE: f64 = 0.05;
+
+/// Shares of the corner radius of the rib tried, largest first.
+const CORNER_SHARES: [f64; 4] = [1.0, 0.75, 0.5, 0.25];
+
+/// The edges of the flow domain `fluid` where the rib meets the walls: those lying on
+/// the rib's surface that run along it, not across the height like the seams between
+/// its faces.
+fn rib_corner_edges(g: &VoluteGeometry, fluid: &Shape, rib: &Shape) -> Vec<usize> {
+    let Some(geometry) = &g.rib else {
+        return Vec::new();
+    };
+    // A quick sieve first: within 2 mm of the outline of the rib in its plane closest
+    // in height.
+    let near = |p: DVec3| {
+        let z = p.z / MM;
+        let Some(plane) = geometry
+            .planes
+            .iter()
+            .min_by(|a, b| (a.z - z).abs().total_cmp(&(b.z - z).abs()))
+        else {
+            return false;
+        };
+        let q = (p / MM).truncate();
+        let outline: Vec<DVec3> = plane.outline();
+        let closed: Vec<DVec3> = outline.iter().chain(outline.first()).copied().collect();
+        closed.windows(2).any(|w| {
+            let (a, b) = (w[0].truncate(), w[1].truncate());
+            let ab = b - a;
+            let s = ((q - a).dot(ab) / ab.length_squared().max(1e-30)).clamp(0.0, 1.0);
+            (a + ab * s).distance(q) < 2e-3
+        })
+    };
+    fluid
+        .edge_samples(CORNER_SAMPLES)
+        .iter()
+        .enumerate()
+        .filter(|(_, points)| points.len() > 2)
+        .filter(|(_, points)| {
+            let (lo, hi) = points.iter().fold(
+                (DVec3::splat(f64::INFINITY), DVec3::splat(f64::NEG_INFINITY)),
+                |(lo, hi), p| (lo.min(*p), hi.max(*p)),
+            );
+            let span = hi - lo;
+            span.truncate().length() > span.z && points.iter().all(|p| near(*p))
+        })
+        .filter(|(_, points)| {
+            rib.boundary_distances(points)
+                .is_ok_and(|d| d.iter().all(|d| *d < CORNER_TOLERANCE))
+        })
+        .map(|(i, _)| i)
+        .collect()
+}
+
+/// The channel `channel` with the corners where the rib `rib` of a double volute meets
+/// its walls rounded with the corner radius of the rib, or with as much of it as the CAD
+/// kernel takes, and whether they are rounded; sharp, with a note in `notes`, where it
+/// takes none. The channel is rounded before the inlet ring joins it: the ring leaves
+/// steps of hundredths of a millimetre by the rib nose that no fillet runs over.
+fn round_rib_corners(
+    g: &VoluteGeometry,
+    channel: Shape,
+    rib: &Shape,
+    notes: &mut Vec<String>,
+) -> (Shape, bool) {
+    let Some(radius) = g
+        .design
+        .rib
+        .map(|r| r.corner_radius * MM)
+        .filter(|r| *r > 0.0)
+    else {
+        return (channel, false);
+    };
+    let edges = rib_corner_edges(g, &channel, rib);
+    if edges.is_empty() {
+        notes.push(
+            "the corners of the rib are left sharp: the CAD found no edge where it meets \
+             the walls"
+                .to_owned(),
+        );
+        return (channel, false);
+    }
+    let volume = channel.volume_with_tolerance(0.0);
+    for share in CORNER_SHARES {
+        let r = share * radius;
+        let Ok(rounded) = channel.filleted(&edges, r) else {
+            continue;
+        };
+        // A concave fillet only takes fluid away, and little of it.
+        let v = rounded.volume_with_tolerance(0.0);
+        if rounded.is_valid() && rounded.solid_count() == 1 && v < volume && v > 0.99 * volume {
+            if share < 1.0 {
+                notes.push(format!(
+                    "the corners of the rib are rounded with {r:.1} mm, the most the CAD \
+                     kernel takes there"
+                ));
+            }
+            return (rounded, true);
+        }
+    }
+    notes.push(
+        "the CAD kernel could not round the corners of the rib: the CAD keeps them sharp"
+            .to_owned(),
+    );
+    (channel, false)
 }
 
 /// The rib of a double volute, mm: lofted smoothly through its planes, and carried
@@ -1597,6 +1728,43 @@ mod tests {
                 "{shape:?}: {added}"
             );
         }
+    }
+
+    #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
+    fn a_tapered_rib_gets_its_corners_rounded() {
+        let _slot = crate::test_slot::take();
+        let build = |corner: f64| {
+            let mut input = VoluteInput::default();
+            input.setup.kind = tp_design::volute::VoluteKind::Double;
+            input.setup.rib_middle_thickness = tp_design::Param::Manual(0.008);
+            input.setup.rib_end_thickness = tp_design::Param::Manual(0.006);
+            input.setup.rib_tail_ratio = tp_design::Param::Manual(2.0);
+            input.setup.rib_corner_radius = tp_design::Param::Manual(corner);
+            let g = VoluteGeometry::build(&basis(), &input).unwrap();
+            (build_volute(&g).unwrap(), g)
+        };
+        let (sharp, g) = build(0.0);
+        let (z_lo, z_hi) = tool_span(&g);
+        let rib = rib_body(&g, z_lo, z_hi).unwrap().unwrap();
+        // Two corners on each side of the rib, along its inner and outer faces at least.
+        assert!(rib_corner_edges(&g, &sharp.channel, &rib).len() >= 4);
+        let (round, _) = build(0.002);
+        assert!(round.fluid.is_valid());
+        assert_eq!(round.fluid.solid_count(), 1);
+        assert!(
+            !round.warnings.iter().any(|w| w.contains("rib")),
+            "{:?}",
+            round.warnings
+        );
+        // The fillets fill the corners: a little less fluid.
+        let (v0, v1) = (
+            sharp.fluid.volume_with_tolerance(0.0),
+            round.fluid.volume_with_tolerance(0.0),
+        );
+        assert!(v1 < v0 && v1 > 0.995 * v0, "{v1} vs {v0}");
+        // One fillet face at least for each corner.
+        assert!(round.channel.face_count() >= sharp.channel.face_count() + 4);
     }
 
     #[test]
