@@ -253,4 +253,136 @@ mod tests {
             }
         }
     }
+
+    /// How the walls of the spiral and of the diffuser meet round the cutwater, in and
+    /// out of the inlet width, over the designs of the trimmed-zone matrix: where they
+    /// cross and at what angle. Run with `--ignored --nocapture`.
+    #[test]
+    #[ignore = "probe"]
+    fn how_the_walls_meet_round_the_cutwater() {
+        use tp_design::volute::{AreaLaw, CrossSectionInput, SectionShape};
+        type Edit = fn(&mut VoluteInput);
+        let cases: [(&str, Edit); 7] = [
+            ("trapezoid", |_| {}),
+            ("round", |v| {
+                v.cross_section = CrossSectionInput::single(SectionShape::round())
+            }),
+            ("rectangular", |v| {
+                v.cross_section = CrossSectionInput::single(SectionShape::rectangular())
+            }),
+            ("tangential", |v| {
+                v.diffuser.shape = DischargeShape::Tangential {
+                    straight_wall: StraightWall::Inner,
+                }
+            }),
+            ("eccentric", |v| {
+                v.diffuser.shape = DischargeShape::Tangential {
+                    straight_wall: StraightWall::Centered,
+                };
+                v.diffuser.eccentricity = Param::Manual(-0.5);
+            }),
+            ("330 wrap", |v| {
+                v.spiral.wrap = Param::Manual(330f64.to_radians())
+            }),
+            ("stepanoff arcs", |v| {
+                v.spiral.law = AreaLaw::Stepanoff;
+                v.spiral.arcs.enabled = true;
+            }),
+        ];
+        let normal_at = |triangles: &[[DVec3; 3]], p: DVec3| -> DVec3 {
+            let t = triangles
+                .iter()
+                .min_by(|a, b| {
+                    let c = |t: &[DVec3; 3]| ((t[0] + t[1] + t[2]) / 3.0).distance(p);
+                    c(a).total_cmp(&c(b))
+                })
+                .unwrap();
+            (t[1] - t[0]).cross(t[2] - t[0]).normalize()
+        };
+        let stats = |v: &mut Vec<f64>| -> String {
+            if v.is_empty() {
+                return "-".into();
+            }
+            v.sort_by(f64::total_cmp);
+            format!("{:.1}/{:.1}/{:.1}", v[0], v[v.len() / 2], v[v.len() - 1])
+        };
+        for (name, edit) in cases {
+            for base in [0.0, 0.5, 1.0] {
+                let mut input = VoluteInput::default();
+                edit(&mut input);
+                input.diffuser.base_form = Param::Manual(base);
+                input.cutwater.shape = CutwaterShape::Simple {
+                    cut: Param::Manual(0.003),
+                    handle: Param::Auto,
+                    measure: CutMeasure::Across,
+                };
+                let g = match VoluteGeometry::build(&basis(), &input) {
+                    Ok(g) => g,
+                    Err(e) => {
+                        println!("{name} base {base}: design {e}");
+                        continue;
+                    }
+                };
+                let (half, zm) = (g.design.inlet_width / 2.0 * MM, g.basis.midplane * MM);
+                let rz = g.inlet_ring().1 * MM;
+                let Some(tip) = g.tongue_cut(g.basis.midplane).and_then(|c| c.tip) else {
+                    println!("{name} base {base}: no tip");
+                    continue;
+                };
+                let tip_angle = tip.y.atan2(tip.x);
+                let (spiral, diffuser) = walls(&g).unwrap();
+                let crossing = spiral.section(&diffuser).unwrap();
+                let turn = |p: DVec3| {
+                    (p.y.atan2(p.x) - tip_angle + std::f64::consts::PI)
+                        .rem_euclid(std::f64::consts::TAU)
+                        - std::f64::consts::PI
+                };
+                let points: Vec<DVec3> = crossing
+                    .edge_samples(40)
+                    .into_iter()
+                    .flatten()
+                    .filter(|p| turn(*p).abs() < 0.4)
+                    .collect();
+                let (ts, td) = (
+                    spiral.triangles(0.05).unwrap(),
+                    diffuser.triangles(0.05).unwrap(),
+                );
+                let near = |tris: &[[DVec3; 3]]| -> Vec<[DVec3; 3]> {
+                    tris.iter()
+                        .filter(|t| turn(t[0]).abs() < 0.5)
+                        .copied()
+                        .collect()
+                };
+                let (ts, td) = (near(&ts), near(&td));
+                let (mut band, mut side) = (Vec::new(), Vec::new());
+                let (mut side_r, mut side_turn, mut side_z) = (Vec::new(), Vec::new(), Vec::new());
+                for p in &points {
+                    let a = normal_at(&ts, *p)
+                        .dot(normal_at(&td, *p))
+                        .abs()
+                        .min(1.0)
+                        .acos()
+                        .to_degrees();
+                    if (p.z - zm).abs() <= half {
+                        band.push(a);
+                    } else {
+                        side.push(a);
+                        side_r.push(p.truncate().length() - rz);
+                        side_turn.push(turn(*p).to_degrees());
+                        side_z.push((p.z - zm).abs() - half);
+                    }
+                }
+                println!(
+                    "{name} base {base}: band {} pts angle {} deg | side {} pts angle {} deg, r-r'z {} mm, turn {} deg, beyond band {} mm",
+                    band.len(),
+                    stats(&mut band),
+                    side.len(),
+                    stats(&mut side),
+                    stats(&mut side_r),
+                    stats(&mut side_turn),
+                    stats(&mut side_z)
+                );
+            }
+        }
+    }
 }
