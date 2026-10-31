@@ -308,6 +308,71 @@ pub(crate) fn holds_the_design(g: &VoluteGeometry, fluid: &Shape) -> Result<(), 
     Ok(())
 }
 
+/// The channel as one union of its lofts. The first attempt over [`FUZZY_GAPS`], in
+/// the order of the lofts and then reversed, that gives one valid solid holding about
+/// the volume of the pieces, or turns so once repaired. Else the attempt that kept the
+/// most of the pieces: on some platforms the kernel returns the spiral alone as one
+/// valid solid at every gap, where the largest gap leaves spiral and diffuser as two
+/// solids; two solids holding both lose less than one without the diffuser, and the
+/// ring joined next may still unite them.
+fn fuse_channel(lofts: &[Shape], pieces: f64) -> Result<Shape, CadError> {
+    let reversed: Vec<Shape> = lofts
+        .iter()
+        .rev()
+        .map(Shape::copied)
+        .collect::<Result<_, _>>()?;
+    let orders: [&[Shape]; 2] = [lofts, &reversed];
+    let mut attempts = Vec::new();
+    let mut error = None;
+    for (order, shapes) in orders.into_iter().enumerate() {
+        if order == 1 && shapes.len() < 2 {
+            break;
+        }
+        for fuzzy in FUZZY_GAPS {
+            let fused = occ::fuse_all_fuzzy(shapes, fuzzy);
+            crate::profile::note(|| {
+                format!(
+                    "channel fuse {fuzzy} (order {order}): {}",
+                    summary(&fused, pieces)
+                )
+            });
+            match fused {
+                Ok(channel) => {
+                    let repaired = channel.fixed().ok();
+                    for candidate in std::iter::once(channel).chain(repaired) {
+                        let share = candidate.volume_with_tolerance(0.0) / pieces;
+                        let sound =
+                            candidate.is_valid() && candidate.solid_count() == 1 && share > 0.9;
+                        attempts.push((candidate, sound, share));
+                        if sound {
+                            return Ok(pick_channel(attempts).expect("one attempt at least"));
+                        }
+                    }
+                }
+                Err(e) => {
+                    error.get_or_insert(e);
+                }
+            }
+        }
+    }
+    pick_channel(attempts).map_or_else(|| Err(error.expect("at least one attempt")), Ok)
+}
+
+/// Of `attempts` (result, sound, share of the pieces' volume), the first sound one,
+/// else the one that kept the most of the pieces.
+fn pick_channel<T>(attempts: impl IntoIterator<Item = (T, bool, f64)>) -> Option<T> {
+    let mut best: Option<(T, f64)> = None;
+    for (result, sound, share) in attempts {
+        if sound {
+            return Some(result);
+        }
+        if best.as_ref().is_none_or(|(_, b)| share > *b) {
+            best = Some((result, share));
+        }
+    }
+    best.map(|(result, _)| result)
+}
+
 /// A line on a kernel result for the profile notes: valid, solids, and its volume as a
 /// share of `reference` (m³).
 fn summary(result: &Result<Shape, CadError>, reference: f64) -> String {
@@ -346,20 +411,7 @@ fn flow_domain(g: &VoluteGeometry, round: bool) -> Result<VoluteCad, CadError> {
             .collect();
         format!("lofts [{}], ring {ring_volume:.4e}", each.join(", "))
     });
-    let whole = |channel: &Shape| channel.volume_with_tolerance(0.0) > 0.9 * pieces;
-    let mut joined = crate::profile::stage("channel fuse", || {
-        first_sound(
-            |fuzzy| {
-                let fused = occ::fuse_all_fuzzy(&lofts, fuzzy);
-                crate::profile::note(|| {
-                    format!("channel fuse {fuzzy}: {}", summary(&fused, pieces))
-                });
-                fused
-            },
-            |channel| channel.is_valid() && channel.solid_count() == 1 && whole(channel),
-            |channel| channel.fixed().ok(),
-        )
-    })?;
+    let mut joined = crate::profile::stage("channel fuse", || fuse_channel(&lofts, pieces))?;
 
     // A rounded cutwater is the union as it is, its intersection edge rounded by the
     // kernel (a fillet) or by the sliver the design's closing cuts off; where neither
@@ -390,7 +442,9 @@ fn flow_domain(g: &VoluteGeometry, round: bool) -> Result<VoluteCad, CadError> {
         let kernel_used = kernel.is_some();
         let rounded = kernel.or_else(|| {
             crate::profile::stage("round tip", || {
-                crate::rounding::round_tip(&joined, g).map(|rounded| (rounded, radius))
+                crate::rounding::round_tip(&joined, g)
+                    .map(|rounded| (rounded, radius))
+                    .filter(|(shape, _)| keeps_whole(shape))
             })
         });
         crate::profile::note(|| {
@@ -1357,6 +1411,20 @@ mod tests {
         ]
     }
 
+    #[test]
+    fn a_channel_that_dropped_a_piece_loses_to_one_that_kept_them() {
+        // Two solids that hold both pieces before one solid without the diffuser.
+        let attempts = [("spiral only", false, 0.640), ("two solids", false, 0.993)];
+        assert_eq!(pick_channel(attempts), Some("two solids"));
+        // A sound union wins whatever comes after it.
+        let attempts = [
+            ("dropped", false, 0.640),
+            ("sound", true, 0.994),
+            ("later", true, 0.999),
+        ];
+        assert_eq!(pick_channel(attempts), Some("sound"));
+        assert_eq!(pick_channel::<&str>([]), None);
+    }
     #[test]
     #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
     fn a_fillet_that_crashes_the_kernel_only_fails_that_fillet() {
