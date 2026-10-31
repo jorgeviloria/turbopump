@@ -61,9 +61,11 @@ pub(crate) fn report(title: &str) {
     totals.clear();
 }
 
-/// Prints `message` when profiling.
+/// Prints `message` when profiling, after the name of the thread (a test's name, in a
+/// test run), so that notes of builds running side by side can be told apart.
 pub(crate) fn note(message: impl FnOnce() -> String) {
     if enabled() {
-        eprintln!("[cad] {}", message());
+        let thread = std::thread::current();
+        eprintln!("[cad] {}: {}", thread.name().unwrap_or("main"), message());
     }
 }

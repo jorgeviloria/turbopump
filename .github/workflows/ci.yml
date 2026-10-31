@@ -65,13 +65,15 @@ jobs:
         timeout-minutes: 75
         # The slowest CAD tests are #[ignore]d so that a local `cargo test` is quick;
         # CI still runs them (the other ignored tests need a GPU or are benchmarks).
+        # The slow CAD tests print, as they run, what each step of the volute's flow
+        # domain gave, to see where a platform's OCCT parts from the others; only those
+        # lines and the results are kept.
         run: |
+          set -o pipefail
           cargo test --workspace
-          cargo test -p tp-cad --lib -- --ignored
-        # The slow CAD tests print what each kernel step gave when they fail, to see
-        # where a platform's OCCT parts from the others.
-        env:
-          TP_CAD_PROFILE: "1"
+          TP_CAD_PROFILE=1 cargo test -p tp-cad --lib -- --ignored --nocapture 2>&1 \
+            | grep --line-buffered -E '^\[cad\] .*: (lofts \[|channel fuse [0-9]|rounded tip|domain fuse|holds the design)|^test |panicked|^error|test result'
+        shell: bash
       # On the Windows runners OCCT ran 3 to 16 times slower than on macOS depending on
       # the operation (diffuser 20 s, reference impeller 9 min, internal volute 28 min,
       # one test at a time), with the parallel booleans still faster than one thread.
