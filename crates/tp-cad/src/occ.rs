@@ -59,12 +59,19 @@ impl Shape {
     /// many B-spline faces this takes seconds; the plain Gauss rule is fast but can be
     /// off by percent.
     pub fn volume(&self) -> f64 {
-        ffi::volume(&self.0, 1e-3)
+        crate::profile::op("volume 1e-3", || ffi::volume(&self.0, 1e-3))
     }
 
     /// Volume with a chosen relative error (smaller is slower; 0 = plain Gauss rule).
     pub fn volume_with_tolerance(&self, eps: f64) -> f64 {
-        ffi::volume(&self.0, eps)
+        crate::profile::op(
+            if eps > 0.0 {
+                "volume eps"
+            } else {
+                "volume gauss"
+            },
+            || ffi::volume(&self.0, eps),
+        )
     }
 
     /// Volume of each solid of the shape, mm³.
@@ -84,15 +91,24 @@ impl Shape {
         ffi::count_subshapes(&self.0, 2)
     }
 
+    /// What OCCT's checker finds wrong, one sub-shape and status code per line; empty
+    /// for a sound shape.
+    pub fn check_report(&self) -> String {
+        ffi::check_report(&self.0)
+    }
+
     /// Whether OCCT's checker finds the shape topologically and geometrically valid.
     pub fn is_valid(&self) -> bool {
-        ffi::is_valid(&self.0)
+        crate::profile::op("is_valid", || ffi::is_valid(&self.0))
     }
 
     /// Copy repaired by shape healing: small gaps, edges out of tolerance and wrongly
     /// oriented faces closed or fixed.
     pub fn fixed(&self) -> Result<Shape, CadError> {
-        op("shape fix", ffi::fix_shape(&self.0))
+        op(
+            "shape fix",
+            crate::profile::op("fix", || ffi::fix_shape(&self.0)),
+        )
     }
 
     /// Copy rotated by `angle` (rad) about the z axis.
@@ -103,7 +119,9 @@ impl Shape {
     /// `samples` points along each edge, in the order of OCCT's indexed edge map; empty
     /// for degenerate edges.
     pub fn edge_samples(&self, samples: usize) -> Vec<Vec<DVec3>> {
-        let flat = ffi::edge_samples(&self.0, samples.max(1));
+        let flat = crate::profile::op("edge_samples", || {
+            ffi::edge_samples(&self.0, samples.max(1))
+        });
         flat.chunks(samples.max(1))
             .map(|chunk| {
                 if chunk.iter().any(|p| p.x.is_nan()) {
@@ -127,13 +145,87 @@ impl Shape {
             .collect())
     }
 
+    /// The face of each triangle of the last [`Self::triangles`], as indices from 0.
+    pub fn triangle_faces(&self) -> Vec<u32> {
+        ffi::triangle_faces(&self.0)
+    }
+
+    /// The edges of the shells of the shape that bound only one face, `samples` points
+    /// each: where the surface is open. Empty for a closed shell or solid.
+    pub fn free_edges(&self, samples: usize) -> Result<Vec<Vec<DVec3>>, CadError> {
+        let flat = ffi::free_edge_samples(&self.0, samples.max(1))
+            .map_err(|e| CadError::Operation(e.what().to_owned()))?;
+        Ok(flat
+            .chunks(samples.max(1))
+            .filter(|chunk| !chunk.iter().any(|p| p.x.is_nan()))
+            .map(|chunk| chunk.iter().map(|p| DVec3::new(p.x, p.y, p.z)).collect())
+            .collect())
+    }
+
+    /// For each face, in the order of OCCT's indexed face map, its plane as a normal and
+    /// a point on it; `None` for a face that is not planar.
+    pub fn face_planes(&self) -> Vec<Option<(DVec3, DVec3)>> {
+        ffi::face_planes(&self.0)
+            .chunks(7)
+            .map(|f| {
+                (f[0] > 0.5).then(|| (DVec3::new(f[1], f[2], f[3]), DVec3::new(f[4], f[5], f[6])))
+            })
+            .collect()
+    }
+
+    /// The faces of the shape but those at `dropped` (indices as in [`Self::face_planes`]),
+    /// as a compound.
+    pub fn faces_except(&self, dropped: &[u32]) -> Result<Shape, CadError> {
+        op("faces", ffi::faces_except(&self.0, dropped))
+    }
+
+    /// The face at `index` (as in [`Self::face_planes`]).
+    pub fn face(&self, index: u32) -> Result<Shape, CadError> {
+        op("face", ffi::face_at(&self.0, index))
+    }
+
+    /// Where this edge crosses the face `face`, inside both: the point, its (u, v) on
+    /// the face's surface and its parameter on the edge.
+    pub fn crossings(&self, face: &Shape) -> Result<Vec<(DVec3, f64, f64, f64)>, CadError> {
+        let flat = ffi::edge_face_crossings(&self.0, &face.0)
+            .map_err(|e| CadError::Operation(e.what().to_owned()))?;
+        Ok(flat
+            .chunks(6)
+            .map(|c| (DVec3::new(c[0], c[1], c[2]), c[3], c[4], c[5]))
+            .collect())
+    }
+
+    /// The edges where the boundaries of this shape and `other` cross.
+    pub fn section(&self, other: &Shape) -> Result<Shape, CadError> {
+        op("section", ffi::section_of(&self.0, &other.0))
+    }
+
+    /// For each face (as in [`Self::face_planes`]), on which side of `solid` a point
+    /// well inside it lies: 1 inside, -1 outside, 0 on its boundary (or no point
+    /// found), with the point.
+    pub fn face_sides(&self, solid: &Shape, tolerance: f64) -> Result<Vec<(i8, DVec3)>, CadError> {
+        let flat = ffi::face_sides(&self.0, &solid.0, tolerance)
+            .map_err(|e| CadError::Operation(e.what().to_owned()))?;
+        Ok(flat
+            .chunks(4)
+            .map(|c| (c[0] as i8, DVec3::new(c[1], c[2], c[3])))
+            .collect())
+    }
+
+    /// The solid the closed shells of the shape bound, facing out.
+    pub fn solid(&self) -> Result<Shape, CadError> {
+        op("solid", ffi::make_solid(&self.0))
+    }
+
     /// Distance from each of `points` to the nearest face of the shape: to its surface,
     /// whether the point lies inside or outside. Slow on large shapes: tens of
     /// milliseconds a point.
     pub fn boundary_distances(&self, points: &[DVec3]) -> Result<Vec<f64>, CadError> {
         let points: Vec<ffi::P3> = points.iter().map(|p| p3(*p)).collect();
-        ffi::boundary_distances(&self.0, &points)
-            .map_err(|e| CadError::Operation(e.what().to_owned()))
+        crate::profile::op("boundary_distances", || {
+            ffi::boundary_distances(&self.0, &points)
+        })
+        .map_err(|e| CadError::Operation(e.what().to_owned()))
     }
 
     /// The shape with the edges at positions `edges` of [`Self::edge_samples`] rounded
@@ -143,7 +235,10 @@ impl Shape {
             .iter()
             .map(|&i| u32::try_from(i + 1).map_err(|_| CadError::Input("edge index".into())))
             .collect::<Result<_, _>>()?;
-        op("fillet", ffi::fillet_edges(&self.0, &indices, radius))
+        op(
+            "fillet",
+            crate::profile::op("fillet", || ffi::fillet_edges(&self.0, &indices, radius)),
+        )
     }
 
     /// Boolean difference `self − tool`.
@@ -158,19 +253,61 @@ impl Shape {
 
     /// Boolean intersection.
     pub fn common(&self, other: &Shape) -> Result<Shape, CadError> {
-        op("boolean common", ffi::boolean_op(&self.0, &other.0, 2, 0.0))
+        boolean(&[self], &[other], 2, 0.0)
     }
 
     /// Boolean difference treating gaps below `fuzzy` (model units) as contact, for
     /// faces that run nearly coincident.
     pub fn cut_fuzzy(&self, tool: &Shape, fuzzy: f64) -> Result<Shape, CadError> {
-        op("boolean cut", ffi::boolean_op(&self.0, &tool.0, 0, fuzzy))
+        self.cut_all_fuzzy(&[tool], fuzzy)
+    }
+
+    /// A copy with its own geometry, for an attempt that must not touch the original:
+    /// a boolean may widen the tolerances of its inputs in place.
+    pub fn copied(&self) -> Result<Shape, CadError> {
+        op(
+            "copy",
+            crate::profile::op("copy", || ffi::copy_shape(&self.0)),
+        )
+    }
+
+    /// `self` less all the `tools`, in one operation.
+    pub fn cut_all_fuzzy(&self, tools: &[&Shape], fuzzy: f64) -> Result<Shape, CadError> {
+        boolean(&[self], tools, 0, fuzzy)
     }
 
     /// Boolean union treating gaps below `fuzzy` (model units) as contact.
     pub fn fuse_fuzzy(&self, other: &Shape, fuzzy: f64) -> Result<Shape, CadError> {
-        op("boolean fuse", ffi::boolean_op(&self.0, &other.0, 1, fuzzy))
+        boolean(&[self], &[other], 1, fuzzy)
     }
+}
+
+/// `op` (0 cut, 1 fuse, 2 common) of all the `tools` with all the `arguments`.
+fn boolean(
+    arguments: &[&Shape],
+    tools: &[&Shape],
+    code: u8,
+    fuzzy: f64,
+) -> Result<Shape, CadError> {
+    let what = ["boolean cut", "boolean fuse", "boolean common"][usize::from(code)];
+    op(
+        what,
+        crate::profile::op(what, || {
+            ffi::boolean_op(&list(arguments), &list(tools), code, fuzzy)
+        }),
+    )
+}
+
+/// The union of all the `pieces`, in one operation.
+pub fn fuse_all_fuzzy(pieces: &[Shape], fuzzy: f64) -> Result<Shape, CadError> {
+    let Some((first, rest)) = pieces.split_first() else {
+        return Err(CadError::Input("nothing to fuse".into()));
+    };
+    if rest.is_empty() {
+        return first.copied();
+    }
+    let rest: Vec<&Shape> = rest.iter().collect();
+    boolean(&[first], &rest, 1, fuzzy)
 }
 
 /// Compound grouping several shapes without merging them.
@@ -192,7 +329,10 @@ pub fn spline_edge(points: &[DVec3], periodic: bool) -> Result<Shape, CadError> 
         return Err(CadError::Input("spline points coincide".into()));
     }
     let pts: Vec<ffi::P3> = points.iter().map(|&p| p3(p)).collect();
-    op("spline edge", ffi::spline_edge(&pts, periodic))
+    op(
+        "spline edge",
+        crate::profile::op("spline", || ffi::spline_edge(&pts, periodic)),
+    )
 }
 
 /// Straight edge from `a` to `b`.
@@ -237,9 +377,24 @@ pub fn cylinder(
     )
 }
 
+/// The surfaces the edges of `shape` sweep in a full turn about the z axis, as B-spline
+/// faces bounded by their own parameters, none of them a plane its trim alone bounds.
+pub fn revolved_surfaces_z(shape: &Shape) -> Result<Shape, CadError> {
+    op("revolution", ffi::revolved_surfaces_z(&shape.0))
+}
+
+/// `shape` swept about the z axis through `angle` (rad), counter-clockwise: a wire into
+/// faces, a face into a solid.
+pub fn revolve_z_by(shape: &Shape, angle: f64) -> Result<Shape, CadError> {
+    op("revolution", ffi::revolve_z_by(&shape.0, angle))
+}
+
 /// Solid of revolution of a planar face through 360° about the z axis.
 pub fn revolve_z(face: &Shape) -> Result<Shape, CadError> {
-    op("revolution", ffi::revolve_z(&face.0))
+    op(
+        "revolution",
+        crate::profile::op("revolution", || ffi::revolve_z(&face.0)),
+    )
 }
 
 /// Closed solid lofted through closed section `wires`: B-spline side surfaces through
@@ -249,7 +404,38 @@ pub fn loft(wires: &[Shape]) -> Result<Shape, CadError> {
         return Err(CadError::Input("a loft needs at least two sections".into()));
     }
     let refs: Vec<&Shape> = wires.iter().collect();
-    op("loft", ffi::loft_solid(&list(&refs)))
+    op(
+        "loft",
+        crate::profile::op("loft", || ffi::loft_solid(&list(&refs))),
+    )
+}
+
+/// The faces lofted through section `wires` (closed or open), without end caps.
+pub fn loft_shell(wires: &[Shape]) -> Result<Shape, CadError> {
+    if wires.len() < 2 {
+        return Err(CadError::Input("a loft needs at least two sections".into()));
+    }
+    let refs: Vec<&Shape> = wires.iter().collect();
+    op(
+        "loft shell",
+        crate::profile::op("loft shell", || ffi::loft_shell(&list(&refs))),
+    )
+}
+
+/// The faces of `shapes` split along the edges of `tools`.
+pub fn split(shapes: &[&Shape], tools: &[&Shape]) -> Result<Shape, CadError> {
+    op(
+        "split",
+        crate::profile::op("split", || ffi::split_by(&list(shapes), &list(tools))),
+    )
+}
+
+/// The faces of `shapes` sewn where their edges lie within `tolerance` (mm).
+pub fn sew(shapes: &[&Shape], tolerance: f64) -> Result<Shape, CadError> {
+    op(
+        "sewing",
+        crate::profile::op("sew", || ffi::sew_shapes(&list(shapes), tolerance)),
+    )
 }
 
 fn path_str(path: &Path) -> Result<&str, CadError> {
@@ -286,6 +472,34 @@ mod tests {
     use super::*;
     use approx::assert_relative_eq;
     use std::f64::consts::PI;
+
+    #[test]
+    fn lofted_faces_and_caps_sew_into_a_closed_solid() {
+        let (bottom, top) = (circle(10.0, 0.0, 0.0), circle(10.0, 20.0, 0.0));
+        let side = loft_shell(&[
+            circle(10.0, 0.0, 0.0),
+            circle(10.0, 10.0, 0.0),
+            circle(10.0, 20.0, 0.0),
+        ])
+        .unwrap();
+        // Open at both ends until capped.
+        let open = sew(&[&side], 1e-3).unwrap();
+        assert_eq!(open.free_edges(5).unwrap().len(), 2);
+        let caps = [planar_face(&bottom).unwrap(), planar_face(&top).unwrap()];
+        let shell = sew(&[&side, &caps[0], &caps[1]], 1e-3).unwrap();
+        assert!(shell.free_edges(5).unwrap().is_empty());
+        let solid = shell.solid().unwrap();
+        assert!(solid.is_valid());
+        assert_relative_eq!(solid.volume(), PI * 100.0 * 20.0, max_relative = 1e-3);
+        // Every triangle knows its face: the side and the two caps.
+        let triangles = solid.triangles(0.1).unwrap();
+        let faces = solid.triangle_faces();
+        assert_eq!(faces.len(), triangles.len());
+        let mut distinct = faces.clone();
+        distinct.sort_unstable();
+        distinct.dedup();
+        assert_eq!(distinct.len(), solid.face_count());
+    }
 
     /// Rectangle (r from 10 to 20, z from 0 to 5) in the xz plane.
     fn ring_profile() -> Shape {

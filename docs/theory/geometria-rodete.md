@@ -271,7 +271,42 @@ $\bar m \in [0, 1]$, entre $\beta_{1B}$ y $\beta_{2B}$:
 - **lineal**, la opción por defecto;
 - **suave**: una Bézier en $(\bar m, \beta)$ que sale y llega con pendiente nula. Los
   parámetros `inlet` y `outlet` fijan cuánto se mantiene β cerca de sus valores
-  extremos.
+  extremos;
+- **por carga del álabe** (diseño inverso, solo álabes de forma libre): se fija cómo sube
+  el giro $r c_u$ a lo largo del álabe, y β sale de él.
+
+**Distribución por carga.** En cada sección, con el flujo siguiendo al álabe (la misma
+hipótesis que las velocidades en las caras, [prestaciones.md](prestaciones.md) §3),
+
+$$c_u = u - \frac{c_m}{\tan\beta} \quad\Longrightarrow\quad
+\beta(\bar m) = \arctan\frac{c_m}{\omega r - r c_u / r}$$
+
+$r c_u$ en los bordes sale de $\beta_{1B}$ y $\beta_{2B}$ con la $c_m$ local, así que los
+ángulos de borde no cambian. Entre ellos, $r c_u = (r c_u)_1 + \Delta(r c_u)\,F(\bar m)$,
+donde $F$ es el área bajo la carga normalizada $f = d(r c_u)/d\bar m \,/\, \Delta(r c_u)$,
+de área 1. La forma de $f$ es la de tres tramos de Zangeneh, Goto y Harada (ASME J.
+Turbomach. 120, 1998):
+
+- una parábola desde la carga en el borde de ataque $f(0)$ hasta $\bar m_1$;
+- una recta de pendiente dada hasta $\bar m_2$;
+- una parábola hasta $f(1) = 0$ en el borde de salida.
+
+Los tramos se unen con el mismo valor y la misma pendiente. El nivel de la recta sale de
+que el área valga 1, una ecuación lineal; $F$ se integra de forma exacta. Se da una forma
+en el cubo y otra en la carcasa, y las secciones intermedias las mezclan según su fracción
+del caudal. Con el envolvimiento común o lineal, la joroba se suma a $F$ (multiplicada por
+$\Delta(r c_u)$) en lugar de a β: mueve carga entre la parte delantera y la trasera sin
+tocar la carga de los bordes ni el área.
+
+En un rodete radial el radio es pequeño cerca del borde de ataque: el giro dado allí pide
+pronto $c_u > u$, es decir, β por encima de 90°. Por eso la forma inicial carga la parte
+trasera en las dos paredes ($\bar m_1$ = 0,3, $\bar m_2$ = 0,9, pendiente 2), con el borde
+de ataque de la carcasa sin carga, porque ahí empieza la cavitación, y algo de carga (0,3)
+en el del cubo. Son valores propios: en la referencia dejan β a menos de 4° de sus valores
+de borde, envuelven 114° y dan una carga máxima y un impulso del flujo secundario
+parecidos a los de la distribución lineal ([prestaciones.md](prestaciones.md) §3). Se avisa
+si la carga se vuelve negativa en alguna pared o si β pasa de 90°. Un álabe cilíndrico la
+rechaza, porque comparte una sola planta para todas las secciones.
 
 **Integración.** Con $\tan\beta = dm/(r\,d\theta)$:
 

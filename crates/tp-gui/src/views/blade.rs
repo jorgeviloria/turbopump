@@ -1,6 +1,7 @@
 //! Blade plots along the normalized meridional length m̄: blade angle, wrap angle,
-//! thickness and the relative velocity on both faces of every section, two rows of
-//! two under one legend, like the performance curves. A second page draws the blade
+//! the swirl r·c_u and its loading d(r·c_u)/dm̄, thickness and the relative velocity
+//! on both faces of every section, three rows of two under one legend, like the
+//! performance curves. A second page draws the blade
 //! edges in true shape, to shape them by hand.
 
 use eframe::egui::{self, Ui};
@@ -121,9 +122,9 @@ fn content(ui: &mut Ui, derived: &Derived, id: ComponentId, units: &DisplayUnits
         marker(ui, Mark::DashedLine, ink, tr("pressure face"));
     });
 
-    // Two rows of two plots, sharing the m̄ axis; it is labelled on the lower row.
+    // Three rows of two plots, sharing the m̄ axis; it is labelled on the lower row.
     let spacing = ui.spacing().item_spacing.y;
-    let height = ((ui.available_height() - spacing) / 2.0).max(150.0);
+    let height = ((ui.available_height() - 2.0 * spacing) / 3.0).max(150.0);
     let base = |name: &str, label: String, lower: bool| {
         let plot = Plot::new((name.to_owned(), id.0))
             .height(height)
@@ -132,6 +133,8 @@ fn content(ui: &mut Ui, derived: &Derived, id: ComponentId, units: &DisplayUnits
             .link_cursor("blade_plots", [true, false])
             .x_grid_spacer(egui_plot::uniform_grid_spacer(super::nice_grid))
             .y_grid_spacer(egui_plot::uniform_grid_spacer(super::nice_grid))
+            .x_axis_formatter(super::tick_label)
+            .y_axis_formatter(super::tick_label)
             .y_axis_min_width(44.0)
             .allow_scroll(false);
         if lower {
@@ -152,9 +155,45 @@ fn content(ui: &mut Ui, derived: &Derived, id: ComponentId, units: &DisplayUnits
         });
         super::settle(ui, (name, id.0), &response.transform);
     };
+    let velocities = blade_velocities(g);
+    // r·c_u of each section with the flow along the blade, over r₂·u₂.
+    let r2u2 = (g.basis.outlet_diameter / 2.0 * velocities.outlet_speed).max(f64::EPSILON);
+    let swirl: Vec<Vec<f64>> = velocities
+        .sections
+        .iter()
+        .zip(sections)
+        .map(|(v, s)| {
+            v.cu.iter()
+                .zip(&s.meridional)
+                .map(|(cu, p)| cu * p.y / r2u2)
+                .collect()
+        })
+        .collect();
+    let swirl_plot = |ui: &mut Ui, name: &str, label: String, loading: bool| {
+        let response = base(name, label, false).show(ui, |plot| {
+            for (i, (v, rcu)) in velocities.sections.iter().zip(&swirl).enumerate() {
+                let points: PlotPoints<'static> = if loading {
+                    // d(r·c_u)/dm̄ over the rise of r·c_u: its area is 1.
+                    let rise = (rcu[rcu.len() - 1] - rcu[0]).abs().max(f64::EPSILON);
+                    slope(&v.position, rcu)
+                        .into_iter()
+                        .zip(&v.position)
+                        .map(|(d, m)| [*m, d / rise])
+                        .collect()
+                } else {
+                    v.position.iter().zip(rcu).map(|(m, w)| [*m, *w]).collect()
+                };
+                plot.line(
+                    Line::new(String::new(), points)
+                        .color(palette.span(i, n))
+                        .width(1.5),
+                );
+            }
+        });
+        super::settle(ui, (name, id.0), &response.transform);
+    };
     let velocity_plot = |ui: &mut Ui| {
         // Relative velocity on the faces: suction solid, pressure dashed.
-        let velocities = blade_velocities(g);
         let u2 = velocities.outlet_speed.max(f64::EPSILON);
         let response = base("blade_velocity", tr("w/u₂").to_owned(), true)
             .include_y(0.0)
@@ -200,6 +239,20 @@ fn content(ui: &mut Ui, derived: &Derived, id: ComponentId, units: &DisplayUnits
         );
     });
     ui.columns(2, |columns| {
+        swirl_plot(
+            &mut columns[0],
+            "blade_swirl",
+            tr("r·c_u / (r₂·u₂)").to_owned(),
+            false,
+        );
+        swirl_plot(
+            &mut columns[1],
+            "blade_swirl_loading",
+            tr("d(r·c_u)/dm̄ over its rise").to_owned(),
+            true,
+        );
+    });
+    ui.columns(2, |columns| {
         section_plot(
             &mut columns[0],
             "blade_thickness",
@@ -209,4 +262,21 @@ fn content(ui: &mut Ui, derived: &Derived, id: ComponentId, units: &DisplayUnits
         );
         velocity_plot(&mut columns[1]);
     });
+}
+
+/// dy/dx on an uneven grid: one-sided at the ends, the three-point formula inside.
+fn slope(x: &[f64], y: &[f64]) -> Vec<f64> {
+    let n = x.len();
+    (0..n)
+        .map(|i| match i {
+            _ if n < 2 => 0.0,
+            0 => (y[1] - y[0]) / (x[1] - x[0]),
+            i if i == n - 1 => (y[i] - y[i - 1]) / (x[i] - x[i - 1]),
+            i => {
+                let (h0, h1) = (x[i] - x[i - 1], x[i + 1] - x[i]);
+                let (d0, d1) = ((y[i] - y[i - 1]) / h0, (y[i + 1] - y[i]) / h1);
+                (h1 * d0 + h0 * d1) / (h0 + h1)
+            }
+        })
+        .collect()
 }

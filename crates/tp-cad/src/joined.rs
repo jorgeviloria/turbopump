@@ -109,7 +109,9 @@ mod tests {
     use tp_design::volute::VoluteInput;
 
     #[test]
+    #[ignore = "slow (minutes of OCCT booleans); CI runs it with `cargo test -p tp-cad --lib -- --ignored`"]
     fn the_chambers_join_the_impeller_and_the_volute_in_one_fluid() {
+        let _slot = crate::test_slot::take();
         let mut input = ImpellerGeometryInput::default();
         input.meridional.chambers.enabled = true;
         let (g, main, duty) = reference_with(&input);

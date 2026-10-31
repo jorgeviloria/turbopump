@@ -327,6 +327,10 @@ mod cad {
         files: Vec<PathBuf>,
         impeller_volume: f64,
         fluid_volume: f64,
+        /// Each wear ring built, with its volume, m³.
+        rings: Vec<(tp_cad::RingKind, f64)>,
+        /// Volume of the back vanes, m³ (part of the impeller); `None` without them.
+        back_vanes: Option<f64>,
         volute_volume: Option<f64>,
         /// Volume and wall thickness of the volute casing.
         casing: Option<(f64, f64)>,
@@ -344,8 +348,12 @@ mod cad {
         step: bool,
         iges: bool,
         stl: bool,
+        /// Also the flow domains split into named boundaries, a file each.
+        boundaries: bool,
         fillet: Param<f64>,
         balance_holes: bool,
+        /// The volute as curves and open surfaces instead of solids.
+        volute_surfaces: bool,
         /// Material density, kg/m³.
         density: f64,
         job: Option<Receiver<Result<CadReport, String>>>,
@@ -358,12 +366,26 @@ mod cad {
                 step: true,
                 iges: false,
                 stl: false,
+                boundaries: true,
                 fillet: Param::Auto,
                 balance_holes: false,
+                volute_surfaces: true,
                 density: 7850.0,
                 job: None,
                 last: None,
             }
+        }
+    }
+
+    /// The name of a wear ring in the current language (literals, so that the
+    /// translation check sees them).
+    fn ring_label(kind: tp_cad::RingKind) -> &'static str {
+        use tp_cad::RingKind;
+        match kind {
+            RingKind::FrontImpeller => tr("Front impeller ring"),
+            RingKind::FrontCasing => tr("Front casing ring"),
+            RingKind::RearImpeller => tr("Rear impeller ring"),
+            RingKind::RearCasing => tr("Rear casing ring"),
         }
     }
 
@@ -385,6 +407,8 @@ mod cad {
         options: &CadOptions,
         folder: &Path,
         formats: &[&str],
+        boundaries: bool,
+        volute_surfaces: bool,
     ) -> Result<CadReport, String> {
         let cad = tp_cad::build_impeller(g, options).map_err(|e| e.to_string())?;
         let mut problems_of_duct = Vec::new();
@@ -396,7 +420,14 @@ mod cad {
             }
         });
         let volute_geometry = volute;
+        // The volute as curves and open surfaces, to model it elsewhere: no solid.
+        let surfaces = volute
+            .filter(|_| volute_surfaces)
+            .map(tp_cad::build_volute_surfaces)
+            .transpose()
+            .map_err(|e| e.to_string())?;
         let volute = volute
+            .filter(|_| !volute_surfaces)
             .map(|g| {
                 let cad = tp_cad::build_volute(g)?;
                 let casing = tp_cad::build_volute_casing(g, &cad)?;
@@ -415,10 +446,13 @@ mod cad {
         for format in formats {
             let chambers = cad.side_chambers.as_ref().map(|s| ("side-chambers", s));
             let duct = duct.as_ref().map(|s| ("inlet-duct", s));
+            // Every wear ring is a file of its own, the chambers designed or not.
+            let rings = cad.rings.iter().map(|r| (r.kind.file_stem(), &r.solid));
             for (stem, shape) in [("impeller", &cad.impeller), ("fluid", &cad.fluid)]
                 .into_iter()
                 .chain(chambers)
                 .chain(duct)
+                .chain(rings)
             {
                 let path = folder.join(format!("{stem}.{format}"));
                 write(shape, &path, format, deflection)?;
@@ -450,6 +484,14 @@ mod cad {
                 }
             }
         }
+        if let Some(s) = &surfaces {
+            let both = s.both().map_err(|e| e.to_string())?;
+            for format in formats.iter().filter(|&&f| f != "stl") {
+                let path = folder.join(format!("volute-surfaces.{format}"));
+                write(&both, &path, format, deflection)?;
+                files.push(path);
+            }
+        }
         if let Some(d) = &diffuser {
             for format in formats {
                 let mut shapes = vec![("diffuser", &d.fluid)];
@@ -463,30 +505,78 @@ mod cad {
                 }
             }
         }
+        // The flow domains split into named boundaries, one file each.
+        let mut boundary_problems = Vec::new();
+        if boundaries {
+            let dir = folder.join("boundaries");
+            let mut domains = vec![(
+                tr("flow domain"),
+                "impeller",
+                &cad.fluid,
+                tp_cad::impeller_patches(g, &cad.fluid),
+            )];
+            if let (Some((v, _, _)), Some(vg)) = (&volute, volute_geometry) {
+                domains.push((
+                    tr("volute flow domain"),
+                    "volute",
+                    &v.fluid,
+                    tp_cad::volute_patches(vg, &v.fluid),
+                ));
+            }
+            for (label, stem, shape, patches) in domains {
+                let written = patches.and_then(|patches| {
+                    formats
+                        .iter()
+                        .map(|format| {
+                            tp_cad::write_patches(shape, &patches, &dir, stem, format, deflection)
+                        })
+                        .collect::<Result<Vec<_>, _>>()
+                });
+                match written {
+                    Ok(groups) => files.extend(groups.into_iter().flatten()),
+                    Err(e) => boundary_problems.push(tf(
+                        "the named boundaries of the {} could not be written: {}",
+                        &[&label, &e],
+                    )),
+                }
+            }
+        }
         let mut problems: Vec<String> = cad.warnings.clone();
+        problems.extend(boundary_problems);
         problems.extend(problems_of_duct);
         problems.extend(joined_warnings);
-        if let Some((_, casing, _)) = &volute {
+        if let Some(s) = &surfaces {
+            problems.extend(s.warnings.iter().cloned());
+        }
+        if let Some((volute, casing, _)) = &volute {
+            problems.extend(volute.warnings.iter().cloned());
             problems.extend(casing.warnings.iter().cloned());
         }
         let invalid = [
-            ("blade", Some(&cad.blade)),
-            ("flow domain", Some(&cad.fluid)),
-            ("impeller", Some(&cad.impeller)),
+            (tr("blade"), Some(&cad.blade)),
+            (tr("flow domain"), Some(&cad.fluid)),
+            (tr("impeller"), Some(&cad.impeller)),
             (
-                "volute flow domain",
+                tr("volute flow domain"),
                 volute.as_ref().map(|(v, _, _)| &v.fluid),
             ),
-            ("volute casing", volute.as_ref().map(|(_, c, _)| &c.solid)),
-            ("diffuser flow domain", diffuser.as_ref().map(|d| &d.fluid)),
+            (
+                tr("volute casing"),
+                volute.as_ref().map(|(_, c, _)| &c.solid),
+            ),
+            (
+                tr("diffuser flow domain"),
+                diffuser.as_ref().map(|d| &d.fluid),
+            ),
         ]
         .into_iter()
         .filter_map(|(label, s)| s.map(|s| (label, s)))
+        .chain(cad.rings.iter().map(|r| (ring_label(r.kind), &r.solid)))
         .filter(|(_, s)| !s.is_valid() || s.solid_count() != 1)
         .map(|(label, s)| {
             tf(
                 "the {} is not a single valid solid ({} solids)",
-                &[&tr(label), &s.solid_count()],
+                &[&label.to_lowercase(), &s.solid_count()],
             )
         });
         problems.extend(invalid);
@@ -495,6 +585,12 @@ mod cad {
             files,
             impeller_volume: cad.impeller_volume(),
             fluid_volume: cad.fluid_volume(),
+            rings: cad
+                .rings
+                .iter()
+                .filter_map(|r| Some((r.kind, cad.ring_volume(r.kind)?)))
+                .collect(),
+            back_vanes: cad.back_vanes.as_ref().map(|v| v.volume() * 1e-9),
             volute_volume: volute.as_ref().map(|(v, _, _)| v.fluid_volume()),
             casing: volute.as_ref().map(|(_, c, wall)| (c.volume(), *wall)),
             diffuser_volume: diffuser.as_ref().map(|d| d.fluid_volume()),
@@ -537,6 +633,7 @@ mod cad {
             stator: Option<DiffuserDesign>,
             volute: Option<VoluteGeometry>,
             holes: Option<BalanceHoleOptions>,
+            note: Option<String>,
             folder: PathBuf,
         ) {
             let options = CadOptions {
@@ -549,6 +646,8 @@ mod cad {
                     .into_iter()
                     .filter_map(|(on, f)| on.then_some(f))
                     .collect();
+            let boundaries = self.boundaries;
+            let volute_surfaces = self.volute_surfaces;
             let (tx, rx) = channel();
             let ctx = ctx.clone();
             let spawned = std::thread::Builder::new()
@@ -562,7 +661,13 @@ mod cad {
                         &options,
                         &folder,
                         &formats,
+                        boundaries,
+                        volute_surfaces,
                     );
+                    let result = result.map(|mut report| {
+                        report.problems.extend(note);
+                        report
+                    });
                     let _ = tx.send(result);
                     ctx.request_repaint();
                 });
@@ -578,33 +683,29 @@ mod cad {
         }
 
         /// The balance holes of impeller `id` when asked for: one per channel, sized for
-        /// the automatic rear seal of the axial thrust.
+        /// the rear seal drawn in `g`. Without a rear seal they are left out, and the
+        /// second part says so for the report.
         fn hole_options(
             &self,
             project: &Project,
             id: ComponentId,
-        ) -> Result<Option<BalanceHoleOptions>, String> {
-            use tp_design::axial_thrust::{AxialThrust, AxialThrustInput};
+            g: &ImpellerGeometry,
+        ) -> Result<(Option<BalanceHoleOptions>, Option<String>), String> {
             if !self.balance_holes {
-                return Ok(None);
+                return Ok((None, None));
             }
-            let duty = project.pump_duty(id).map_err(|e| e.to_string())?;
-            let design = project
-                .compute_main_dimensions(id)
-                .map_err(|e| e.to_string())?;
-            let input = AxialThrustInput {
-                balance_holes: true,
-                ..AxialThrustInput::default()
-            };
-            let axial =
-                AxialThrust::new(&duty, &design, &input, false).map_err(|e| e.to_string())?;
-            Ok(axial
-                .balance_holes(design.blade_count)
-                .map(|h| BalanceHoleOptions {
+            let size = project.balance_hole_size(id, g)?;
+            let note = size
+                .is_none()
+                .then(|| "balance holes need the rear seal; they are left out".to_string());
+            Ok((
+                size.map(|h| BalanceHoleOptions {
                     count: h.count,
                     diameter: h.diameter,
                     seal_diameter: h.seal_diameter,
-                }))
+                }),
+                note,
+            ))
         }
 
         pub(super) fn ui(
@@ -689,11 +790,24 @@ mod cad {
                 }));
             }
             if volute.is_some() {
-                ui.label(tr(if volute_geometry.is_some() {
-                    "The volute flow domain and its casing are exported too."
-                } else {
-                    "The volute is left out until its steps are accepted."
-                }));
+                if volute_geometry.is_some() {
+                    ui.checkbox(
+                        &mut self.volute_surfaces,
+                        tr("Volute as curves and surfaces (no solid)"),
+                    )
+                    .on_hover_text(tr(
+                        "The walls trimmed and sewn at a sharp or fillet cutwater, with the \
+                         section outlines, to model the solid in another CAD system. STEP \
+                         and IGES only.",
+                    ));
+                }
+                ui.label(tr(
+                    match (volute_geometry.is_some(), self.volute_surfaces) {
+                        (false, _) => "The volute is left out until its steps are accepted.",
+                        (true, true) => "The volute is exported as curves and surfaces.",
+                        (true, false) => "The volute flow domain and its casing are exported too.",
+                    },
+                ));
             }
             ui.horizontal(|ui| {
                 ui.label(tr("Formats"));
@@ -701,6 +815,10 @@ mod cad {
                 ui.checkbox(&mut self.iges, tr("IGES"));
                 ui.checkbox(&mut self.stl, tr("STL"));
             });
+            ui.checkbox(&mut self.boundaries, tr("Named boundaries"))
+                .on_hover_text(tr(
+                    "Also writes the flow domains split into named boundaries (inflow, outflow, hub, shroud, blade, spiral, diffuser, cutwater…), a file each, in a folder called boundaries",
+                ));
             ui.add_space(6.0);
 
             let any_format = self.step || self.iges || self.stl;
@@ -719,8 +837,8 @@ mod cad {
                         "Accept the geometry steps up to the blade edges first."
                     }));
                 if response.clicked() {
-                    match self.hole_options(project, id) {
-                        Ok(holes) => {
+                    match self.hole_options(project, id, g) {
+                        Ok((holes, note)) => {
                             if let Some(folder) = rfd::FileDialog::new().pick_folder() {
                                 self.start(
                                     ui.ctx(),
@@ -729,6 +847,7 @@ mod cad {
                                     stator_design.cloned(),
                                     volute_geometry.cloned(),
                                     holes,
+                                    note,
                                     folder,
                                 );
                             }
@@ -773,6 +892,26 @@ mod cad {
                             tr("Flow domain"),
                             format!("{:.1} cm³", report.fluid_volume * 1e6),
                         );
+                        for &(kind, volume) in &report.rings {
+                            value_row(
+                                ui,
+                                ring_label(kind),
+                                tf(
+                                    "{} cm³, {} (at the impeller density)",
+                                    &[&format!("{:.1}", volume * 1e6), &mass(volume)],
+                                ),
+                            );
+                        }
+                        if let Some(volume) = report.back_vanes {
+                            value_row(
+                                ui,
+                                tr("Back vanes"),
+                                tf(
+                                    "{} cm³, {} (part of the impeller)",
+                                    &[&format!("{:.1}", volume * 1e6), &mass(volume)],
+                                ),
+                            );
+                        }
                         value_row(
                             ui,
                             tr("Hub"),
@@ -839,7 +978,11 @@ mod cad {
                     for p in &report.problems {
                         ui.colored_label(
                             ui.visuals().warn_fg_color,
-                            format!("{} {p}", crate::theme::icon::WARNING),
+                            format!(
+                                "{} {}",
+                                crate::theme::icon::WARNING,
+                                crate::i18n::message(p)
+                            ),
                         );
                     }
                 }
@@ -874,9 +1017,23 @@ mod cad {
                 &CadOptions::default(),
                 &folder,
                 &["step"],
+                false,
+                false,
             )
             .unwrap();
-            assert_eq!(report.files.len(), 4);
+            // Impeller, flow domain, volute and its casing, then the four wear rings.
+            assert_eq!(report.files.len(), 8);
+            assert_eq!(report.rings.len(), 4);
+            assert!(report.rings.iter().all(|&(_, v)| v > 0.0));
+            for stem in tp_cad::RingKind::ALL.map(tp_cad::RingKind::file_stem) {
+                assert!(
+                    report
+                        .files
+                        .iter()
+                        .any(|f| f.file_stem().is_some_and(|s| s == stem)),
+                    "{stem}"
+                );
+            }
             assert!(report.volute_volume.is_some_and(|v| v > 0.0));
             assert!(report.casing.is_some_and(|(v, t)| v > 0.0 && t > 0.0));
             for file in &report.files {
@@ -889,6 +1046,132 @@ mod cad {
                 report.problems
             );
             assert!(report.impeller_volume > 0.0 && report.fluid_volume > 0.0);
+            // The vanes are off by default and so is their line.
+            assert!(report.back_vanes.is_none());
+            std::fs::remove_dir_all(&folder).unwrap();
+        }
+
+        #[test]
+        fn cad_export_writes_the_named_boundaries_of_the_flow_domains() {
+            let project = default_project();
+            let mut derived = Derived::default();
+            derived.update(&project);
+            let g = derived.geometry(project.components()[0].id()).unwrap();
+            let folder =
+                std::env::temp_dir().join(format!("tp-gui-cad-named-{}", std::process::id()));
+            let volute = derived.volute(project.components()[1].id());
+            let report = run(
+                g,
+                None,
+                None,
+                volute,
+                &CadOptions::default(),
+                &folder,
+                &["stl"],
+                true,
+                false,
+            )
+            .unwrap();
+            let named = |stem: &str, name: &str| {
+                report
+                    .files
+                    .iter()
+                    .any(|f| f.ends_with(format!("boundaries/{stem}-{name}.stl")))
+            };
+            for name in ["Inflow", "Outflow", "Hub", "Shroud", "Blade"] {
+                assert!(named("impeller", name), "impeller {name}");
+            }
+            for name in ["Inflow", "Outflow", "Spiral", "Diffuser"] {
+                assert!(named("volute", name), "volute {name}");
+            }
+            assert!(
+                report.problems.iter().all(|p| p.contains("did not fit")),
+                "{:?}",
+                report.problems
+            );
+            std::fs::remove_dir_all(&folder).unwrap();
+        }
+
+        #[test]
+        fn cad_export_writes_the_volute_as_curves_and_surfaces() {
+            let project = default_project();
+            let mut derived = Derived::default();
+            derived.update(&project);
+            let g = derived.geometry(project.components()[0].id()).unwrap();
+            let folder =
+                std::env::temp_dir().join(format!("tp-gui-surfaces-{}", std::process::id()));
+            let volute = derived.volute(project.components()[1].id());
+            let report = run(
+                g,
+                None,
+                None,
+                volute,
+                &CadOptions::default(),
+                &folder,
+                &["step", "igs", "stl"],
+                false,
+                true,
+            )
+            .unwrap();
+            // No volute solid, and the surfaces in STEP and IGES, not in STL.
+            assert!(report.volute_volume.is_none() && report.casing.is_none());
+            for (extension, expected) in [("step", true), ("igs", true), ("stl", false)] {
+                let path = folder.join(format!("volute-surfaces.{extension}"));
+                assert_eq!(report.files.contains(&path), expected, "{extension}");
+            }
+            let read = tp_cad::read_step(&folder.join("volute-surfaces.step")).unwrap();
+            assert!(read.face_count() >= 3);
+            std::fs::remove_dir_all(&folder).unwrap();
+        }
+
+        #[test]
+        fn balance_holes_follow_the_rear_seal_of_the_contour() {
+            let mut project = default_project();
+            let id = project.components()[0].id();
+            let export = CadExport {
+                balance_holes: true,
+                ..CadExport::default()
+            };
+            let mut input = project.impeller_geometry_input(id).unwrap();
+            input.meridional.seals.rear.diameter = Param::Manual(0.09);
+            project.set_impeller_geometry(id, input.clone()).unwrap();
+            let g = project.compute_impeller_geometry(id).unwrap();
+            let rear = g.contour.seals.rear.unwrap();
+            let (holes, note) = export.hole_options(&project, id, &g).unwrap();
+            assert!(note.is_none());
+            assert!((holes.unwrap().seal_diameter - 2.0 * rear.radius).abs() < 1e-12);
+            // Without the rear seal the holes are left out, and the report says so.
+            input.meridional.seals.rear.enabled = false;
+            project.set_impeller_geometry(id, input).unwrap();
+            let g = project.compute_impeller_geometry(id).unwrap();
+            let (holes, note) = export.hole_options(&project, id, &g).unwrap();
+            assert!(holes.is_none());
+            assert!(note.is_some_and(|n| n.contains("rear seal")));
+        }
+
+        #[test]
+        fn cad_export_reports_the_back_vanes() {
+            let project = default_project();
+            let mut derived = Derived::default();
+            derived.update(&project);
+            let g = derived.geometry(project.components()[0].id()).unwrap();
+            let mut input = tp_design::impeller::ImpellerGeometryInput::default();
+            input.meridional.back_vanes.enabled = true;
+            let g = tp_design::impeller::build(&g.basis, &input, 1.0).unwrap();
+            let folder = std::env::temp_dir().join(format!("tp-gui-vanes-{}", std::process::id()));
+            let report = run(
+                &g,
+                None,
+                None,
+                None,
+                &CadOptions::default(),
+                &folder,
+                &["step"],
+                false,
+                false,
+            )
+            .unwrap();
+            assert!(report.back_vanes.is_some_and(|v| v > 0.0));
             std::fs::remove_dir_all(&folder).unwrap();
         }
     }

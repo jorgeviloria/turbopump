@@ -13,7 +13,7 @@ use egui_plot::{
     HLine, Line, LineStyle, Plot, PlotBounds, PlotPoint, PlotPoints, PlotTransform, Points, VLine,
 };
 use tp_design::Param;
-use tp_design::volute::{CutwaterShape, CutwaterSlice, VoluteGeometry, VoluteInput};
+use tp_design::volute::{CutwaterSlice, VoluteGeometry, VoluteInput};
 use tp_math::{DVec2, DVec3};
 use tp_project::ComponentId;
 use tp_units::{DisplayUnits, QuantityKind};
@@ -32,10 +32,6 @@ const PREVIEW_STRIDE: usize = 3;
 /// A point of the cutwater to drag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Grip {
-    /// The innermost point of the nose, on the cutwater circle d_z.
-    Nose,
-    /// The leading point of the nose, ρ ahead of its centre.
-    Radius,
     /// A point on the camber line, for the blade angle α₃B.
     Camber,
 }
@@ -58,8 +54,6 @@ pub(crate) struct CutwaterPage {
     pitch: f32,
     /// The plane z to show in the 3D view, asked for with its button.
     pub open_3d: Option<f64>,
-    /// Why the last obliquity asked for could not be built.
-    lean_limit: Option<String>,
 }
 
 impl Default for CutwaterPage {
@@ -70,7 +64,6 @@ impl Default for CutwaterPage {
             dragging: None,
             transform: None,
             frame: true,
-            lean_limit: None,
             yaw: -0.6,
             pitch: 0.9,
             open_3d: None,
@@ -116,8 +109,6 @@ impl Nose {
     /// Where each point to drag lies.
     fn grip(&self, grip: Grip) -> DVec2 {
         match grip {
-            Grip::Nose => self.centre - self.radial * self.radius,
-            Grip::Radius => self.centre - self.camber * self.radius,
             Grip::Camber => self.centre + self.camber * (CAMBER_REACH * self.radius),
         }
     }
@@ -139,23 +130,6 @@ fn dragged(
 ) -> Option<VoluteInput> {
     let mut next = input.clone();
     match grip {
-        Grip::Nose => {
-            let dz = 2.0 * p.length();
-            if dz <= g.basis.impeller_diameter {
-                return None;
-            }
-            next.setup.cutwater_diameter = Param::Manual(dz);
-        }
-        Grip::Radius => {
-            // The innermost point stays on d_z while the radius changes, so the leading
-            // point moves from it along r̂ − c, by the radius.
-            let fixed = nose.centre - nose.radial * nose.radius;
-            let way = nose.radial - nose.camber;
-            let radius = ((p - fixed).dot(way) / way.length_squared()).max(1e-4);
-            next.cutwater.shape = CutwaterShape::Rounded {
-                radius: Param::Manual(radius),
-            };
-        }
         Grip::Camber => {
             let incidence = (nose.angle_to(p) - g.design.cutwater_flow_angle)
                 .clamp(-MAX_INCIDENCE, MAX_INCIDENCE);
@@ -165,13 +139,10 @@ fn dragged(
     (next != *input).then_some(next)
 }
 
-/// The grips a cutwater of this shape has.
-fn grips(g: &VoluteGeometry) -> &'static [Grip] {
-    if g.cutwater.radius > 0.0 {
-        &[Grip::Nose, Grip::Radius, Grip::Camber]
-    } else {
-        &[]
-    }
+/// The grips a cutwater of this shape has: none, since a rounded one takes its radius from
+/// its field and its nose follows the walls, not points to drag.
+fn grips(_g: &VoluteGeometry) -> &'static [Grip] {
+    &[]
 }
 
 /// How a measure compares with its guideline.
@@ -273,48 +244,17 @@ impl CutwaterPage {
             }
             ui.checkbox(&mut self.all_planes, tr("All planes"));
             if ui
-                .button(format!("{}  {}", crate::theme::icon::CUBE, tr("View in 3D")))
-                .on_hover_text(tr("The 3D view on the cutwater, cut across the axis at this plane"))
+                .button(format!(
+                    "{}  {}",
+                    crate::theme::icon::CUBE,
+                    tr("View in 3D")
+                ))
+                .on_hover_text(tr(
+                    "The 3D view on the cutwater, cut across the axis at this plane",
+                ))
                 .clicked()
             {
                 self.open_3d = Some(slices[plane].z);
-            }
-            if let CutwaterShape::Rounded { .. } = input.cutwater.shape {
-                ui.separator();
-                let mut share = g.design.cutwater_share;
-                let response = ui
-                    .add(egui::Slider::new(&mut share, 0.0..=1.0).text(tr("spiral share")))
-                    .on_hover_text(tr(
-                        "Share of the missing thickness the spiral side of the body takes past the tip; the diffuser side takes the rest",
-                    ));
-                if response.changed() {
-                    let mut next = input.clone();
-                    next.cutwater.share = Param::Manual(share);
-                    edit = Some(next);
-                }
-                // The obliquity only as far as the walls leave room: a lean they cannot
-                // take keeps the last one and says how far it goes.
-                let mut lean = g.design.cutwater_obliquity.to_degrees();
-                let most = tp_design::volute::MAX_OBLIQUITY.to_degrees();
-                let response = ui
-                    .add(egui::Slider::new(&mut lean, -most..=most).suffix("°").text(tr("obliquity ε")))
-                    .on_hover_text(tr(
-                        "Angle between the edge and the pump axis, unrolled onto d_z; Gülich Table 10.2 asks for more than 35° against pressure pulsations",
-                    ));
-                if response.changed() {
-                    let mut next = input.clone();
-                    next.cutwater.obliquity = Param::Manual(lean.to_radians());
-                    match VoluteGeometry::build(&g.basis, &next) {
-                        Ok(_) => {
-                            self.lean_limit = None;
-                            edit = Some(next);
-                        }
-                        Err(e) => self.lean_limit = Some(crate::i18n::message(&e.to_string())),
-                    }
-                }
-                if let Some(limit) = &self.lean_limit {
-                    ui.colored_label(ui.visuals().warn_fg_color, limit);
-                }
             }
         });
 
@@ -466,11 +406,23 @@ impl CutwaterPage {
                 );
                 if self.all_planes {
                     for (k, s) in slices.iter().enumerate() {
-                        if k == plane || s.outline.is_empty() {
+                        // A fillet's arc lies in another place in each plane, with the same
+                        // radius: drawn together they would look like several radii.
+                        if k == plane || s.outline.is_empty() || g.design.cutwater_shape.is_fillet()
+                        {
                             continue;
                         }
-                        let mut closed = s.outline.iter().map(|p| p.truncate()).collect::<Vec<_>>();
-                        closed.push(closed[0]);
+                        let closed = if g.design.cutwater_shape.is_fillet() {
+                            s.nose_arc()
+                                .iter()
+                                .map(|p| p.truncate())
+                                .collect::<Vec<_>>()
+                        } else {
+                            let mut closed =
+                                s.outline.iter().map(|p| p.truncate()).collect::<Vec<_>>();
+                            closed.push(closed[0]);
+                            closed
+                        };
                         plot.line(
                             Line::new(String::new(), line(&mut closed.into_iter()))
                                 .color(palette.shroud.gamma_multiply(0.35))
@@ -483,7 +435,7 @@ impl CutwaterPage {
                         tr("spiral wall"),
                         line(
                             &mut shown
-                                .spiral_wall
+                                .trimmed_spiral_wall()
                                 .iter()
                                 .filter(|p| near(p))
                                 .map(|p| p.truncate()),
@@ -497,7 +449,7 @@ impl CutwaterPage {
                         tr("diffuser wall"),
                         line(
                             &mut shown
-                                .diffuser_wall
+                                .trimmed_diffuser_wall()
                                 .iter()
                                 .filter(|p| near(p))
                                 .map(|p| p.truncate()),
@@ -506,7 +458,17 @@ impl CutwaterPage {
                     .color(palette.volute)
                     .width(2.0),
                 );
-                if !shown.outline.is_empty() {
+                if g.design.cutwater_shape.is_fillet() {
+                    // The nose is the arc between the two walls, not a body of its own.
+                    plot.line(
+                        Line::new(
+                            tr("cutwater"),
+                            line(&mut shown.nose_arc().iter().map(|p| p.truncate())),
+                        )
+                        .color(palette.shroud)
+                        .width(2.4),
+                    );
+                } else if !shown.outline.is_empty() {
                     let mut closed = body.clone();
                     closed.push(body[0]);
                     plot.line(
@@ -537,7 +499,7 @@ impl CutwaterPage {
         let t = response.transform;
         super::settle(ui, ("cutwater_plot", g.basis.midplane.to_bits()), &t);
         self.transform = Some(t);
-        if !shown.outline.is_empty() {
+        if !shown.outline.is_empty() && !g.design.cutwater_shape.is_fillet() {
             fill_strip(ui, &t, &body, scale, palette.shroud.gamma_multiply(0.25));
         }
         let painter = ui.painter_at(*t.frame());
@@ -558,8 +520,6 @@ impl CutwaterPage {
         }
         if let Some(grip) = active {
             response.response.clone().on_hover_text(match grip {
-                Grip::Nose => tr("Innermost point of the nose: drag outward or inward to set the cutwater circle d_z"),
-                Grip::Radius => tr("Leading point of the nose: drag to set its radius ρ"),
                 Grip::Camber => tr("Camber line: turn it to set the incidence i₃ against the flow"),
             });
             ui.ctx().set_cursor_icon(if self.dragging.is_some() {
@@ -608,9 +568,16 @@ impl CutwaterPage {
             .iter()
             .filter(|s| !s.outline.is_empty())
             .collect();
+        let fillet = g.design.cutwater_shape.is_fillet();
         let rings: Vec<Vec<DVec3>> = slices
             .iter()
-            .map(|s| s.outline.iter().step_by(PREVIEW_STRIDE).copied().collect())
+            .map(|s| {
+                if fillet {
+                    s.nose_arc().to_vec()
+                } else {
+                    s.outline.iter().step_by(PREVIEW_STRIDE).copied().collect()
+                }
+            })
             .collect();
         let points: Vec<DVec3> = if rings.is_empty() {
             g.cutwater_slices
@@ -653,13 +620,18 @@ impl CutwaterPage {
         for pair in rings.windows(2) {
             let (a, b) = (&pair[0], &pair[1]);
             let n = a.len().min(b.len());
-            for i in 0..n {
+            // A fillet's nose is an open strip between the two walls.
+            for i in 0..if fillet { n.saturating_sub(1) } else { n } {
                 let j = (i + 1) % n;
                 triangles.push([a[i], a[j], b[j]]);
                 triangles.push([a[i], b[j], b[i]]);
             }
         }
-        for ring in [rings.first(), rings.last()].into_iter().flatten() {
+        for ring in [rings.first(), rings.last()]
+            .into_iter()
+            .flatten()
+            .filter(|_| !fillet)
+        {
             let n = ring.len();
             for i in 0..n / 2 {
                 let (p, q) = (ring[i], ring[i + 1]);
@@ -680,7 +652,11 @@ impl CutwaterPage {
             .collect();
         shaded.sort_by(|a, b| a.0.total_cmp(&b.0));
         let mut mesh = egui::Mesh::default();
-        let base = palette.shroud;
+        let base = if fillet {
+            palette.volute
+        } else {
+            palette.shroud
+        };
         for (_, corners, light) in shaded {
             let color = Color32::from_rgb(
                 (base.r() as f32 * light) as u8,
@@ -698,8 +674,8 @@ impl CutwaterPage {
         let near = |p: &&DVec3| p.distance(centre) < 1.6 * radius;
         for s in &g.cutwater_slices {
             for (wall, color) in [
-                (&s.spiral_wall, palette.hub),
-                (&s.diffuser_wall, palette.volute),
+                (s.trimmed_spiral_wall(), palette.hub),
+                (s.trimmed_diffuser_wall(), palette.volute),
             ] {
                 let points: Vec<Pos2> =
                     wall.iter().filter(near).map(|p| screen(view(*p))).collect();
@@ -768,10 +744,17 @@ fn measures(ui: &mut Ui, g: &VoluteGeometry, band: Option<(f64, f64)>, units: &D
         },
         tr("Effective cutwater diameter").to_owned(),
         show(QuantityKind::Length, effective),
-        tf(
-            "designed d_z {}",
-            &[&show(QuantityKind::Length, d.cutwater_diameter)],
-        ),
+        if effective >= d.cutwater_diameter * (1.0 - 1e-4) {
+            tf(
+                "designed d_z {}",
+                &[&show(QuantityKind::Length, d.cutwater_diameter)],
+            )
+        } else {
+            tf(
+                "fix: the nose reaches inside d_z {}; lower the obliquity or the side radius",
+                &[&show(QuantityKind::Length, d.cutwater_diameter)],
+            )
+        },
     ));
     // Gap B to the impeller, against Table 10.2.
     let gap = d.cutwater_diameter / d2 - 1.0;
@@ -784,10 +767,20 @@ fn measures(ui: &mut Ui, g: &VoluteGeometry, band: Option<(f64, f64)>, units: &D
         },
         tr("Gap d_z/d₂ − 1").to_owned(),
         percent(gap),
-        tf(
-            "at least {} against pulsations (Gülich Table 10.2); past 10 % it costs about 1 % of efficiency (p. 421)",
-            &[&percent(least)],
-        ),
+        if d.cutwater_diameter >= d.min_cutwater_diameter * (1.0 - 1e-9) {
+            tf(
+                "at least {} against pulsations (Gülich Table 10.2); past 10 % it costs about 1 % of efficiency (p. 421)",
+                &[&percent(least)],
+            )
+        } else {
+            tf(
+                "fix: raise d_z to {}, the least that gives the gap {} against pulsations (Gülich Table 10.2)",
+                &[
+                    &show(QuantityKind::Length, d.min_cutwater_diameter),
+                    &percent(least),
+                ],
+            )
+        },
     ));
     if g.cutwater.radius > 0.0 {
         let e = 2.0 * g.cutwater.radius;
@@ -800,7 +793,14 @@ fn measures(ui: &mut Ui, g: &VoluteGeometry, band: Option<(f64, f64)>, units: &D
             },
             tr("Thinnest body").to_owned(),
             show(QuantityKind::Length, thin),
-            tf("the nose {}: no neck", &[&show(QuantityKind::Length, e)]),
+            if thin >= e * (1.0 - 2e-3) {
+                tf("the nose {}: no neck", &[&show(QuantityKind::Length, e)])
+            } else {
+                tf(
+                    "fix: thinner than the nose {}, a neck; reduce the side radius or enlarge the nose",
+                    &[&show(QuantityKind::Length, e)],
+                )
+            },
         ));
         let ratio = e / d.cutwater_diameter;
         rows.push((
@@ -823,13 +823,23 @@ fn measures(ui: &mut Ui, g: &VoluteGeometry, band: Option<(f64, f64)>, units: &D
         },
         tr("Incidence i₃ at design").to_owned(),
         show(QuantityKind::Angle, incidence),
-        tf(
-            "α₃B {} against α₃′ {}; ±3° (eq. T7.7.6)",
-            &[
-                &show(QuantityKind::Angle, d.cutwater_angle),
-                &show(QuantityKind::Angle, d.cutwater_flow_angle),
-            ],
-        ),
+        if incidence.abs() <= 3f64.to_radians() + 1e-12 {
+            tf(
+                "α₃B {} against α₃′ {}; ±3° (eq. T7.7.6)",
+                &[
+                    &show(QuantityKind::Angle, d.cutwater_angle),
+                    &show(QuantityKind::Angle, d.cutwater_flow_angle),
+                ],
+            )
+        } else {
+            tf(
+                "fix: set the cutwater angle α₃B to the flow angle {}, against α₃B {} now; ±3° (eq. T7.7.6)",
+                &[
+                    &show(QuantityKind::Angle, d.cutwater_flow_angle),
+                    &show(QuantityKind::Angle, d.cutwater_angle),
+                ],
+            )
+        },
     ));
     if let Some((lo, hi)) = band {
         rows.push((
@@ -840,7 +850,11 @@ fn measures(ui: &mut Ui, g: &VoluteGeometry, band: Option<(f64, f64)>, units: &D
             },
             tr("Within ±3°").to_owned(),
             format!("q* {lo:.2}–{hi:.2}"),
-            tr("the flow range over which the flow meets the cutwater within ±3°; it comes flatter at part load (Gülich Fig. 9.20)").to_owned(),
+            if lo < 0.8 && hi > 1.2 {
+                tr("the flow range over which the flow meets the cutwater within ±3°; it comes flatter at part load (Gülich Fig. 9.20)").to_owned()
+            } else {
+                tr("fix: the flow meets the cutwater within ±3° over too narrow a range; change the cutwater angle α₃B or the spiral start").to_owned()
+            },
         ));
     }
     if g.cutwater.radius > 0.0 {
@@ -856,19 +870,86 @@ fn measures(ui: &mut Ui, g: &VoluteGeometry, band: Option<(f64, f64)>, units: &D
             tr("more than 35° against pressure pulsations (Gülich Table 10.2); the walls set how far it can lean").to_owned(),
         ));
     }
-    let (wedge_lo, wedge_hi) = range(slices, |s| s.wedge);
-    let degrees = |a: f64| units.to_display(QuantityKind::Angle, a);
     rows.push((
-        Check::Info,
-        tr("Wedge across the width").to_owned(),
-        format!(
-            "{:.1}–{:.1} {}",
-            degrees(wedge_lo),
-            degrees(wedge_hi),
-            units.get(QuantityKind::Angle).symbol
-        ),
-        tr("angle between the spiral and the diffuser wall where they cross").to_owned(),
+        if g.start_range.is_some() {
+            Check::Info
+        } else {
+            Check::Watch
+        },
+        tr("Spiral start").to_owned(),
+        show(QuantityKind::Angle, g.start_angle),
+        match g.start_range {
+            Some((lo, hi)) => tf(
+                "before the walls cross in every plane: from {} to {}",
+                &[
+                    &show(QuantityKind::Angle, lo),
+                    &show(QuantityKind::Angle, hi),
+                ],
+            ),
+            None => tr("the walls do not cross in every plane: the spiral starts where it clears the diffuser").to_owned(),
+        },
     ));
+    if let Some(v) = g.cutwater_values() {
+        rows.push((
+            Check::Info,
+            tr("Cutwater diameter in / out / mean").to_owned(),
+            format!(
+                "{} / {} / {}",
+                show(QuantityKind::Length, v.diameter.lower),
+                show(QuantityKind::Length, v.diameter.upper),
+                show(QuantityKind::Length, v.diameter.mean)
+            ),
+            tf(
+                "lower side / upper side / mean of the planes; the least, dMin, is {} above",
+                &[&show(QuantityKind::Length, v.least_diameter)],
+            ),
+        ));
+        rows.push((
+            Check::Info,
+            tr("Cutwater angle in / out / mean").to_owned(),
+            format!(
+                "{} / {} / {}",
+                show(QuantityKind::Angle, v.angle.lower),
+                show(QuantityKind::Angle, v.angle.upper),
+                show(QuantityKind::Angle, v.angle.mean)
+            ),
+            tr("angle between the spiral and the diffuser wall at the tip, lower side / upper side / mean of the planes").to_owned(),
+        ));
+        rows.push((
+            Check::Info,
+            tr("Cutwater position φC,1").to_owned(),
+            show(QuantityKind::Angle, v.position),
+            tr("wrap angle of the tip, from the start of the volute").to_owned(),
+        ));
+        for (label, section, note) in [
+            (
+                tr("Equivalent diameter D, cutwater section"),
+                v.start,
+                tr("the start of the spiral, where the cutwater ends"),
+            ),
+            (
+                tr("Equivalent diameter D, throat"),
+                v.throat,
+                tr("the first section of the discharge diffuser"),
+            ),
+            (
+                tr("Equivalent diameter D, outlet"),
+                v.outlet,
+                tr("the last section of the discharge diffuser"),
+            ),
+        ] {
+            rows.push((
+                Check::Info,
+                label.to_owned(),
+                format!(
+                    "{} · A {}",
+                    show(QuantityKind::Length, section.equivalent_diameter),
+                    show(QuantityKind::Area, section.area)
+                ),
+                note.to_owned(),
+            ));
+        }
+    }
     if d.development.law.velocity_based() {
         rows.push((
             Check::Info,
@@ -966,25 +1047,4 @@ fn incidence_plot(
                     .width(2.0),
             );
         });
-}
-
-#[cfg(test)]
-impl CutwaterPage {
-    /// The point to drag `grip` as last drawn, in screen points.
-    pub(crate) fn grip_position(&self, g: &VoluteGeometry, grip: Grip, scale: f64) -> Option<Pos2> {
-        self.screen(Nose::of(g).grip(grip), scale)
-    }
-
-    /// Where a point of the volute (x, y) lies on the plot as last drawn.
-    pub(crate) fn screen(&self, p: DVec2, scale: f64) -> Option<Pos2> {
-        Some(self.transform?.position_from_point(&to_plot(p, scale)))
-    }
-}
-
-/// The nose of `g`: its centre, outward, downstream and along the camber line, and its
-/// radius.
-#[cfg(test)]
-pub(crate) fn nose_frame(g: &VoluteGeometry) -> (DVec2, DVec2, DVec2, DVec2, f64) {
-    let n = Nose::of(g);
-    (n.centre, n.radial, n.along, n.camber, n.radius)
 }

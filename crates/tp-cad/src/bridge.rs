@@ -30,12 +30,31 @@ pub(crate) mod ffi {
         fn planar_face(wire: &Shape) -> Result<UniquePtr<Shape>>;
         fn revolve_z(face: &Shape) -> Result<UniquePtr<Shape>>;
         fn loft_solid(wires: &ShapeList) -> Result<UniquePtr<Shape>>;
+        fn loft_shell(wires: &ShapeList) -> Result<UniquePtr<Shape>>;
+        fn sew_shapes(shapes: &ShapeList, tolerance: f64) -> Result<UniquePtr<Shape>>;
+        fn make_solid(shape: &Shape) -> Result<UniquePtr<Shape>>;
+        fn split_by(shapes: &ShapeList, tools: &ShapeList) -> Result<UniquePtr<Shape>>;
+        fn face_sides(faces: &Shape, solid: &Shape, tolerance: f64) -> Result<Vec<f64>>;
+        fn face_at(shape: &Shape, index: u32) -> Result<UniquePtr<Shape>>;
+        fn edge_face_crossings(edge: &Shape, face: &Shape) -> Result<Vec<f64>>;
+        fn section_of(a: &Shape, b: &Shape) -> Result<UniquePtr<Shape>>;
+        fn revolve_z_by(shape: &Shape, angle: f64) -> Result<UniquePtr<Shape>>;
+        fn revolved_surfaces_z(shape: &Shape) -> Result<UniquePtr<Shape>>;
+        fn face_planes(shape: &Shape) -> Vec<f64>;
+        fn faces_except(shape: &Shape, dropped: &[u32]) -> Result<UniquePtr<Shape>>;
         /// Extrusion of a planar face along +z by `height`.
         fn prism_z(face: &Shape, height: f64) -> Result<UniquePtr<Shape>>;
         fn rotate_z(shape: &Shape, angle: f64) -> Result<UniquePtr<Shape>>;
         fn fix_shape(shape: &Shape) -> Result<UniquePtr<Shape>>;
-        /// `op`: 0 cut, 1 fuse, 2 common.
-        fn boolean_op(a: &Shape, b: &Shape, op: u8, fuzzy: f64) -> Result<UniquePtr<Shape>>;
+        /// `op`: 0 cut, 1 fuse, 2 common, of all the `tools` with all the `arguments`.
+        fn boolean_op(
+            arguments: &ShapeList,
+            tools: &ShapeList,
+            op: u8,
+            fuzzy: f64,
+        ) -> Result<UniquePtr<Shape>>;
+        /// A copy of the shape with its own geometry.
+        fn copy_shape(shape: &Shape) -> Result<UniquePtr<Shape>>;
         fn make_compound(shapes: &ShapeList) -> Result<UniquePtr<Shape>>;
         /// Cylinder from `base` along `direction`.
         fn cylinder(
@@ -49,6 +68,10 @@ pub(crate) mod ffi {
         fn edge_samples(shape: &Shape, samples: usize) -> Vec<P3>;
         /// Triangles of the faces, three points each, facing out, within `deflection`.
         fn triangles(shape: &Shape, deflection: f64) -> Result<Vec<P3>>;
+        /// The face of each triangle of the last triangulation, as `triangles` lists them.
+        fn triangle_faces(shape: &Shape) -> Vec<u32>;
+        /// Points along the edges of the shells that bound only one face, `samples` each.
+        fn free_edge_samples(shape: &Shape, samples: usize) -> Result<Vec<P3>>;
         /// Distance from each point to the nearest face; NaN where it cannot be found.
         fn boundary_distances(shape: &Shape, points: &[P3]) -> Result<Vec<f64>>;
         /// Rounds the edges of the indexed edge map with `radius`.
@@ -60,6 +83,7 @@ pub(crate) mod ffi {
         /// `kind`: 0 solid, 1 shell, 2 face, 3 edge.
         fn count_subshapes(shape: &Shape, kind: u8) -> usize;
         fn is_valid(shape: &Shape) -> bool;
+        fn check_report(shape: &Shape) -> String;
 
         fn write_step(shape: &Shape, path: &str) -> Result<()>;
         fn write_iges(shape: &Shape, path: &str) -> Result<()>;

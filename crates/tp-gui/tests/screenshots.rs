@@ -123,7 +123,7 @@ fn scene_colors_and_picture() {
     harness.run();
     // Glass to opaque to translucent.
     for _ in 0..2 {
-        harness.get_by_label("Opacity of Casing").click();
+        harness.get_by_label("Opacity of Flow channel").click();
         harness.run();
     }
     harness.get_by_label("Color of Blades").click();
@@ -240,7 +240,7 @@ fn front_dimensions() {
 #[ignore = "needs a GPU; run with --ignored"]
 fn cut_caps() {
     let mut harness = stage_in_3d();
-    harness.get_by_label("Opacity of Casing").click();
+    harness.get_by_label("Opacity of Flow channel").click();
     harness.run();
     harness.get_by_label("Meridional cut").click();
     harness.run();
@@ -310,7 +310,7 @@ fn cut_caps_of_every_volume() {
         harness.state_mut().set_sidebar_open(false);
         harness.get_by_label("3D tab").click();
         harness.run();
-        harness.get_by_label("Opacity of Casing").click();
+        harness.get_by_label("Opacity of Flow channel").click();
         harness.run();
         harness.get_by_label("Meridional cut").click();
         harness.remove_cursor();
@@ -434,7 +434,7 @@ fn inspect_3d() {
         .click();
     harness.run();
     let casing_shown = harness
-        .get_all_by_label("Casing")
+        .get_all_by_label("Flow channel")
         .find(|n| n.accesskit_node().role() == egui::accesskit::Role::CheckBox)
         .and_then(|n| n.accesskit_node().toggled());
     assert_eq!(casing_shown, Some(egui::accesskit::Toggled::False));
@@ -533,6 +533,43 @@ fn cutwater_3d() {
     harness.get_by_label("Zebra").click();
     harness.run_steps(4);
     save(&mut harness, "cutwater-zebra");
+}
+
+/// The fillet cutwater: its page, and the 3D view of the nose the arc rounds at the
+/// crossing of the two walls.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn cutwater_fillet() {
+    let mut project = tp_gui::default_project();
+    let id = project.components()[1].id();
+    let mut input = project.volute_input(id).unwrap();
+    input.cutwater.shape = tp_design::volute::CutwaterShape::Fillet {
+        radius: tp_design::Param::Auto,
+    };
+    project.set_volute(id, input).unwrap();
+    let path = std::env::temp_dir().join("turbopump-cutwater-fillet.tpj");
+    project.save(&path).unwrap();
+    let mut harness = Harness::builder()
+        .with_size([1440.0, 900.0])
+        .with_pixels_per_point(1.5)
+        .with_theme(egui::Theme::Dark)
+        .wgpu()
+        .build_eframe(|cc| TurbopumpApp::new(cc, Some(&path)));
+    harness.run();
+    for _ in 0..6 {
+        harness.get_by_label_contains("Accept step").click();
+        harness.run();
+    }
+    harness.get_by_label("Volute 1").click();
+    harness.run();
+    for _ in 0..4 {
+        harness.get_by_label_contains("Accept step").click();
+        harness.run();
+    }
+    save(&mut harness, "cutwater-fillet");
+    harness.get_by_label_contains("View in 3D").click();
+    harness.run_steps(6);
+    save(&mut harness, "cutwater-fillet-3d");
 }
 
 /// The cross-section step: the default trapezoid, then a radius-based section with a
@@ -1289,4 +1326,141 @@ fn blade_edges() {
         harness.run();
         save(&mut harness, &format!("blade-edges-{suffix}"));
     }
+}
+
+/// The blade mean lines by blade loading: its rows, the quality indicators and the
+/// swirl and loading plots.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn blade_loading() {
+    let mut harness = harness(egui::Theme::Light);
+    for _ in 0..3 {
+        harness.get_by_label_contains("Accept step").click();
+        harness.run();
+    }
+    harness.get_by_value("linear").click();
+    harness.run();
+    harness.get_by_label("by blade loading").click();
+    harness.run();
+    save(&mut harness, "blade-loading");
+}
+
+/// The back vanes card of the meridional contour step and the band they draw in the
+/// Meridian view.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn back_vanes() {
+    let mut project = tp_gui::default_project();
+    let id = project.components()[0].id();
+    let mut input = project.impeller_geometry_input(id).unwrap();
+    input.meridional.back_vanes.enabled = true;
+    input.meridional.seals.rear.enabled = false;
+    project.set_impeller_geometry(id, input).unwrap();
+    let path = std::env::temp_dir().join("turbopump-back-vanes.tpj");
+    project.save(&path).unwrap();
+    let mut harness = Harness::builder()
+        .with_size([1440.0, 900.0])
+        .with_pixels_per_point(1.5)
+        .with_theme(egui::Theme::Light)
+        .wgpu()
+        .build_eframe(|cc| TurbopumpApp::new(cc, Some(&path)));
+    harness.run();
+    harness
+        .get_all_by_label("Meridional contour")
+        .find(|n| n.rect().left() < 400.0)
+        .unwrap()
+        .click();
+    harness.run();
+    harness.run();
+    harness
+        .get_all_by_label("Back vanes")
+        .next()
+        .unwrap()
+        .scroll_to_me();
+    harness.run_steps(4);
+    save(&mut harness, "back-vanes-card");
+    harness.state_mut().focus_view(View::Meridian);
+    harness.run();
+    save(&mut harness, "back-vanes-meridian");
+}
+
+/// The seal cards of the meridional contour step, the rear one scrolled into view.
+#[test]
+#[ignore = "needs a GPU; run with --ignored"]
+fn seal_cards() {
+    let mut harness = harness(egui::Theme::Light);
+    harness
+        .get_all_by_label("Meridional contour")
+        .find(|n| n.rect().left() < 400.0)
+        .unwrap()
+        .click();
+    harness.run();
+    harness.run();
+    harness
+        .get_all_by_label("Rear seal")
+        .next()
+        .unwrap()
+        .scroll_to_me();
+    harness.run_steps(4);
+    save(&mut harness, "seal-cards");
+}
+
+/// The impeller and the volute as the CAD model builds them, generated from the 3D view
+/// of a fillet cutwater: whole, then cut through the axis to show the wall of the
+/// casing and the impeller's disk and cover.
+#[test]
+#[ignore = "needs a GPU and builds the CAD model; run with --ignored"]
+fn cad_model_3d() {
+    let mut project = tp_gui::default_project();
+    let id = project.components()[1].id();
+    let mut input = project.volute_input(id).unwrap();
+    input.cutwater.shape = tp_design::volute::CutwaterShape::Fillet {
+        radius: tp_design::Param::Auto,
+    };
+    project.set_volute(id, input).unwrap();
+    let path = std::env::temp_dir().join("turbopump-cad-model.tpj");
+    project.save(&path).unwrap();
+    let mut harness = Harness::builder()
+        .with_size([1440.0, 900.0])
+        .with_pixels_per_point(1.5)
+        .with_theme(egui::Theme::Light)
+        .wgpu()
+        .build_eframe(|cc| TurbopumpApp::new(cc, Some(&path)));
+    harness.run();
+    for _ in 0..6 {
+        harness.get_by_label_contains("Accept step").click();
+        harness.run();
+    }
+    harness.get_by_label("Volute 1").click();
+    harness.run();
+    for _ in 0..2 {
+        harness.get_by_label_contains("Accept step").click();
+        harness.run();
+    }
+    harness.state_mut().set_sidebar_open(false);
+    harness.get_by_label("3D tab").click();
+    harness.run();
+    harness.get_by_label("Generate 3D (CAD)").click();
+    // It repaints while the model is being built.
+    harness.run_steps(2);
+    let started = std::time::Instant::now();
+    // The casing and the solid impeller join the scene as their models come.
+    while harness.query_by_label("Casing").is_none()
+        || harness.query_by_label("Impeller (solid)").is_none()
+    {
+        assert!(
+            started.elapsed().as_secs() < 300,
+            "the CAD model took too long"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        harness.run_steps(2);
+    }
+    harness.remove_cursor();
+    harness.run_steps(4);
+    save(&mut harness, "cad-model-3d");
+    harness.get_by_label("Meridional cut").click();
+    harness.run();
+    harness.remove_cursor();
+    harness.run_steps(4);
+    save(&mut harness, "cad-model-3d-cut");
 }

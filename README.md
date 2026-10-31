@@ -366,7 +366,11 @@ Otro deslizador reparte entre el lado de la espiral y el del difusor el espesor 
 falta a la cuña pasada la punta, y otro inclina el borde del corte de agua un ángulo
 $\varepsilon$ respecto del eje (la tabla 10.2 pide más de 35° contra las pulsaciones);
 no pasa de lo que las paredes permiten y dice hasta dónde llega. La nariz del nervio de
-una voluta doble se inclina igual. Al lado, las medidas frente a Gülich (diámetro
+una voluta doble se inclina igual. El paso *Cut-water* fija también dónde empieza la espiral,
+dentro del rango en que su pared cruza la del difusor en todos los planos, que se
+muestra con las medidas. En una voluta simple de secciones rectangulares o
+trapeciales el cuerpo se ensancha hacia cada pared lateral con un redondeo del radio de
+la nariz, para llegar a ella sin canto vivo (*Side endings R*; 0 deja el canto). Al lado, las medidas frente a Gülich (diámetro
 efectivo, holgura de la tabla 10.2, cuerpo más fino, $e/d_z$, incidencia en el diseño,
 rango de caudal con $|i_3| \le 3°$, oblicuidad, cuña a lo ancho y corrección de la
 garganta de la ec. 7.28), el cuerpo en 3D, que se
@@ -425,8 +429,11 @@ cargo run -p tp-cli -- geometry bomba.tpj --export salida
 ```
 
 Con `--set` se fija también el borde de ataque por puntos (`le-points=Z,R;Z,R`), la
-velocidad de entrada uniforme en todas las secciones (`inlet-velocity=uniform`) y el
-envolvimiento (`wrap=linear`, común o libre).
+velocidad de entrada uniforme en todas las secciones (`inlet-velocity=uniform`), el
+envolvimiento (`wrap=linear`, común o libre) y la distribución de β: `beta=linear`,
+`beta=smooth:0.3,0.3` o por carga del álabe, `beta=loading` con la forma inicial o
+`beta=loading:L,F,A,S/L,F,A,S` en el cubo y en la carcasa (carga en el borde de ataque,
+fin del tramo delantero, inicio del trasero y pendiente central de $d(r c_u)/d\bar m$).
 
 Los bordes del álabe (`le`, `te`) pueden ser cortados, elípticos (`ellipse:4`), con un
 afilado que acaba en un redondeo tangente y una asimetría opcional
@@ -510,7 +517,9 @@ Curva característica prevista, de válvula cerrada a sobrecarga, también en CS
 cargo run -p tp-cli -- performance bomba.tpj --csv curva.csv
 ```
 
-Flujo potencial meridional y velocidades en las caras del álabe:
+Flujo potencial meridional, velocidades en las caras del álabe e indicadores de calidad
+del álabe (de Haller, pico de succión, carga máxima y en el borde de ataque, cara de
+presión e impulso del flujo secundario):
 
 ```bash
 cargo run -p tp-cli -- analysis bomba.tpj

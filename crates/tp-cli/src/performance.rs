@@ -248,7 +248,7 @@ fn print_report(
                 l.volumetric_efficiency
             );
             println!(
-                "           seal d_sp {} s {} L {}: ΔH {} k {:.2} λ {:.3} → leakage {}; disk friction {} + {}; mechanical {}; Gülich Chap. 3.6",
+                "           seal d_sp {} s {} L {}: ΔH {} k {:.2} λ {:.3} → leakage {}; disk friction {} + {}{}; mechanical {}; Gülich Chap. 3.6",
                 s(Length, l.seal.diameter),
                 s(Length, l.seal.clearance),
                 s(Length, l.seal.length),
@@ -258,6 +258,11 @@ fn print_report(
                 s(VolumeFlow, l.leakage),
                 s(Power, l.front_friction),
                 s(Power, l.rear_friction),
+                if l.back_vanes {
+                    " (with back vanes, Gülich eq. T9.3.4)"
+                } else {
+                    ""
+                },
                 s(Power, l.mechanical)
             );
             if let Some(h) = &c.hydraulic {
@@ -470,6 +475,12 @@ fn print_report(
             s(Force, f.momentum),
             s(Force, f.shaft)
         );
+        if a.law.back_vanes.is_some() {
+            println!(
+                "           back vanes take {} off the rear shroud; Gülich Table 9.3",
+                s(Force, f.back_vanes)
+            );
+        }
         println!(
             "           seals d_sp {} and d_D {}; rough estimate {} to {} (eq. T9.2.12)",
             s(Length, a.law.seal_diameter),

@@ -39,8 +39,13 @@ use crate::pump::correlations::{CorrelationInfo, Verification};
 use crate::{DesignError, Param};
 use tp_units::STANDARD_GRAVITY;
 
-pub use cutwater::CutwaterSlice;
-pub use geometry::{NozzleSection, RibPlane, VoluteGeometry, VoluteSection};
+pub use cutwater::{CutwaterRails, CutwaterSlice};
+pub use geometry::{
+    AcrossWidth, CHANNEL_OVERLAP, CutwaterValues, FlowSection, NozzleSection, RibPlane,
+    ThroatJunction, VoluteGeometry, VoluteSection,
+};
+mod double;
+pub use double::{DoubleRow, FreeDouble};
 pub use section::{
     BendWall, BezierBase, BezierSide, CrossSectionInput, CrossSections, DEFAULT_CONE_ANGLE_DEG,
     ExternalRound, InnerPosition, InternalRound, Measure, RadiusSide, SectionDefinition,
@@ -193,13 +198,27 @@ pub enum VoluteKind {
 #[serde(default)]
 pub struct VoluteSetupInput {
     pub kind: VoluteKind,
-    /// Wrap angle ε_sp of the inner volute of a double volute, rad.
-    pub rib_wrap: Param<f64>,
-    /// Thickness of the rib of a double volute, m.
+    /// Length of the rib of a double volute from its nose, rad. The nose is fixed at
+    /// 180° from the cutwater, which balances the two channels; the rib runs from there
+    /// toward the discharge and ends where this length says: 180° (automatic) reaches
+    /// the throat, less stops the rib short of the discharge diffuser, and the two
+    /// channels join there. Files saved with `rib_wrap` read it as this length.
+    #[serde(alias = "rib_wrap")]
+    pub rib_length: Param<f64>,
+    /// Thickness of the rib of a double volute at its nose, m.
     pub rib_thickness: Param<f64>,
-    /// Length over thickness of the elliptic nose and tail of the rib: 1 for a
-    /// semicircle.
+    /// Thickness of the rib halfway along it, m; automatic: the mean of the nose and
+    /// the tail.
+    pub rib_middle_thickness: Param<f64>,
+    /// Thickness of the rib at its tail, m; automatic: the nose's.
+    pub rib_end_thickness: Param<f64>,
+    /// Length over thickness of the elliptic nose of the rib: 1 for a semicircle.
     pub rib_nose_ratio: Param<f64>,
+    /// Length over thickness of the elliptic tail of the rib; automatic: the nose's.
+    pub rib_tail_ratio: Param<f64>,
+    /// Radius of the fillet where the rib meets the walls of the volute, m; automatic:
+    /// 0, sharp corners. Castings round them anyway, and the CAD rounds them with it.
+    pub rib_corner_radius: Param<f64>,
     /// Outlet area of the outer channel of a double volute over the throat area of the
     /// first partial volute.
     pub channel_area_ratio: Param<f64>,
@@ -303,7 +322,21 @@ pub enum DischargeShape {
     /// end of the bend, rad: 0 points the discharge straight away from the pump axis (a
     /// centerline discharge).
     Radial { axis_angle: f64 },
+    /// A centerline of a fourth-degree Bézier curve between the throat and the outlet:
+    /// it leaves along the flow at the throat and ends `turn` further round, away from
+    /// the pump axis (rad). The control points 0 and 4 are its ends, point 2 lies where
+    /// the two directions meet, and points 1 and 3 sit at `start_share` and
+    /// `end_share` of the way from the ends to point 2; they shape the curve.
+    Spline {
+        turn: f64,
+        start_share: f64,
+        end_share: f64,
+    },
 }
+
+/// Range of the turn of a spline diffuser, rad, and of its shape shares.
+pub const SPLINE_TURN: std::ops::RangeInclusive<f64> = 0.05..=2.6;
+pub const SPLINE_SHARE: std::ops::RangeInclusive<f64> = 0.1..=0.9;
 
 /// By default a centerline discharge: the bend turns the outlet onto the line through
 /// the pump axis, as on process pumps (our choice).
@@ -312,6 +345,76 @@ impl Default for DischargeShape {
         DischargeShape::Radial { axis_angle: 0.0 }
     }
 }
+
+/// How the area of the discharge diffuser grows from the throat to the outlet. Gülich
+/// (Eqs. 1.44 and 1.45) limits the opening angle but does not give the law between the
+/// two areas, so both laws are our choice.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiffuserGrowth {
+    /// The equivalent radius grows linearly, so the area gains slope from the first
+    /// step: several times that of the last section of the spiral, a break at the throat.
+    #[default]
+    Linear,
+    /// The area is quadratic along the centerline, starts with the slope of the spiral
+    /// at the throat and reaches the outlet area: no break at the throat.
+    Matched,
+}
+
+/// How the sections of the discharge diffuser sit along the pump axis against the
+/// last section of the spiral. Shifting the whole diffuser so that it stays below the
+/// top of the spiral, or above its bottom, leaves a face lying in the plane of the top
+/// of the spiral, which the CAD kernel cannot build: the same shift is a manual offset.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ZAlignment {
+    /// Each section is centred on the centerline.
+    #[default]
+    Centric,
+    /// The outlet is `offset` toward +z (m), the sections in between by the share of the
+    /// length covered, or by its square when `quadratic`.
+    Manual { offset: f64, quadratic: bool },
+}
+
+/// A bend of the centerline of the discharge diffuser along the pump axis: it runs flat
+/// from the throat, rounds off with the radius `radius` through `angle` and goes on
+/// straight at that angle, ending `extent` away from the plane of the volute. The
+/// three have to agree for the length of the diffuser (Δz, R and α of the manual).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ZBend {
+    /// Axial extension Δz at the outlet, m, positive toward +z.
+    pub extent: f64,
+    /// Radius of the round, m.
+    pub radius: f64,
+    /// Angle the centerline reaches against the plane of the volute, rad.
+    pub angle: f64,
+}
+
+/// Range of the angle of a z-bend, rad.
+pub const Z_BEND_ANGLE: std::ops::RangeInclusive<f64> = 0.05..=1.2;
+
+/// Shape of the outlet section of the discharge diffuser. The outlet diameter is then
+/// the equivalent one: the area of the outlet stays π·D²/4.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum OutletShape {
+    #[default]
+    Round,
+    /// A rectangle of the same area, `aspect` = height along the pump axis over width.
+    Rectangular { aspect: f64 },
+}
+
+/// Range of the aspect of a rectangular outlet.
+pub const OUTLET_ASPECT: std::ops::RangeInclusive<f64> = 0.25..=4.0;
+
+/// Shortest rib of a double volute, rad.
+pub const MIN_RIB_LENGTH: f64 = 60.0 * PI / 180.0;
+
+/// Largest base form factor of the discharge diffuser. At 1 the base side is the circle
+/// at once and the CAD kernel cannot cut the cutwater cleanly (the flow domain comes out
+/// in four pieces), and at 0.9 the cutwater of the CAD solid lies 1.7 mm off its design
+/// with the automatic side endings; up to 0.75 it builds cleanly on the reference volute.
+pub const MAX_BASE_FORM: f64 = 1.0;
 
 /// Inputs of the discharge-diffuser step.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -334,10 +437,37 @@ pub struct DischargeInput {
     /// x axis, counter-clockwise about z, rad. Automatic: the discharge points along +y,
     /// vertically up in the front view.
     pub rotation: Param<f64>,
+    /// Law of the area from the throat to the outlet.
+    pub growth: DiffuserGrowth,
+    /// Height offset Δr_C, m: the diffuser is shifted across its centerline, away from
+    /// the pump axis when positive, growing from nothing at the throat to the full offset
+    /// over the first 40 % of its length. It gives the cutwater more room. Automatic: 0.
+    pub height_offset: Param<f64>,
+    /// Alignment of the diffuser along the pump axis.
+    pub z_alignment: ZAlignment,
+    /// Bend of the centerline along the pump axis, if any.
+    pub z_bend: Option<ZBend>,
+    /// Shape of the outlet section; a rectangular one has no round flange.
+    pub outlet_shape: OutletShape,
+    /// Eccentricity of a tangential diffuser, −1 to 1: how it widens against its axis,
+    /// −1 with the wall on the cutwater side straight (it opens outward only), 0 to
+    /// both sides, 1 with the outer wall straight; between them in proportion. Automatic:
+    /// that of the wall chosen in the shape.
+    pub eccentricity: Param<f64>,
+    /// Base form factor, 0 to [`MAX_BASE_FORM`]: how round the first section of the
+    /// diffuser is on its base side, the inlet chord toward the pump axis. 0 keeps the
+    /// flat chord of the throat of the spiral, so that the two run along each other
+    /// there; above it the chord bulges toward the axis by half an ellipse as deep as
+    /// the factor times half the chord (at most nine tenths of the gap to the impeller),
+    /// so that the diffuser crosses the start of the spiral; the bulge fades out along
+    /// the diffuser. Automatic: 0.
+    pub base_form: Param<f64>,
 }
 
 /// Shape of the cutwater where the spiral meets the discharge diffuser (Gülich Chap.
-/// 7.8.1, item 7, and Fig. 7.41b).
+/// 7.8.1, item 7, and Fig. 7.41b). Sharp and fillet share one principle: the cutwater
+/// stands where the outer wall of the spiral crosses the inner wall of the diffuser,
+/// and only the way it closes there changes.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CutwaterShape {
@@ -347,39 +477,118 @@ pub enum CutwaterShape {
     /// The spiral starts at the cutwater and cuts the inner wall of the diffuser: a
     /// sharp edge along their intersection.
     Sharp,
-    /// That edge rounded with `radius`, m (automatic: e₃/2, a nose as thick as the
-    /// cutwater).
-    Rounded { radius: Param<f64> },
+    /// That edge rounded by an arc of `radius`, m (automatic: e₃/2) tangent to both
+    /// walls, so that the cutwater stands where they cross. The CAD joins the spiral and
+    /// the diffuser and rounds the edge with the kernel's fillet; where the kernel
+    /// cannot, it adds the sliver of the wedge the arc cuts off. Shown as "rounded";
+    /// projects saved with the former rounded body (`rounded`) read as this.
+    #[serde(alias = "rounded")]
+    Fillet { radius: Param<f64> },
+    /// The edge closed by a cubic curve between the two walls, cut back from the tip and
+    /// tangent to both there, its handles `handle` times each wall's cut long (0 to 1;
+    /// automatic: ½). The same rounding in every plane, but a smooth curve and not an
+    /// arc, as a blade edge drawn between the walls. `cut` is measured as `measure`
+    /// says: along each wall from the tip (m; automatic: 3 e₃) or across the gap the
+    /// walls leave (m; automatic: e₃).
+    Simple {
+        #[serde(default)]
+        cut: Param<f64>,
+        #[serde(default)]
+        handle: Param<f64>,
+        #[serde(default)]
+        measure: CutMeasure,
+    },
+}
+
+/// How the cut of a simple cutwater is measured.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CutMeasure {
+    /// Along each wall from the tip: both walls end the cut back from it.
+    #[default]
+    Along,
+    /// Across the gap: each wall ends where the other lies the cut away, so the gap the
+    /// curve closes is that wide whatever the wedge. The idea of the offset trim of
+    /// CAESES's volute tutorial (Friendship Systems).
+    Across,
+}
+
+impl CutwaterShape {
+    /// Whether the CAD rounds the intersection edge of the walls (a fillet): the nose is
+    /// the arc of that radius tangent to both walls, wherever that leaves it.
+    pub fn is_fillet(&self) -> bool {
+        matches!(self, Self::Fillet { .. } | Self::Simple { .. })
+    }
+
+    /// Whether the tip is closed by a cubic between the walls ([`Self::Simple`]).
+    pub fn is_simple(&self) -> bool {
+        matches!(self, Self::Simple { .. })
+    }
+
+    /// How the cut of a simple cutwater is measured; `None` for any other.
+    pub fn cut_measure(&self) -> Option<CutMeasure> {
+        match self {
+            Self::Simple { measure, .. } => Some(*measure),
+            _ => None,
+        }
+    }
+
+    /// The radius of the rounded edge.
+    pub fn radius(&self) -> Option<Param<f64>> {
+        match self {
+            Self::Fillet { radius } => Some(*radius),
+            _ => None,
+        }
+    }
 }
 
 impl Default for CutwaterShape {
     fn default() -> Self {
-        CutwaterShape::Rounded {
+        CutwaterShape::Fillet {
             radius: Param::Auto,
         }
     }
 }
+
+/// Handle of the cubic of a simple cutwater, as a share of its cut, when automatic.
+pub const SIMPLE_HANDLE: f64 = 0.5;
+
+/// Cut of a simple cutwater, as a multiple of its thickness e₃, when automatic.
+pub const SIMPLE_CUT: f64 = 3.0;
 
 /// Largest obliquity of the cutwater, rad: past it the edge runs nearly round the
 /// circumference.
 pub const MAX_OBLIQUITY: f64 = 60.0 * std::f64::consts::PI / 180.0;
 
 /// Inputs of the cutwater step.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CutwaterInput {
     pub shape: CutwaterShape,
     /// Incidence i₃ between the cutwater camber line and the approaching flow, rad
     /// (eq. T7.7.6; ±3°).
     pub incidence: Param<f64>,
-    /// Share of the thickness a rounded cutwater lacks past the tip of the wedge that
-    /// its spiral side takes, 0 to 1; the diffuser side takes the rest. Automatic: ½.
-    pub share: Param<f64>,
-    /// Obliquity ε of a rounded cutwater and of the rib nose, rad: the angle between
-    /// the edge and the pump axis, unrolled onto the cutwater circle (Gülich Table 10.2
-    /// asks for ε > 35° against pressure pulsations). For ε > 0 the edge lies further
-    /// downstream toward +z. Automatic: 0, an edge parallel to the axis.
+    /// Obliquity ε of the rib nose of a double volute, rad: the angle between the edge
+    /// and the pump axis, unrolled onto the cutwater circle (Gülich Table 10.2 asks for
+    /// ε > 35° against pressure pulsations). For ε > 0 the edge lies further downstream
+    /// toward +z. Automatic: 0, an edge parallel to the axis.
     pub obliquity: Param<f64>,
+    /// Wrap angle from the cutwater where the spiral of a sharp or rounded cutwater
+    /// starts, rad: before its outer wall crosses the inner wall of the diffuser in
+    /// every plane across the inlet width. Automatic: 3°, or the latest start the walls
+    /// allow if that is too late.
+    pub spiral_start: Param<f64>,
+}
+
+impl Default for CutwaterInput {
+    fn default() -> Self {
+        Self {
+            shape: CutwaterShape::default(),
+            incidence: Param::Auto,
+            obliquity: Param::Auto,
+            spiral_start: Param::Auto,
+        }
+    }
 }
 
 /// Inputs of the wall-thickness step.
@@ -539,6 +748,20 @@ pub struct SectionSize {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DischargeDiffuser {
     pub shape: DischargeShape,
+    /// Law of the area from the throat to the outlet.
+    pub growth: DiffuserGrowth,
+    /// Height offset Δr_C, m.
+    pub height_offset: f64,
+    /// Alignment along the pump axis.
+    pub z_alignment: ZAlignment,
+    /// Bend of the centerline along the pump axis, if any.
+    pub z_bend: Option<ZBend>,
+    /// Shape of the outlet section.
+    pub outlet_shape: OutletShape,
+    /// Eccentricity of a tangential diffuser, −1 to 1 (0 for a radial one).
+    pub eccentricity: f64,
+    /// Base form factor, 0 to 1.
+    pub base_form: f64,
     /// Mean radius of the bend of a radial discharge; 0 for a straight one, m.
     pub bend_radius: f64,
     /// Length along the centerline from the throat, m: the bend of a radial discharge
@@ -569,10 +792,18 @@ pub struct Rib {
     /// Wrap angle of the rib nose from the cutwater, 2π − ε_sp, rad: where the inner
     /// volute starts. The elliptic nose reaches a little ahead of it.
     pub start: f64,
-    /// m
+    /// Length of the rib from its nose, rad: the whole inner volute (`wrap`) or less.
+    pub length: f64,
+    /// Thickness at the nose, m.
     pub thickness: f64,
-    /// Length over thickness of the elliptic nose and tail.
+    /// Thickness halfway along the rib and at its tail, m.
+    pub middle_thickness: f64,
+    pub end_thickness: f64,
+    /// Length over thickness of the elliptic nose and of the elliptic tail.
     pub nose_ratio: f64,
+    pub tail_ratio: f64,
+    /// Radius of the fillet between the rib and the walls, m; 0 for sharp corners.
+    pub corner_radius: f64,
     /// Throat of the first partial volute, at the rib nose, corrected for the rib like a
     /// cutwater (eq. 7.28).
     pub outer_throat: SectionSize,
@@ -586,10 +817,47 @@ pub struct Rib {
 }
 
 impl Rib {
-    /// Length of the nose ahead of the start of the inner volute, and of the tail after
-    /// the throat, m.
+    /// Wrap angle where the tail of the rib ends, rad; 2π when it reaches the throat.
+    pub fn end(&self) -> f64 {
+        self.start + self.length
+    }
+
+    /// Whether the rib stops short of the throat, so that the two channels join before
+    /// the discharge diffuser.
+    pub fn is_short(&self) -> bool {
+        self.length < self.wrap - 1e-9
+    }
+
+    /// Length of the nose ahead of the start of the inner volute, m.
     pub fn nose_length(&self) -> f64 {
         self.nose_ratio * self.thickness / 2.0
+    }
+
+    /// Length of the tail after the end of the rib, m.
+    pub fn tail_length(&self) -> f64 {
+        self.tail_ratio * self.end_thickness / 2.0
+    }
+
+    /// Thickness of the rib at wrap angle `angle`, m: the parabola through the nose,
+    /// middle and tail thicknesses along the rib, kept to its ends outside it.
+    pub fn thickness_at(&self, angle: f64) -> f64 {
+        let s = ((angle - self.start) / self.length).clamp(0.0, 1.0);
+        let t = self.thickness * (2.0 * s - 1.0) * (s - 1.0)
+            + self.middle_thickness * 4.0 * s * (1.0 - s)
+            + self.end_thickness * s * (2.0 * s - 1.0);
+        // A middle far from the ends could bend the parabola below them.
+        t.max(
+            0.5 * self
+                .thickness
+                .min(self.middle_thickness)
+                .min(self.end_thickness),
+        )
+    }
+
+    /// Whether the thickness changes along the rib.
+    pub fn is_tapered(&self) -> bool {
+        (self.middle_thickness - self.thickness).abs() > 1e-12
+            || (self.end_thickness - self.thickness).abs() > 1e-12
     }
 
     /// Area of the outer channel at wrap angle `angle` between the rib nose and 2π.
@@ -642,9 +910,11 @@ pub struct VoluteDesign {
     pub cutwater_shape: CutwaterShape,
     /// Rounding radius of the cutwater nose; 0 unless rounded, m.
     pub nose_radius: f64,
-    /// Share of the missing thickness on the spiral side of a rounded cutwater.
-    pub cutwater_share: f64,
-    /// Obliquity ε of a rounded cutwater and of the rib nose, rad.
+    /// How far back from the tip a simple cutwater cuts the walls, m; 0 for any other.
+    pub cutwater_cut: f64,
+    /// Handles of the cubic of a simple cutwater, as a share of the cut.
+    pub cutwater_handle: f64,
+    /// Obliquity ε of the rib nose, rad.
     pub cutwater_obliquity: f64,
     pub diffuser: DischargeDiffuser,
     pub wall_thickness: f64,
@@ -661,6 +931,8 @@ pub struct VoluteDesign {
     throat_corrected: bool,
     /// The straight walls of a double volute, in closed form.
     straight: Option<Shape>,
+    /// The sizes of a double volute of radius based, line segment or Bézier sections.
+    free_double: Option<FreeDouble>,
 }
 
 /// The axial gap between the spiral of an internal volute and the impeller beside it.
@@ -709,31 +981,87 @@ pub fn inlet_width_ratio(nq: f64) -> f64 {
 /// A rectangular or trapezoidal section in closed form: flanks at slope t = tan δ from
 /// the width b₃ at radius `rz` (Gülich eqs. T7.7.8 and T7.7.9). The double volute uses
 /// it, since its rib runs at one radius across sections of straight walls.
-#[derive(Debug, Clone, Copy, PartialEq)]
+///
+/// A `free` shape stands for any other section a double volute takes (radius based, line
+/// segments, Bézier): the same functions of the height, from the outlines of the cross
+/// sections instead of closed forms.
+#[derive(Debug, Clone, PartialEq)]
 struct Shape {
     slope: f64,
     b3: f64,
     rz: f64,
+    free: Option<std::sync::Arc<CrossSections>>,
 }
 
 impl Shape {
-    fn slope(&self) -> f64 {
-        self.slope
+    fn closed(slope: f64, b3: f64, rz: f64) -> Self {
+        Self {
+            slope,
+            b3,
+            rz,
+            free: None,
+        }
+    }
+
+    /// The shape of `sections` all round the volute, which has one definition.
+    fn free(sections: &CrossSections) -> Self {
+        Self {
+            slope: 0.0,
+            b3: sections.inlet_width,
+            rz: sections.stagnation_radius,
+            free: Some(std::sync::Arc::new(sections.clone())),
+        }
+    }
+
+    /// The properties of the section of height `a`, for a free shape.
+    fn properties(&self, a: f64) -> Option<section::SectionProperties> {
+        let cs = self.free.as_ref()?;
+        cs.properties(TAU, a).ok()
+    }
+
+    /// Area of the part of the section of height `total` below the height `cut`: for
+    /// straight walls the section of height `cut` itself.
+    fn area_below(&self, total: f64, cut: f64) -> f64 {
+        match &self.free {
+            None => self.area(cut),
+            Some(cs) => double::clip_area(cs, total, cut),
+        }
+    }
+
+    /// Width of the outer wall of the section of height `a`, at the top: the base a wider
+    /// channel beyond a rib starts from.
+    fn top_width(&self, a: f64) -> f64 {
+        match &self.free {
+            None => self.b3 + 2.0 * a * self.slope,
+            Some(cs) => {
+                let outline = cs.outline(TAU, a);
+                section::width_at(&outline, 0.97 * a)
+            }
+        }
     }
 
     /// ∫ b/r dr over the section of height `a`.
     fn momentum_integral(&self, a: f64) -> f64 {
+        if let Some(p) = self.properties(a) {
+            return p.momentum;
+        }
         let (rz, t) = (self.rz, self.slope);
         (self.b3 - 2.0 * rz * t) * ((rz + a) / rz).ln() + 2.0 * t * a
     }
 
     fn area(&self, a: f64) -> f64 {
+        if let Some(p) = self.properties(a) {
+            return p.area;
+        }
         self.b3 * a + self.slope * a * a
     }
 
     /// Wetted perimeter of the section of height `a`: all walls but the opening of
     /// width b₃ toward the impeller.
     fn wetted_perimeter(&self, a: f64) -> f64 {
+        if let Some(p) = self.properties(a) {
+            return p.wetted_perimeter;
+        }
         let t = self.slope;
         self.b3 + 2.0 * t * a + 2.0 * a * t.hypot(1.0)
     }
@@ -741,12 +1069,18 @@ impl Shape {
     /// ∮ r⁻² dℓ along the wetted walls of the section of height `a`, all but the
     /// opening of width b₃ toward the impeller, 1/m.
     fn wall_inverse_square(&self, a: f64) -> f64 {
+        if let Some(p) = self.properties(a) {
+            return p.wall_inverse_square;
+        }
         let (rz, t) = (self.rz, self.slope);
         let outer = rz + a;
         (self.b3 + 2.0 * t * a) / (outer * outer) + 2.0 * t.hypot(1.0) * (1.0 / rz - 1.0 / outer)
     }
 
     fn centroid_radius(&self, a: f64) -> f64 {
+        if let Some(p) = self.properties(a) {
+            return p.centroid_radius;
+        }
         let (rz, t) = (self.rz, self.slope);
         // ∫ r·b dr with b = b₃ + 2t·s over s = r − r'_z ∈ [0, a].
         let moment =
@@ -755,6 +1089,9 @@ impl Shape {
     }
 
     fn size(&self, a: f64) -> SectionSize {
+        if let Some(p) = self.properties(a) {
+            return size_of(&p);
+        }
         SectionSize {
             height: a,
             outer_radius: self.rz + a,
@@ -767,6 +1104,13 @@ impl Shape {
     /// ∫ b·(r_ref/r)^x dr over the section of height `a` (see
     /// [`section::Outline::swirl_area`]).
     fn swirl_area(&self, a: f64, reference: f64, exponent: f64) -> f64 {
+        if let Some(cs) = &self.free {
+            let measure = section::Measure::Swirl {
+                exponent,
+                reference_radius: reference,
+            };
+            return cs.measure(TAU, a, 0.0, measure).unwrap_or(f64::NAN);
+        }
         #[allow(clippy::float_cmp)] // Closed forms only at exactly these exponents.
         if exponent == 1.0 {
             return reference * self.momentum_integral(a);
@@ -789,6 +1133,13 @@ impl Shape {
         reference: f64,
         exponent: f64,
     ) -> Result<f64, DesignError> {
+        if let Some(cs) = &self.free {
+            let measure = section::Measure::Swirl {
+                exponent,
+                reference_radius: reference,
+            };
+            return cs.height_for(TAU, 0.0, measure, target);
+        }
         #[allow(clippy::float_cmp)]
         if exponent == 1.0 {
             return self.height_for_integral(target / reference);
@@ -816,6 +1167,9 @@ impl Shape {
 
     /// Height whose momentum integral is `k` (eq. 7.24).
     fn height_for_integral(&self, k: f64) -> Result<f64, DesignError> {
+        if let Some(cs) = &self.free {
+            return cs.height_for_momentum(TAU, k);
+        }
         if k <= 0.0 {
             return Ok(0.0);
         }
@@ -840,6 +1194,9 @@ impl Shape {
     fn height_for_area(&self, area: f64) -> f64 {
         if area <= 0.0 {
             return 0.0;
+        }
+        if let Some(cs) = &self.free {
+            return cs.height_for_area(TAU, area).unwrap_or(0.0);
         }
         let t = self.slope;
         if t < 1e-12 {
@@ -932,38 +1289,53 @@ impl VoluteDesign {
         })?;
         let stagnation_radius = cutwater_diameter / 2.0 + cutwater_thickness / 2.0;
         let mut warnings = Vec::new();
-        // A double volute splits every section with its rib at one radius, so its walls
-        // must be straight and keep one cone angle: other shapes become the trapezoid of
-        // the first definition's cone angle.
+        // A double volute splits every section with its rib at one radius: the shape is
+        // the same all round, and either its walls are straight (closed forms) or it is a
+        // radius based, line segment or Bézier section the rib cuts (`double`). Other
+        // shapes become the trapezoid of the first definition's cone angle.
         let mut sections = input.cross_section.clone();
+        let mut free_shape = false;
         if setup.kind == VoluteKind::Double {
             let mut active = sections.sections.iter().filter(|d| d.active);
             let first = active.clone().min_by(|a, b| a.angle.total_cmp(&b.angle));
             let cone = first
                 .and_then(|d| d.shape.cone_angle())
                 .unwrap_or(DEFAULT_CONE_ANGLE_DEG.to_radians());
-            if !active.all(|d| d.shape.straight_cone_angle() == Some(cone)) {
-                warnings.push(format!(
-                    "a double volute needs straight walls at one cone angle: the cross \
-                     sections were made trapezoidal at {:.1}°",
-                    cone.to_degrees()
-                ));
-            }
-            sections = CrossSectionInput::single(if cone == 0.0 {
-                SectionShape::rectangular()
+            let free = first
+                .filter(|f| f.shape.takes_a_rib() && active.clone().all(|d| d.shape == f.shape))
+                .map(|f| f.shape.clone());
+            if let Some(shape) = free {
+                free_shape = true;
+                sections = CrossSectionInput::single(shape);
             } else {
-                SectionShape::trapezoidal(cone)
-            });
+                if !active.all(|d| d.shape.straight_cone_angle() == Some(cone)) {
+                    warnings.push(format!(
+                        "a double volute needs straight, radius based, line segment or Bézier \
+                         sections of two equal sides, one shape all round: the cross \
+                         sections were made trapezoidal at {:.1}°",
+                        cone.to_degrees()
+                    ));
+                }
+                sections = CrossSectionInput::single(if cone == 0.0 {
+                    SectionShape::rectangular()
+                } else {
+                    SectionShape::trapezoidal(cone)
+                });
+            }
         }
         let mut cross_sections = CrossSections::new(&sections, inlet_width, stagnation_radius)?;
-        let section = Shape {
-            slope: cross_sections.definitions()[0]
-                .shape
-                .straight_cone_angle()
-                .unwrap_or(0.0)
-                .tan(),
-            b3: inlet_width,
-            rz: stagnation_radius,
+        let section = if free_shape {
+            Shape::free(&cross_sections)
+        } else {
+            Shape::closed(
+                cross_sections.definitions()[0]
+                    .shape
+                    .straight_cone_angle()
+                    .unwrap_or(0.0)
+                    .tan(),
+                inlet_width,
+                stagnation_radius,
+            )
         };
         // Eq. 7.24 for a partial volute of wrap angle ε: ∫ b/r dr = ε·Q_Le/(2π·c₂u·r₂).
         let momentum_constant = flow / (TAU * basis.cu * r2);
@@ -973,27 +1345,27 @@ impl VoluteDesign {
             law => law,
         };
 
-        // A double volute: the inner volute wraps ε_sp, 180° by default and 170° with an
-        // even number of blades so that two blades never pass the cutwaters together
-        // (Gülich Chap. 7.8.1, item 1).
-        let even_blades = basis.impeller_blades.is_multiple_of(2);
+        // A double volute: the inner volute starts at the rib nose, always 180° from the
+        // cutwater (the hydraulic balance), and wraps 180° to the throat, where the
+        // discharge is. The rib may end earlier.
         let rib_wrap = match setup.kind {
             VoluteKind::Single => None,
+            // The inner volute always wraps 180°: the nose is half a turn from the cutwater.
+            VoluteKind::Double => Some(PI),
+        };
+        let rib_length = match setup.kind {
+            VoluteKind::Single => None,
             VoluteKind::Double => {
-                let wrap = setup
-                    .rib_wrap
-                    .resolve(|| if even_blades { 170f64.to_radians() } else { PI });
-                require(
-                    wrap > 90f64.to_radians() && wrap <= 240f64.to_radians(),
-                    || {
-                        format!(
-                            "the inner volute of a double volute must wrap more than 90° and \
-                             at most 240°, got {:.1}°",
-                            wrap.to_degrees()
-                        )
-                    },
-                )?;
-                Some(wrap)
+                let length = setup.rib_length.resolve(|| PI);
+                require((MIN_RIB_LENGTH..=PI + 1e-9).contains(&length), || {
+                    format!(
+                        "the rib of a double volute must be between {:.0}° and 180° long, \
+                             got {:.1}°",
+                        MIN_RIB_LENGTH.to_degrees(),
+                        length.to_degrees()
+                    )
+                })?;
+                Some(length.min(PI))
             }
         };
 
@@ -1152,10 +1524,121 @@ impl VoluteDesign {
                 let correction = correction_for(blockage, a);
                 Ok((section.size(a + correction), correction))
             };
+        let rib = match rib_wrap.zip(rib_length) {
+            None => None,
+            Some((wrap, length)) => {
+                let start = TAU - wrap;
+                let thickness = setup.rib_thickness.resolve(|| cutwater_thickness);
+                require(thickness > 0.0, || {
+                    "the rib thickness must be positive".into()
+                })?;
+                // The compensation makes room for the rib instead of eq. 7.28.
+                let compensation_start = if setup.rib_compensation {
+                    let at = setup.rib_compensation_start.resolve(|| start / 2.0);
+                    require(at >= 0.0 && at < start - 1f64.to_radians(), || {
+                        format!(
+                            "the rib compensation must start between the cutwater and the rib \
+                             nose at {:.0}°, got {:.1}°",
+                            start.to_degrees(),
+                            at.to_degrees()
+                        )
+                    })?;
+                    Some(at)
+                } else {
+                    None
+                };
+                let (outer_throat, _) = match compensation_start {
+                    Some(_) => partial_throat(start, 0.0, thickness)?,
+                    None => partial_throat(start, thickness, 0.0)?,
+                };
+                require(outer_throat.height > 1.5 * thickness, || {
+                    format!(
+                        "the rib ({:.1} mm) is too thick for the {:.1} mm high throat of the \
+                         first partial volute",
+                        thickness * 1e3,
+                        outer_throat.height * 1e3
+                    )
+                })?;
+                let end_thickness = setup.rib_end_thickness.resolve(|| thickness);
+                let middle_thickness = setup
+                    .rib_middle_thickness
+                    .resolve(|| 0.5 * (thickness + end_thickness));
+                require(end_thickness > 0.0 && middle_thickness > 0.0, || {
+                    "the rib thickness must be positive along the rib".into()
+                })?;
+                let thickest = middle_thickness.max(end_thickness);
+                require(outer_throat.height > 1.5 * thickest, || {
+                    format!(
+                        "the rib ({:.1} mm along it) is too thick for the {:.1} mm high \
+                         throat of the first partial volute",
+                        thickest * 1e3,
+                        outer_throat.height * 1e3
+                    )
+                })?;
+                let nose_ratio = setup.rib_nose_ratio.resolve(|| 1.0);
+                require((1.0..=5.0).contains(&nose_ratio), || {
+                    format!("the nose ratio of the rib must lie between 1 and 5, got {nose_ratio}")
+                })?;
+                let tail_ratio = setup.rib_tail_ratio.resolve(|| nose_ratio);
+                require((1.0..=5.0).contains(&tail_ratio), || {
+                    format!("the tail ratio of the rib must lie between 1 and 5, got {tail_ratio}")
+                })?;
+                let corner_radius = setup.rib_corner_radius.resolve(|| 0.0);
+                require(
+                    (0.0..=thickness.min(end_thickness)).contains(&corner_radius),
+                    || {
+                        format!(
+                            "the corner fillet of the rib must lie between 0 and its thinnest end, \
+                         {:.1} mm, got {:.1} mm",
+                            thickness.min(end_thickness) * 1e3,
+                            corner_radius * 1e3
+                        )
+                    },
+                )?;
+                let ratio = setup.channel_area_ratio.resolve(|| 1.0);
+                require((0.8..=3.0).contains(&ratio), || {
+                    format!(
+                        "the area ratio of the outer channel must lie between 0.8 and 3, \
+                         got {ratio}"
+                    )
+                })?;
+                Some(Rib {
+                    wrap,
+                    start,
+                    length,
+                    thickness,
+                    middle_thickness,
+                    end_thickness,
+                    nose_ratio,
+                    tail_ratio,
+                    corner_radius,
+                    outer_throat,
+                    channel_inlet_area: outer_throat.area
+                        - section.area_below(outer_throat.height, thickness),
+                    channel_outlet_area: outer_throat.area * ratio,
+                    compensation_start,
+                })
+            }
+        };
         let inner_wrap = rib_wrap.unwrap_or(TAU);
-        let (throat, throat_correction, throat_aspect) = if rib_wrap.is_some() {
+        // The sections of the double volute the rib cuts, if its walls are not straight.
+        let free_double = match (&rib, free_shape) {
+            (Some(rib), true) => Some(double::FreeDouble::build(
+                &section,
+                &development,
+                rib,
+                cutwater_thickness,
+                spiral_input.cutwater_correction,
+            )?),
+            _ => None,
+        };
+        let (throat, throat_correction, throat_aspect) = if let Some(table) = &free_double {
+            let throat = table.inner_size(TAU, stagnation_radius);
+            let width = cross_sections.properties(TAU, throat.height)?.width;
+            (throat, table.correction, width / throat.height)
+        } else if rib_wrap.is_some() {
             let (throat, correction) = partial_throat(inner_wrap, cutwater_thickness, 0.0)?;
-            let aspect = (inlet_width + 2.0 * section.slope() * throat.height) / throat.height;
+            let aspect = section.top_width(throat.height) / throat.height;
             (throat, correction, aspect)
         } else {
             // A single volute takes the shape defined at its throat, raised by the
@@ -1251,17 +1734,35 @@ impl VoluteDesign {
         let incidence = input.cutwater.incidence.resolve(|| 0.0);
         let cutwater_angle = cutwater_flow_angle + incidence;
         let cutwater_shape = input.cutwater.shape;
-        let nose_radius = match cutwater_shape {
-            CutwaterShape::Rounded { radius } => radius.resolve(|| cutwater_thickness / 2.0),
-            _ => 0.0,
+        let nose_radius = match cutwater_shape.radius() {
+            Some(radius) => radius.resolve(|| cutwater_thickness / 2.0),
+            None => 0.0,
         };
         require(nose_radius >= 0.0, || {
             "the cutwater radius cannot be negative".into()
         })?;
-        let cutwater_share = input.cutwater.share.resolve(|| 0.5);
-        require((0.0..=1.0).contains(&cutwater_share), || {
-            "the share of the spiral side of the cutwater must lie between 0 and 1".into()
-        })?;
+        let (cutwater_cut, cutwater_handle) = match cutwater_shape {
+            CutwaterShape::Simple {
+                cut,
+                handle,
+                measure,
+            } => (
+                cut.resolve(|| match measure {
+                    CutMeasure::Along => SIMPLE_CUT * cutwater_thickness,
+                    CutMeasure::Across => cutwater_thickness,
+                }),
+                handle.resolve(|| SIMPLE_HANDLE),
+            ),
+            _ => (0.0, SIMPLE_HANDLE),
+        };
+        if cutwater_shape.is_simple() {
+            require(cutwater_cut > 0.0, || {
+                "the cut of the cutwater must be positive".into()
+            })?;
+            require(cutwater_handle > 0.0 && cutwater_handle <= 1.0, || {
+                "the handles of the cutwater must lie between 0 and 1 of its cut".into()
+            })?;
+        }
         let cutwater_obliquity = input.cutwater.obliquity.resolve(|| 0.0);
         require(cutwater_obliquity.abs() <= MAX_OBLIQUITY, || {
             format!(
@@ -1271,64 +1772,6 @@ impl VoluteDesign {
             )
         })?;
 
-        let rib = match rib_wrap {
-            None => None,
-            Some(wrap) => {
-                let start = TAU - wrap;
-                let thickness = setup.rib_thickness.resolve(|| cutwater_thickness);
-                require(thickness > 0.0, || {
-                    "the rib thickness must be positive".into()
-                })?;
-                // The compensation makes room for the rib instead of eq. 7.28.
-                let compensation_start = if setup.rib_compensation {
-                    let at = setup.rib_compensation_start.resolve(|| start / 2.0);
-                    require(at >= 0.0 && at < start - 1f64.to_radians(), || {
-                        format!(
-                            "the rib compensation must start between the cutwater and the rib \
-                             nose at {:.0}°, got {:.1}°",
-                            start.to_degrees(),
-                            at.to_degrees()
-                        )
-                    })?;
-                    Some(at)
-                } else {
-                    None
-                };
-                let (outer_throat, _) = match compensation_start {
-                    Some(_) => partial_throat(start, 0.0, thickness)?,
-                    None => partial_throat(start, thickness, 0.0)?,
-                };
-                require(outer_throat.height > 1.5 * thickness, || {
-                    format!(
-                        "the rib ({:.1} mm) is too thick for the {:.1} mm high throat of the \
-                         first partial volute",
-                        thickness * 1e3,
-                        outer_throat.height * 1e3
-                    )
-                })?;
-                let nose_ratio = setup.rib_nose_ratio.resolve(|| 1.0);
-                require((1.0..=5.0).contains(&nose_ratio), || {
-                    format!("the nose ratio of the rib must lie between 1 and 5, got {nose_ratio}")
-                })?;
-                let ratio = setup.channel_area_ratio.resolve(|| 1.0);
-                require((0.8..=3.0).contains(&ratio), || {
-                    format!(
-                        "the area ratio of the outer channel must lie between 0.8 and 3, \
-                         got {ratio}"
-                    )
-                })?;
-                Some(Rib {
-                    wrap,
-                    start,
-                    thickness,
-                    nose_ratio,
-                    outer_throat,
-                    channel_inlet_area: outer_throat.area - section.area(thickness),
-                    channel_outlet_area: outer_throat.area * ratio,
-                    compensation_start,
-                })
-            }
-        };
         // Both channels feed the discharge diffuser.
         let discharge_area = throat.area + rib.map_or(0.0, |r| r.channel_outlet_area);
         let diffuser = Self::discharge(basis, &input.diffuser, flow, discharge_area)?;
@@ -1389,10 +1832,14 @@ impl VoluteDesign {
                 gap,
             });
         }
-        let flange = input
-            .wall
-            .flange
-            .enabled
+        let round_outlet = matches!(diffuser.outlet_shape, OutletShape::Round);
+        if input.wall.flange.enabled && !round_outlet {
+            warnings.push(
+                "a rectangular outlet has no flange of ours, which is round: the casing ends flat"
+                    .into(),
+            );
+        }
+        let flange = (input.wall.flange.enabled && round_outlet)
             .then(|| Flange::new(diffuser.outlet_diameter, wall_thickness, &input.wall.flange))
             .transpose()?;
 
@@ -1425,22 +1872,6 @@ impl VoluteDesign {
                 diffuser.allowable_angle.to_degrees()
             ));
         }
-        if let Some(r) = &rib {
-            if r.wrap > PI + 1e-9 {
-                warnings.push(format!(
-                    "the inner volute wraps {:.0}°: past 180° the long outer channel adds \
-                     losses and radial force at overload (Gülich Chap. 7.8.1)",
-                    r.wrap.to_degrees()
-                ));
-            }
-            if even_blades && (r.wrap - PI).abs() < 0.5f64.to_radians() {
-                warnings.push(format!(
-                    "with {} blades and a rib at 180° two blades pass the cutwaters at once: \
-                     Gülich advises 165° to 170° (Chap. 7.8.1)",
-                    basis.impeller_blades
-                ));
-            }
-        }
         if basis.nq > NO_DIFFUSION_NQ && diffuser.area_ratio > 1.05 {
             warnings.push(format!(
                 "above nq ≈ {NO_DIFFUSION_NQ} the discharge nozzle should not decelerate \
@@ -1469,7 +1900,8 @@ impl VoluteDesign {
             cutwater_angle,
             cutwater_shape,
             nose_radius,
-            cutwater_share,
+            cutwater_cut,
+            cutwater_handle,
             cutwater_obliquity,
             diffuser,
             wall_thickness,
@@ -1480,6 +1912,7 @@ impl VoluteDesign {
             momentum_constant,
             throat_corrected: input.spiral.cutwater_correction,
             straight: rib_wrap.map(|_| section),
+            free_double,
             development,
         })
     }
@@ -1498,6 +1931,32 @@ impl VoluteDesign {
         // Eq. 7.29: R_N ≈ 1.5·√(4·A₃q/π).
         let bend_radius = match input.shape {
             DischargeShape::Tangential { .. } => 0.0,
+            DischargeShape::Spline {
+                turn,
+                start_share,
+                end_share,
+            } => {
+                require(SPLINE_TURN.contains(&turn), || {
+                    format!(
+                        "the turn of a spline diffuser must lie between {:.0}° and {:.0}°, got \
+                         {:.1}°",
+                        SPLINE_TURN.start().to_degrees(),
+                        SPLINE_TURN.end().to_degrees(),
+                        turn.to_degrees()
+                    )
+                })?;
+                require(
+                    SPLINE_SHARE.contains(&start_share) && SPLINE_SHARE.contains(&end_share),
+                    || {
+                        format!(
+                            "the shares of a spline diffuser must lie between {} and {}",
+                            SPLINE_SHARE.start(),
+                            SPLINE_SHARE.end()
+                        )
+                    },
+                )?;
+                0.0
+            }
             DischargeShape::Radial { axis_angle } => {
                 require((0.0..=80f64.to_radians()).contains(&axis_angle), || {
                     format!(
@@ -1540,8 +1999,77 @@ impl VoluteDesign {
         let area_ratio = outlet_area / throat_area;
         // Eq. 1.45: tan ϑ_eq = (R₁,eq/L)·(√(A₂/A₁) − 1).
         let opening_angle = (r1 / length * (area_ratio.sqrt() - 1.0)).atan();
+        let height_offset = input.height_offset.resolve(|| 0.0);
+        require(
+            height_offset.is_finite() && height_offset.abs() <= 2.0 * r1,
+            || {
+                format!(
+                    "the height offset {:.1} mm must lie within two throat radii ({:.1} mm)",
+                    height_offset * 1e3,
+                    2.0 * r1 * 1e3
+                )
+            },
+        )?;
+        if let ZAlignment::Manual { offset, .. } = input.z_alignment {
+            require(offset.is_finite() && offset.abs() <= 4.0 * r1, || {
+                format!(
+                    "the axial offset {:.1} mm must lie within four throat radii ({:.1} mm)",
+                    offset * 1e3,
+                    4.0 * r1 * 1e3
+                )
+            })?;
+        }
+        if let Some(b) = input.z_bend {
+            require(
+                b.extent.is_finite()
+                    && b.radius.is_finite()
+                    && b.radius > 0.0
+                    && Z_BEND_ANGLE.contains(&b.angle),
+                || {
+                    format!(
+                        "the z-bend needs a positive radius and an angle between {:.0}° and \
+                         {:.0}°",
+                        Z_BEND_ANGLE.start().to_degrees(),
+                        Z_BEND_ANGLE.end().to_degrees()
+                    )
+                },
+            )?;
+        }
+        if let OutletShape::Rectangular { aspect } = input.outlet_shape {
+            require(OUTLET_ASPECT.contains(&aspect), || {
+                format!(
+                    "the aspect of a rectangular outlet must lie between {} and {}, got {aspect:.2}",
+                    OUTLET_ASPECT.start(),
+                    OUTLET_ASPECT.end()
+                )
+            })?;
+        }
+        let eccentricity = input.eccentricity.resolve(|| match input.shape {
+            DischargeShape::Tangential { straight_wall } => match straight_wall {
+                StraightWall::Inner => -1.0,
+                StraightWall::Centered => 0.0,
+                StraightWall::Outer => 1.0,
+            },
+            DischargeShape::Radial { .. } | DischargeShape::Spline { .. } => 0.0,
+        });
+        require((-1.0..=1.0).contains(&eccentricity), || {
+            format!("the eccentricity must lie between −1 and 1, got {eccentricity:.2}")
+        })?;
+        let base_form = input.base_form.resolve(|| 0.0);
+        require((0.0..=MAX_BASE_FORM).contains(&base_form), || {
+            format!(
+                "the base form factor must lie between 0 and {MAX_BASE_FORM}, got {base_form:.2}"
+            )
+        })?;
         Ok(DischargeDiffuser {
             shape: input.shape,
+            growth: input.growth,
+            height_offset,
+            z_alignment: input.z_alignment,
+            z_bend: input.z_bend,
+            outlet_shape: input.outlet_shape,
+            eccentricity,
+            base_form,
             bend_radius,
             length,
             inlet_area: throat_area,
@@ -1557,15 +2085,33 @@ impl VoluteDesign {
     /// The straight walls of a double volute in closed form; for a single volute, those
     /// of its first definition, or rectangles.
     fn shape(&self) -> Shape {
-        self.straight.unwrap_or(Shape {
-            slope: self.cross_sections.definitions()[0]
-                .shape
-                .straight_cone_angle()
-                .unwrap_or(0.0)
-                .tan(),
-            b3: self.inlet_width,
-            rz: self.stagnation_radius,
+        self.straight.clone().unwrap_or_else(|| {
+            Shape::closed(
+                self.cross_sections.definitions()[0]
+                    .shape
+                    .straight_cone_angle()
+                    .unwrap_or(0.0)
+                    .tan(),
+                self.inlet_width,
+                self.stagnation_radius,
+            )
         })
+    }
+
+    /// The sizes of a double volute whose sections the rib cuts, if it is one.
+    pub fn free_double(&self) -> Option<&FreeDouble> {
+        self.free_double.as_ref()
+    }
+
+    /// The height of the inner face of the rib above r'_z at wrap `angle`, m: that of the
+    /// inner volute, where there is one.
+    pub fn rib_height(&self, angle: f64) -> Result<f64, DesignError> {
+        match (&self.rib, &self.free_double) {
+            (Some(rib), _) if angle <= rib.start => Ok(0.0),
+            (Some(_), Some(table)) => Ok(table.row_at(angle).inner_height),
+            (Some(_), None) => Ok(self.section(angle)?.height),
+            (None, _) => Ok(0.0),
+        }
     }
 
     /// Flow angle α₃′ at the cutwater at another operating point, rad: c₃m grows with
@@ -1593,6 +2139,10 @@ impl VoluteDesign {
     pub fn section(&self, angle: f64) -> Result<SectionSize, DesignError> {
         let e3 = self.cutwater_thickness;
         match &self.rib {
+            Some(rib) if angle > rib.start && self.free_double.is_some() => {
+                let table = self.free_double.as_ref().expect("checked");
+                Ok(table.inner_size(angle, self.stagnation_radius))
+            }
             Some(rib) if angle > rib.start => {
                 self.partial_section(angle - rib.start, rib.wrap, e3, None)
             }
@@ -1733,7 +2283,7 @@ impl VoluteDesign {
                 let area = rib.channel_area(angle);
                 let height = shape.height_for_area(area);
                 let perimeter = shape.wetted_perimeter(height) + self.inlet_width;
-                let radius = section.outer_radius + rib.thickness + height / 2.0;
+                let radius = section.outer_radius + rib.thickness_at(angle) + height / 2.0;
                 sum += (rib.start / TAU / area).powi(3) * perimeter * radius;
             }
         }
@@ -2420,6 +2970,47 @@ mod tests {
     }
 
     #[test]
+    fn a_rib_tapers_along_a_parabola_through_its_three_thicknesses() {
+        let plain = double_with(|_| {}).unwrap().rib.unwrap();
+        // Automatic: the same thickness all along, the tail like the nose, sharp corners.
+        assert!(!plain.is_tapered());
+        assert_relative_eq!(plain.end_thickness, plain.thickness);
+        assert_relative_eq!(plain.tail_ratio, plain.nose_ratio);
+        assert_eq!(plain.corner_radius, 0.0);
+        let rib = double_with(|v| {
+            v.setup.rib_thickness = Param::Manual(0.004);
+            v.setup.rib_middle_thickness = Param::Manual(0.007);
+            v.setup.rib_end_thickness = Param::Manual(0.005);
+            v.setup.rib_tail_ratio = Param::Manual(3.0);
+            v.setup.rib_corner_radius = Param::Manual(0.002);
+        })
+        .unwrap()
+        .rib
+        .unwrap();
+        assert!(rib.is_tapered());
+        assert_relative_eq!(rib.thickness_at(rib.start), 0.004, epsilon = 1e-12);
+        assert_relative_eq!(
+            rib.thickness_at(rib.start + rib.length / 2.0),
+            0.007,
+            epsilon = 1e-12
+        );
+        assert_relative_eq!(rib.thickness_at(rib.end()), 0.005, epsilon = 1e-12);
+        // Outside the rib it keeps the thickness of its ends.
+        assert_relative_eq!(rib.thickness_at(0.0), 0.004, epsilon = 1e-12);
+        assert_relative_eq!(rib.tail_length(), 1.5 * 0.005, epsilon = 1e-12);
+        // An automatic middle is the mean of the ends.
+        let mean = double_with(|v| v.setup.rib_end_thickness = Param::Manual(0.008))
+            .unwrap()
+            .rib
+            .unwrap();
+        assert_relative_eq!(mean.middle_thickness, 0.5 * (mean.thickness + 0.008));
+        // A corner fillet thicker than the rib, or a tail ratio out of range, is refused.
+        assert!(double_with(|v| v.setup.rib_corner_radius = Param::Manual(0.02)).is_err());
+        assert!(double_with(|v| v.setup.rib_tail_ratio = Param::Manual(0.5)).is_err());
+        assert!(double_with(|v| v.setup.rib_end_thickness = Param::Manual(0.03)).is_err());
+    }
+
+    #[test]
     fn the_throat_integral_is_the_flow_over_the_swirl() {
         // Sized by angular momentum without correction, the throat integral J_sp is
         // Q_Le/(c_u·r) for a single volute (eq. 7.24), and the same for the two partial
@@ -2441,20 +3032,35 @@ mod tests {
 
     #[test]
     fn double_volute_rib_limits() {
-        // An even blade count turns the default rib to 170°.
+        // The rib nose is always 180° from the cutwater, whatever the blade count.
         let mut basis = reference_basis();
-        basis.impeller_blades = 6;
         let mut input = VoluteInput::default();
         input.setup.kind = VoluteKind::Double;
+        for blades in [5, 6, 7, 8] {
+            basis.impeller_blades = blades;
+            let d = VoluteDesign::new(&basis, &input).unwrap();
+            let rib = d.rib.unwrap();
+            assert_relative_eq!(rib.wrap, PI, epsilon = 1e-12);
+            assert_relative_eq!(rib.start, PI, epsilon = 1e-12);
+            assert!(d.warnings.iter().all(|w| !w.contains("two blades")));
+        }
+        // The nose stays at 180° and the length of the rib is what changes: 120° stops it
+        // before the throat, the two channels joining there. It cannot be longer than
+        // the inner volute or shorter than 60°.
+        input.setup.rib_length = Param::Manual(120f64.to_radians());
         let d = VoluteDesign::new(&basis, &input).unwrap();
-        assert_relative_eq!(d.rib.unwrap().wrap, 170f64.to_radians());
-        // 180° with six blades and 200° are allowed with a warning; 80° is not.
-        input.setup.rib_wrap = Param::Manual(PI);
-        let d = VoluteDesign::new(&basis, &input).unwrap();
-        assert!(d.warnings.iter().any(|w| w.contains("two blades")));
-        let d = double_with(|v| v.setup.rib_wrap = Param::Manual(200f64.to_radians())).unwrap();
-        assert!(d.warnings.iter().any(|w| w.contains("past 180°")));
-        assert!(double_with(|v| v.setup.rib_wrap = Param::Manual(80f64.to_radians())).is_err());
+        let rib = d.rib.unwrap();
+        assert_relative_eq!(rib.start, PI, epsilon = 1e-12);
+        assert_relative_eq!(rib.wrap, PI, epsilon = 1e-12);
+        assert_relative_eq!(rib.length, 120f64.to_radians());
+        assert_relative_eq!(rib.end(), PI + 120f64.to_radians());
+        assert!(rib.is_short());
+        assert!(!VoluteDesign::new(&basis, &VoluteInput::default()).is_err());
+        assert!(double_with(|v| v.setup.rib_length = Param::Manual(200f64.to_radians())).is_err());
+        assert!(double_with(|v| v.setup.rib_length = Param::Manual(40f64.to_radians())).is_err());
+        let full = double_with(|_| {}).unwrap().rib.unwrap();
+        assert_relative_eq!(full.length, PI);
+        assert!(!full.is_short());
         assert!(double_with(|v| v.setup.channel_area_ratio = Param::Manual(5.0)).is_err());
         assert!(double_with(|v| v.setup.rib_nose_ratio = Param::Manual(0.5)).is_err());
         assert!(double_with(|v| v.setup.rib_nose_ratio = Param::Manual(6.0)).is_err());
@@ -2464,13 +3070,42 @@ mod tests {
             v.cross_section = CrossSectionInput::single(SectionShape::round());
         })
         .unwrap();
-        assert!(d.warnings.iter().any(|w| w.contains("straight walls")));
+        assert!(
+            d.warnings
+                .iter()
+                .any(|w| w.contains("straight, radius based"))
+        );
         assert_eq!(
             d.cross_sections.definitions()[0].shape,
             SectionShape::default()
         );
         let d = double_with(|_| {}).unwrap();
-        assert!(d.warnings.iter().all(|w| !w.contains("straight walls")));
+        assert!(
+            d.warnings
+                .iter()
+                .all(|w| !w.contains("straight, radius based"))
+        );
+        // Radius based, line segment and Bézier sections are kept as they are.
+        for shape in [
+            SectionShape::symmetric(SideShape::RadiusBased(Default::default())),
+            SectionShape::symmetric(SideShape::LineSegments {
+                points: section::default_segments(),
+            }),
+            SectionShape::symmetric(SideShape::Bezier(Default::default())),
+        ] {
+            let d = double_with(|v| {
+                v.cross_section = CrossSectionInput::single(shape.clone());
+            })
+            .unwrap();
+            assert_eq!(d.cross_sections.definitions()[0].shape, shape);
+            assert!(d.free_double().is_some());
+            assert!(
+                d.warnings
+                    .iter()
+                    .all(|w| !w.contains("straight, radius based"))
+            );
+            assert!(d.throat.area > 0.0 && d.throat.height > 0.0);
+        }
         // A widening outer channel, against the first throat.
         let d = double_with(|v| v.setup.channel_area_ratio = Param::Manual(1.5)).unwrap();
         let rib = d.rib.unwrap();

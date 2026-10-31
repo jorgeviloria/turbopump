@@ -123,7 +123,7 @@ mod tests {
     #[test]
     fn the_reference_impeller_against_eq_7_2() {
         let b = basis();
-        let contour = MeridionalContour::build(&b, &MeridionalInput::default()).unwrap();
+        let contour = MeridionalContour::build(&b, &MeridionalInput::default(), 1.0).unwrap();
         let g = guide(&contour, &b);
         // z_E = (172.2 − 72.3)·(35.92/74)^1.07 mm.
         let ze = (0.1722 - 0.0723) * (35.92_f64 / 74.0).powf(1.07);
@@ -146,13 +146,13 @@ mod tests {
     #[test]
     fn a_longer_impeller_moves_towards_the_recommended_extension() {
         let b = basis();
-        let short = MeridionalContour::build(&b, &MeridionalInput::default()).unwrap();
+        let short = MeridionalContour::build(&b, &MeridionalInput::default(), 1.0).unwrap();
         let ze = guide(&short, &b).axial_extension.recommended.0;
         let input = MeridionalInput {
             axial_length: crate::Param::Manual(ze + b.outlet_width),
             ..MeridionalInput::default()
         };
-        let long = MeridionalContour::build(&b, &input).unwrap();
+        let long = MeridionalContour::build(&b, &input, 1.0).unwrap();
         let g = guide(&long, &b);
         assert_relative_eq!(g.axial_extension.actual, ze, max_relative = 1e-9);
         assert!(g.axial_extension.ok);

@@ -439,6 +439,26 @@ pub(crate) fn section(ui: &mut Ui, cx: ToolsCx) -> Option<Command> {
 /// color and how see-through, is in the scene over the view.
 pub(crate) fn view3d(ui: &mut Ui, viewer: &mut Viewer, cx: ToolsCx) -> Option<Command> {
     let mut command = None;
+    group(ui, tr("CAD model"), |ui| {
+        let ready = cx.has_geometry && crate::viewer::CadView::AVAILABLE && !viewer.cad.building();
+        if big_button(
+            ui,
+            Icon::Glyph(icon::CUBE),
+            tr("Generate 3D (CAD)"),
+            ready,
+            false,
+            None,
+        )
+        .on_hover_text(tr(
+            "Builds the impeller and the volute as they are exported (the casing without its \
+             flange) and shows them in place of the quick mesh; hidden again when the design \
+             changes",
+        ))
+        .clicked()
+        {
+            viewer.cad.request();
+        }
+    });
     group(ui, tr("Camera"), |ui| {
         if big_button(
             ui,

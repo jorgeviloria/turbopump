@@ -6,6 +6,105 @@
 
 /// English text → Spanish text.
 pub(super) static TEXTS: &[(&str, &str)] = &[
+    (
+        "Cutwater diameter in / out / mean",
+        "Diámetro del corte de agua entrada / salida / media",
+    ),
+    (
+        "lower side / upper side / mean of the planes; the least, dMin, is {} above",
+        "cara inferior / cara superior / media de los planos; el mínimo, dMin, es {} (fila de arriba)",
+    ),
+    (
+        "Cutwater angle in / out / mean",
+        "Ángulo del corte de agua entrada / salida / media",
+    ),
+    (
+        "angle between the spiral and the diffuser wall at the tip, lower side / upper side / mean of the planes",
+        "ángulo entre la pared de la espiral y la del difusor en la punta, cara inferior / cara superior / media de los planos",
+    ),
+    ("Cutwater position φC,1", "Posición del corte de agua φC,1"),
+    (
+        "wrap angle of the tip, from the start of the volute",
+        "ángulo de envoltura de la punta, desde el inicio de la voluta",
+    ),
+    (
+        "Equivalent diameter D, cutwater section",
+        "Diámetro equivalente D, sección del corte de agua",
+    ),
+    (
+        "the start of the spiral, where the cutwater ends",
+        "el inicio de la espiral, donde acaba el corte de agua",
+    ),
+    (
+        "Equivalent diameter D, throat",
+        "Diámetro equivalente D, garganta",
+    ),
+    (
+        "the first section of the discharge diffuser",
+        "la primera sección del difusor de descarga",
+    ),
+    (
+        "Equivalent diameter D, outlet",
+        "Diámetro equivalente D, salida",
+    ),
+    (
+        "the last section of the discharge diffuser",
+        "la última sección del difusor de descarga",
+    ),
+    (
+        "fix: raise d_z to {}, the least that gives the gap {} against pulsations (Gülich Table 10.2)",
+        "solución: sube d_z a {}, lo mínimo para que el hueco sea {} contra pulsaciones (Gülich Tabla 10.2)",
+    ),
+    (
+        "fix: set the cutwater angle α₃B to the flow angle {}, against α₃B {} now; ±3° (eq. T7.7.6)",
+        "solución: fija el ángulo del corte de agua α₃B en el ángulo del flujo {}, frente al α₃B {} actual; ±3° (ec. T7.7.6)",
+    ),
+    (
+        "fix: the nose reaches inside d_z {}; lower the obliquity or the side radius",
+        "solución: la nariz entra dentro de d_z {}; baja la oblicuidad o el radio lateral",
+    ),
+    (
+        "fix: thinner than the nose {}, a neck; reduce the side radius or enlarge the nose",
+        "solución: más fino que la nariz {}, un cuello; reduce el radio lateral o agranda la nariz",
+    ),
+    (
+        "fix: the flow meets the cutwater within ±3° over too narrow a range; change the cutwater angle α₃B or the spiral start",
+        "solución: el flujo llega al corte de agua dentro de ±3° en un rango demasiado estrecho; cambia el ángulo del corte de agua α₃B o el inicio de la espiral",
+    ),
+    ("Nose shape", "Forma de la nariz"),
+    (
+        "As a blade edge on a body as thick as the nose: elliptic (round by default; Gülich asks for an elliptic profile), tapered, Bézier or blunt. Its pressure face is the diffuser side",
+        "Como un borde de álabe sobre un cuerpo tan grueso como la nariz: elíptica (redonda por defecto; Gülich pide un perfil elíptico), afilada, Bézier o roma. Su cara de presión es el lado del difusor",
+    ),
+    ("Join to the walls", "Unión con las paredes"),
+    (
+        "How the faces run into the spiral and diffuser walls: G1 tangent, G2 with the curvature of the wall too",
+        "Cómo entran las caras en las paredes de la espiral y del difusor: G1 tangente, G2 también con la curvatura de la pared",
+    ),
+    ("G1, tangent", "G1, tangente"),
+    ("G2, same curvature", "G2, misma curvatura"),
+    ("Side endings R", "Remates laterales R"),
+    (
+        "Toward each side wall of the channel the body widens with this round between its faces and the wall, so it meets the wall without a sharp corner; 0 leaves the corner. Automatic: the nose radius ρ in a single volute, except with radius-based sides or external and internal round sections; 0 for those and for a double volute",
+        "Hacia cada pared lateral del canal el cuerpo se ensancha con este redondeo entre sus caras y la pared, para llegar a ella sin canto vivo; 0 deja el canto. Automático: el radio de la nariz ρ en una voluta simple, salvo con lados por radios o secciones redondas externas e internas; 0 en esas y en una voluta doble",
+    ),
+    ("Spiral start", "Inicio de la espiral"),
+    (
+        "Where the spiral starts, before its wall crosses the diffuser's in every plane: from {} to {} here. Automatic: 3°",
+        "Dónde empieza la espiral, antes de que su pared cruce la del difusor en todos los planos: de {} a {} aquí. Automático: 3°",
+    ),
+    (
+        "Where the spiral starts. Its wall does not cross the diffuser's in every plane: it starts where it clears it",
+        "Dónde empieza la espiral. Su pared no cruza la del difusor en todos los planos: empieza donde la deja libre",
+    ),
+    (
+        "before the walls cross in every plane: from {} to {}",
+        "antes de que las paredes se crucen en todos los planos: de {} a {}",
+    ),
+    (
+        "the walls do not cross in every plane: the spiral starts where it clears the diffuser",
+        "las paredes no se cruzan en todos los planos: la espiral empieza donde deja libre el difusor",
+    ),
     ("Fillet over the cutwater", "Redondeo exterior"),
     (
         "Fills and rounds the outside of the casing where the back of the start of the spiral meets the diffuser, so no sharp groove is left over the cutwater; 0 leaves it. Automatic: the wall thickness",
@@ -241,11 +340,6 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     (
         "The casing walls beside the impeller: the front chamber down to the annular seal, the rear one down to the shaft seal",
         "Las paredes de carcasa junto al rodete: la cámara delantera hasta el sello anular y la trasera hasta el sello del eje",
-    ),
-    ("Neck length", "Longitud del cuello"),
-    (
-        "Of the shroud upstream of the inlet, where the annular seal runs; automatic: 0.12·d_sp (Gülich Chap. 3.6.2); 0 for none",
-        "De la tapa aguas arriba de la entrada, donde va el sello anular; automático: 0,12·d_sp (Gülich, cap. 3.6.2); 0 para ninguno",
     ),
     ("Design the side chambers", "Diseñar las cámaras laterales"),
     ("Axial gap s_ax", "Holgura axial s_ax"),
@@ -839,6 +933,116 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Distancia del eje de la bomba a la cara de salida; si se fija, da el largo del difusor",
     ),
     ("Nominal size DN", "Diámetro nominal DN"),
+    ("Area growth", "Crecimiento del área"),
+    ("Height offset Δr_C", "Desplazamiento radial Δr_C"),
+    (
+        "Shifts the diffuser across its centerline, away from the pump axis when positive, over the first 40 % of its length: room for the cutwater, whose tip moves toward the base circle",
+        "Desplaza el difusor a través de su línea media, alejándolo del eje de la bomba si es positivo, en el primer 40 % de su longitud: da sitio al corte de agua, cuya punta se acerca al círculo base",
+    ),
+    ("spline turning {}", "spline con giro de {}"),
+    ("spline", "spline"),
+    ("Turn", "Giro"),
+    (
+        "How far the centerline of the spline diffuser turns between the throat and the outlet, away from the pump axis",
+        "Cuánto gira la línea media del difusor spline entre la garganta y la salida, alejándose del eje de la bomba",
+    ),
+    ("Start share", "Proporción inicial"),
+    ("End share", "Proporción final"),
+    (
+        "Where the control points 1 and 3 of the fourth-degree Bézier centerline sit between the ends and point 2: they shape the curve",
+        "Dónde quedan los puntos de control 1 y 3 de la línea media Bézier de cuarto grado entre los extremos y el punto 2: dan forma a la curva",
+    ),
+    ("Axial bend", "Codo axial"),
+    (
+        "Bends the centerline of the diffuser along the pump axis: it runs flat from the throat, rounds off with the radius R through the angle α and goes on straight, ending Δz along the pump axis. The three have to agree for the length of the diffuser",
+        "Curva la línea media del difusor a lo largo del eje de la bomba: va plana desde la garganta, se redondea con el radio R hasta el ángulo α y sigue recta, acabando a Δz sobre el eje de la bomba. Los tres tienen que ser compatibles con la longitud del difusor",
+    ),
+    ("bent", "con codo"),
+    ("Axial extension Δz", "Extensión axial Δz"),
+    (
+        "How far the outlet lies from the plane of the volute, along the pump axis",
+        "A qué distancia del plano de la voluta queda la salida, a lo largo del eje de la bomba",
+    ),
+    ("Bend radius R", "Radio del codo R"),
+    (
+        "Radius of the round of the axial bend",
+        "Radio del redondeo del codo axial",
+    ),
+    ("Bend angle α", "Ángulo del codo α"),
+    (
+        "Angle the centerline reaches against the plane of the volute",
+        "Ángulo que alcanza la línea media respecto al plano de la voluta",
+    ),
+    ("Outlet section", "Sección de salida"),
+    (
+        "Round, or a rectangle of the same area: its aspect is the height along the pump axis over the width. A rectangular outlet has no round flange",
+        "Circular, o un rectángulo de la misma área: su proporción es la altura a lo largo del eje de la bomba sobre el ancho. Una salida rectangular no lleva la brida circular",
+    ),
+    ("round", "circular"),
+    ("Outlet aspect", "Proporción de la salida"),
+    (
+        "Height along the pump axis over the width of the rectangular outlet",
+        "Altura a lo largo del eje de la bomba sobre el ancho de la salida rectangular",
+    ),
+    ("Eccentricity", "Excentricidad"),
+    (
+        "How the diffuser widens against its axis: −1 with the wall on the cutwater side straight, 0 to both sides, 1 with the outer wall straight; automatic: that of the wall chosen above",
+        "Cómo se ensancha el difusor respecto a su eje: −1 con la pared del lado del corte de agua recta, 0 hacia ambos lados, 1 con la pared exterior recta; automática: la de la pared elegida arriba",
+    ),
+    ("Base form factor", "Factor de forma de la base"),
+    (
+        "How round the first section of the diffuser is on its base side, the inlet chord toward the pump axis: 0 keeps the flat chord of the throat, so that diffuser and spiral run along each other there; above it the chord bulges toward the axis (1: half an ellipse as deep as half the chord, at most nine tenths of the gap to the impeller), so that the diffuser crosses the start of the spiral. It fades out along the diffuser; a rounder base moves the cutwater downstream",
+        "Cuán redonda es la primera sección del difusor en su lado de la base, la cuerda de entrada hacia el eje de la bomba: 0 conserva la cuerda plana de la garganta, y difusor y espiral corren uno junto al otro allí; por encima, la cuerda se abomba hacia el eje (1: media elipse tan honda como media cuerda, como mucho nueve décimos del hueco hasta el impulsor), y el difusor corta el arranque de la espiral. Se desvanece a lo largo del difusor; una base más redonda lleva el corte de agua aguas abajo",
+    ),
+    ("Axial alignment", "Alineación axial"),
+    (
+        "Where the sections of the diffuser sit along the pump axis. Centric: on the centerline. Manual: the outlet is shifted by the offset, linearly or quadratically with the length",
+        "Dónde quedan las secciones del difusor a lo largo del eje de la bomba. Centrada: sobre la línea media. Manual: la salida se desplaza el desvío indicado, de forma lineal o cuadrática con la longitud",
+    ),
+    ("centric", "centrada"),
+    ("Axial offset", "Desvío axial"),
+    (
+        "Shift of the outlet along the pump axis, positive toward +z",
+        "Desplazamiento de la salida a lo largo del eje de la bomba, positivo hacia +z",
+    ),
+    ("Quadratic progression", "Progresión cuadrática"),
+    (
+        "The shift grows with the square of the length instead of linearly",
+        "El desplazamiento crece con el cuadrado de la longitud en vez de linealmente",
+    ),
+    (
+        "Velocity ratio c_out/c_in",
+        "Relación de velocidades c_sal/c_ent",
+    ),
+    ("Outlet axis offset C", "Desvío C del eje de salida"),
+    ("Outlet centre angle φ", "Ángulo φ del centro de la salida"),
+    ("Inlet diameter D₁", "Diámetro de entrada D₁"),
+    ("Inlet area A₁", "Área de entrada A₁"),
+    ("Outlet area A₂", "Área de salida A₂"),
+    (
+        "Spiral wall angle αIn",
+        "Ángulo de la pared de la espiral αIn",
+    ),
+    (
+        "Diffuser wall angle αOut",
+        "Ángulo de la pared del difusor αOut",
+    ),
+    ("Mean wall angle αAvg", "Ángulo medio de las paredes αAvg"),
+    (
+        "Walls off the flow angle",
+        "Paredes frente al ángulo de flujo",
+    ),
+    ("Spiral start φC,0", "Inicio de la espiral φC,0"),
+    (
+        "How the area grows from the throat to the outlet. Radius: the equivalent radius grows \
+        linearly, so the area gains slope from the first step. Matched: quadratic area that starts \
+        with the slope of the spiral, with no break at the throat",
+        "Cómo crece el área de la garganta a la salida. Radio: el radio equivalente crece \
+        linealmente y el área gana pendiente desde el primer paso. Empalmada: área cuadrática que \
+        parte con la pendiente de la espiral, sin salto en la garganta",
+    ),
+    ("linear in the radius", "lineal en el radio"),
+    ("matched to the spiral", "empalmada con la espiral"),
     (
         "Round the automatic outlet diameter to the nearest nominal size",
         "Redondea el diámetro de salida automático al diámetro nominal más próximo",
@@ -1220,6 +1424,103 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "La geometría del rodete tiene errores; corrígelos antes.",
     ),
     ("Wall thickness", "Espesor de pared"),
+    ("Front seal", "Sello delantero"),
+    ("Rear seal", "Sello trasero"),
+    ("Seal diameter", "Diámetro del sello"),
+    ("Seal length", "Largo del sello"),
+    ("Radial clearance", "Holgura radial"),
+    ("Impeller ring", "Anillo del rodete"),
+    ("Casing ring", "Anillo de la carcasa"),
+    ("Impeller ring thickness", "Espesor anillo rodete"),
+    ("Casing ring thickness", "Espesor anillo carcasa"),
+    ("Performance view", "vista de Rendimiento"),
+    (
+        "Set them in the Performance view",
+        "Se ponen en la vista de Rendimiento",
+    ),
+    (
+        "An annular seal between the impeller and the casing, with an optional pair of replaceable wear rings, one on the impeller and one in the casing",
+        "Un sello anular entre el rodete y la carcasa, con un par opcional de anillos de desgaste reemplazables, uno en el rodete y otro en la carcasa",
+    ),
+    ("Back vanes", "Álabes de rebombeo"),
+    (
+        "Short ribs on the back of the hub disk that drag the fluid of the rear chamber round with the impeller: the pressure on the back falls and so does the axial thrust (Gülich §9.2.7)",
+        "Nervios cortos en la cara trasera del disco que arrastran el fluido de la cámara trasera con el rodete: baja la presión sobre la cara trasera y con ella el empuje axial (Gülich §9.2.7)",
+    ),
+    (
+        "Fit the vanes; switched off, the values below are kept",
+        "Poner los álabes; apagados, se conservan los valores de abajo",
+    ),
+    ("Count", "Cantidad"),
+    (
+        "Automatic: 4 below d₂ = 200 mm, else 6 (Gülich Table 9.3)",
+        "Automático: 4 por debajo de d₂ = 200 mm, si no 6 (tabla 9.3 de Gülich)",
+    ),
+    (
+        "Radial and straight (Gülich §9.2.7), or curved like the main blades",
+        "Radiales y rectos (Gülich §9.2.7), o curvos como los álabes principales",
+    ),
+    ("Radial", "Radial"),
+    ("Curved", "Curvo"),
+    ("Vane angle β_v", "Ángulo del álabe β_v"),
+    (
+        "Measured from the circumferential direction, like the blade angle β (90° is radial); the vane turns in the sense of the main blades",
+        "Medido desde la dirección circunferencial, como el ángulo β del álabe (90° es radial); el álabe gira en el sentido de los álabes principales",
+    ),
+    (
+        "Automatic: 0.80·d₂ (Gülich Table 9.3: 0.75 to 0.85)",
+        "Automático: 0,80·d₂ (tabla 9.3 de Gülich: 0,75 a 0,85)",
+    ),
+    ("Inner diameter", "Diámetro interior"),
+    (
+        "Automatic: the boss plus a wall on each side (our choice); with the rear seal on, no lower than its casing ring",
+        "Automático: el cubo más una pared a cada lado (elección nuestra); con el sello trasero activo, no menos que su anillo de la carcasa",
+    ),
+    (
+        "Axial height h; automatic: 0.04·r₂ (Gülich Table 9.3: 0.03 to 0.05)",
+        "Altura axial h; automático: 0,04·r₂ (tabla 9.3 de Gülich: 0,03 a 0,05)",
+    ),
+    (
+        "Circumferential width of a vane; automatic: 2·h (Gülich Table 9.3)",
+        "Ancho circunferencial de un álabe; automático: 2·h (tabla 9.3 de Gülich)",
+    ),
+    ("Tip clearance", "Holgura de punta"),
+    (
+        "Axial, between the vane tips and the casing; automatic: 0.2·h (Gülich Table 9.3). The value shown is the gap as built, larger than asked when the collar of the rear seal governs",
+        "Axial, entre las puntas de los álabes y la carcasa; automática: 0,2·h (tabla 9.3 de Gülich). El valor mostrado es la holgura construida, mayor que la pedida cuando manda el collar del sello trasero",
+    ),
+    ("Rear seal in the way", "El sello trasero estorba"),
+    (
+        "With the rear seal on, the vanes stop outside its casing ring. Nothing changes until you press the button",
+        "Con el sello trasero activo, los álabes terminan fuera de su anillo de la carcasa. Nada cambia hasta que pulses el botón",
+    ),
+    ("Turn off the rear seal", "Quitar el sello trasero"),
+    (
+        "Fit the seal; switched off, the values below are kept",
+        "Poner el sello; apagado, se conservan los valores de abajo",
+    ),
+    (
+        "Automatic: d₁ + 2t + 2·e_r with the impeller ring, d₁ + 2t without",
+        "Automático: d₁ + 2t + 2·e_r con el anillo del rodete, d₁ + 2t sin él",
+    ),
+    ("Automatic: d_sp", "Automático: d_sp"),
+    (
+        "Automatic: 0.12·d (Gülich Chap. 3.6.2)",
+        "Automático: 0,12·d (Gülich cap. 3.6.2)",
+    ),
+    ("Automatic: Gülich eq. 3.12", "Automático: Gülich ec. 3.12"),
+    (
+        "Automatic: max(0.03·d, 4 mm), our choice",
+        "Automático: máx(0,03·d, 4 mm), elección nuestra",
+    ),
+    (
+        "A replaceable wear ring pressed on the impeller",
+        "Un anillo de desgaste reemplazable, montado a presión en el rodete",
+    ),
+    (
+        "A replaceable wear ring fitted in the casing",
+        "Un anillo de desgaste reemplazable, montado en la carcasa",
+    ),
     (
         "Hub disk and shroud; automatic: max(3 mm, 0.02·d₂)",
         "Disco del cubo y carcasa; automático: máx(3 mm, 0,02·d₂)",
@@ -1246,6 +1547,18 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "The volute is left out until its steps are accepted.",
         "La voluta se queda fuera hasta que se acepten sus pasos.",
     ),
+    (
+        "Volute as curves and surfaces (no solid)",
+        "Voluta como curvas y superficies (sin sólido)",
+    ),
+    (
+        "The walls trimmed and sewn at a sharp or fillet cutwater, with the section outlines, to model the solid in another CAD system. STEP and IGES only.",
+        "Las paredes recortadas y cosidas en un corte de agua filoso o con filete, con los contornos de las secciones, para modelar el sólido en otro programa CAD. Solo STEP e IGES.",
+    ),
+    (
+        "The volute is exported as curves and surfaces.",
+        "La voluta se exporta como curvas y superficies.",
+    ),
     ("Formats", "Formatos"),
     ("STEP", "STEP"),
     ("IGES", "IGES"),
@@ -1265,6 +1578,18 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Flow domain", "Dominio fluido"),
     ("Diffuser flow domain", "Dominio fluido del difusor"),
     ("Volute flow domain", "Dominio fluido de la voluta"),
+    (
+        "{} cm³, {} (at the impeller density)",
+        "{} cm³, {} (con la densidad del rodete)",
+    ),
+    (
+        "{} cm³, {} (part of the impeller)",
+        "{} cm³, {} (parte del rodete)",
+    ),
+    ("Front impeller ring", "Anillo delantero del rodete"),
+    ("Front casing ring", "Anillo delantero de la carcasa"),
+    ("Rear impeller ring", "Anillo trasero del rodete"),
+    ("Rear casing ring", "Anillo trasero de la carcasa"),
     (
         "Every solid is a single valid solid.",
         "Cada sólido es un único sólido válido.",
@@ -1333,6 +1658,38 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Remove {} from the project", "Quitar {} del proyecto"),
     ("Views", "Vistas"),
     ("Camera", "Cámara"),
+    ("CAD model", "Modelo CAD"),
+    ("Generate 3D (CAD)", "Generar 3D (CAD)"),
+    (
+        "Builds the impeller and the volute as they are exported (the casing without its flange) and shows them in place of the quick mesh; hidden again when the design changes",
+        "Construye el impulsor y la voluta tal como se exportan (la carcasa sin brida) y los muestra en lugar de la malla rápida; se ocultan de nuevo cuando cambia el diseño",
+    ),
+    (
+        "Generating the CAD model… {} s",
+        "Generando el modelo CAD… {} s",
+    ),
+    (
+        "The design changed: the CAD model is hidden until generated again",
+        "El diseño cambió: el modelo CAD queda oculto hasta generarlo de nuevo",
+    ),
+    (
+        "The CAD model could not be generated: {}",
+        "No se pudo generar el modelo CAD: {}",
+    ),
+    ("sewn surfaces", "superficies cosidas"),
+    ("boolean operations", "operaciones booleanas"),
+    (
+        "CAD model: volute of {}, {} s",
+        "Modelo CAD: voluta de {}, {} s",
+    ),
+    ("CAD model: {} s", "Modelo CAD: {} s"),
+    ("Impeller (solid)", "Impulsor (sólido)"),
+    (" · {} warnings", " · {} avisos"),
+    ("Flow channel", "Canal de flujo"),
+    (
+        "Quick preview · Generate 3D (CAD) shows the solids as they are exported",
+        "Vista rápida · «Generar 3D (CAD)» muestra los sólidos tal como se exportan",
+    ),
     ("Fit", "Encuadrar"),
     (
         "Fit the model in the view",
@@ -2584,8 +2941,8 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Rozamiento de disco y pérdidas mecánicas",
     ),
     (
-        "front {}, rear {}, mechanical {} (Gülich eqs. T3.6.2, T3.6.3, T3.5.6a)",
-        "delantero {}, trasero {}, mecánicas {} (Gülich ecs. T3.6.2, T3.6.3, T3.5.6a)",
+        "front {}, rear {}{}, mechanical {} (Gülich eqs. T3.6.2, T3.6.3, T3.5.6a)",
+        "delantero {}, trasero {}{}, mecánicas {} (Gülich ecs. T3.6.2, T3.6.3, T3.5.6a)",
     ),
     ("Efficiency breakdown", "Desglose del rendimiento"),
     (
@@ -2686,6 +3043,14 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ),
     (", balance holes", ", agujeros de equilibrado"),
     (
+        " (with back vanes, eq. T9.3.4)",
+        " (con álabes de rebombeo, ec. T9.3.4)",
+    ),
+    (
+        "{} off the rear shroud (Gülich Table 9.3)",
+        "{} menos sobre el disco trasero (tabla 9.3 de Gülich)",
+    ),
+    (
         "Annular and shaft seals",
         "Anillo de desgaste y sello del eje",
     ),
@@ -2694,6 +3059,10 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "d_sp {}, d_D {}; estimación rápida de {} a {} (ec. T9.2.12)",
     ),
     ("Balance holes", "Agujeros de equilibrado"),
+    (
+        "The impeller has no rear seal: turn it on in the meridional contour",
+        "El rodete no tiene sello trasero: actívalo en el contorno meridional",
+    ),
     (
         "Holes in the rear shroud with an annular seal there: most of the axial force on the shrouds cancels (Gülich eq. T9.2.14)",
         "Agujeros en el disco trasero con un anillo de desgaste allí: se anula la mayor parte del empuje axial sobre los discos (Gülich ec. T9.2.14)",
@@ -2731,13 +3100,10 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "A double volute splits the spiral with a rib to cut the radial force (Gülich Chap. 7.8.1 and Table 9.4)",
         "Una voluta doble divide la espiral con un nervio para reducir el empuje radial (Gülich cap. 7.8.1 y tabla 9.4)",
     ),
+    ("Rib length", "Largo del nervio"),
     (
-        "Inner volute wrap ε_sp",
-        "Ángulo de la voluta interior ε_sp",
-    ),
-    (
-        "From the rib nose to the throat; 180°, or 170° with an even number of blades (Gülich Chap. 7.8.1)",
-        "De la nariz del nervio a la garganta; 180°, o 170° con un número par de álabes (Gülich cap. 7.8.1)",
+        "From the rib nose, which is always 180° from the cutwater and keeps the two channels balanced. 180° (automatic) reaches the throat; less stops the rib short of the discharge diffuser and the two channels join there",
+        "Desde el morro del nervio, que está siempre a 180° del corte de agua y mantiene equilibrados los dos canales. 180° (automático) llega a la garganta; menos detiene el nervio antes del difusor de descarga y los dos canales se unen ahí",
     ),
     ("Rib thickness", "Espesor del nervio"),
     (
@@ -2757,9 +3123,42 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Largo/espesor de la nariz del nervio",
     ),
     (
-        "Elliptic nose and tail of the rib: 1 for a semicircle, longer for a nose less sensitive to the flow angle (Gülich Chap. 7.8.1, item 7)",
-        "Nariz y cola elípticas del nervio: 1 para un semicírculo, más largas para una nariz menos sensible al ángulo del flujo (Gülich cap. 7.8.1, punto 7)",
+        "Elliptic nose of the rib: 1 for a semicircle, longer for a nose less sensitive to the flow angle (Gülich Chap. 7.8.1, item 7)",
+        "Nariz elíptica del nervio: 1 para un semicírculo, más larga para una nariz menos sensible al ángulo del flujo (Gülich cap. 7.8.1, punto 7)",
     ),
+    ("Rib middle thickness", "Espesor del nervio en medio"),
+    (
+        "Halfway along the rib; the thickness follows a parabola through the nose, the middle and the tail. Automatic: the mean of the ends",
+        "A mitad del nervio; el espesor sigue una parábola por la nariz, el medio y la cola. Automático: el promedio de los extremos",
+    ),
+    ("Rib end thickness", "Espesor del nervio en la cola"),
+    (
+        "At the tail of the rib; automatic: the nose's",
+        "En la cola del nervio; automático: el de la nariz",
+    ),
+    (
+        "Rib tail length/thickness",
+        "Largo/espesor de la cola del nervio",
+    ),
+    (
+        "Elliptic tail of the rib, over its end thickness; automatic: the nose's",
+        "Cola elíptica del nervio, sobre su espesor final; automático: la de la nariz",
+    ),
+    ("Rib corner fillet", "Filete de esquina del nervio"),
+    (
+        "Radius where the rib meets the side walls; the CAD rounds those corners with it. Automatic: 0, sharp corners",
+        "Radio donde el nervio se une a las paredes laterales; el CAD redondea esas esquinas con él. Automático: 0, esquinas vivas",
+    ),
+    ("Rib thickness along it", "Espesor a lo largo del nervio"),
+    (
+        "nose {} · middle {} · tail {}",
+        "nariz {} · medio {} · cola {}",
+    ),
+    ("Rib tail", "Cola del nervio"),
+    ("{}:1 ellipse {} long", "elipse {}:1 de {} de largo"),
+    ("Rib corners", "Esquinas del nervio"),
+    ("fillet {}", "filete de {}"),
+    ("sharp corners", "esquinas vivas"),
     ("Rib nose at", "Nariz del nervio a"),
     ("Tip of the rib nose", "Punta de la nariz del nervio"),
     ("{}, {} from the axis", "{}, a {} del eje"),
@@ -2794,6 +3193,14 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "redondeado con ρ {}, punta a {} con una cuña de {}",
     ),
     (
+        "simple, cut {} back, tip at {} with a wedge of {}",
+        "simple, recorte de {} hacia atrás, punta a {} con una cuña de {}",
+    ),
+    (
+        "body with ρ {}, tip at {} with a wedge of {}",
+        "cuerpo con ρ {}, punta a {} con una cuña de {}",
+    ),
+    (
         "radial, bend R_N {} turning {}, axis at {}",
         "radial, codo R_N {} que gira {}, eje a {}",
     ),
@@ -2822,10 +3229,38 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("Bend turns", "Giro del codo"),
     ("Centerline length", "Longitud de la línea media"),
     (
-        "Tangent: the spiral starts where it clears the diffuser. Sharp: the spiral cuts the diffuser wall. Rounded: a nose of radius ρ on the cutwater circle, its body never thinner than the nose and running smoothly into both walls (Gülich Fig. 7.41b)",
-        "Tangente: la espiral empieza donde deja libre el difusor. Afilado: la espiral corta la pared del difusor. Redondeado: una nariz de radio ρ sobre el círculo del corte de agua, con un cuerpo nunca más fino que la nariz que se une suavemente a las dos paredes (Gülich Fig. 7.41b)",
+        "Tangent: the spiral starts where it clears the diffuser. Sharp: the spiral cuts the diffuser wall. Rounded: the same edge rounded by an arc of radius ρ tangent to both walls, so the cutwater stands where the walls cross. Simple: the walls are cut back from the tip and a smooth curve joins them, tangent to both",
+        "Tangente: la espiral empieza donde deja libre el difusor. Afilado: la espiral corta la pared del difusor. Redondeado: la misma arista redondeada por un arco de radio ρ tangente a las dos paredes, así que el corte de agua queda donde se cruzan las paredes. Simple: las paredes se recortan hacia atrás desde la punta y una curva suave las une, tangente a ambas",
     ),
     ("Nose radius ρ", "Radio de la nariz ρ"),
+    (
+        "How far back from the tip along each wall the cutwater starts: the walls end there and a smooth curve joins them. Automatic: 3 e₃",
+        "A qué distancia de la punta, por cada pared, empieza el corte de agua: las paredes terminan ahí y una curva suave las une. Automático: 3 e₃",
+    ),
+    (
+        "Length of the handles of the curve, as a share of each wall's cut: shorter ones close the nose more tightly. Automatic: ½",
+        "Longitud de las manos de la curva, como fracción del recorte de cada pared: más cortas cierran la nariz con más curvatura. Automático: ½",
+    ),
+    ("Cut measured", "Medida del recorte"),
+    (
+        "Along the walls: both end the same length back from the tip. Across the gap: each ends where the other lies that far away, so the gap the curve closes keeps its width whatever the wedge",
+        "A lo largo de las paredes: las dos terminan a la misma distancia de la punta. A través del hueco: cada una termina donde la otra queda a esa distancia, así que el hueco que cierra la curva mantiene su ancho sea cual sea la cuña",
+    ),
+    ("along the walls", "a lo largo de las paredes"),
+    ("across the gap", "a través del hueco"),
+    ("Gap", "Hueco"),
+    (
+        "How wide the gap between the walls is where the cutwater starts: each wall ends where the other lies this far away, and a smooth curve joins them. Automatic: e₃",
+        "Qué ancho tiene el hueco entre las paredes donde empieza el corte de agua: cada pared termina donde la otra queda a esta distancia, y una curva suave las une. Automático: e₃",
+    ),
+    (
+        "simple, gap {} wide, tip at {} with a wedge of {}",
+        "simple, hueco de {} de ancho, punta a {} con una cuña de {}",
+    ),
+    (
+        "Radius of the round at the crossing of the two walls: the arc touches both, so the cutwater stands where the walls leave it. Automatic: e₃/2",
+        "Radio del redondeo en el cruce de las dos paredes: el arco toca a ambas, así que el corte de agua queda donde lo dejan las paredes. Automático: e₃/2",
+    ),
     (
         "Automatic: e₃/2, a nose as thick as the cutwater; its innermost point stays on the cutwater circle d_z",
         "Automático: e₃/2, una nariz tan gruesa como el corte de agua; su punto más interior queda sobre el círculo d_z",
@@ -2856,6 +3291,20 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
     ("radial", "radial"),
     ("sharp", "afilado"),
     ("rounded", "redondeado"),
+    ("body", "cuerpo"),
+    ("Named boundaries", "Fronteras con nombre"),
+    (
+        "Also writes the flow domains split into named boundaries (inflow, outflow, hub, shroud, blade, spiral, diffuser, cutwater…), a file each, in a folder called boundaries",
+        "Escribe además los dominios de flujo divididos en fronteras con nombre (entrada, salida, cubo, carcasa, álabe, espiral, difusor, corte de agua…), un archivo cada una, en una carpeta llamada boundaries",
+    ),
+    (
+        "the named boundaries of the {} could not be written: {}",
+        "no se pudieron escribir las fronteras con nombre de {}: {}",
+    ),
+    ("simple", "simple"),
+    ("Cut back", "Recorte"),
+    ("Handles", "Manos"),
+    ("fillet", "empalme"),
     (
         "the cutwater radius cannot be negative",
         "el radio del corte de agua no puede ser negativo",
@@ -3615,10 +4064,290 @@ pub(super) static TEXTS: &[(&str, &str)] = &[
         "Cut the model across its axis, by a plane z = const, and remove the side the camera looks from",
         "Corta el modelo a través de su eje, por un plano z = cte, y quita el lado desde el que mira la cámara",
     ),
+    ("by blade loading", "por carga del álabe"),
+    (
+        "Linear or smooth: β itself between its edge values. By blade loading: the swirl r·c_u rises along the blade as the loading d(r·c_u)/dm̄ shares it out, and β follows from it (inverse design; free-form blades only)",
+        "Lineal o suave: β misma entre sus valores en los bordes. Por carga del álabe: el giro r·c_u sube a lo largo del álabe según lo reparte la carga d(r·c_u)/dm̄, y β sale de él (diseño inverso; sólo álabes de forma libre)",
+    ),
+    ("Leading-edge loading", "Carga en el borde de entrada"),
+    (
+        "d(r·c_u)/dm̄ at the leading edge over the rise of r·c_u; 0 leaves the edge unloaded, which keeps the suction peak low where cavitation starts",
+        "d(r·c_u)/dm̄ en el borde de entrada entre la subida de r·c_u; 0 deja el borde sin carga, lo que mantiene bajo el pico de succión donde empieza la cavitación",
+    ),
+    ("End of the front part m̄₁", "Fin del tramo delantero m̄₁"),
+    (
+        "Where the loading leaves its leading-edge value and turns into the straight middle part",
+        "Donde la carga deja su valor en el borde de entrada y pasa al tramo recto central",
+    ),
+    ("Start of the rear part m̄₂", "Inicio del tramo trasero m̄₂"),
+    (
+        "Where the straight middle part bends down to no loading at the trailing edge",
+        "Donde el tramo recto central se curva hasta carga nula en el borde de salida",
+    ),
+    ("Middle slope", "Pendiente central"),
+    (
+        "Slope of the straight middle part: above 0 loads the rear of the blade, below 0 its front. A radial impeller needs the rear: near the leading edge the radius is small and early swirl asks for β past 90°",
+        "Pendiente del tramo recto central: por encima de 0 carga la parte trasera del álabe, por debajo de 0 la delantera. Un rodete radial necesita la trasera: cerca del borde de entrada el radio es pequeño y un giro temprano pide β por encima de 90°",
+    ),
+    ("Blade quality", "Calidad del álabe"),
+    (
+        "From the velocities on the blade faces with the flow following the blades: they compare designs, they do not predict losses",
+        "A partir de las velocidades en las caras del álabe con el flujo siguiendo los álabes: sirven para comparar diseños, no predicen pérdidas",
+    ),
+    (
+        "Deceleration w₂/w₁ (shroud)",
+        "Desaceleración w₂/w₁ (carcasa)",
+    ),
+    (
+        "de Haller criterion: not below 0.7 on the outer streamline, or the flow stalls early and loses efficiency (Gülich, Chap. 7.2.1)",
+        "Criterio de de Haller: no menos de 0.7 en la línea de corriente exterior, o el flujo se desprende antes y pierde rendimiento (Gülich, cap. 7.2.1)",
+    ),
+    ("Suction-face peak / outlet w", "Pico de succión / w₂"),
+    (
+        "Highest suction-face velocity over the mean outlet velocity: how much the suction face decelerates to the trailing edge. Lower is better",
+        "Mayor velocidad en la cara de succión entre la velocidad media de salida: cuánto desacelera la cara de succión hasta el borde de salida. Cuanto menor, mejor",
+    ),
+    ("Peak loading Δw/w̄", "Carga máxima Δw/w̄"),
+    (
+        "Highest (w_SS − w_PS)/w̄ and where it is along the blade; above 2 the pressure face stops",
+        "Mayor (w_SS − w_PS)/w̄ y dónde está a lo largo del álabe; por encima de 2 la cara de presión se detiene",
+    ),
+    (
+        "Leading-edge loading (shroud)",
+        "Carga de entrada (carcasa)",
+    ),
+    (
+        "Mean Δw/w̄ over the first tenth of the shroud section: a loaded leading edge lowers the pressure where cavitation starts",
+        "Δw/w̄ medio en la primera décima de la sección de la carcasa: un borde de entrada cargado baja la presión donde empieza la cavitación",
+    ),
+    (
+        "Lowest pressure-face w/u₂",
+        "Menor w/u₂ en la cara de presión",
+    ),
+    (
+        "Below zero the relative flow on the pressure face turns back and may separate (the last 5 % of the blade, where the flow slips, is left out)",
+        "Por debajo de cero el flujo relativo en la cara de presión retrocede y puede desprenderse (se deja fuera el último 5 % del álabe, donde el flujo resbala)",
+    ),
+    ("Secondary-flow drive ΔC_p", "Flujo secundario ΔC_p"),
+    (
+        "Largest difference of reduced static pressure on the suction face between hub and shroud, over ½ρu₂². Above 0 it draws low-energy fluid to the shroud corner, where the wake forms; loading the hub further back than the shroud lowers it (Zangeneh, Goto & Harada 1998; Gülich, Chap. 8.9.4)",
+        "Mayor diferencia de presión estática reducida en la cara de succión entre el cubo y la carcasa, entre ½ρu₂². Por encima de 0 arrastra fluido de baja energía a la esquina de la carcasa, donde se forma la estela; cargar el cubo más atrás que la carcasa la reduce (Zangeneh, Goto y Harada 1998; Gülich, cap. 8.9.4)",
+    ),
+    ("r·c_u / (r₂·u₂)", "r·c_u / (r₂·u₂)"),
+    ("d(r·c_u)/dm̄ over its rise", "d(r·c_u)/dm̄ entre su subida"),
 ];
 
 /// Messages of the design code, most specific first.
 pub(super) static MESSAGES: &[(&str, &str)] = &[
+    (
+        "a double-entry impeller has no rear seal: the rear seal is left out",
+        "un rodete de doble entrada no tiene sello trasero: el sello trasero se omite",
+    ),
+    (
+        "the rear seal of {} mm reaches beyond the hub disk rim: it is trimmed to {} mm",
+        "el sello trasero de {} mm sale del borde del disco del cubo: se recorta a {} mm",
+    ),
+    (
+        "the {} seal clearance {} mm is below the {} mm Gülich recommends for a seal of {} mm",
+        "la holgura del sello {}, de {} mm, es menor que los {} mm que recomienda Gülich para un sello de {} mm",
+    ),
+    (
+        "the {} impeller ring of {} mm is trimmed to {} mm to leave the neck a wall",
+        "el anillo {} del rodete, de {} mm, se recorta a {} mm para dejar una pared al cuello",
+    ),
+    (
+        "the {} impeller ring of {} mm does not fit on the neck wall: it is left out",
+        "el anillo {} del rodete, de {} mm, no cabe sobre la pared del cuello: se omite",
+    ),
+    (
+        "the {} seal diameter {} mm is below the neck wall ({} mm): the seal cuts into the neck",
+        "el diámetro del sello {}, de {} mm, queda por debajo de la pared del cuello ({} mm): el sello corta el cuello",
+    ),
+    ("front", "delantero"),
+    ("rear", "trasero"),
+    (
+        "the rear seal collar (inner radius {} mm) would sit on the boss ({} mm): the collar is left out",
+        "el collar del sello trasero (radio interior {} mm) quedaría sobre el cubo ({} mm): se omite el collar",
+    ),
+    (
+        "the rear seal seat ({} mm) is not below the hub disk rim ({} mm): the collar is left out",
+        "el asiento del sello trasero ({} mm) no queda por debajo del borde del disco del cubo ({} mm): se omite el collar",
+    ),
+    (
+        "the front seal shoulder reaches only {} mm on the shroud, below the seal radius of {} mm: the shoulder is made on the face",
+        "el resalte del sello delantero llega solo a {} mm sobre la carcasa, por debajo del radio del sello, de {} mm: el resalte se hace sobre la cara",
+    ),
+    (
+        "the automatic {} material could not be built ({}); a plain one is used",
+        "no se pudo construir el material automático de {} ({}); se usa uno liso",
+    ),
+    (
+        "the back vanes reach out to {} mm, beyond the disk rim ({} mm): they stop at the rim",
+        "los álabes de rebombeo llegan hasta {} mm, más allá del borde del disco ({} mm): se detienen en el borde",
+    ),
+    (
+        "the back vanes stop outside the rear casing ring: their inner radius is raised from {} mm to {} mm",
+        "los álabes de rebombeo quedarían fuera del anillo trasero de la carcasa: su radio interior sube de {} mm a {} mm",
+    ),
+    (
+        "the {} back vanes {} mm wide overlap at their inner radius ({} mm)",
+        "los {} álabes de rebombeo, de {} mm de ancho, se solapan en su radio interior ({} mm)",
+    ),
+    (
+        "the back vanes have no room: the outer radius ({} mm) is not above the inner one ({} mm)",
+        "los álabes de rebombeo no tienen espacio: el radio exterior ({} mm) no supera al interior ({} mm)",
+    ),
+    (
+        "the back vanes find no back face of the disk between their radii",
+        "los álabes de rebombeo no encuentran cara trasera del disco entre sus radios",
+    ),
+    (
+        "the back vanes {} mm high do not fit the curvature of the back face; the face is moved straight back",
+        "los álabes de rebombeo de {} mm de alto no caben en la curvatura de la cara trasera; la cara se desplaza hacia atrás en línea recta",
+    ),
+    (
+        "a double-entry impeller has no rear shroud: the back vanes are left out",
+        "un rodete de doble entrada no tiene disco trasero: los álabes de rebombeo se omiten",
+    ),
+    (
+        "the front seal is off: the front chamber closes on the face of the shroud cover",
+        "el sello delantero está apagado: la cámara delantera se cierra sobre la cara de la tapa",
+    ),
+    (
+        "the front casing wall {} mm from the shroud does not fit its curvature; a straight one is used",
+        "la pared delantera de la carcasa, a {} mm de la tapa, no cabe en su curvatura; se usa una recta",
+    ),
+    (
+        "the rear seal collar keeps the rear casing wall {} mm from the back vane tips, more than their {} mm clearance",
+        "el collar del sello trasero mantiene la pared trasera de la carcasa a {} mm de las puntas de los álabes de rebombeo, más que su holgura de {} mm",
+    ),
+    (
+        "the rear casing wall drawn is closer to the back vanes than their tip clearance ({} mm)",
+        "la pared trasera de la carcasa dibujada queda más cerca de los álabes de rebombeo que su holgura de punta ({} mm)",
+    ),
+    (
+        "balance holes need the rear seal; they are left out",
+        "los agujeros de equilibrado necesitan el sello trasero; se omiten",
+    ),
+    (
+        "the front seal is off in the contour: the thrust and the leakage assume the automatic seal d₁ + 2t that is not drawn",
+        "el sello delantero está apagado en el contorno: el empuje y la fuga suponen el sello automático d₁ + 2t, que no está dibujado",
+    ),
+    (
+        "the back vanes need a count, a positive height and a gap that is not negative",
+        "los álabes de rebombeo necesitan un número, una altura positiva y una holgura no negativa",
+    ),
+    (
+        "the back vanes must run outward up to d₂ = {} mm at most",
+        "los álabes de rebombeo deben ir hacia fuera hasta d₂ = {} mm como máximo",
+    ),
+    (
+        "the {} wear ring is left out: the {} wire is drawn by hand, so its seat is not known",
+        "el anillo de desgaste {} se omite: el alambre de {} está dibujado a mano y no se conoce su asiento",
+    ),
+    (
+        "the front impeller wear ring is left out: the shroud wire has no seat on the ring radius",
+        "el anillo de desgaste delantero del rodete se omite: el alambre de la carcasa no tiene asiento en el radio del anillo",
+    ),
+    (
+        "the front casing wear ring is left out: the shroud wire has no seat on the ring radius",
+        "el anillo de desgaste delantero de la carcasa se omite: el alambre de la carcasa no tiene asiento en el radio del anillo",
+    ),
+    (
+        "the front casing ring follows the impeller seat run: the chamber wall does not run on the casing seat",
+        "el anillo delantero de la carcasa sigue el tramo del asiento del rodete: la pared de la cámara no corre sobre el asiento de la carcasa",
+    ),
+    (
+        "the back face of the disk does not reach the {} wear ring radius: the ring spans the whole collar",
+        "la cara trasera del disco no llega al radio del anillo de desgaste {}: el anillo ocupa todo el collar",
+    ),
+    (
+        "the {} wear ring is left out: the back face of the disk leaves no room for it on the collar",
+        "el anillo de desgaste {} se omite: la cara trasera del disco no le deja sitio en el collar",
+    ),
+    (
+        "the {} wear ring is left out: the hub disk wire has no collar seat",
+        "el anillo de desgaste {} se omite: el alambre del disco del cubo no tiene asiento de collar",
+    ),
+    (
+        "the {} wear ring is left out: it has no {} extent",
+        "el anillo de desgaste {} se omite: no tiene extensión {}",
+    ),
+    ("radial", "radial"),
+    ("axial", "axial"),
+    (
+        "the {} is {} mm long, shorter than the {} mm of its seal",
+        "el {} mide {} mm, menos que los {} mm de su sello",
+    ),
+    ("front impeller", "delantero del rodete"),
+    ("front casing", "delantero de la carcasa"),
+    ("rear impeller", "trasero del rodete"),
+    ("rear casing", "trasero de la carcasa"),
+    ("front impeller ring", "anillo delantero del rodete"),
+    ("front casing ring", "anillo delantero de la carcasa"),
+    ("rear impeller ring", "anillo trasero del rodete"),
+    ("rear casing ring", "anillo trasero de la carcasa"),
+    (
+        "the curved back vanes need an angle above 0 and up to 90 degrees",
+        "los álabes de rebombeo curvos necesitan un ángulo mayor que 0 y de hasta 90 grados",
+    ),
+    (
+        "the back vanes are not a valid solid",
+        "los álabes de rebombeo no son un sólido válido",
+    ),
+    (
+        "the back vanes were not built: {}",
+        "no se construyeron los álabes de rebombeo: {}",
+    ),
+    // Before the generic pattern below: `message` takes the first entry that matches.
+    (
+        "the back vanes could not be taken out of the side chambers",
+        "no se pudieron restar los álabes de rebombeo de las cámaras laterales",
+    ),
+    (
+        "the {} could not be taken out of the side chambers",
+        "no se pudo restar el {} de las cámaras laterales",
+    ),
+    (
+        "the back vanes left out: the join added less than half of their volume",
+        "los álabes de rebombeo se omiten: la unión añadió menos de la mitad de su volumen",
+    ),
+    (
+        "the volume the back vanes add to the impeller could not be checked",
+        "no se pudo comprobar el volumen que los álabes de rebombeo añaden al rodete",
+    ),
+    (
+        "the back vanes could not be joined to the impeller",
+        "no se pudieron unir los álabes de rebombeo al rodete",
+    ),
+    (
+        "the back vanes have {} = {}, outside the {} to {} tested behind Gülich Table 9.3: their effect on the axial force and the power is an extrapolation",
+        "los álabes de rebombeo tienen {} = {}, fuera del rango ensayado de {} a {} de la tabla 9.3 de Gülich: su efecto sobre el empuje axial y la potencia es una extrapolación",
+    ),
+    (
+        "Gülich eqs. T9.3.2 and T9.3.4 hold for radial back vanes only: the axial force and the power of the curved vanes are estimates",
+        "las ecs. T9.3.2 y T9.3.4 de Gülich solo valen para álabes de rebombeo radiales: el empuje axial y la potencia de los álabes curvos son estimaciones",
+    ),
+    (
+        "Gülich gives no rule for back vanes together with a rear seal: they turn the liquid faster above the seal only, an estimate outside the tested range",
+        "Gülich no da ninguna regla para álabes de rebombeo junto con un sello trasero: aceleran el líquido solo por encima del sello, una estimación fuera del rango ensayado",
+    ),
+    (
+        "a double-entry impeller has no rear shroud: its back vanes are left out of the axial force and the power",
+        "un rodete de doble entrada no tiene disco trasero: sus álabes de rebombeo quedan fuera del empuje axial y de la potencia",
+    ),
+    (
+        "the radius of the side endings of the cutwater cannot be negative",
+        "el radio de los remates laterales del corte de agua no puede ser negativo",
+    ),
+    (
+        "the spiral must start between {}° and {}° for its wall to cross the diffuser's in every plane, got {}°",
+        "la espiral debe empezar entre {}° y {}° para que su pared cruce la del difusor en todos los planos, se pidió {}°",
+    ),
+    (
+        "the walls of the spiral and the diffuser do not cross in every plane: leave the start of the spiral automatic",
+        "las paredes de la espiral y del difusor no se cruzan en todos los planos: deja automático el inicio de la espiral",
+    ),
     (
         "the fillet over the cutwater cannot be negative",
         "el redondeo sobre el corte de agua no puede ser negativo",
@@ -3628,8 +4357,32 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
         "la hendidura sobre el corte de agua queda redondeada con {} mm, lo más que acepta ahí el núcleo CAD",
     ),
     (
+        "the CAD keeps the cutwater of sections of radii and segments sharp",
+        "el CAD deja afilado el corte de agua de las secciones de radios y segmentos",
+    ),
+    (
+        "the CAD kernel could not join the spiral and the discharge diffuser soundly: the flow domain may part from the design by some tenths of a millimetre",
+        "el núcleo CAD no pudo unir bien la espiral y el difusor de descarga: el dominio fluido puede apartarse del diseño unas décimas de milímetro",
+    ),
+    (
+        "the CAD kernel could not cut the rounded cutwater cleanly: the CAD keeps it sharp",
+        "el núcleo CAD no pudo recortar limpio el corte de agua redondeado: el CAD lo deja afilado",
+    ),
+    (
+        "the CAD kernel could not build the casing around the rounded cutwater: the casing fits a sharp one",
+        "el núcleo CAD no pudo construir la carcasa alrededor del corte de agua redondeado: la carcasa se ajusta a uno afilado",
+    ),
+    (
         "the groove over the cutwater could not be rounded: it stays sharp",
         "no se pudo redondear la hendidura sobre el corte de agua: queda aguda",
+    ),
+    (
+        "the cutwater of the CAD solid lies up to {} mm off its design: the CAD kernel could not cut it cleanly",
+        "el corte de agua del sólido CAD se aparta hasta {} mm de su diseño: el núcleo CAD no pudo recortarlo limpio",
+    ),
+    (
+        "the flow domain of the CAD is not one valid solid: the CAD kernel could not cut the cutwater cleanly",
+        "el dominio de flujo del CAD no es un solo sólido válido: el núcleo CAD no pudo recortar limpio el corte de agua",
     ),
     (
         "the obliquity of the cutwater must lie within ±{}°, got {}°",
@@ -3804,8 +4557,8 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
     ),
     // Cross sections of the volute.
     (
-        "a double volute needs straight walls at one cone angle: the cross sections were made trapezoidal at {}°",
-        "una voluta doble necesita paredes rectas con un solo ángulo de cono: las secciones se hicieron trapeciales a {}°",
+        "a double volute needs straight, radius based, line segment or Bézier sections of two equal sides, one shape all round: the cross sections were made trapezoidal at {}°",
+        "una voluta doble necesita secciones rectas, por radios, por segmentos de recta o Bézier, de dos lados iguales y una sola forma en toda la espiral: las secciones se hicieron trapeciales a {}°",
     ),
     (
         "at least one cross section must be active",
@@ -4004,10 +4757,6 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
         "la voluta interior abarca {}°: pasados 180° el canal exterior largo añade pérdidas y empuje radial en sobrecarga (Gülich cap. 7.8.1)",
     ),
     (
-        "with {} blades and a rib at 180° two blades pass the cutwaters at once: Gülich advises 165° to 170° (Chap. 7.8.1)",
-        "con {} álabes y un nervio a 180° dos álabes pasan por los cortes de agua a la vez: Gülich aconseja de 165° a 170° (cap. 7.8.1)",
-    ),
-    (
         "the volute loses {} m at the design point, more than the {} m of all the hydraulic losses: check the volute",
         "la voluta pierde {} m en el punto de diseño, más que los {} m de todas las pérdidas hidráulicas: revisa la voluta",
     ),
@@ -4182,6 +4931,38 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
     (
         "d_z/d₂ = {} is below the {} of Gülich Table 10.2: expect pressure pulsations and hydraulic excitation forces",
         "d_z/d₂ = {} está por debajo del {} de la tabla 10.2 de Gülich: habrá pulsaciones de presión y fuerzas de excitación hidráulica",
+    ),
+    (
+        "the walls at the cutwater tip point {}° from the circumference, {}° off the flow angle α₃' of {}° (beyond ±3°): the flow meets the wedge at an angle; turn the diffuser or move the start of the spiral",
+        "las paredes en la punta del corte de agua forman {}° con la circunferencia, {}° de diferencia con el ángulo de flujo α₃' de {}° (más de ±3°): el flujo choca con la cuña en ángulo; conviene girar el difusor o mover el inicio de la espiral",
+    ),
+    (
+        "the spiral wall crosses the diffuser wall more than once in {} of {} planes, so there are several intersection curves: move the start of the spiral, reduce the height offset or raise the base form factor",
+        "la pared de la espiral cruza la del difusor más de una vez en {} de {} planos, así que hay varias curvas de intersección: conviene mover el inicio de la espiral, reducir el desplazamiento radial o subir el factor de forma de la base",
+    ),
+    (
+        "the fillet leaves an effective cutwater diameter d_z/d₂ = {}, below the {} of Gülich Table 10.2: expect pressure pulsations and hydraulic excitation forces; start the spiral later or use a smaller radius",
+        "el empalme deja un diámetro efectivo del corte de agua d_z/d₂ = {}, por debajo del {} de la Tabla 10.2 de Gülich: cabe esperar pulsaciones de presión y fuerzas hidráulicas de excitación; conviene empezar la espiral más tarde o usar un radio menor",
+    ),
+    (
+        "the cutwater stands at an effective diameter d_z/d₂ = {}, below the {} of Gülich Table 10.2: expect pressure pulsations and hydraulic excitation forces; start the spiral later",
+        "el corte de agua queda a un diámetro efectivo d_z/d₂ = {}, por debajo del {} de la Tabla 10.2 de Gülich: cabe esperar pulsaciones de presión y fuerzas hidráulicas de excitación; conviene empezar la espiral más tarde",
+    ),
+    (
+        "the spiral wraps {}° from its start to the throat, less than the {}° a sharp or rounded cutwater needs: start the spiral earlier",
+        "la espiral da {}° desde su inicio hasta la garganta, menos de los {}° que necesita un corte de agua afilado o redondeado: conviene empezar la espiral antes",
+    ),
+    (
+        "a rectangular outlet has no flange of ours, which is round: the casing ends flat",
+        "una salida rectangular no lleva nuestra brida, que es circular: la carcasa termina plana",
+    ),
+    (
+        "the CAD kernel builds the flow domain of a diffuser with an axial bend but not yet its casing",
+        "el núcleo CAD construye el dominio de fluido de un difusor con codo axial, pero todavía no su carcasa",
+    ),
+    (
+        "the CAD kernel is slow and unreliable on a spline diffuser (minutes to half an hour, depending on the turn): export the CAD solids with a radial or tangential discharge",
+        "el núcleo CAD es lento y poco fiable con un difusor spline (de minutos a media hora, según el giro): exporta los sólidos CAD con una descarga radial o tangencial",
     ),
     (
         "cutwater incidence {}° is outside ±3° (Gülich eq. T7.7.6)",
@@ -4600,5 +5381,25 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
     (
         "the leading- and trailing-edge shapes overlap at span {}: shorten them",
         "las formas de los bordes de ataque y de salida se solapan en la sección {}: acórtalas",
+    ),
+    (
+        "the blade loading at the {} turns negative near m̄ = {}: the blade takes swirl back out of the flow there",
+        "la carga del álabe en el {} se vuelve negativa cerca de m̄ = {}: ahí el álabe le quita giro al flujo",
+    ),
+    (
+        "the blade loading asks for more swirl than the blade speed gives at m̄ = {} on span {} (β past 90°): load the blade further back",
+        "la carga del álabe pide más giro del que da la velocidad del álabe en m̄ = {} en la sección {} (β por encima de 90°): carga el álabe más atrás",
+    ),
+    (
+        "at span {} the edge angles give no rise of r·c_u for the blade loading to share out",
+        "en la sección {} los ángulos de los bordes no dan subida de r·c_u que la carga del álabe pueda repartir",
+    ),
+    (
+        "the blade loading needs 0 ≤ fore ≤ aft < 1, got fore {} and aft {}",
+        "la carga del álabe necesita 0 ≤ m̄₁ ≤ m̄₂ < 1; se dio m̄₁ = {} y m̄₂ = {}",
+    ),
+    (
+        "the blade loading sets β on each section, which a cylindrical blade cannot follow: choose the free-form shape or a linear or smooth β",
+        "la carga del álabe fija β en cada sección, y un álabe cilíndrico no puede seguirla: elige la forma libre o una β lineal o suave",
     ),
 ];

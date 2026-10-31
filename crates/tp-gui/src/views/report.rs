@@ -7,7 +7,7 @@ use tp_design::impeller::loading::blade_velocities;
 use tp_design::performance::ShutoffSource;
 use tp_design::pump::{InletSection, correlations as corr};
 use tp_design::radial_thrust::RadialCollector;
-use tp_design::volute::{AreaLaw, CutwaterShape, DischargeShape, Progression};
+use tp_design::volute::{AreaLaw, CutMeasure, CutwaterShape, DischargeShape, Progression};
 use tp_project::{ComponentId, Project};
 use tp_units::{DisplayUnits, QuantityKind};
 
@@ -617,10 +617,15 @@ fn content(
                                     ui,
                                     tr("Disk friction and mechanical losses"),
                                     tf(
-                                        "front {}, rear {}, mechanical {} (Gülich eqs. T3.6.2, T3.6.3, T3.5.6a)",
+                                        "front {}, rear {}{}, mechanical {} (Gülich eqs. T3.6.2, T3.6.3, T3.5.6a)",
                                         &[
                                             &s(Power, l.front_friction),
                                             &s(Power, l.rear_friction),
+                                            &if l.back_vanes {
+                                                tr(" (with back vanes, eq. T9.3.4)").to_owned()
+                                            } else {
+                                                String::new()
+                                            },
                                             &s(Power, l.mechanical),
                                         ],
                                     ),
@@ -788,6 +793,16 @@ fn content(
                                     ],
                                 ),
                             );
+                            if a.law.back_vanes.is_some() {
+                                value_row(
+                                    ui,
+                                    tr("Back vanes"),
+                                    tf(
+                                        "{} off the rear shroud (Gülich Table 9.3)",
+                                        &[&s(Force, f.back_vanes)],
+                                    ),
+                                );
+                            }
                             value_row(
                                 ui,
                                 tr("Annular and shaft seals"),
@@ -1026,6 +1041,40 @@ fn content(
                             s(Area, rib.channel_outlet_area)
                         ),
                     );
+                    if rib.is_tapered() {
+                        value_row(
+                            ui,
+                            tr("Rib thickness along it"),
+                            tf(
+                                "nose {} · middle {} · tail {}",
+                                &[
+                                    &s(Length, rib.thickness),
+                                    &s(Length, rib.middle_thickness),
+                                    &s(Length, rib.end_thickness),
+                                ],
+                            ),
+                        );
+                    }
+                    value_row(
+                        ui,
+                        tr("Rib tail"),
+                        tf(
+                            "{}:1 ellipse {} long",
+                            &[
+                                &format!("{:.2}", rib.tail_ratio),
+                                &s(Length, rib.tail_length()),
+                            ],
+                        ),
+                    );
+                    value_row(
+                        ui,
+                        tr("Rib corners"),
+                        if rib.corner_radius > 0.0 {
+                            tf("fillet {}", &[&s(Length, rib.corner_radius)])
+                        } else {
+                            tr("sharp corners").to_owned()
+                        },
+                    );
                     if let Some(r) = &v.rib {
                         value_row(
                             ui,
@@ -1084,9 +1133,28 @@ fn content(
                         "sharp, tip at {} with a wedge of {}",
                         &[&s(Angle, c.angle), &s(Angle, c.wedge)],
                     ),
-                    CutwaterShape::Rounded { .. } => tf(
+                    CutwaterShape::Fillet { .. } => tf(
                         "rounded with ρ {}, tip at {} with a wedge of {}",
                         &[&s(Length, c.radius), &s(Angle, c.angle), &s(Angle, c.wedge)],
+                    ),
+                    CutwaterShape::Simple {
+                        measure: CutMeasure::Across,
+                        ..
+                    } => tf(
+                        "simple, gap {} wide, tip at {} with a wedge of {}",
+                        &[
+                            &s(Length, d.cutwater_cut),
+                            &s(Angle, c.angle),
+                            &s(Angle, c.wedge),
+                        ],
+                    ),
+                    CutwaterShape::Simple { .. } => tf(
+                        "simple, cut {} back, tip at {} with a wedge of {}",
+                        &[
+                            &s(Length, d.cutwater_cut),
+                            &s(Angle, c.angle),
+                            &s(Angle, c.wedge),
+                        ],
                     ),
                 };
                 value_row(ui, tr("Cutwater"), cutwater);
@@ -1106,6 +1174,9 @@ fn content(
                             &s(Angle, axis_angle),
                         ],
                     ),
+                    DischargeShape::Spline { turn, .. } => {
+                        tf("spline turning {}", &[&s(Angle, turn)])
+                    }
                 };
                 value_row(
                     ui,

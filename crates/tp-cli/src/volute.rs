@@ -8,10 +8,10 @@ use tp_design::Param;
 use tp_design::outlet::Reach;
 use tp_design::volute::stress::StressPlace;
 use tp_design::volute::{
-    AreaLaw, BendWall, BezierBase, BezierSide, CutwaterShape, DEFAULT_CONE_ANGLE_DEG,
-    DischargeShape, ExternalRound, InnerPosition, InternalRound, Progression, RadiusSide,
-    SectionDefinition, SectionShape, SegmentPoint, SideShape, StraightWall, VoluteGeometry,
-    VoluteInput, VoluteKind,
+    AreaLaw, BendWall, BezierBase, BezierSide, CutMeasure, CutwaterShape, DEFAULT_CONE_ANGLE_DEG,
+    DiffuserGrowth, DischargeShape, ExternalRound, InnerPosition, InternalRound, OutletShape,
+    Progression, RadiusSide, SectionDefinition, SectionShape, SegmentPoint, SideShape,
+    StraightWall, VoluteGeometry, VoluteInput, VoluteKind, ZAlignment, ZBend,
 };
 use tp_project::{ComponentId, ComponentKind, Project, VOLUTE_STEPS};
 use tp_units::{DisplayUnits, QuantityKind, parse_quantity_or};
@@ -48,20 +48,28 @@ pub(crate) struct VoluteArgs {
     /// by comp_e from comp_start to the throat), comp_e, comp_start, arcs (off or the
     /// number of circular arcs of the outer contour), sections, correction (on or off),
     /// length (along the diffuser centerline) and
-    /// outlet (discharge diffuser), incidence (cutwater), obliquity (of a rounded
-    /// cutwater and the rib nose: the angle of the edge to the pump axis), wall, fillet
+    /// outlet (discharge diffuser), incidence (cutwater), obliquity (of the rib nose: the
+    /// angle of the edge to the pump axis), spiral_start
+    /// (where the spiral of a sharp or rounded cutwater starts), wall, fillet
     /// (radius rounding the outside of the casing over the cutwater; 0 for none), type
     /// (single or double),
-    /// rib_wrap (wrap of the inner volute of a double volute), rib (rib thickness),
+    /// rib_length (length of the rib of a double volute from its nose, which is always 180° from the cutwater; 180° reaches the throat, less stops the rib short of the discharge diffuser), rib (rib thickness),
     /// rib_comp (on or off: the first partial volute grows by the rib from rib_comp_start
     /// to the nose, so the outer channel starts with the area of the rule), rib_comp_start,
-    /// rib_nose (length over thickness of the elliptic nose and tail of the rib, 1 for a
-    /// semicircle), channel_ratio (outlet area of the outer channel over the first
-    /// throat), discharge (radial, the default, with the outlet on the pump centerline,
+    /// rib_nose (length over thickness of the elliptic nose of the rib, 1 for a
+    /// semicircle), rib_tail (the same for its tail, over the end thickness; automatic:
+    /// rib_nose), rib_middle and rib_end (rib thickness halfway along it and at its tail;
+    /// the thickness follows a parabola through the three), rib_corner (radius of the
+    /// fillet where the rib meets the side walls; 0, the default, for sharp corners),
+    /// channel_ratio (outlet area of the outer channel over the first
+    /// throat), discharge (spline:TURN[,START,END], a Bézier centerline turning TURN degrees with shares START and END from 0.1 to 0.9; radial, the default, with the outlet on the pump centerline,
     /// or radial:DEGREES from the line through the pump axis; tangential, opening to both
-    /// sides; tangential:inner or tangential:outer with that wall straight), bend (bend radius of a radial discharge), rotation (angle
+    /// sides; tangential:inner or tangential:outer with that wall straight), bend (bend radius of a radial discharge), outlet_shape (round, or rectangular[:ASPECT] with the height along the pump axis over the width, the same area as the round outlet and no round flange), z_bend (none, or EXTENT,RADIUS,ANGLE: the centerline of the diffuser runs flat, rounds off with RADIUS through ANGLE degrees and goes on straight, ending EXTENT along the pump axis), eccentricity (−1 to 1 for a tangential diffuser: −1 with the cutwater wall straight, 0 opening to both sides, 1 with the outer wall straight), base_form (0 to 1: how far the inlet chord of the first diffuser section bulges toward the pump axis, so that the diffuser crosses the start of the spiral), height_offset (Δr_C: the diffuser shifted across its centerline, away from the pump axis when positive, to give the cutwater room), z_align (centric, or manual:OFFSET[,quadratic]: the outlet shifted along the pump axis), growth (area of the diffuser from the throat: linear, the default, or matched, which starts with the slope of the spiral), rotation (angle
     /// of the cutwater from the x axis; auto turns the discharge vertically up), cutwater
-    /// (tangent, sharp or rounded), nose (radius of a rounded cutwater), height (H, the
+    /// (tangent, sharp, rounded or simple), nose (radius of a rounded cutwater), cut (how far
+    /// back from the tip a simple cutwater cuts the walls) or gap (instead, how wide the gap
+    /// between the walls is where it cuts them) and handle (the handles of its curve, as a
+    /// share of each wall's cut), height (H, the
     /// outlet face from the pump axis, which sets the diffuser length), dn (on: round the
     /// automatic outlet to the nearest nominal size), flange (on or off), flange_d
     /// (outer diameter), flange_t (thickness), bolt_circle, bolt_hole and bolts, pressure
@@ -541,6 +549,55 @@ fn on_off(value: &str) -> Result<bool, String> {
     }
 }
 
+/// The bend of the diffuser along the pump axis: none, or EXTENT,RADIUS,ANGLE with two
+/// lengths and the angle in degrees.
+fn parse_z_bend(value: &str, units: &DisplayUnits) -> Result<Option<ZBend>, String> {
+    if value == "none" || value == "off" {
+        return Ok(None);
+    }
+    let bad = || format!("z_bend must be none or EXTENT,RADIUS,ANGLE (degrees), got {value:?}");
+    let parts: Vec<&str> = value.split(',').map(str::trim).collect();
+    let [extent, radius, angle] = parts[..] else {
+        return Err(bad());
+    };
+    let length = |text: &str| {
+        parse_quantity_or(text, QuantityKind::Length, units.get(QuantityKind::Length))
+            .map_err(|e| format!("z_bend: {e}"))
+    };
+    Ok(Some(ZBend {
+        extent: length(extent)?,
+        radius: length(radius)?,
+        angle: angle.parse::<f64>().map_err(|_| bad())?.to_radians(),
+    }))
+}
+
+/// How the diffuser sits along the pump axis: centric, or manual:OFFSET[,quadratic]
+/// with a length for the shift of the outlet.
+fn parse_z_alignment(value: &str, units: &DisplayUnits) -> Result<ZAlignment, String> {
+    match value {
+        "centric" => Ok(ZAlignment::Centric),
+        _ => {
+            let manual = value.strip_prefix("manual:").ok_or_else(|| {
+                format!(
+                    "z_align must be centric or manual:OFFSET[,quadratic], got \
+                     {value:?}"
+                )
+            })?;
+            let (offset, quadratic) = match manual.strip_suffix(",quadratic") {
+                Some(offset) => (offset, true),
+                None => (manual, false),
+            };
+            let offset = parse_quantity_or(
+                offset.trim(),
+                QuantityKind::Length,
+                units.get(QuantityKind::Length),
+            )
+            .map_err(|e| format!("z_align: {e}"))?;
+            Ok(ZAlignment::Manual { offset, quadratic })
+        }
+    }
+}
+
 fn parse_discharge(value: &str) -> Result<DischargeShape, String> {
     let wall = |w| DischargeShape::Tangential { straight_wall: w };
     match value {
@@ -548,6 +605,30 @@ fn parse_discharge(value: &str) -> Result<DischargeShape, String> {
         "tangential" | "tangential:centered" => Ok(wall(StraightWall::Centered)),
         "tangential:outer" => Ok(wall(StraightWall::Outer)),
         "radial" => Ok(DischargeShape::Radial { axis_angle: 0.0 }),
+        _ if value.starts_with("spline") => {
+            let bad = || {
+                format!(
+                    "discharge spline must be spline:TURN[,START,END] with the turn in degrees \
+                     and the two shares from 0.1 to 0.9, got {value:?}"
+                )
+            };
+            let numbers: Vec<f64> = value
+                .strip_prefix("spline:")
+                .ok_or_else(bad)?
+                .split(',')
+                .map(|n| n.trim().parse::<f64>().map_err(|_| bad()))
+                .collect::<Result<_, _>>()?;
+            match numbers[..] {
+                [turn] => Ok((turn, 0.5, 0.5)),
+                [turn, start, end] => Ok((turn, start, end)),
+                _ => Err(bad()),
+            }
+            .map(|(turn, start_share, end_share)| DischargeShape::Spline {
+                turn: turn.to_radians(),
+                start_share,
+                end_share,
+            })
+        }
         _ => value
             .strip_prefix("radial:")
             .and_then(|d| d.trim().parse::<f64>().ok())
@@ -556,8 +637,8 @@ fn parse_discharge(value: &str) -> Result<DischargeShape, String> {
             })
             .ok_or_else(|| {
                 format!(
-                    "discharge must be tangential[:inner|centered|outer] or \
-                     radial[:DEGREES], got {value:?}"
+                    "discharge must be tangential[:inner|centered|outer], radial[:DEGREES] \
+                     or spline:TURN[,START,END], got {value:?}"
                 )
             }),
     }
@@ -683,6 +764,7 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
         "outlet" => input.diffuser.outlet_diameter = quantity(Length)?,
         "incidence" => input.cutwater.incidence = quantity(Angle)?,
         "obliquity" => input.cutwater.obliquity = quantity(Angle)?,
+        "spiral_start" => input.cutwater.spiral_start = quantity(Angle)?,
         "wall" => input.wall.thickness = quantity(Length)?,
         "fillet" => input.wall.cutwater_fillet = quantity(Length)?,
         "pressure" => input.wall.pressure = quantity(Pressure)?,
@@ -694,45 +776,110 @@ fn apply(input: &mut VoluteInput, units: &DisplayUnits, setting: &str) -> Result
                 _ => return Err(format!("type must be single or double, got {value:?}")),
             }
         }
-        "rib_wrap" => input.setup.rib_wrap = quantity(Angle)?,
+        "rib_length" | "rib_wrap" => input.setup.rib_length = quantity(Angle)?,
         "rib" => input.setup.rib_thickness = quantity(Length)?,
         "rib_nose" => input.setup.rib_nose_ratio = quantity(Dimensionless)?,
+        "rib_tail" => input.setup.rib_tail_ratio = quantity(Dimensionless)?,
+        "rib_middle" => input.setup.rib_middle_thickness = quantity(Length)?,
+        "rib_end" => input.setup.rib_end_thickness = quantity(Length)?,
+        "rib_corner" => input.setup.rib_corner_radius = quantity(Length)?,
         "channel_ratio" => input.setup.channel_area_ratio = quantity(Dimensionless)?,
         "rib_comp" => input.setup.rib_compensation = on_off(value)?,
         "rib_comp_start" => input.setup.rib_compensation_start = quantity(Angle)?,
         "discharge" => input.diffuser.shape = parse_discharge(value)?,
         "bend" => input.diffuser.bend_radius = quantity(Length)?,
+        "height_offset" => input.diffuser.height_offset = quantity(Length)?,
+        "base_form" => input.diffuser.base_form = quantity(Dimensionless)?,
+        "eccentricity" => input.diffuser.eccentricity = quantity(Dimensionless)?,
+        "z_bend" => input.diffuser.z_bend = parse_z_bend(value, units)?,
+        "outlet_shape" => {
+            input.diffuser.outlet_shape =
+                match value {
+                    "round" => OutletShape::Round,
+                    _ => {
+                        let aspect = value
+                        .strip_prefix("rectangular:")
+                        .or(if value == "rectangular" { Some("1") } else { None })
+                        .and_then(|a| a.trim().parse::<f64>().ok())
+                        .ok_or_else(|| {
+                            format!(
+                                "outlet_shape must be round or rectangular[:ASPECT], got {value:?}"
+                            )
+                        })?;
+                        OutletShape::Rectangular { aspect }
+                    }
+                }
+        }
+        "z_align" => input.diffuser.z_alignment = parse_z_alignment(value, units)?,
+        "growth" => {
+            input.diffuser.growth = match value {
+                "linear" => DiffuserGrowth::Linear,
+                "matched" => DiffuserGrowth::Matched,
+                _ => return Err(format!("growth must be linear or matched, got {value:?}")),
+            }
+        }
         "rotation" => input.diffuser.rotation = quantity(Angle)?,
         "cutwater" => {
             input.cutwater.shape = match value {
                 "tangent" => CutwaterShape::Tangent,
                 "sharp" => CutwaterShape::Sharp,
-                "rounded" => CutwaterShape::Rounded {
-                    radius: match input.cutwater.shape {
-                        CutwaterShape::Rounded { radius } => radius,
-                        _ => Param::Auto,
+                // Rounded is the arc tangent to both walls; fillet is its former name.
+                "rounded" | "fillet" => CutwaterShape::Fillet {
+                    radius: input.cutwater.shape.radius().unwrap_or(Param::Auto),
+                },
+                "simple" => match input.cutwater.shape {
+                    simple @ CutwaterShape::Simple { .. } => simple,
+                    _ => CutwaterShape::Simple {
+                        cut: Param::Auto,
+                        handle: Param::Auto,
+                        measure: CutMeasure::Along,
                     },
                 },
                 _ => {
                     return Err(format!(
-                        "cutwater must be tangent, sharp or rounded, got {value:?}"
+                        "cutwater must be tangent, sharp, rounded or simple, got {value:?}"
                     ));
                 }
             }
         }
         "nose" => {
-            input.cutwater.shape = CutwaterShape::Rounded {
+            input.cutwater.shape = CutwaterShape::Fillet {
                 radius: quantity(Length)?,
             }
+        }
+        // The cut along the walls, or across the gap they leave.
+        "cut" | "gap" | "handle" => {
+            let (mut cut, mut handle, mut measure) = match input.cutwater.shape {
+                CutwaterShape::Simple {
+                    cut,
+                    handle,
+                    measure,
+                } => (cut, handle, measure),
+                _ => (Param::Auto, Param::Auto, CutMeasure::Along),
+            };
+            match key {
+                "cut" => (cut, measure) = (quantity(Length)?, CutMeasure::Along),
+                "gap" => (cut, measure) = (quantity(Length)?, CutMeasure::Across),
+                _ => handle = quantity(Dimensionless)?,
+            }
+            input.cutwater.shape = CutwaterShape::Simple {
+                cut,
+                handle,
+                measure,
+            };
         }
         _ => {
             return Err(format!(
                 "unknown key {key:?}; valid keys: flow-factor, dz, b3, e3, shape, law, \
                  wrap, x, k3, cu4, qi, q0, end_height, end_area, end_area_radius, \
                  progression, compensation, comp_e, comp_start, arcs, \
-                 sections, correction, length, outlet, incidence, obliquity, wall, fillet, type, \
-                 rib_wrap, rib, \
-                 rib_nose, channel_ratio, discharge, bend, rotation, cutwater, nose, height, \
+                 sections, correction, length, outlet, incidence, obliquity, spiral_start, \
+                 wall, \
+                 fillet, type, \
+                 rib_length, rib, \
+                 rib_nose, rib_tail, rib_middle, rib_end, rib_corner, channel_ratio, discharge, \
+                 bend, growth, height_offset, z_align, base_form, eccentricity, outlet_shape, \
+                 z_bend, rotation, cutwater, nose, cut, gap, handle, height, \
                  dn, flange, flange_d, flange_t, bolt_circle, bolt_hole, bolts, pressure, \
                  allowable"
             ));
@@ -834,10 +981,10 @@ fn print_report(name: &str, id: ComponentId, g: &VoluteGeometry, units: &Display
         }
         shape => println!(
             "           {} cutwater: tip at {} ({} from the axis), wedge {}{}   nearest to the axis {}",
-            if matches!(shape, CutwaterShape::Sharp) {
-                "sharp"
-            } else {
-                "rounded"
+            match shape {
+                CutwaterShape::Sharp => "sharp",
+                CutwaterShape::Simple { .. } => "simple",
+                _ => "rounded",
             },
             s(Angle, c.angle),
             s(Length, c.tip.truncate().length()),
@@ -850,7 +997,18 @@ fn print_report(name: &str, id: ComponentId, g: &VoluteGeometry, units: &Display
             s(Length, c.nose_distance)
         ),
     }
-    // Across the inlet width: where the walls cross, and the body of a rounded cutwater.
+    // The walls at the tip, from the circumferential direction.
+    if !matches!(d.cutwater_shape, CutwaterShape::Tangent) && d.development.start <= 0.0 {
+        println!(
+            "           walls at the tip: spiral αIn {}   diffuser αOut {}   mean αAvg {} ({} off the flow angle)   spiral starts at {}",
+            s(Angle, c.spiral_angle),
+            s(Angle, c.diffuser_angle),
+            s(Angle, c.mean_angle()),
+            s(Angle, g.wall_misalignment()),
+            s(Angle, g.start_angle)
+        );
+    }
+    // Across the inlet width: where the walls cross.
     let slices = &g.cutwater_slices;
     if !slices.is_empty() {
         let range = |f: &dyn Fn(&tp_design::volute::CutwaterSlice) -> f64| {
@@ -874,6 +1032,31 @@ fn print_report(name: &str, id: ComponentId, g: &VoluteGeometry, units: &Display
             s(Angle, wedge_hi),
             s(Length, near)
         );
+        if let Some(v) = g.cutwater_values() {
+            println!(
+                "           diameter lower / upper / mean {} / {} / {} (dMin {}), angle {} / {} / {}, \
+                 position φC,1 {}",
+                s(Length, v.diameter.lower),
+                s(Length, v.diameter.upper),
+                s(Length, v.diameter.mean),
+                s(Length, v.least_diameter),
+                s(Angle, v.angle.lower),
+                s(Angle, v.angle.upper),
+                s(Angle, v.angle.mean),
+                s(Angle, v.position)
+            );
+            for (label, f) in [
+                ("cutwater section", v.start),
+                ("throat", v.throat),
+                ("outlet", v.outlet),
+            ] {
+                println!(
+                    "           {label}: equivalent diameter D {}, area A {}",
+                    s(Length, f.equivalent_diameter),
+                    s(Area, f.area)
+                );
+            }
+        }
         if c.radius > 0.0 {
             let (thin, _) = range(&|c| c.min_thickness);
             let (join_lo, join_hi) = range(&|c| c.join_length);
@@ -969,10 +1152,16 @@ fn print_report(name: &str, id: ComponentId, g: &VoluteGeometry, units: &Display
     }
     if let Some(rib) = &d.rib {
         println!(
-            "Double     inner volute wraps {} from the rib nose at {}   rib {}",
+            "Double     inner volute wraps {} from the rib nose at {}   rib {} long {}{}",
             s(Angle, rib.wrap),
             s(Angle, rib.start),
-            s(Length, rib.thickness)
+            s(Length, rib.thickness),
+            s(Angle, rib.length),
+            if rib.is_short() {
+                format!(" (ends at {}, before the throat)", s(Angle, rib.end()))
+            } else {
+                String::new()
+            }
         );
         println!(
             "           first throat {} at the rib nose   outer channel {} → {}",
@@ -986,17 +1175,38 @@ fn print_report(name: &str, id: ComponentId, g: &VoluteGeometry, units: &Display
                 s(Angle, start)
             );
         }
+        let ellipse = |ratio: f64| {
+            if ratio > 1.0 {
+                format!("elliptic {ratio:.2}:1")
+            } else {
+                "semicircular".to_string()
+            }
+        };
         if let Some(r) = &g.rib {
             println!(
-                "           {} nose and tail (length {}): tip at {}   nearest to the axis {}",
-                if rib.nose_ratio > 1.0 {
-                    format!("elliptic {:.2}:1", rib.nose_ratio)
-                } else {
-                    "semicircular".to_string()
-                },
+                "           {} nose (length {}): tip at {}   nearest to the axis {}",
+                ellipse(rib.nose_ratio),
                 s(Length, rib.nose_length()),
                 s(Angle, r.nose_angle),
                 s(Length, r.nose_distance)
+            );
+        }
+        println!(
+            "           {} tail (length {})   corners {}",
+            ellipse(rib.tail_ratio),
+            s(Length, rib.tail_length()),
+            if rib.corner_radius > 0.0 {
+                format!("filleted with {}", s(Length, rib.corner_radius))
+            } else {
+                "sharp".to_string()
+            }
+        );
+        if rib.is_tapered() {
+            println!(
+                "           rib thickness: nose {}   middle {}   tail {}",
+                s(Length, rib.thickness),
+                s(Length, rib.middle_thickness),
+                s(Length, rib.end_thickness)
             );
         }
     }
@@ -1022,6 +1232,14 @@ fn print_report(name: &str, id: ComponentId, g: &VoluteGeometry, units: &Display
             s(Angle, g.nozzle_bend),
             s(Angle, axis_angle)
         ),
+        DischargeShape::Spline {
+            turn,
+            start_share,
+            end_share,
+        } => format!(
+            "spline (Bézier of degree 4) turning {}, shares {start_share:.2} and {end_share:.2}",
+            s(Angle, turn)
+        ),
     };
     println!("Diffuser   {discharge}");
     println!(
@@ -1043,14 +1261,48 @@ fn print_report(name: &str, id: ComponentId, g: &VoluteGeometry, units: &Display
         s(Angle, dif.allowable_angle),
         dif.ideal_pressure_recovery
     );
+    // Inlet and outlet as equivalent circles, the velocity ratio, and where the outlet
+    // stands: C from the pump axis to its axis, φ from the throat to its centre.
+    let equivalent = |area: f64| (4.0 * area / std::f64::consts::PI).sqrt();
     println!(
-        "Spiral     {} sections from {} to {}   wall {}",
+        "           inlet D {} A {}   outlet D {} A {}   c_out/c_in {:.3}",
+        s(Length, equivalent(dif.inlet_area)),
+        s(Area, dif.inlet_area),
+        s(Length, dif.outlet_diameter),
+        s(
+            Area,
+            std::f64::consts::PI * dif.outlet_diameter.powi(2) / 4.0
+        ),
+        1.0 / dif.area_ratio
+    );
+    println!(
+        "           outlet axis C {} from the pump axis   outlet centre φ {} from the throat",
+        s(Length, g.outlet_offset()),
+        s(Angle, g.outlet_angle())
+    );
+    println!(
+        "Spiral     {} sections from {} to {}   wall {}{}",
         g.sections.len(),
         s(Angle, g.start_angle),
         s(Angle, d.rib.map_or(std::f64::consts::TAU, |r| r.start)),
-        s(Length, d.wall_thickness)
+        s(Length, d.wall_thickness),
+        g.start_range.map_or(String::new(), |(lo, hi)| format!(
+            "   (it may start from {} to {}: before the walls cross in every plane)",
+            s(Angle, lo),
+            s(Angle, hi)
+        ))
     );
-    if d.rib.is_some() {
+    if let (Some(_), Some(table)) = (&d.rib, d.free_double()) {
+        // Sections the rib cuts: the inner volute and the outer channel are parts of the
+        // whole section, sized together.
+        let end = table.row_at(std::f64::consts::TAU);
+        println!(
+            "           whole sections cut by the rib: {} sections; at the throat the rib stands {} above r'z, the whole section {}",
+            g.envelope.len(),
+            s(Length, end.inner_height),
+            s(Length, end.whole_height)
+        );
+    } else if d.rib.is_some() {
         println!(
             "           inner volute {} sections, outer channel {} sections",
             g.inner_sections.len(),

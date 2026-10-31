@@ -306,7 +306,7 @@ fn the_panel_accepts_steps_and_the_column_adds_components() {
     harness.state_mut().focus_view(View::View3d);
     harness.run();
     harness.get_by_label("Side walls");
-    harness.get_by_label("Casing");
+    harness.get_by_label("Flow channel");
 }
 
 /// The labels of the property rows in sight that are cut short: their text, wider than
@@ -856,11 +856,11 @@ fn the_scene_shows_hides_and_isolates_the_parts() {
     let shown = |h: &Harness<'_, TurbopumpApp>, part: &str| {
         eye(h, part).accesskit_node().toggled() == Some(egui::accesskit::Toggled::True)
     };
-    assert!(shown(&harness, "Casing"));
+    assert!(shown(&harness, "Flow channel"));
     // The eye hides a part.
-    eye(&harness, "Casing").click();
+    eye(&harness, "Flow channel").click();
     harness.run();
-    assert!(!shown(&harness, "Casing"));
+    assert!(!shown(&harness, "Flow channel"));
     // Isolating the blades hides every other part; again, everything comes back.
     harness.get_by_label("Isolate Blades").click();
     harness.run();
@@ -869,7 +869,7 @@ fn the_scene_shows_hides_and_isolates_the_parts() {
     harness.get_by_label("Isolate Blades").click();
     harness.run();
     assert!(shown(&harness, "Hub (disk)"));
-    assert!(!shown(&harness, "Casing"), "as it was before");
+    assert!(!shown(&harness, "Flow channel"), "as it was before");
     // One blade or all of them.
     harness.get_by_label("All blades").click();
     harness.run();
@@ -879,13 +879,13 @@ fn the_scene_shows_hides_and_isolates_the_parts() {
     harness.run();
     harness.get_by_label("Show all").click();
     harness.run();
-    assert!(shown(&harness, "Casing"));
+    assert!(shown(&harness, "Flow channel"));
     harness.get_by_label("Fold the scene").click();
     harness.run();
-    assert!(harness.query_by_label("Casing").is_none());
+    assert!(harness.query_by_label("Flow channel").is_none());
     harness.get_by_label("Show the scene").click();
     harness.run();
-    eye(&harness, "Casing");
+    eye(&harness, "Flow channel");
 }
 
 /// Whether a toggle button is on, however its role reports it.
@@ -902,13 +902,13 @@ fn the_scene_sets_opacity_and_color_and_the_camera_goes_parallel() {
     harness.get_by_label("3D tab").click();
     harness.run();
     // The casing starts as glass; the button steps to opaque, then translucent.
-    assert!(is_on(&harness.get_by_label("Opacity of Casing")));
-    harness.get_by_label("Opacity of Casing").click();
+    assert!(is_on(&harness.get_by_label("Opacity of Flow channel")));
+    harness.get_by_label("Opacity of Flow channel").click();
     harness.run();
-    assert!(!is_on(&harness.get_by_label("Opacity of Casing")));
-    harness.get_by_label("Opacity of Casing").click();
+    assert!(!is_on(&harness.get_by_label("Opacity of Flow channel")));
+    harness.get_by_label("Opacity of Flow channel").click();
     harness.run();
-    assert!(is_on(&harness.get_by_label("Opacity of Casing")));
+    assert!(is_on(&harness.get_by_label("Opacity of Flow channel")));
     // The swatch opens the color and the three opacities; the color is the default one.
     harness.get_by_label("Color of Blades").click();
     harness.run();
@@ -1345,7 +1345,7 @@ fn nothing_moves_when_a_toggle_is_selected() {
     harness.run();
     for toggle in [
         "Orthographic",
-        "Opacity of Casing",
+        "Opacity of Flow channel",
         "Opacity of Blades",
         "Shaded",
         "Meridional cut",
@@ -1635,4 +1635,349 @@ fn nothing_moves_on_hover_in_the_dialogs() {
     harness.key_press_modifiers(Modifiers::COMMAND, Key::N);
     harness.run();
     nothing_moves_on_hover(&mut harness);
+}
+
+#[test]
+fn a_blade_loading_sets_the_beta_distribution() {
+    use tp_design::impeller::blade::BetaDistribution;
+    let mut harness = harness();
+    for _ in 0..3 {
+        accept(&mut harness);
+    }
+    assert!(matches!(
+        harness.state().selection(),
+        Selection::Step(_, DesignStep::BladeMeanLines)
+    ));
+    // The quality of the linear distribution is already shown.
+    harness.get_by_label("Deceleration w₂/w₁ (shroud)");
+    harness.get_by_value("linear").click();
+    harness.run();
+    harness.get_by_label("by blade loading").click();
+    harness.run();
+    let project = harness.state().document().project();
+    let id = project.components()[0].id();
+    let beta = project.impeller_geometry_input(id).unwrap().mean_lines.beta;
+    assert_eq!(beta, BetaDistribution::loading());
+    // Hub and shroud each get their four rows, and the blade is still built.
+    assert_eq!(harness.get_all_by_label("Middle slope").count(), 2);
+    harness.get_by_label("Secondary-flow drive ΔC_p");
+}
+
+/// A harness on the meridional contour of a saved copy of the default pump, after
+/// `prepare` has changed its inputs.
+fn on_the_contour(
+    name: &str,
+    prepare: impl FnOnce(&mut tp_project::Project, tp_project::ComponentId),
+) -> Harness<'static, TurbopumpApp> {
+    let mut project = tp_gui::default_project();
+    let id = project.components()[0].id();
+    project.design_step(id, DesignStep::MainDimensions).unwrap();
+    prepare(&mut project, id);
+    let path = std::env::temp_dir().join(format!("turbopump-{name}.tpj"));
+    project.save(&path).unwrap();
+    let mut harness = Harness::builder()
+        .with_size([1440.0, 900.0])
+        .build_eframe(|cc| TurbopumpApp::new(cc, Some(&path)));
+    harness.run();
+    harness
+        .get_all_by_label("Meridional contour")
+        .find(|n| n.rect().left() < 400.0)
+        .unwrap()
+        .click();
+    harness.run();
+    harness.run();
+    harness
+}
+
+fn seals(h: &Harness<'_, TurbopumpApp>) -> tp_design::impeller::seals::Seals {
+    let project = h.state().document().project();
+    let id = project.components()[0].id();
+    project
+        .impeller_geometry_input(id)
+        .unwrap()
+        .meridional
+        .seals
+}
+
+#[test]
+fn the_material_step_shows_both_seal_cards() {
+    let harness = on_the_contour("seal-cards", |_, _| {});
+    for text in [
+        "Front seal",
+        "Rear seal",
+        "Seal diameter",
+        "Seal length",
+        "Radial clearance",
+        "Impeller ring",
+        "Casing ring",
+    ] {
+        assert!(
+            harness.get_all_by_label(text).next().is_some(),
+            "no {text:?}"
+        );
+    }
+    // Two cards: each has its own rows.
+    assert_eq!(harness.get_all_by_label("Seal diameter").count(), 2);
+}
+
+#[test]
+fn toggling_a_seal_keeps_its_manual_values() {
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::NodeT;
+    use tp_design::Param;
+    let mut harness = on_the_contour("seal-toggle", |project, id| {
+        let mut input = project.impeller_geometry_input(id).unwrap();
+        input.meridional.seals.rear.diameter = Param::Manual(0.09);
+        project.set_impeller_geometry(id, input).unwrap();
+    });
+    let toggle = |h: &mut Harness<'_, TurbopumpApp>| {
+        h.get_all_by_label("Rear seal")
+            .find(|n| n.accesskit_node().role() == Role::CheckBox)
+            .unwrap()
+            .click_accesskit();
+        h.run();
+        h.run();
+    };
+    toggle(&mut harness);
+    assert!(!seals(&harness).rear.enabled);
+    // A switched-off seal hides its rows.
+    assert_eq!(harness.get_all_by_label("Seal diameter").count(), 1);
+    toggle(&mut harness);
+    let rear = seals(&harness).rear;
+    assert!(rear.enabled);
+    assert_eq!(rear.diameter, Param::Manual(0.09));
+    assert_eq!(harness.get_all_by_label("Seal diameter").count(), 2);
+}
+
+/// Scrolls the rear seal card into view.
+fn show_the_rear_seal(h: &mut Harness<'_, TurbopumpApp>) {
+    h.get_all_by_label("Rear seal")
+        .next()
+        .unwrap()
+        .scroll_to_me();
+    h.run_steps(4);
+}
+
+#[test]
+fn seal_cards_do_not_move_on_hover() {
+    let mut harness = on_the_contour("seal-hover", |_, _| {});
+    show_the_rear_seal(&mut harness);
+    // Both cards' rows are among what is compared.
+    assert_eq!(harness.get_all_by_label("Seal diameter").count(), 2);
+    assert!(layout(&harness).contains_key("Rear seal"));
+    nothing_moves_on_hover(&mut harness);
+}
+
+#[test]
+fn toggling_a_seal_or_a_ring_moves_nothing_above_it() {
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::NodeT;
+    let mut harness = on_the_contour("seal-toggle-layout", |_, _| {});
+    show_the_rear_seal(&mut harness);
+    for toggle in ["Impeller ring", "Casing ring", "Rear seal"] {
+        harness.remove_cursor();
+        harness.run();
+        let before = layout(&harness);
+        let node = harness
+            .get_all_by_label(toggle)
+            .rfind(|n| n.accesskit_node().role() == Role::CheckBox)
+            .unwrap();
+        let top = node.rect().top();
+        node.click_accesskit();
+        harness.run();
+        harness.remove_cursor();
+        harness.run();
+        let after = layout(&harness);
+        // Whatever sits above the switch stays where it was.
+        let shifted: Vec<String> = before
+            .iter()
+            .filter(|(_, r)| r.bottom() < top)
+            .filter(|(k, r)| after.get(*k).is_some_and(|a| a != *r))
+            .map(|(k, _)| k.clone())
+            .collect();
+        assert!(shifted.is_empty(), "{toggle}: {shifted:?}");
+    }
+}
+
+#[test]
+fn the_two_ring_thicknesses_are_remembered_apart() {
+    use tp_design::Param;
+    let mut harness = on_the_contour("seal-rings-accepted", |_, _| {});
+    // Accept the step as it is, then change the impeller ring of the front seal only.
+    accept(&mut harness);
+    let mut project = harness.state().document().project().clone();
+    let id = project.components()[0].id();
+    let mut input = project.impeller_geometry_input(id).unwrap();
+    input.meridional.seals.front.impeller_ring.thickness = Param::Manual(0.006);
+    project.set_impeller_geometry(id, input).unwrap();
+    let mut harness = reopened(&project, "seal-rings-accepted-2");
+    harness
+        .get_all_by_label("Meridional contour")
+        .find(|n| n.rect().left() < 400.0)
+        .unwrap()
+        .click();
+    harness.run();
+    harness.run();
+    assert_eq!(
+        status(&harness, DesignStep::MeridionalContour),
+        StepStatus::Stale
+    );
+    let marked = |name: &str| {
+        harness
+            .query_all_by_label(&format!("{name} changed since the step was accepted"))
+            .count()
+    };
+    assert_eq!(marked("Impeller ring thickness"), 1);
+    assert_eq!(marked("Casing ring thickness"), 0);
+}
+
+#[test]
+fn a_double_entry_impeller_hides_the_rear_seal() {
+    use tp_design::MainDimensionsInput;
+    use tp_design::pump::Suction;
+    let harness = on_the_contour("seal-double", |project, id| {
+        let mut input = project.pump_impeller_input(id).unwrap();
+        input.suction = Suction::Double;
+        project
+            .set_main_dimensions(id, MainDimensionsInput::CentrifugalPump(input))
+            .unwrap();
+        project.design_step(id, DesignStep::MainDimensions).unwrap();
+    });
+    assert!(harness.get_all_by_label("Front seal").next().is_some());
+    assert!(harness.query_by_label("Rear seal").is_none());
+    assert!(harness.query_by_label("Back vanes").is_none());
+}
+
+fn back_vanes(h: &Harness<'_, TurbopumpApp>) -> tp_design::impeller::back_vanes::BackVaneSettings {
+    let project = h.state().document().project();
+    let id = project.components()[0].id();
+    project
+        .impeller_geometry_input(id)
+        .unwrap()
+        .meridional
+        .back_vanes
+}
+
+/// Scrolls the back vanes card into view.
+fn show_the_back_vanes(h: &mut Harness<'_, TurbopumpApp>) {
+    h.get_all_by_label("Back vanes")
+        .next()
+        .unwrap()
+        .scroll_to_me();
+    h.run_steps(4);
+}
+
+#[test]
+fn the_back_vanes_card_starts_with_its_switch_only() {
+    let harness = on_the_contour("vanes-off", |_, _| {});
+    assert!(harness.get_all_by_label("Back vanes").next().is_some());
+    for text in ["Count", "Tip clearance", "Turn off the rear seal"] {
+        assert!(harness.query_by_label(text).is_none(), "{text:?} shown");
+    }
+}
+
+#[test]
+fn a_curved_angle_made_elsewhere_is_not_rewritten_by_the_card() {
+    use tp_design::impeller::back_vanes::VaneShape;
+    // 2° is in the CLI's range (0°, 90°] but below the widget's 5° floor.
+    let angle = 2f64.to_radians();
+    let mut harness = on_the_contour("vanes-angle", |project, id| {
+        let mut input = project.impeller_geometry_input(id).unwrap();
+        input.meridional.back_vanes.enabled = true;
+        input.meridional.back_vanes.shape = VaneShape::Curved { angle };
+        project.set_impeller_geometry(id, input).unwrap();
+    });
+    show_the_back_vanes(&mut harness);
+    harness.run_steps(4);
+    assert_eq!(back_vanes(&harness).shape, VaneShape::Curved { angle });
+}
+
+#[test]
+fn back_vanes_card_offers_to_turn_off_the_rear_seal() {
+    let mut harness = on_the_contour("vanes-seal", |project, id| {
+        let mut input = project.impeller_geometry_input(id).unwrap();
+        input.meridional.back_vanes.enabled = true;
+        project.set_impeller_geometry(id, input).unwrap();
+    });
+    for text in [
+        "Count",
+        "Shape",
+        "Outer diameter",
+        "Inner diameter",
+        "Height",
+        "Thickness",
+        "Tip clearance",
+    ] {
+        assert!(
+            harness.get_all_by_label(text).next().is_some(),
+            "no {text:?}"
+        );
+    }
+    // The warning offers the button, which does nothing by itself.
+    assert!(seals(&harness).rear.enabled);
+    harness
+        .get_by_label("Turn off the rear seal")
+        .scroll_to_me();
+    harness.run_steps(4);
+    harness.get_by_label("Turn off the rear seal").click();
+    harness.run();
+    harness.run();
+    assert!(!seals(&harness).rear.enabled);
+    assert!(back_vanes(&harness).enabled);
+    // With the seal off there is nothing left to turn off.
+    assert!(harness.query_by_label("Turn off the rear seal").is_none());
+}
+
+#[test]
+fn back_vanes_without_a_rear_seal_offer_no_button() {
+    let harness = on_the_contour("vanes-no-seal", |project, id| {
+        let mut input = project.impeller_geometry_input(id).unwrap();
+        input.meridional.back_vanes.enabled = true;
+        input.meridional.seals.rear.enabled = false;
+        project.set_impeller_geometry(id, input).unwrap();
+    });
+    assert!(harness.get_all_by_label("Count").next().is_some());
+    assert!(harness.query_by_label("Turn off the rear seal").is_none());
+}
+
+#[test]
+fn back_vanes_card_does_not_move_on_hover() {
+    let mut harness = on_the_contour("vanes-hover", |project, id| {
+        let mut input = project.impeller_geometry_input(id).unwrap();
+        input.meridional.back_vanes.enabled = true;
+        project.set_impeller_geometry(id, input).unwrap();
+    });
+    show_the_back_vanes(&mut harness);
+    nothing_moves_on_hover(&mut harness);
+}
+
+#[test]
+fn toggling_the_back_vanes_moves_nothing_above_them() {
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::NodeT;
+    let mut harness = on_the_contour("vanes-toggle-layout", |_, _| {});
+    show_the_back_vanes(&mut harness);
+    for _ in 0..2 {
+        harness.remove_cursor();
+        harness.run();
+        let before = layout(&harness);
+        let node = harness
+            .get_all_by_label("Back vanes")
+            .rfind(|n| n.accesskit_node().role() == Role::CheckBox)
+            .unwrap();
+        let top = node.rect().top();
+        node.click_accesskit();
+        harness.run();
+        harness.remove_cursor();
+        harness.run();
+        let after = layout(&harness);
+        let shifted: Vec<String> = before
+            .iter()
+            .filter(|(_, r)| r.bottom() < top)
+            .filter(|(k, r)| after.get(*k).is_some_and(|a| a != *r))
+            .map(|(k, _)| k.clone())
+            .collect();
+        assert!(shifted.is_empty(), "{shifted:?}");
+    }
+    assert!(!back_vanes(&harness).enabled);
 }

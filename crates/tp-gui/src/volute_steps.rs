@@ -8,8 +8,9 @@ use egui_plot::{Line, Plot, PlotPoints};
 use tp_design::Param;
 use tp_design::volute::stress::StressPlace;
 use tp_design::volute::{
-    AreaLaw, CutwaterShape, DischargeShape, MAX_ARCS, MIN_ARCS, MIN_WRAP_DEG, Progression,
-    StraightWall, VoluteGeometry, VoluteInput, VoluteKind,
+    AreaLaw, CutMeasure, CutwaterShape, DiffuserGrowth, DischargeShape, MAX_ARCS, MIN_ARCS,
+    MIN_WRAP_DEG, OutletShape, Progression, StraightWall, VoluteGeometry, VoluteInput, VoluteKind,
+    ZAlignment, ZBend,
 };
 use tp_project::{ComponentId, DesignStep, Project};
 use tp_units::{DisplayUnits, QuantityKind};
@@ -152,16 +153,18 @@ fn setup(
                 let rib = d.and_then(|d| d.rib);
                 param_f64(
                     ui,
-                    tr("Inner volute wrap ε_sp"),
+                    tr("Rib length"),
                     tr(
-                        "From the rib nose to the throat; 180°, or 170° with an even number of \
-                        blades (Gülich Chap. 7.8.1)",
+                        "From the rib nose, which is always 180° from the cutwater and keeps \
+                        the two channels balanced. 180° (automatic) reaches the throat; less \
+                        stops the rib short of the discharge diffuser and the two channels \
+                        join there",
                     ),
-                    &mut input.setup.rib_wrap,
+                    &mut input.setup.rib_length,
                     Angle,
-                    rib.map(|r| r.wrap),
+                    rib.map(|r| r.length),
                     &units,
-                    (90.5f64).to_radians()..=(240f64).to_radians(),
+                    tp_design::volute::MIN_RIB_LENGTH..=PI,
                 );
                 param_f64(
                     ui,
@@ -175,16 +178,62 @@ fn setup(
                 );
                 param_f64(
                     ui,
+                    tr("Rib middle thickness"),
+                    tr(
+                        "Halfway along the rib; the thickness follows a parabola through the \
+                        nose, the middle and the tail. Automatic: the mean of the ends",
+                    ),
+                    &mut input.setup.rib_middle_thickness,
+                    Length,
+                    rib.map(|r| r.middle_thickness),
+                    &units,
+                    0.0005..=0.1,
+                );
+                param_f64(
+                    ui,
+                    tr("Rib end thickness"),
+                    tr("At the tail of the rib; automatic: the nose's"),
+                    &mut input.setup.rib_end_thickness,
+                    Length,
+                    rib.map(|r| r.end_thickness),
+                    &units,
+                    0.0005..=0.1,
+                );
+                param_f64(
+                    ui,
                     tr("Rib nose length/thickness"),
                     tr(
-                        "Elliptic nose and tail of the rib: 1 for a semicircle, longer for a \
-                        nose less sensitive to the flow angle (Gülich Chap. 7.8.1, item 7)",
+                        "Elliptic nose of the rib: 1 for a semicircle, longer for a nose less \
+                        sensitive to the flow angle (Gülich Chap. 7.8.1, item 7)",
                     ),
                     &mut input.setup.rib_nose_ratio,
                     Dimensionless,
                     rib.map(|r| r.nose_ratio),
                     &units,
                     1.0..=5.0,
+                );
+                param_f64(
+                    ui,
+                    tr("Rib tail length/thickness"),
+                    tr("Elliptic tail of the rib, over its end thickness; automatic: the nose's"),
+                    &mut input.setup.rib_tail_ratio,
+                    Dimensionless,
+                    rib.map(|r| r.tail_ratio),
+                    &units,
+                    1.0..=5.0,
+                );
+                param_f64(
+                    ui,
+                    tr("Rib corner fillet"),
+                    tr(
+                        "Radius where the rib meets the side walls; the CAD rounds those corners \
+                        with it. Automatic: 0, sharp corners",
+                    ),
+                    &mut input.setup.rib_corner_radius,
+                    Length,
+                    rib.map(|r| r.corner_radius),
+                    &units,
+                    0.0..=0.05,
                 );
                 param_f64(
                     ui,
@@ -880,6 +929,7 @@ fn diffuser(
                         straight_wall: StraightWall::Outer,
                     } => "tangential, outer wall straight",
                     DischargeShape::Radial { .. } => "radial",
+                    DischargeShape::Spline { .. } => "spline",
                 })
             };
             let current = input.diffuser.shape;
@@ -889,6 +939,11 @@ fn diffuser(
                     .show_ui(ui, |ui| {
                         for option in [
                             DischargeShape::Radial { axis_angle: 0.0 },
+                            DischargeShape::Spline {
+                                turn: 60f64.to_radians(),
+                                start_share: 0.5,
+                                end_share: 0.5,
+                            },
                             DischargeShape::Tangential {
                                 straight_wall: StraightWall::Centered,
                             },
@@ -901,8 +956,10 @@ fn diffuser(
                         ] {
                             let same = std::mem::discriminant(&option)
                                 == std::mem::discriminant(&current)
-                                && (matches!(option, DischargeShape::Radial { .. })
-                                    || option == current);
+                                && (matches!(
+                                    option,
+                                    DischargeShape::Radial { .. } | DischargeShape::Spline { .. }
+                                ) || option == current);
                             if ui.selectable_label(same, text(&option)).clicked() && !same {
                                 input.diffuser.shape = option;
                             }
@@ -910,6 +967,49 @@ fn diffuser(
                     })
             });
             ui.end_row();
+            if let DischargeShape::Spline {
+                turn,
+                start_share,
+                end_share,
+            } = &mut input.diffuser.shape
+            {
+                let mut value = Param::Manual(*turn);
+                param_f64(
+                    ui,
+                    tr("Turn"),
+                    tr(
+                        "How far the centerline of the spline diffuser turns between the throat \
+                        and the outlet, away from the pump axis",
+                    ),
+                    &mut value,
+                    Angle,
+                    Some(*turn),
+                    &units,
+                    *tp_design::volute::SPLINE_TURN.start()..=*tp_design::volute::SPLINE_TURN.end(),
+                );
+                *turn = value.resolve(|| 1.0);
+                for (name, share) in [
+                    (tr("Start share"), start_share),
+                    (tr("End share"), end_share),
+                ] {
+                    let mut value = Param::Manual(*share);
+                    param_f64(
+                        ui,
+                        name,
+                        tr(
+                            "Where the control points 1 and 3 of the fourth-degree Bézier \
+                            centerline sit between the ends and point 2: they shape the curve",
+                        ),
+                        &mut value,
+                        Dimensionless,
+                        Some(*share),
+                        &units,
+                        *tp_design::volute::SPLINE_SHARE.start()
+                            ..=*tp_design::volute::SPLINE_SHARE.end(),
+                    );
+                    *share = value.resolve(|| 0.5);
+                }
+            }
             if let DischargeShape::Radial { axis_angle } = &mut input.diffuser.shape {
                 let mut angle = Param::Manual(*axis_angle);
                 param_f64(
@@ -935,6 +1035,22 @@ fn diffuser(
                     dif.map(|d| d.bend_radius),
                     &units,
                     0.001..=10.0,
+                );
+            }
+            if matches!(input.diffuser.shape, DischargeShape::Tangential { .. }) {
+                param_f64(
+                    ui,
+                    tr("Eccentricity"),
+                    tr(
+                        "How the diffuser widens against its axis: −1 with the wall on the \
+                        cutwater side straight, 0 to both sides, 1 with the outer wall straight; \
+                        automatic: that of the wall chosen above",
+                    ),
+                    &mut input.diffuser.eccentricity,
+                    Dimensionless,
+                    dif.map(|d| d.eccentricity),
+                    &units,
+                    -1.0..=1.0,
                 );
             }
             param_f64(
@@ -975,11 +1091,250 @@ fn diffuser(
             );
             label(
                 ui,
+                tr("Outlet section"),
+                tr(
+                    "Round, or a rectangle of the same area: its aspect is the height along the \
+                    pump axis over the width. A rectangular outlet has no round flange",
+                ),
+            );
+            let section = |o: &OutletShape| {
+                tr(match o {
+                    OutletShape::Round => "round",
+                    OutletShape::Rectangular { .. } => "rectangular",
+                })
+            };
+            let current = input.diffuser.outlet_shape;
+            crate::widgets::list(ui, |ui| {
+                ComboBox::from_id_salt("volute_outlet_shape")
+                    .selected_text(crate::widgets::noted(ui, section(&current)))
+                    .show_ui(ui, |ui| {
+                        for option in [OutletShape::Round, OutletShape::Rectangular { aspect: 1.0 }]
+                        {
+                            let same =
+                                std::mem::discriminant(&option) == std::mem::discriminant(&current);
+                            if ui.selectable_label(same, section(&option)).clicked() && !same {
+                                input.diffuser.outlet_shape = option;
+                            }
+                        }
+                    })
+            });
+            ui.end_row();
+            if let OutletShape::Rectangular { aspect } = &mut input.diffuser.outlet_shape {
+                let mut value = Param::Manual(*aspect);
+                param_f64(
+                    ui,
+                    tr("Outlet aspect"),
+                    tr("Height along the pump axis over the width of the rectangular outlet"),
+                    &mut value,
+                    Dimensionless,
+                    Some(*aspect),
+                    &units,
+                    tp_design::volute::OUTLET_ASPECT,
+                );
+                *aspect = value.resolve(|| 1.0);
+            }
+            label(
+                ui,
                 tr("Nominal size DN"),
                 tr("Round the automatic outlet diameter to the nearest nominal size"),
             );
             ui.checkbox(&mut input.diffuser.nominal_size, "");
             ui.end_row();
+            label(
+                ui,
+                tr("Area growth"),
+                tr(
+                    "How the area grows from the throat to the outlet. Radius: the equivalent \
+                    radius grows linearly, so the area gains slope from the first step. Matched: \
+                    quadratic area that starts with the slope of the spiral, with no break at the \
+                    throat",
+                ),
+            );
+            let growth = |g: DiffuserGrowth| {
+                tr(match g {
+                    DiffuserGrowth::Linear => "linear in the radius",
+                    DiffuserGrowth::Matched => "matched to the spiral",
+                })
+            };
+            crate::widgets::list(ui, |ui| {
+                ComboBox::from_id_salt("volute_growth")
+                    .selected_text(crate::widgets::noted(ui, growth(input.diffuser.growth)))
+                    .show_ui(ui, |ui| {
+                        for option in [DiffuserGrowth::Linear, DiffuserGrowth::Matched] {
+                            let same = option == input.diffuser.growth;
+                            if ui.selectable_label(same, growth(option)).clicked() && !same {
+                                input.diffuser.growth = option;
+                            }
+                        }
+                    })
+            });
+            ui.end_row();
+            param_f64(
+                ui,
+                tr("Height offset Δr_C"),
+                tr(
+                    "Shifts the diffuser across its centerline, away from the pump axis when \
+                    positive, over the first 40 % of its length: room for the cutwater, whose \
+                    tip moves toward the base circle",
+                ),
+                &mut input.diffuser.height_offset,
+                Length,
+                Some(0.0),
+                &units,
+                -0.5..=0.5,
+            );
+            param_f64(
+                ui,
+                tr("Base form factor"),
+                tr(
+                    "How round the first section of the diffuser is on its base side, the inlet \
+                    chord toward the pump axis: 0 keeps the flat chord of the throat, so that \
+                    diffuser and spiral run along each other there; above it the chord bulges \
+                    toward the axis (1: half an ellipse as deep as half the chord, at most nine \
+                    tenths of the gap to the impeller), so that the diffuser crosses the start of \
+                    the spiral. It fades out along the diffuser; a rounder base moves the cutwater \
+                    downstream",
+                ),
+                &mut input.diffuser.base_form,
+                Dimensionless,
+                Some(0.0),
+                &units,
+                0.0..=tp_design::volute::MAX_BASE_FORM,
+            );
+            label(
+                ui,
+                tr("Axial alignment"),
+                tr(
+                    "Where the sections of the diffuser sit along the pump axis. Centric: on the \
+                    centerline. Manual: the outlet is shifted by the offset, linearly or \
+                    quadratically with the length",
+                ),
+            );
+            let alignment = |a: &ZAlignment| {
+                tr(match a {
+                    ZAlignment::Centric => "centric",
+                    ZAlignment::Manual { .. } => "manual",
+                })
+            };
+            let current = input.diffuser.z_alignment;
+            crate::widgets::list(ui, |ui| {
+                ComboBox::from_id_salt("volute_z_alignment")
+                    .selected_text(crate::widgets::noted(ui, alignment(&current)))
+                    .show_ui(ui, |ui| {
+                        for option in [
+                            ZAlignment::Centric,
+                            ZAlignment::Manual {
+                                offset: 0.0,
+                                quadratic: false,
+                            },
+                        ] {
+                            let same =
+                                std::mem::discriminant(&option) == std::mem::discriminant(&current);
+                            if ui.selectable_label(same, alignment(&option)).clicked() && !same {
+                                input.diffuser.z_alignment = option;
+                            }
+                        }
+                    })
+            });
+            ui.end_row();
+            if let ZAlignment::Manual { offset, quadratic } = &mut input.diffuser.z_alignment {
+                let mut value = Param::Manual(*offset);
+                param_f64(
+                    ui,
+                    tr("Axial offset"),
+                    tr("Shift of the outlet along the pump axis, positive toward +z"),
+                    &mut value,
+                    Length,
+                    Some(*offset),
+                    &units,
+                    -0.5..=0.5,
+                );
+                *offset = value.resolve(|| 0.0);
+                label(
+                    ui,
+                    tr("Quadratic progression"),
+                    tr("The shift grows with the square of the length instead of linearly"),
+                );
+                ui.checkbox(quadratic, "");
+                ui.end_row();
+            }
+            label(
+                ui,
+                tr("Axial bend"),
+                tr(
+                    "Bends the centerline of the diffuser along the pump axis: it runs flat from \
+                    the throat, rounds off with the radius R through the angle α and goes on \
+                    straight, ending Δz along the pump axis. The three have to agree for the \
+                    length of the diffuser",
+                ),
+            );
+            crate::widgets::list(ui, |ui| {
+                let on = input.diffuser.z_bend.is_some();
+                ComboBox::from_id_salt("volute_z_bend")
+                    .selected_text(crate::widgets::noted(
+                        ui,
+                        if on { tr("bent") } else { tr("none") },
+                    ))
+                    .show_ui(ui, |ui| {
+                        if ui.selectable_label(!on, tr("none")).clicked() && on {
+                            input.diffuser.z_bend = None;
+                        }
+                        if ui.selectable_label(on, tr("bent")).clicked() && !on {
+                            // A bend that fits the length: the middle of what it allows.
+                            let length = dif.map_or(0.1, |d| d.length);
+                            let (radius, angle) = (0.6 * length, 20f64.to_radians());
+                            let low = radius * (1.0 - angle.cos());
+                            let high = low + (length - radius * angle.sin()) * angle.tan();
+                            input.diffuser.z_bend = Some(ZBend {
+                                extent: 0.5 * (low + high),
+                                radius,
+                                angle,
+                            });
+                        }
+                    })
+            });
+            ui.end_row();
+            if let Some(bend) = &mut input.diffuser.z_bend {
+                for (name, help, kind, value, range) in [
+                    (
+                        tr("Axial extension Δz"),
+                        tr(
+                            "How far the outlet lies from the plane of the volute, along the pump axis",
+                        ),
+                        Length,
+                        &mut bend.extent,
+                        -0.5..=0.5,
+                    ),
+                    (
+                        tr("Bend radius R"),
+                        tr("Radius of the round of the axial bend"),
+                        Length,
+                        &mut bend.radius,
+                        0.001..=2.0,
+                    ),
+                    (
+                        tr("Bend angle α"),
+                        tr("Angle the centerline reaches against the plane of the volute"),
+                        Angle,
+                        &mut bend.angle,
+                        *tp_design::volute::Z_BEND_ANGLE.start()
+                            ..=*tp_design::volute::Z_BEND_ANGLE.end(),
+                    ),
+                ] {
+                    let mut parameter = Param::Manual(*value);
+                    param_f64(
+                        ui,
+                        name,
+                        help,
+                        &mut parameter,
+                        kind,
+                        Some(*value),
+                        &units,
+                        range,
+                    );
+                    *value = parameter.resolve(|| 0.0);
+                }
+            }
             param_f64(
                 ui,
                 tr("Volute rotation"),
@@ -998,12 +1353,39 @@ fn diffuser(
             && section_kind(ui, tr("Results"), "", Kind::Results)
         {
             props(ui, "volute_diffuser_results", |ui| {
+                let equivalent = |area: f64| (4.0 * area / std::f64::consts::PI).sqrt();
+                value_row(
+                    ui,
+                    tr("Inlet diameter D₁"),
+                    units.show(Length, equivalent(d.inlet_area)),
+                );
+                value_row(ui, tr("Inlet area A₁"), units.show(Area, d.inlet_area));
+                value_row(
+                    ui,
+                    tr("Outlet area A₂"),
+                    units.show(Area, std::f64::consts::PI * d.outlet_diameter.powi(2) / 4.0),
+                );
                 value_row(ui, tr("Area ratio A_R"), format!("{:.2}", d.area_ratio));
+                value_row(
+                    ui,
+                    tr("Velocity ratio c_out/c_in"),
+                    format!("{:.3}", 1.0 / d.area_ratio),
+                );
                 if let Some(g) = g {
                     value_row(
                         ui,
                         tr("Outlet face from the pump axis"),
                         units.show(Length, g.outlet_height),
+                    );
+                    value_row(
+                        ui,
+                        tr("Outlet axis offset C"),
+                        units.show(Length, g.outlet_offset()),
+                    );
+                    value_row(
+                        ui,
+                        tr("Outlet centre angle φ"),
+                        units.show(Angle, g.outlet_angle()),
                     );
                 }
                 if let Some(g) = g
@@ -1059,16 +1441,17 @@ fn cutwater(
                 tr("Shape"),
                 tr(
                     "Tangent: the spiral starts where it clears the diffuser. Sharp: the spiral \
-                 cuts the diffuser wall. Rounded: a nose of radius ρ on the cutwater circle, \
-                 its body never thinner than the nose and running smoothly into both walls \
-                 (Gülich Fig. 7.41b)",
+                 cuts the diffuser wall. Rounded: the same edge rounded by an arc of radius ρ \
+                 tangent to both walls, so the cutwater stands where the walls cross. Simple: the \
+                 walls are cut back from the tip and a smooth curve joins them, tangent to both",
                 ),
             );
             let text = |shape: &CutwaterShape| {
                 tr(match shape {
                     CutwaterShape::Tangent => "tangent",
                     CutwaterShape::Sharp => "sharp",
-                    CutwaterShape::Rounded { .. } => "rounded",
+                    CutwaterShape::Fillet { .. } => "rounded",
+                    CutwaterShape::Simple { .. } => "simple",
                 })
             };
             let current = input.cutwater.shape;
@@ -1079,8 +1462,13 @@ fn cutwater(
                         for option in [
                             CutwaterShape::Tangent,
                             CutwaterShape::Sharp,
-                            CutwaterShape::Rounded {
+                            CutwaterShape::Fillet {
                                 radius: Param::Auto,
+                            },
+                            CutwaterShape::Simple {
+                                cut: Param::Auto,
+                                handle: Param::Auto,
+                                measure: CutMeasure::Along,
                             },
                         ] {
                             let same =
@@ -1092,13 +1480,14 @@ fn cutwater(
                     })
             });
             ui.end_row();
-            if let CutwaterShape::Rounded { radius } = &mut input.cutwater.shape {
+            if let CutwaterShape::Fillet { radius } = &mut input.cutwater.shape {
                 param_f64(
                     ui,
                     tr("Nose radius ρ"),
                     tr(
-                        "Automatic: e₃/2, a nose as thick as the cutwater; its innermost point \
-                        stays on the cutwater circle d_z",
+                        "Radius of the round at the crossing of the two walls: the arc \
+                        touches both, so the cutwater stands where the walls leave it. \
+                        Automatic: e₃/2",
                     ),
                     radius,
                     Length,
@@ -1106,29 +1495,110 @@ fn cutwater(
                     &units,
                     0.0001..=0.1,
                 );
+            }
+            if let CutwaterShape::Simple {
+                cut,
+                handle,
+                measure,
+            } = &mut input.cutwater.shape
+            {
+                label(
+                    ui,
+                    tr("Cut measured"),
+                    tr(
+                        "Along the walls: both end the same length back from the tip. Across \
+                        the gap: each ends where the other lies that far away, so the gap the \
+                        curve closes keeps its width whatever the wedge",
+                    ),
+                );
+                let text = |m: CutMeasure| {
+                    tr(match m {
+                        CutMeasure::Along => "along the walls",
+                        CutMeasure::Across => "across the gap",
+                    })
+                };
+                let current = *measure;
+                crate::widgets::list(ui, |ui| {
+                    ComboBox::from_id_salt("volute_cutwater_measure")
+                        .selected_text(crate::widgets::noted(ui, text(current)))
+                        .show_ui(ui, |ui| {
+                            for option in [CutMeasure::Along, CutMeasure::Across] {
+                                if ui
+                                    .selectable_label(option == current, text(option))
+                                    .clicked()
+                                    && option != current
+                                {
+                                    *measure = option;
+                                    // The value means another length now.
+                                    *cut = Param::Auto;
+                                }
+                            }
+                        })
+                });
+                ui.end_row();
+                let (name, hint) = match *measure {
+                    CutMeasure::Along => (
+                        tr("Cut back"),
+                        tr(
+                            "How far back from the tip along each wall the cutwater starts: \
+                            the walls end there and a smooth curve joins them. Automatic: 3 e₃",
+                        ),
+                    ),
+                    CutMeasure::Across => (
+                        tr("Gap"),
+                        tr(
+                            "How wide the gap between the walls is where the cutwater starts: \
+                            each wall ends where the other lies this far away, and a smooth \
+                            curve joins them. Automatic: e₃",
+                        ),
+                    ),
+                };
                 param_f64(
                     ui,
-                    tr("Spiral share"),
-                    tr(
-                        "Share of the thickness the wedge lacks past its tip that the spiral side of the body takes; the diffuser side takes the rest. Automatic: ½",
-                    ),
-                    &mut input.cutwater.share,
-                    Dimensionless,
-                    g.map(|g| g.design.cutwater_share),
+                    name,
+                    hint,
+                    cut,
+                    Length,
+                    g.map(|g| g.design.cutwater_cut),
                     &units,
-                    0.0..=1.0,
+                    0.001..=0.2,
                 );
                 param_f64(
                     ui,
-                    tr("Obliquity ε"),
+                    tr("Handles"),
                     tr(
-                        "Angle between the edge of the cutwater and the pump axis, unrolled onto d_z; positive leans it downstream toward +z. Gülich Table 10.2 asks for more than 35° against pressure pulsations; the walls set how far it can lean. Automatic: 0",
+                        "Length of the handles of the curve, as a share of each wall's cut: \
+                        shorter ones close the nose more tightly. Automatic: ½",
                     ),
-                    &mut input.cutwater.obliquity,
-                    Angle,
-                    g.map(|g| g.design.cutwater_obliquity),
+                    handle,
+                    Dimensionless,
+                    g.map(|g| g.design.cutwater_handle),
                     &units,
-                    -tp_design::volute::MAX_OBLIQUITY..=tp_design::volute::MAX_OBLIQUITY,
+                    0.05..=1.0,
+                );
+            }
+            if !matches!(input.cutwater.shape, CutwaterShape::Tangent) {
+                // The starts that see the walls cross in every plane.
+                let range = g.and_then(|g| g.start_range);
+                let hint = match range {
+                    Some((lo, hi)) => tf(
+                        "Where the spiral starts, before its wall crosses the diffuser's in every plane: from {} to {} here. Automatic: 3°",
+                        &[&units.show(Angle, lo), &units.show(Angle, hi)],
+                    ),
+                    None => tr(
+                        "Where the spiral starts. Its wall does not cross the diffuser's in every plane: it starts where it clears it",
+                    )
+                    .to_owned(),
+                };
+                param_f64(
+                    ui,
+                    tr("Spiral start"),
+                    &hint,
+                    &mut input.cutwater.spiral_start,
+                    Angle,
+                    g.map(|g| g.start_angle),
+                    &units,
+                    0.0..=std::f64::consts::FRAC_PI_2,
                 );
             }
             let incidence = input.cutwater.incidence.resolve(|| 0.0);
@@ -1181,6 +1651,31 @@ fn cutwater(
                             ),
                         );
                         value_row(ui, tr("Wedge angle"), units.show(Angle, c.wedge));
+                        value_row(
+                            ui,
+                            tr("Spiral wall angle αIn"),
+                            units.show(Angle, c.spiral_angle),
+                        );
+                        value_row(
+                            ui,
+                            tr("Diffuser wall angle αOut"),
+                            units.show(Angle, c.diffuser_angle),
+                        );
+                        value_row(
+                            ui,
+                            tr("Mean wall angle αAvg"),
+                            units.show(Angle, c.mean_angle()),
+                        );
+                        value_row(
+                            ui,
+                            tr("Walls off the flow angle"),
+                            units.show(Angle, g.wall_misalignment()),
+                        );
+                        value_row(
+                            ui,
+                            tr("Spiral start φC,0"),
+                            units.show(Angle, g.start_angle),
+                        );
                     }
                     value_row(
                         ui,

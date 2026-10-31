@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 
 use clap::{Args, ValueEnum};
 use tp_cad::{BalanceHoleOptions, CadOptions, ImpellerCad, Shape};
-use tp_design::axial_thrust::{AxialThrust, AxialThrustInput};
 use tp_project::{
     ComponentId, ComponentKind, DesignStep, Project, StepStatus, VANED_STEPS, VANELESS_STEPS,
     VOLUTE_STEPS,
@@ -64,9 +63,44 @@ pub(crate) struct CadArgs {
     /// Chap. 9.2.2.
     #[arg(long)]
     balance_holes: bool,
+    /// Volutes as curves and surfaces instead of solids, to model them in another CAD
+    /// system: the walls trimmed and sewn at a sharp or fillet cutwater, and the
+    /// section outlines and cutwater lines. STEP and IGES only.
+    #[arg(long)]
+    surfaces: bool,
     /// Material density for the masses of the impeller and the volute casing.
     #[arg(long, default_value = "7850 kg/m3")]
     density: String,
+    /// Leave out the flow domains split into named boundaries (inflow, outflow, hub,
+    /// shroud, blade, spiral, diffuser, cutwater…), a file each in a `boundaries` folder.
+    #[arg(long)]
+    no_boundaries: bool,
+}
+
+/// Writes the named boundaries of a flow domain, a file each, into `dir/boundaries`;
+/// says what could not be written.
+fn write_boundaries(
+    shape: &Shape,
+    patches: Result<Vec<tp_cad::Patch>, tp_cad::CadError>,
+    dir: &Path,
+    stem: &str,
+    formats: &[Format],
+    deflection: f64,
+) -> bool {
+    let dir = dir.join("boundaries");
+    let written = patches.and_then(|patches| {
+        formats.iter().try_for_each(|format| {
+            tp_cad::write_patches(shape, &patches, &dir, stem, format.extension(), deflection)
+                .map(drop)
+        })
+    });
+    match written {
+        Ok(()) => true,
+        Err(e) => {
+            println!("  warning: the named boundaries of {stem} were not written: {e}");
+            false
+        }
+    }
 }
 
 fn length(text: &Option<String>, units: &DisplayUnits) -> Result<Option<f64>, String> {
@@ -178,7 +212,12 @@ pub(crate) fn run(args: CadArgs) -> CliResult {
         }
         let options = CadOptions {
             balance_holes: if args.balance_holes {
-                Some(balance_holes(&project, *id)?)
+                let holes = balance_holes(&project, *id, &geometry)?;
+                if holes.is_none() {
+                    eprintln!("warning: balance holes need the rear seal; they are left out");
+                    warned = true;
+                }
+                holes
             } else {
                 None
             },
@@ -223,14 +262,27 @@ pub(crate) fn run(args: CadArgs) -> CliResult {
         for &format in &args.format {
             let chambers = cad.side_chambers.as_ref().map(|s| ("side-chambers", s));
             let duct = duct.as_ref().map(|s| ("inlet-duct", s));
+            // Every wear ring is a file of its own, the chambers designed or not.
+            let rings = cad.rings.iter().map(|r| (r.kind.file_stem(), &r.solid));
             for (stem, shape) in [("impeller", &cad.impeller), ("fluid", &cad.fluid)]
                 .into_iter()
                 .chain(chambers)
                 .chain(duct)
+                .chain(rings)
             {
                 let path = dir.join(format!("{stem}.{}", format.extension()));
                 write(shape, &path, format, deflection)?;
             }
+        }
+        if !args.no_boundaries {
+            warned |= !write_boundaries(
+                &cad.fluid,
+                tp_cad::impeller_patches(&geometry, &cad.fluid),
+                &dir,
+                "impeller",
+                &args.format,
+                deflection,
+            );
         }
         // One flow domain for CFD: with the side chambers and the volute after them.
         let next = project
@@ -319,9 +371,48 @@ pub(crate) fn run(args: CadArgs) -> CliResult {
             continue;
         }
         let geometry = project.compute_volute(*id).map_err(err)?;
+        let stem = if volutes.len() > 1 {
+            format!("volute-{}", id.0)
+        } else {
+            "volute".to_owned()
+        };
+        if args.surfaces {
+            println!("{name} ({id}): building curves and surfaces…");
+            let s = tp_cad::build_volute_surfaces(&geometry).map_err(|e| e.to_string())?;
+            println!(
+                "  {} surfaces{}, {} curves",
+                s.surfaces.face_count(),
+                if s.trimmed {
+                    ", the walls trimmed and sewn at the cutwater"
+                } else {
+                    ""
+                },
+                s.curves.edge_samples(2).len()
+            );
+            for w in &s.warnings {
+                println!("  warning: {w}");
+                warned = true;
+            }
+            std::fs::create_dir_all(&base).map_err(|e| format!("{}: {e}", base.display()))?;
+            let both = s.both().map_err(|e| e.to_string())?;
+            for &format in &args.format {
+                if format == Format::Stl {
+                    println!("  STL holds no curves or open surfaces: skipped");
+                    continue;
+                }
+                let path = base.join(format!("{stem}-surfaces.{}", format.extension()));
+                write(&both, &path, format, 0.0)?;
+            }
+            println!();
+            continue;
+        }
         println!("{name} ({id}): building CAD solids…");
         let cad = tp_cad::build_volute(&geometry).map_err(|e| e.to_string())?;
         println!("  Volute flow domain {:.1} cm³", cad.fluid_volume() * 1e6);
+        for w in &cad.warnings {
+            println!("  warning: {w}");
+            warned = true;
+        }
         let casing = tp_cad::build_volute_casing(&geometry, &cad).map_err(|e| e.to_string())?;
         let material = casing.volume();
         println!(
@@ -347,17 +438,22 @@ pub(crate) fn run(args: CadArgs) -> CliResult {
             }
         }
         std::fs::create_dir_all(&base).map_err(|e| format!("{}: {e}", base.display()))?;
-        let stem = if volutes.len() > 1 {
-            format!("volute-{}", id.0)
-        } else {
-            "volute".to_owned()
-        };
         let deflection = geometry.basis.impeller_diameter * 1e3 / 2000.0;
         for &format in &args.format {
             let path = base.join(format!("{stem}.{}", format.extension()));
             write(&cad.fluid, &path, format, deflection)?;
             let path = base.join(format!("{stem}-casing.{}", format.extension()));
             write(&casing.solid, &path, format, deflection)?;
+        }
+        if !args.no_boundaries {
+            warned |= !write_boundaries(
+                &cad.fluid,
+                tp_cad::volute_patches(&geometry, &cad.fluid),
+                &base,
+                &stem,
+                &args.format,
+                deflection,
+            );
         }
         println!();
     }
@@ -368,24 +464,20 @@ pub(crate) fn run(args: CadArgs) -> CliResult {
     })
 }
 
-/// One balance hole per channel, sized for the rear seal of the axial thrust (Gülich
-/// Chap. 9.2.2) with the automatic seal diameters.
-fn balance_holes(project: &Project, id: ComponentId) -> Result<BalanceHoleOptions, String> {
-    let duty = project.pump_duty(id).map_err(err)?;
-    let design = project.compute_main_dimensions(id).map_err(err)?;
-    let input = AxialThrustInput {
-        balance_holes: true,
-        ..AxialThrustInput::default()
-    };
-    let axial = AxialThrust::new(&duty, &design, &input, false).map_err(|e| e.to_string())?;
-    let size = axial
-        .balance_holes(design.blade_count)
-        .ok_or("the axial thrust has no rear seal for balance holes")?;
-    Ok(BalanceHoleOptions {
-        count: size.count,
-        diameter: size.diameter,
-        seal_diameter: size.seal_diameter,
-    })
+/// One balance hole per channel, sized for the rear seal drawn in `geometry` (Gülich
+/// Chap. 9.2.2); `None` when the contour has no rear seal for the holes to open into.
+fn balance_holes(
+    project: &Project,
+    id: ComponentId,
+    geometry: &tp_design::impeller::ImpellerGeometry,
+) -> Result<Option<BalanceHoleOptions>, String> {
+    Ok(project
+        .balance_hole_size(id, geometry)?
+        .map(|size| BalanceHoleOptions {
+            count: size.count,
+            diameter: size.diameter,
+            seal_diameter: size.seal_diameter,
+        }))
 }
 
 /// Prints volumes and checks; returns whether every solid is valid.
@@ -403,6 +495,23 @@ fn report(cad: &ImpellerCad, density: f64, units: &DisplayUnits) -> bool {
         show(units, QuantityKind::Density, density)
     );
     println!("  Flow domain      {:.1} cm³", fluid * 1e6);
+    for ring in &cad.rings {
+        let volume = cad.ring_volume(ring.kind).unwrap_or(0.0);
+        println!(
+            "  {:<19} {:.1} cm³, {} (at the impeller density)",
+            ring.kind.label(),
+            volume * 1e6,
+            format_mass(volume * density)
+        );
+    }
+    if let Some(vanes) = &cad.back_vanes {
+        let volume = vanes.volume() * 1e-9;
+        println!(
+            "  Back vanes       {:.1} cm³, {} (part of the impeller)",
+            volume * 1e6,
+            format_mass(volume * density)
+        );
+    }
     let length = |v: f64| show(units, QuantityKind::Length, v);
     println!(
         "  Hub              bore {}, boss {}",
@@ -427,10 +536,16 @@ fn report(cad: &ImpellerCad, density: f64, units: &DisplayUnits) -> bool {
         println!("  warning: {w}");
     }
     let checks = [
-        ("blade", &cad.blade),
-        ("flow domain", &cad.fluid),
-        ("impeller", &cad.impeller),
-    ];
+        ("blade".to_string(), &cad.blade),
+        ("flow domain".to_string(), &cad.fluid),
+        ("impeller".to_string(), &cad.impeller),
+    ]
+    .into_iter()
+    .chain(
+        cad.rings
+            .iter()
+            .map(|r| (r.kind.label().to_lowercase(), &r.solid)),
+    );
     let mut ok = true;
     for (label, shape) in checks {
         if !shape.is_valid() || shape.solid_count() != 1 {
@@ -442,7 +557,9 @@ fn report(cad: &ImpellerCad, density: f64, units: &DisplayUnits) -> bool {
         }
     }
     if ok {
-        println!("  Solids           valid (blade, flow domain and impeller are single solids)");
+        println!(
+            "  Solids           valid (blade, flow domain, impeller and wear rings are single solids)"
+        );
     }
     ok && cad.warnings.is_empty()
 }
@@ -452,5 +569,52 @@ fn format_mass(kg: f64) -> String {
         format!("{:.0} g", kg * 1e3)
     } else {
         format!("{kg:.2} kg")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::f64::consts::PI;
+
+    use tp_project::{DesignPoint, EnergyTransfer, FlowRate, GlobalSetup, MachineType};
+
+    use super::*;
+
+    fn pump() -> (Project, ComponentId) {
+        let setup = GlobalSetup::new(
+            MachineType::Pump,
+            DesignPoint {
+                flow: FlowRate::Volume(100.0 / 3600.0),
+                energy: EnergyTransfer::Head(32.0),
+                speed: 2900.0 * PI / 30.0,
+            },
+        );
+        let mut project = Project::new("t", MachineType::Pump, setup).unwrap();
+        let id = project
+            .add_component(ComponentKind::Impeller, None)
+            .unwrap();
+        (project, id)
+    }
+
+    #[test]
+    fn balance_holes_follow_the_rear_seal_of_the_contour() {
+        let (mut project, id) = pump();
+        let mut input = project.impeller_geometry_input(id).unwrap();
+        input.meridional.seals.rear.diameter = tp_design::Param::Manual(0.09);
+        project.set_impeller_geometry(id, input).unwrap();
+        let geometry = project.compute_impeller_geometry(id).unwrap();
+        let rear = geometry.contour.seals.rear.unwrap();
+        let holes = balance_holes(&project, id, &geometry).unwrap().unwrap();
+        assert!((holes.seal_diameter - 2.0 * rear.radius).abs() < 1e-12);
+    }
+
+    #[test]
+    fn balance_holes_without_a_rear_seal_are_left_out() {
+        let (mut project, id) = pump();
+        let mut input = project.impeller_geometry_input(id).unwrap();
+        input.meridional.seals.rear.enabled = false;
+        project.set_impeller_geometry(id, input).unwrap();
+        let geometry = project.compute_impeller_geometry(id).unwrap();
+        assert!(balance_holes(&project, id, &geometry).unwrap().is_none());
     }
 }

@@ -60,6 +60,23 @@ pub(crate) enum PartId {
     Duct,
     /// The body of a rounded cutwater.
     Cutwater,
+    /// The material of the volute casing, from the CAD model.
+    Casing,
+    /// The impeller's material as one solid, from the CAD model.
+    Impeller,
+}
+
+/// The impeller and the volute as the CAD model builds them, triangulated, m: what the
+/// view shows in place of its own mesh once the CAD model is generated. A part not
+/// built (yet) is empty.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct CadMesh {
+    /// The flow domain: spiral, diffuser and the ring before them.
+    pub flow: Vec<Triangle>,
+    /// The casing round it, without its flange.
+    pub casing: Vec<Triangle>,
+    /// The impeller's material: disk, cover, blades and the fillets at their roots.
+    pub impeller: Vec<Triangle>,
 }
 
 /// How one part of the model is drawn.
@@ -103,6 +120,10 @@ pub(crate) struct ViewOptions {
     pub duct: Part,
     /// The body of a rounded cutwater.
     pub cutwater: Part,
+    /// The casing of the CAD model.
+    pub casing: Part,
+    /// The impeller of the CAD model.
+    pub impeller: Part,
     /// Every blade, or only the first.
     pub all_blades: bool,
     /// Outlines and sharp edges of the parts.
@@ -124,6 +145,8 @@ impl ViewOptions {
             PartId::Volute => &self.volute,
             PartId::Duct => &self.duct,
             PartId::Cutwater => &self.cutwater,
+            PartId::Casing => &self.casing,
+            PartId::Impeller => &self.impeller,
         }
     }
 
@@ -137,6 +160,8 @@ impl ViewOptions {
             PartId::Volute => &mut self.volute,
             PartId::Duct => &mut self.duct,
             PartId::Cutwater => &mut self.cutwater,
+            PartId::Casing => &mut self.casing,
+            PartId::Impeller => &mut self.impeller,
         }
     }
 }
@@ -152,6 +177,8 @@ impl Default for ViewOptions {
             volute: Part::glass(VOLUTE),
             duct: Part::glass(DUCT),
             cutwater: Part::solid(CUTWATER),
+            casing: Part::solid(CASING),
+            impeller: Part::solid(BLADE),
             all_blades: true,
             edges: true,
             sections: true,
@@ -215,6 +242,8 @@ const VOLUTE: [u8; 3] = [85, 129, 188];
 /// The inlet duct: a cool grey, a fluid rather than a part of the pump.
 const DUCT: [u8; 3] = [120, 150, 170];
 const CUTWATER: [u8; 3] = [214, 112, 78];
+/// The casing: cast iron grey, opaque, so that a cut shows its wall.
+const CASING: [u8; 3] = [150, 156, 166];
 /// Steps round the axis of a revolved outline.
 const REVOLVE_STEPS: usize = 72;
 /// Lines are drawn in the part's color times this.
@@ -404,29 +433,45 @@ fn revolved(outline: &[DVec2]) -> Vec<Triangle> {
     triangles
 }
 
-/// Builds the vertices of the stage as `options` ask.
+/// Builds the vertices of the stage as `options` ask; the volute as the CAD model `cad`
+/// builds it, when given.
 pub(crate) fn build(
     g: &ImpellerGeometry,
     inlet_duct: Option<&InletDuct>,
     stator: Option<&DiffuserDesign>,
     volute: Option<&VoluteGeometry>,
+    cad: Option<&CadMesh>,
     options: &ViewOptions,
 ) -> MeshData {
-    let parts = impeller_parts(g);
+    // The impeller as the CAD model builds it replaces blades, disk and cover.
+    let solid = cad.map(|c| c.impeller.clone()).unwrap_or_default();
+    let mut parts = impeller_parts(g);
+    if !solid.is_empty() {
+        parts.blades.clear();
+        parts.hub.clear();
+        parts.shroud.clear();
+    }
     let blades: Vec<Triangle> = if options.all_blades {
         parts.blades.iter().flatten().copied().collect()
     } else {
         parts.blades.first().cloned().unwrap_or_default()
     };
     let diffuser = stator.map(diffuser_parts).unwrap_or_default();
-    // The casing as the cutwater shapes it, and the body of the cutwater.
-    let casing = volute.map(volute_view_triangles).unwrap_or_default();
+    // The flow channel as the cutwater shapes it, and the body of the cutwater; the CAD
+    // model's flow domain already has the cutwater in it.
+    let cad = cad.filter(|c| volute.is_some() && !c.flow.is_empty());
+    let casing = match cad {
+        Some(cad) => cad.flow.clone(),
+        None => volute.map(volute_view_triangles).unwrap_or_default(),
+    };
     // The rounded cutwater and the rib of a double volute, its second cutwater.
-    let cutwater: Vec<Triangle> = volute
-        .map(|g| [cutwater_triangles(g), rib_triangles(g)].concat())
-        .unwrap_or_default();
+    let cutwater: Vec<Triangle> = match (cad, volute) {
+        (None, Some(g)) => [cutwater_triangles(g), rib_triangles(g)].concat(),
+        _ => Vec::new(),
+    };
+    let material = cad.map(|c| c.casing.clone()).unwrap_or_default();
     let duct = inlet_duct.map(|d| revolved(&d.outline)).unwrap_or_default();
-    let shown: [(&[Triangle], PartId); 8] = [
+    let shown: [(&[Triangle], PartId); 10] = [
         (&blades, PartId::Blades),
         (&parts.hub, PartId::Hub),
         (&parts.shroud, PartId::Shroud),
@@ -435,6 +480,8 @@ pub(crate) fn build(
         (&casing, PartId::Volute),
         (&duct, PartId::Duct),
         (&cutwater, PartId::Cutwater),
+        (&material, PartId::Casing),
+        (&solid, PartId::Impeller),
     ];
 
     let mut mesh = MeshData::default();
@@ -478,7 +525,10 @@ pub(crate) fn build(
                     // Apart from each other: one volume.
                     vec![solids.into_iter().take(count).flatten().collect()]
                 }
+                PartId::Volute if cad.is_some() => vec![casing.clone()],
                 PartId::Volute => volute.map(volute_solids).unwrap_or_default(),
+                PartId::Casing => vec![material.clone()],
+                PartId::Impeller => vec![solid.clone()],
                 // Apart from each other: one volume.
                 PartId::Vanes => stator.map(|d| vec![vane_solids(d)]).unwrap_or_default(),
                 PartId::Duct => vec![duct.clone()],
@@ -541,6 +591,8 @@ pub(crate) fn build(
         .chain(&casing)
         .chain(&duct)
         .chain(&cutwater)
+        .chain(&material)
+        .chain(&solid)
         .flatten();
     let (min, max) = all.clone().fold(
         (DVec3::splat(f64::INFINITY), DVec3::splat(f64::NEG_INFINITY)),
@@ -576,7 +628,7 @@ mod tests {
     #[test]
     fn normals_are_unit_vectors() {
         let g = geometry();
-        let mesh = build(&g, None, None, None, &ViewOptions::default());
+        let mesh = build(&g, None, None, None, None, &ViewOptions::default());
         assert!(mesh.vertices.len() > 3000);
         for v in &mesh.vertices {
             let n = Vec3::from(v.normal);
@@ -589,7 +641,7 @@ mod tests {
     #[test]
     fn transparent_shroud_comes_last() {
         let g = geometry();
-        let mesh = build(&g, None, None, None, &ViewOptions::default());
+        let mesh = build(&g, None, None, None, None, &ViewOptions::default());
         assert!(mesh.opaque > 0 && (mesh.opaque as usize) < mesh.vertices.len());
         assert!(
             mesh.vertices[mesh.opaque as usize..]
@@ -598,6 +650,7 @@ mod tests {
         );
         let solid = build(
             &g,
+            None,
             None,
             None,
             None,
@@ -622,7 +675,7 @@ mod tests {
             },
             ..ViewOptions::default()
         };
-        let mesh = build(&g, None, None, None, &options);
+        let mesh = build(&g, None, None, None, None, &options);
         let blended = &mesh.vertices[mesh.opaque as usize..];
         let near = |a: [f32; 4], b: [f32; 4]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-6);
         assert!(blended.iter().any(|v| near(v.color, [1.0, 0.0, 0.0, 0.5])));
@@ -666,6 +719,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             &ViewOptions {
                 wireframe: true,
                 ..ViewOptions::default()
@@ -695,7 +749,7 @@ mod tests {
     #[test]
     fn parts_know_their_vertices() {
         let g = geometry();
-        let mesh = build(&g, None, None, None, &ViewOptions::default());
+        let mesh = build(&g, None, None, None, None, &ViewOptions::default());
         let ids: Vec<PartId> = mesh.parts.iter().map(|p| p.id).collect();
         assert_eq!(ids, [PartId::Blades, PartId::Hub, PartId::Shroud]);
         assert_eq!(mesh.parts[1].range.end, mesh.opaque);
@@ -714,14 +768,15 @@ mod tests {
             .iter()
             .find_map(|c| derived.volute(c.id()))
             .unwrap();
-        // The casing is glass by default: only the blades and the cutwater are capped.
-        let glass = build(&g, None, None, Some(v), &ViewOptions::default());
-        assert_eq!(glass.caps.len(), 2);
+        // The casing is glass by default: only the blades are capped (a rounded cutwater
+        // has no body of its own).
+        let glass = build(&g, None, None, Some(v), None, &ViewOptions::default());
+        assert_eq!(glass.caps.len(), 1);
         let mut options = ViewOptions::default();
         options.volute.opacity = Opacity::Opaque;
-        let opaque = build(&g, None, None, Some(v), &options);
+        let opaque = build(&g, None, None, Some(v), None, &options);
         // One cap for each channel: they overlap where the spiral meets the diffuser.
-        assert_eq!(opaque.caps.len(), 2 + v.channels().len());
+        assert_eq!(opaque.caps.len(), 1 + v.channels().len());
         for cap in &opaque.caps {
             let triangles: Vec<Triangle> = opaque.closures
                 [cap.range.start as usize..cap.range.end as usize]
@@ -733,7 +788,11 @@ mod tests {
             assert!(is_closed(&triangles));
         }
         options.wireframe = true;
-        assert!(build(&g, None, None, Some(v), &options).caps.is_empty());
+        assert!(
+            build(&g, None, None, Some(v), None, &options)
+                .caps
+                .is_empty()
+        );
     }
 
     #[test]
@@ -754,7 +813,7 @@ mod tests {
         assert!(d.is_some_and(|d| d.vanes.is_some()));
         let mut options = ViewOptions::default();
         options.volute.opacity = Opacity::Opaque;
-        let mesh = build(g, None, d, Some(v), &options);
+        let mesh = build(g, None, d, Some(v), None, &options);
         // The blades, the vanes, each channel of the double volute, and the cutwater
         // with the rib.
         assert_eq!(mesh.caps.len(), 3 + v.channels().len());
@@ -764,59 +823,17 @@ mod tests {
     fn an_inlet_duct_is_a_part_of_its_own() {
         use tp_design::impeller::duct::{self, DuctInput};
         let mut g = geometry();
-        let without = build(&g, None, None, None, &ViewOptions::default());
+        let without = build(&g, None, None, None, None, &ViewOptions::default());
         assert!(without.parts.iter().all(|p| p.id != PartId::Duct));
         let mut input = tp_design::impeller::ImpellerGeometryInput::default();
         input.meridional.chambers.enabled = true;
-        g = tp_design::impeller::build(&g.basis, &input).unwrap();
+        g = tp_design::impeller::build(&g.basis, &input, 1.0).unwrap();
         let built = duct::build(&g.contour, &g.basis, &DuctInput::default());
-        let with = build(&g, Some(&built), None, None, &ViewOptions::default());
+        let with = build(&g, Some(&built), None, None, None, &ViewOptions::default());
         let part = with.parts.iter().find(|p| p.id == PartId::Duct).unwrap();
         assert_eq!(part.opacity, Opacity::Glass);
         // The duct reaches upstream of the eye: the bounds grow that way.
         assert!(with.radius > without.radius);
-    }
-
-    #[test]
-    fn the_cutwater_is_a_part_of_its_own_and_caps_a_cut() {
-        let project = crate::default_project();
-        let mut derived = crate::derived::Derived::default();
-        derived.update(&project);
-        let impeller = project.components()[0].id();
-        let volute = project.components()[1].id();
-        let (g, v) = (
-            derived.geometry(impeller).unwrap(),
-            derived.volute(volute).unwrap(),
-        );
-        let options = ViewOptions::default();
-        let mesh = build(g, None, None, Some(v), &options);
-        let part = mesh
-            .parts
-            .iter()
-            .find(|p| p.id == PartId::Cutwater)
-            .expect("a cutwater part");
-        assert!(part.range.end > part.range.start);
-        // Opaque by default: a closed volume for the caps of a cut, in its own shade.
-        let shade = rgba(linear(options.cutwater.color).map(|c| c * CAP_SHADE), 1.0);
-        assert!(
-            mesh.caps
-                .iter()
-                .any(|c| { c.color.iter().zip(shade).all(|(a, b)| (a - b).abs() < 1e-6) })
-        );
-        // The casing leaves out the walls the cutwater replaces.
-        let full = tp_io::mesh::volute_triangles(v).len();
-        let shown = mesh.parts.iter().find(|p| p.id == PartId::Volute).unwrap();
-        assert!(((shown.range.end - shown.range.start) / 3) < full as u32);
-        // Hidden, it draws nothing.
-        let hidden = ViewOptions {
-            cutwater: Part {
-                shown: false,
-                ..options.cutwater
-            },
-            ..options
-        };
-        let mesh = build(g, None, None, Some(v), &hidden);
-        assert!(mesh.parts.iter().all(|p| p.id != PartId::Cutwater));
     }
 
     #[test]
@@ -828,6 +845,7 @@ mod tests {
         };
         let mesh = build(
             &g,
+            None,
             None,
             None,
             None,

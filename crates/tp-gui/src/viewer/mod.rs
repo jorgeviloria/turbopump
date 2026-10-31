@@ -3,6 +3,7 @@
 //! face, the axes, a scale bar and the distance being measured. The part under the
 //! pointer is tinted; a click selects it, a right-click offers to hide or isolate it.
 
+mod cad;
 mod camera;
 mod mesh;
 mod pick;
@@ -23,20 +24,22 @@ use crate::derived::Derived;
 use crate::i18n::tr;
 use crate::theme::{Palette, bold, icon};
 use crate::views::unavailable;
+pub(crate) use cad::CadView;
 use camera::Camera;
 use mesh::MeshData;
 pub(crate) use mesh::{Opacity, Part, PartId, ViewOptions};
 use pick::{Hit, Ray};
 use render::{Gpu, Highlight, Uniforms};
 
-/// What the uploaded mesh was built from: results revision, impeller, stator, volute
-/// and display options.
+/// What the uploaded mesh was built from: results revision, impeller, stator, volute,
+/// display options and CAD model.
 type MeshKey = (
     u64,
     ComponentId,
     Option<ComponentId>,
     Option<ComponentId>,
     ViewOptions,
+    u64,
 );
 
 /// Standard camera positions.
@@ -204,6 +207,8 @@ pub(crate) struct Viewer {
     mesh: Option<MeshData>,
     /// Views the user saved, in order.
     pub saved: Vec<SavedView>,
+    /// The volute as the CAD model builds it, when asked for.
+    pub cad: cad::CadView,
 }
 
 /// What a right-click on the model asks of the scene.
@@ -223,9 +228,11 @@ pub(crate) fn part_name(id: PartId) -> &'static str {
         PartId::Shroud => "Shroud (cover)",
         PartId::Vanes => "Vanes",
         PartId::Walls => "Side walls",
-        PartId::Volute => "Casing",
+        PartId::Volute => "Flow channel",
         PartId::Duct => "Inlet duct",
         PartId::Cutwater => "Cutwater",
+        PartId::Casing => "Casing",
+        PartId::Impeller => "Impeller (solid)",
     })
 }
 
@@ -475,12 +482,15 @@ impl Viewer {
         );
         self.free_aspect = free.width() / free.height().max(1.0);
         let gpu = self.gpu.get_or_insert_with(|| Gpu::new(&state.device));
+        let revision = derived.revision();
+        self.cad.update(revision, g, volute.map(|v| v.1), ui.ctx());
         let key = (
-            derived.revision(),
+            revision,
             id,
             stator.map(|s| s.0),
             volute.map(|v| v.0),
             self.options,
+            self.cad.generation(),
         );
         if self.mesh_key != Some(key) {
             let mesh = mesh::build(
@@ -488,6 +498,7 @@ impl Viewer {
                 derived.duct_before(id),
                 stator.map(|s| s.1),
                 volute.map(|v| v.1),
+                self.cad.mesh(revision),
                 &self.options,
             );
             gpu.upload(&state.device, &mesh);
@@ -693,6 +704,10 @@ impl Viewer {
         {
             plane_outline(ui, matrix, (rect, free), plane, center, radius, &p);
         }
+        if let Some(text) = cad_status(self.cad.status(revision)) {
+            let below = if self.measuring { 46.0 } else { 18.0 };
+            chip(ui, free.center_top() + vec2(0.0, below), &text, &p);
+        }
         if self.measuring {
             let hint = if self.points.len() == 1 {
                 tr("Click the second point; Esc clears")
@@ -743,6 +758,46 @@ impl Viewer {
             rgba,
         })
     }
+}
+
+/// What the view says of the CAD model: that it shows its quick mesh until the model is
+/// asked for, then how the model stands.
+fn cad_status(status: cad::Status<'_>) -> Option<String> {
+    Some(match status {
+        cad::Status::Absent if CadView::AVAILABLE => {
+            tr("Quick preview · Generate 3D (CAD) shows the solids as they are exported").to_owned()
+        }
+        cad::Status::Absent => return None,
+        cad::Status::Building(seconds) => crate::i18n::tf(
+            "Generating the CAD model… {} s",
+            &[&format!("{seconds:.0}")],
+        ),
+        cad::Status::Stale => {
+            tr("The design changed: the CAD model is hidden until generated again").to_owned()
+        }
+        cad::Status::Failed(error) => crate::i18n::tf(
+            "The CAD model could not be generated: {}",
+            &[&crate::i18n::message(error)],
+        ),
+        cad::Status::Ready(built) => {
+            let seconds = format!("{:.1}", built.seconds);
+            let mut text = match built.sewn {
+                Some(sewn) => {
+                    let how = if sewn {
+                        tr("sewn surfaces")
+                    } else {
+                        tr("boolean operations")
+                    };
+                    crate::i18n::tf("CAD model: volute of {}, {} s", &[&how, &seconds])
+                }
+                None => crate::i18n::tf("CAD model: {} s", &[&seconds]),
+            };
+            if !built.warnings.is_empty() {
+                text.push_str(&crate::i18n::tf(" · {} warnings", &[&built.warnings.len()]));
+            }
+            text
+        }
+    })
 }
 
 /// The cutting plane as a frame over the view, as big as the model: its trace, not a

@@ -6,8 +6,9 @@ use std::path::{Path, PathBuf};
 use clap::Args;
 use tp_design::Param;
 use tp_design::impeller::ImpellerGeometryInput;
+use tp_design::impeller::back_vanes::VaneShape;
 use tp_design::impeller::blade::{
-    BetaDistribution, BladeShape, EdgeShape, InletVelocity, MeridionalFlow, WrapMode,
+    BetaDistribution, BladeShape, EdgeShape, InletVelocity, LoadingShape, MeridionalFlow, WrapMode,
 };
 use tp_design::impeller::{BladeLoading, ImpellerGeometry};
 use tp_io::dwg::{self, DwgVersion};
@@ -38,7 +39,16 @@ pub(crate) struct GeometryArgs {
     /// bezier[:START,PULL] or bezier:START_P,START_S,PULL_P,PULL_S,TIP, lengths in blade
     /// thicknesses; at the hub, or on every span), le-shroud-shape and te-shroud-shape
     /// (the shape at the shroud, blended linearly from the hub; uniform: none),
-    /// e-le, e-te (thickness).
+    /// e-le, e-te (thickness), and for each side (front or rear) the seal and its wear
+    /// rings: front-seal and rear-seal (on or off), front-seal-d, front-seal-length,
+    /// front-seal-s (a length or auto), front-impeller-ring and front-casing-ring (on or
+    /// off), front-impeller-ring-e and front-casing-ring-e (radial thickness), and the back
+    /// vanes on the rear face of the disk: back-vanes (on or off), back-vanes-z (number),
+    /// back-vanes-shape (radial, or curved:DEGREES, the angle measured from the
+    /// circumferential direction like the blade angle, so 90 is radial),
+    /// back-vanes-d-out and back-vanes-d-in (diameters), back-vanes-h (height),
+    /// back-vanes-e (width of a vane) and back-vanes-gap (tip clearance to the casing).
+    /// Each value but the switch and the shape can be auto.
     #[arg(long = "set", value_name = "KEY=VALUE")]
     settings: Vec<String>,
     /// Write impeller.txt (points), impeller.stl (mesh), and the meridional and front
@@ -265,7 +275,41 @@ fn parse_beta(value: &str) -> Result<BetaDistribution, String> {
     if value == "linear" {
         return Ok(BetaDistribution::Linear);
     }
-    let bad = || format!("beta must be linear or smooth:IN,OUT, got {value:?}");
+    let bad = || {
+        format!(
+            "beta must be linear, smooth:IN,OUT or loading[:L,F,A,S/L,F,A,S] (hub/shroud \
+             leading-edge loading, end of the front part, start of the rear part, middle \
+             slope), got {value:?}"
+        )
+    };
+    if let Some(rest) = value.strip_prefix("loading") {
+        if rest.is_empty() {
+            return Ok(BetaDistribution::loading());
+        }
+        let shape = |text: &str| -> Result<LoadingShape, String> {
+            let v: Vec<f64> = text
+                .split(',')
+                .map(|x| x.trim().parse().map_err(|_| bad()))
+                .collect::<Result<_, _>>()?;
+            let [leading, fore, aft, slope] = v[..] else {
+                return Err(bad());
+            };
+            Ok(LoadingShape {
+                leading,
+                fore,
+                aft,
+                slope,
+            })
+        };
+        let (hub, shroud) = rest
+            .strip_prefix(':')
+            .and_then(|r| r.split_once('/'))
+            .ok_or_else(bad)?;
+        return Ok(BetaDistribution::Loading {
+            hub: shape(hub)?,
+            shroud: shape(shroud)?,
+        });
+    }
     let rest = value.strip_prefix("smooth").ok_or_else(bad)?;
     if rest.is_empty() {
         return Ok(BetaDistribution::Smooth {
@@ -393,12 +437,113 @@ fn apply(
         "te" => input.edges.trailing = parse_edge(value)?,
         "le-shroud-shape" => input.edges.leading_shroud = parse_shroud_edge(value)?,
         "te-shroud-shape" => input.edges.trailing_shroud = parse_shroud_edge(value)?,
+        "back-vanes" => m.back_vanes.enabled = on_off(key, value)?,
+        "back-vanes-z" => {
+            let z = count()?;
+            if z == Param::Manual(0) {
+                return Err(format!("{key} must be at least 1, got {value:?}"));
+            }
+            m.back_vanes.count = z;
+        }
+        "back-vanes-shape" => m.back_vanes.shape = parse_vane_shape(value)?,
+        "back-vanes-d-out" => m.back_vanes.outer_diameter = quantity(Length)?,
+        "back-vanes-d-in" => m.back_vanes.inner_diameter = quantity(Length)?,
+        "back-vanes-h" => m.back_vanes.height = quantity(Length)?,
+        "back-vanes-e" => m.back_vanes.thickness = quantity(Length)?,
+        "back-vanes-gap" => m.back_vanes.tip_clearance = quantity(Length)?,
+        _ if seal_key(key).is_some() => apply_seal(&mut m.seals, key, value, &quantity)?,
         _ => {
             return Err(format!(
-                "unknown key {key:?}; valid keys: axial-length, hub-in, hub-out, shroud-in, \
+                "unknown key {key:?}; valid keys: front-seal, rear-seal (and -d, -length, -s), \
+                 front-impeller-ring, front-casing-ring, rear-impeller-ring, rear-casing-ring \
+                 (and -e), back-vanes, back-vanes-z, back-vanes-shape, back-vanes-d-out, \
+                 back-vanes-d-in, back-vanes-h, back-vanes-e, back-vanes-gap, axial-length, hub-in, hub-out, shroud-in, \
                  shroud-out, le-hub, le-shroud, le-points, spans, flow, inlet-velocity, wrap, shape, points, beta, e-le, e-te, le, te, le-shroud-shape, te-shroud-shape"
             ));
         }
+    }
+    Ok(())
+}
+
+/// The side and the setting of a seal key such as `front-seal-d`, or `None` if `key` is
+/// not one.
+fn seal_key(key: &str) -> Option<(bool, &str)> {
+    let (front, rest) = if let Some(rest) = key.strip_prefix("front-") {
+        (true, rest)
+    } else {
+        (false, key.strip_prefix("rear-")?)
+    };
+    const SETTINGS: [&str; 8] = [
+        "seal",
+        "seal-d",
+        "seal-length",
+        "seal-s",
+        "impeller-ring",
+        "impeller-ring-e",
+        "casing-ring",
+        "casing-ring-e",
+    ];
+    SETTINGS.contains(&rest).then_some((front, rest))
+}
+
+/// `on` or `off` (any case) of the key `key`.
+fn on_off(key: &str, value: &str) -> Result<bool, String> {
+    match value.to_ascii_lowercase().as_str() {
+        "on" => Ok(true),
+        "off" => Ok(false),
+        _ => Err(format!("{key} must be on or off, got {value:?}")),
+    }
+}
+
+/// The shape of the back vanes: `radial`, `auto` (radial) or `curved:<degrees>`, the
+/// angle measured from the circumferential direction like the blade angle β.
+fn parse_vane_shape(value: &str) -> Result<VaneShape, String> {
+    let lower = value.to_ascii_lowercase();
+    if lower == "radial" || lower == "auto" {
+        return Ok(VaneShape::Radial);
+    }
+    let bad = || {
+        format!(
+            "back-vanes-shape must be radial or curved:<degrees> with the angle above 0 and \
+             up to 90, got {value:?}"
+        )
+    };
+    let degrees: f64 = lower
+        .strip_prefix("curved:")
+        .and_then(|d| d.trim().trim_end_matches('°').trim().parse().ok())
+        .ok_or_else(bad)?;
+    if degrees > 0.0 && degrees <= 90.0 {
+        Ok(VaneShape::Curved {
+            angle: degrees.to_radians(),
+        })
+    } else {
+        Err(bad())
+    }
+}
+
+/// Applies a seal or wear-ring key (`front-seal-d`, `rear-casing-ring`, …).
+fn apply_seal(
+    seals: &mut tp_design::impeller::seals::Seals,
+    key: &str,
+    value: &str,
+    quantity: &dyn Fn(QuantityKind) -> Result<Param<f64>, String>,
+) -> Result<(), String> {
+    let (front, setting) = seal_key(key).ok_or_else(|| format!("unknown key {key:?}"))?;
+    let seal = if front {
+        &mut seals.front
+    } else {
+        &mut seals.rear
+    };
+    let on = || on_off(key, value);
+    match setting {
+        "seal" => seal.enabled = on()?,
+        "seal-d" => seal.diameter = quantity(QuantityKind::Length)?,
+        "seal-length" => seal.length = quantity(QuantityKind::Length)?,
+        "seal-s" => seal.clearance = quantity(QuantityKind::Length)?,
+        "impeller-ring" => seal.impeller_ring.enabled = on()?,
+        "impeller-ring-e" => seal.impeller_ring.thickness = quantity(QuantityKind::Length)?,
+        "casing-ring" => seal.casing_ring.enabled = on()?,
+        _ => seal.casing_ring.thickness = quantity(QuantityKind::Length)?,
     }
     Ok(())
 }
@@ -422,6 +567,43 @@ fn print_report(
         s(Length, g.contour.hub_length()),
         s(Length, g.contour.shroud_length())
     );
+    for (label, seal) in [
+        ("Front seal", &g.contour.seals.front),
+        ("Rear seal ", &g.contour.seals.rear),
+    ] {
+        let Some(seal) = seal else { continue };
+        let ring = |e: Option<f64>| e.map_or("none".to_string(), |e| s(Length, e));
+        println!(
+            "{label}  d {}   L {}   s {}   impeller ring {}   casing ring {}",
+            s(Length, 2.0 * seal.radius),
+            s(Length, seal.length),
+            s(Length, seal.clearance),
+            ring(seal.impeller_ring),
+            ring(seal.casing_ring)
+        );
+    }
+    if let Some(v) = &g.contour.back_vanes {
+        let shape = match v.shape {
+            VaneShape::Radial => "radial".to_string(),
+            VaneShape::Curved { angle } => format!("curved {}", s(Angle, angle)),
+        };
+        // The gap as built can exceed the asked clearance when the rear seal governs.
+        let gap = g
+            .contour
+            .chambers
+            .values
+            .rear_vane_gap
+            .unwrap_or(v.tip_clearance);
+        println!(
+            "Back vanes  z {}   {shape}   d {} → {}   h {}   e {}   gap {}",
+            v.count,
+            s(Length, 2.0 * v.outer_radius),
+            s(Length, 2.0 * v.inner_radius),
+            s(Length, v.height),
+            s(Length, v.thickness),
+            s(Length, gap)
+        );
+    }
     println!(
         "Flow        cm {} → {}   area {} → {}   max local rise of cm {:.1} %",
         s(Velocity, inlet.cm),
@@ -490,4 +672,111 @@ fn print_report(
         }
     }
     println!();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn set(input: &mut ImpellerGeometryInput, setting: &str) -> Result<(), String> {
+        apply(input, &DisplayUnits::si(), setting)
+    }
+
+    #[test]
+    fn back_vane_keys_set_the_vanes() {
+        use tp_design::impeller::back_vanes::VaneShape;
+        let mut input = ImpellerGeometryInput::default();
+        for setting in [
+            "back-vanes=on",
+            "back-vanes-z=6",
+            "back-vanes-shape=curved:50",
+            "back-vanes-d-out=0.2 m",
+            "back-vanes-d-in=60 mm",
+            "back-vanes-h=6 mm",
+            "back-vanes-e=12 mm",
+            "back-vanes-gap=1.5 mm",
+        ] {
+            set(&mut input, setting).unwrap();
+        }
+        let v = &input.meridional.back_vanes;
+        assert!(v.enabled);
+        assert_eq!(v.count, Param::Manual(6));
+        assert_eq!(v.outer_diameter, Param::Manual(0.2));
+        assert_eq!(v.inner_diameter, Param::Manual(0.06));
+        assert_eq!(v.height, Param::Manual(0.006));
+        assert_eq!(v.thickness, Param::Manual(0.012));
+        assert_eq!(v.tip_clearance, Param::Manual(0.0015));
+        match v.shape {
+            VaneShape::Curved { angle } => assert!((angle - 50f64.to_radians()).abs() < 1e-12),
+            VaneShape::Radial => panic!("radial"),
+        }
+        set(&mut input, "back-vanes-shape=radial").unwrap();
+        set(&mut input, "back-vanes-z=auto").unwrap();
+        set(&mut input, "back-vanes-gap=auto").unwrap();
+        set(&mut input, "back-vanes=OFF").unwrap();
+        let v = &input.meridional.back_vanes;
+        assert!(!v.enabled && v.shape == VaneShape::Radial);
+        assert!(v.count.is_auto() && v.tip_clearance.is_auto());
+        // Bad values name the key.
+        assert_eq!(
+            set(&mut input, "back-vanes=x").unwrap_err(),
+            "back-vanes must be on or off, got \"x\""
+        );
+        assert!(set(&mut input, "back-vanes-shape=spiral").is_err());
+        assert!(set(&mut input, "back-vanes-shape=curved:abc").is_err());
+        assert!(set(&mut input, "back-vanes-shape=curved:0").is_err());
+        assert!(set(&mut input, "back-vanes-shape=curved:-10").is_err());
+        assert!(set(&mut input, "back-vanes-shape=curved:90.5").is_err());
+        assert!(set(&mut input, "back-vanes-shape=curved:90").is_ok());
+        assert!(set(&mut input, "back-vanes-z=0").is_err());
+        assert!(set(&mut input, "back-vanes-z=2.5").is_err());
+    }
+
+    #[test]
+    fn front_seal_keys_set_the_seal() {
+        let mut input = ImpellerGeometryInput::default();
+        for s in [
+            "front-seal-d=120 mm",
+            "front-seal-length=15 mm",
+            "front-seal-s=auto",
+            "front-impeller-ring-e=5 mm",
+            "rear-casing-ring-e=6 mm",
+        ] {
+            set(&mut input, s).unwrap();
+        }
+        let seals = &input.meridional.seals;
+        assert_eq!(seals.front.diameter, Param::Manual(0.12));
+        assert_eq!(seals.front.length, Param::Manual(0.015));
+        assert!(seals.front.clearance.is_auto());
+        assert_eq!(seals.front.impeller_ring.thickness, Param::Manual(0.005));
+        assert_eq!(seals.rear.casing_ring.thickness, Param::Manual(0.006));
+        assert!(seals.rear.diameter.is_auto());
+    }
+
+    #[test]
+    fn ring_switches_accept_on_and_off() {
+        let mut input = ImpellerGeometryInput::default();
+        for s in [
+            "front-seal=OFF",
+            "rear-seal=Off",
+            "front-impeller-ring=off",
+            "rear-casing-ring=off",
+        ] {
+            set(&mut input, s).unwrap();
+        }
+        let seals = &input.meridional.seals;
+        assert!(!seals.front.enabled && !seals.rear.enabled);
+        assert!(!seals.front.impeller_ring.enabled && seals.front.casing_ring.enabled);
+        assert!(!seals.rear.casing_ring.enabled && seals.rear.impeller_ring.enabled);
+        set(&mut input, "front-seal=on").unwrap();
+        assert!(input.meridional.seals.front.enabled);
+    }
+
+    #[test]
+    fn an_unknown_switch_value_is_an_error() {
+        let mut input = ImpellerGeometryInput::default();
+        let e = set(&mut input, "front-seal=x").unwrap_err();
+        assert_eq!(e, "front-seal must be on or off, got \"x\"");
+        assert!(set(&mut input, "front-seal-q=1").is_err());
+    }
 }

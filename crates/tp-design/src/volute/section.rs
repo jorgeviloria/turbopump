@@ -510,6 +510,17 @@ impl SectionShape {
         SectionShape::symmetric(SideShape::Round { ellipse_ratio: 1.0 })
     }
 
+    /// Whether the CAD kernel cuts the side endings of a rounded cutwater cleanly out of
+    /// a channel of this section: checked for every side shape but the radius-based one,
+    /// and not for external or internal round sections.
+    pub fn takes_side_endings(&self) -> bool {
+        let takes = |side: &SideShape| !matches!(side, SideShape::RadiusBased(_));
+        match self {
+            SectionShape::Sides { left, right } => takes(left) && right.as_ref().is_none_or(takes),
+            SectionShape::RoundExternal(_) | SectionShape::RoundInternal(_) => false,
+        }
+    }
+
     /// The +z side, which mirrors the −z side when the section is symmetric.
     pub fn right_side(&self) -> Option<&SideShape> {
         match self {
@@ -538,6 +549,24 @@ impl SectionShape {
                 }
             }
             SectionShape::RoundExternal(_) | SectionShape::RoundInternal(_) => None,
+        }
+    }
+
+    /// Whether a double volute can split this shape with its rib although its walls are not
+    /// straight: a section of two equal sides, radius based, of line segments or Bézier,
+    /// with the top level (tangent angle 0). The rib cuts such a section at one radius;
+    /// the sizes of the inner volute and of the outer channel come from the outline.
+    pub fn takes_a_rib(&self) -> bool {
+        let level = |side: &SideShape| match side {
+            SideShape::RadiusBased(_) | SideShape::LineSegments { .. } => true,
+            SideShape::Bezier(b) => b.tangent_angle == 0.0,
+            _ => false,
+        };
+        match self {
+            SectionShape::Sides { left, right } => {
+                level(left) && right.as_ref().is_none_or(|r| r == left)
+            }
+            SectionShape::RoundExternal(_) | SectionShape::RoundInternal(_) => false,
         }
     }
 
@@ -689,6 +718,24 @@ pub struct Outline {
     /// Indices that start a smooth run of the outline: the −z inlet point, the corners of
     /// the walls, the top and the +z inlet point.
     pub breaks: Vec<usize>,
+}
+
+/// Width (z extent) of the outline at height `h` above r'_z, m: the section across the
+/// polygon. Outlines are convex, so it is the span of where the height crosses it; 0 above
+/// or below it.
+pub(crate) fn width_at(outline: &Outline, h: f64) -> f64 {
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    let n = outline.points.len();
+    for i in 0..n {
+        let (a, b) = (outline.points[i], outline.points[(i + 1) % n]);
+        if (a.y - h) * (b.y - h) > 0.0 || (b.y - a.y).abs() < 1e-15 {
+            continue;
+        }
+        let s = a.x + (b.x - a.x) * (h - a.y) / (b.y - a.y);
+        lo = lo.min(s);
+        hi = hi.max(s);
+    }
+    if hi >= lo { hi - lo } else { 0.0 }
 }
 
 /// Average of ln r over a straight edge from radius `a` to `b`.
@@ -1638,6 +1685,20 @@ pub struct CrossSections {
 }
 
 impl CrossSections {
+    /// Whether an active section has a radius-based or line-segment side.
+    pub fn has_polyline_sides(&self) -> bool {
+        let free = |side: &SideShape| {
+            matches!(
+                side,
+                SideShape::RadiusBased(_) | SideShape::LineSegments { .. }
+            )
+        };
+        self.definitions.iter().any(|d| match &d.shape {
+            SectionShape::Sides { left, right } => free(left) || right.as_ref().is_some_and(free),
+            SectionShape::RoundExternal(_) | SectionShape::RoundInternal(_) => false,
+        })
+    }
+
     /// Checks and orders the active definitions of `input` for an inlet of width `b3` on
     /// radius `rz`.
     pub fn new(input: &CrossSectionInput, b3: f64, rz: f64) -> Result<Self, DesignError> {

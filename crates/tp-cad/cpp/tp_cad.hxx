@@ -35,17 +35,32 @@ std::unique_ptr<Shape> make_wire(const ShapeList &edges);
 std::unique_ptr<Shape> planar_face(const Shape &wire);
 std::unique_ptr<Shape> revolve_z(const Shape &face);
 std::unique_ptr<Shape> loft_solid(const ShapeList &wires);
+std::unique_ptr<Shape> loft_shell(const ShapeList &wires);
+std::unique_ptr<Shape> sew_shapes(const ShapeList &shapes, double tolerance);
+std::unique_ptr<Shape> make_solid(const Shape &shape);
+std::unique_ptr<Shape> split_by(const ShapeList &shapes, const ShapeList &tools);
+rust::Vec<double> face_sides(const Shape &faces, const Shape &solid, double tolerance);
+std::unique_ptr<Shape> face_at(const Shape &shape, std::uint32_t index);
+rust::Vec<double> edge_face_crossings(const Shape &edge, const Shape &face);
+std::unique_ptr<Shape> section_of(const Shape &a, const Shape &b);
+std::unique_ptr<Shape> revolve_z_by(const Shape &shape, double angle);
+std::unique_ptr<Shape> revolved_surfaces_z(const Shape &shape);
+rust::Vec<double> face_planes(const Shape &shape);
+std::unique_ptr<Shape> faces_except(const Shape &shape, rust::Slice<const std::uint32_t> dropped);
 std::unique_ptr<Shape> prism_z(const Shape &face, double height);
 std::unique_ptr<Shape> rotate_z(const Shape &shape, double angle);
 std::unique_ptr<Shape> fix_shape(const Shape &shape);
-std::unique_ptr<Shape> boolean_op(const Shape &a, const Shape &b, std::uint8_t op,
-                                  double fuzzy);
+std::unique_ptr<Shape> boolean_op(const ShapeList &arguments, const ShapeList &tools,
+                                  std::uint8_t op, double fuzzy);
+std::unique_ptr<Shape> copy_shape(const Shape &shape);
 std::unique_ptr<Shape> make_compound(const ShapeList &shapes);
 
 std::unique_ptr<Shape> cylinder(const P3 &base, const P3 &direction, double radius,
                                 double height);
 rust::Vec<P3> edge_samples(const Shape &shape, std::size_t samples);
 rust::Vec<P3> triangles(const Shape &shape, double deflection);
+rust::Vec<std::uint32_t> triangle_faces(const Shape &shape);
+rust::Vec<P3> free_edge_samples(const Shape &shape, std::size_t samples);
 rust::Vec<double> boundary_distances(const Shape &shape, rust::Slice<const P3> points);
 std::unique_ptr<Shape> fillet_edges(const Shape &shape, rust::Slice<const std::uint32_t> edges,
                                     double radius);
@@ -54,6 +69,7 @@ double volume(const Shape &shape, double eps);
 rust::Vec<double> solid_volumes(const Shape &shape);
 std::size_t count_subshapes(const Shape &shape, std::uint8_t kind);
 bool is_valid(const Shape &shape);
+rust::String check_report(const Shape &shape);
 
 void write_step(const Shape &shape, rust::Str path);
 void write_iges(const Shape &shape, rust::Str path);

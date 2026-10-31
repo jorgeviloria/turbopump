@@ -586,6 +586,7 @@ pub fn predict(
     };
     // The loss analysis replaces the leakage and secondary power of the statistics.
     let axial = AxialThrust::new(duty, design, &input.axial, input.wide_seal_clearances)?;
+    warnings.extend(axial.back_vane_warnings());
     let water_losses = SecondaryLosses::new(
         &water,
         design,
@@ -1229,6 +1230,17 @@ pub const PERFORMANCE_CORRELATIONS: &[crate::pump::correlations::CorrelationInfo
                       with φ_sp = 5.5·10⁻⁴·ψ^1.5·(nq/20)^0.4",
         reference: "Gülich 2nd ed., Table 9.1, eqs. T9.1.2a to T9.1.4",
         verification: crate::pump::correlations::Verification::Verified,
+    },
+    crate::pump::correlations::CorrelationInfo {
+        id: "performance.back_vanes",
+        description: "k_Rs = 1/[1 + 0.13·s/(s + h)·√(r₂/(h·z))] and k_av for trimmed vanes \
+                      over the span of the vanes, put into the rear side of eq. T9.2.8 (our \
+                      reading); P_Rs = ζ_Rs·ρ·ω³·r₂⁵ in place of the rear disk friction (our \
+                      reading); above the ring only with a rear seal (our choice)",
+        reference: "Gülich 2nd ed., Table 9.3 (after Möhring), eqs. T9.3.2 to T9.3.4, \
+                    checked against the book; their use in the axial force and the losses \
+                    is our reading",
+        verification: crate::pump::correlations::Verification::EngineeringDefault,
     },
     crate::pump::correlations::CorrelationInfo {
         id: "performance.axial_balance",

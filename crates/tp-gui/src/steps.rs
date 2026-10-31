@@ -2,9 +2,10 @@
 
 use eframe::egui::{self, ComboBox, DragValue, Grid, RichText, Ui};
 use tp_design::MainDimensionsInput;
+use tp_design::impeller::back_vanes::{BackVaneSettings, BackVanes, VaneShape};
 use tp_design::impeller::blade::{
     BetaDistribution, BladeShape, DEFAULT_POINTS, DEFAULT_SPANS, EdgeShape, InletVelocity,
-    MeridionalFlow, WrapMode,
+    LoadingShape, MeridionalFlow, WrapMode,
 };
 use tp_design::impeller::meridian::{
     DEFAULT_LEADING_EDGE_HUB, DEFAULT_LEADING_EDGE_SHROUD, DEFAULT_TANGENT,
@@ -2297,18 +2298,6 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                 &units,
                 0.0..=1.0,
             );
-            changed |= param_f64(
-                ui,
-                tr("Neck length"),
-                tr(
-                    "Of the shroud upstream of the inlet, where the annular seal runs; automatic: 0.12·d_sp (Gülich Chap. 3.6.2); 0 for none",
-                ),
-                &mut settings.neck_length,
-                Length,
-                used.map(|u| u.neck_length),
-                &units,
-                0.0..=0.5,
-            );
             for (name, wire) in [
                 (tr("Hub disk drawn by segments"), &mut m.hub_material),
                 (tr("Shroud cover drawn by segments"), &mut m.shroud_material),
@@ -2330,6 +2319,41 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                 }
             }
         });
+    }
+    let seals = g.map(|g| g.contour.seals.clone());
+    let double_entry = project
+        .pump_impeller_input(id)
+        .is_ok_and(|p| p.suction == Suction::Double);
+    changed |= seal_card(
+        ui,
+        tr("Front seal"),
+        &mut m.seals.front,
+        seals.as_ref().and_then(|s| s.front.as_ref()),
+        SealSide::Front,
+        &units,
+    );
+    // A double-entry impeller has no rear seal.
+    if !double_entry {
+        changed |= seal_card(
+            ui,
+            tr("Rear seal"),
+            &mut m.seals.rear,
+            seals.as_ref().and_then(|s| s.rear.as_ref()),
+            SealSide::Rear,
+            &units,
+        );
+    }
+    // Nor does it have a rear shroud to carry back vanes.
+    if !double_entry {
+        changed |= back_vanes_card(
+            ui,
+            &mut m.back_vanes,
+            // Offered while the rear seal is there to turn off.
+            Some(&mut m.seals.rear.enabled),
+            g.and_then(|g| g.contour.back_vanes.as_ref()),
+            g.and_then(|g| g.contour.chambers.values.rear_vane_gap),
+            &units,
+        );
     }
     if section_info(
         ui,
@@ -2376,16 +2400,6 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
             );
             changed |= param_f64(
                 ui,
-                tr("Seal clearance s"),
-                tr("Radial, of the annular seal on the neck; automatic: Gülich eq. 3.12"),
-                &mut chambers.seal_clearance,
-                Length,
-                built.map(|v| v.seal_clearance),
-                &units,
-                0.00001..=0.01,
-            );
-            changed |= param_f64(
-                ui,
                 tr("Shaft seal diameter d_D"),
                 tr("Where the rear chamber ends; automatic: the hub diameter"),
                 &mut chambers.shaft_seal_diameter,
@@ -2399,6 +2413,11 @@ fn meridional(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                     ui,
                     tr("Seal diameter d_sp"),
                     units.show(Length, v.seal_diameter),
+                );
+                value_row(
+                    ui,
+                    tr("Seal clearance s"),
+                    units.show(Length, v.seal_clearance),
                 );
                 value_row(
                     ui,
@@ -2524,6 +2543,349 @@ fn area_progression(ui: &mut Ui, id: ComponentId, table: &mut Vec<[f64; 2]>) -> 
         }
     });
     ui.ctx().data_mut(|d| d.insert_temp(key, text));
+    changed
+}
+
+/// Which of the two annular seals a card edits.
+#[derive(Clone, Copy, PartialEq)]
+enum SealSide {
+    Front,
+    Rear,
+}
+
+/// A checkbox on its own row, named `name` for the accessibility tree.
+fn toggle_row(ui: &mut Ui, name: &str, hint: &str, on: &mut bool) -> bool {
+    label(ui, name, hint);
+    let shown = *on;
+    let response = ui.checkbox(on, "");
+    response
+        .widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, shown, name));
+    ui.end_row();
+    response.changed()
+}
+
+/// The rows of one wear ring: its switch and, with it on, its thickness. `texts` are the
+/// name of the switch, its hint and the label of the thickness row (distinct for each
+/// ring, since a row is remembered by its section and label).
+fn ring_rows(
+    ui: &mut Ui,
+    texts: [&str; 3],
+    ring: &mut tp_design::impeller::seals::RingSettings,
+    used: Option<f64>,
+    units: &DisplayUnits,
+) -> bool {
+    let [name, hint, thickness] = texts;
+    let mut changed = toggle_row(ui, name, hint, &mut ring.enabled);
+    if ring.enabled {
+        changed |= param_f64(
+            ui,
+            thickness,
+            tr("Automatic: max(0.03·d, 4 mm), our choice"),
+            &mut ring.thickness,
+            QuantityKind::Length,
+            used,
+            units,
+            0.0005..=0.1,
+        );
+    }
+    changed
+}
+
+/// The card of one annular seal: its switch, and with it on its diameter, length and
+/// radial clearance and the two wear rings. A seal switched off keeps its values.
+/// `used` is the seal as the design drew it. Returns whether anything changed.
+fn seal_card(
+    ui: &mut Ui,
+    title: &str,
+    seal: &mut tp_design::impeller::seals::SealSettings,
+    used: Option<&tp_design::impeller::seals::Seal>,
+    side: SealSide,
+    units: &DisplayUnits,
+) -> bool {
+    use QuantityKind::Length;
+    let mut changed = false;
+    if !section_info(
+        ui,
+        title,
+        tr(
+            "An annular seal between the impeller and the casing, with an optional pair of \
+             replaceable wear rings, one on the impeller and one in the casing",
+        ),
+    ) {
+        return false;
+    }
+    props(
+        ui,
+        if side == SealSide::Front {
+            "front_seal"
+        } else {
+            "rear_seal"
+        },
+        |ui| {
+            changed |= toggle_row(
+                ui,
+                title,
+                tr("Fit the seal; switched off, the values below are kept"),
+                &mut seal.enabled,
+            );
+            if side == SealSide::Rear {
+                value_info(
+                    ui,
+                    tr("Balance holes"),
+                    tr("Set them in the Performance view"),
+                    tr("Performance view"),
+                );
+            }
+            if !seal.enabled {
+                return;
+            }
+            changed |= param_f64(
+                ui,
+                tr("Seal diameter"),
+                tr(match side {
+                    SealSide::Front => {
+                        "Automatic: d₁ + 2t + 2·e_r with the impeller ring, d₁ + 2t without"
+                    }
+                    SealSide::Rear => "Automatic: d_sp",
+                }),
+                &mut seal.diameter,
+                Length,
+                used.map(|s| 2.0 * s.radius),
+                units,
+                0.001..=2.0,
+            );
+            changed |= param_f64(
+                ui,
+                tr("Seal length"),
+                tr("Automatic: 0.12·d (Gülich Chap. 3.6.2)"),
+                &mut seal.length,
+                Length,
+                used.map(|s| s.length),
+                units,
+                0.0..=1.0,
+            );
+            changed |= param_f64(
+                ui,
+                tr("Radial clearance"),
+                tr("Automatic: Gülich eq. 3.12"),
+                &mut seal.clearance,
+                Length,
+                used.map(|s| s.clearance),
+                units,
+                0.00001..=0.01,
+            );
+            changed |= ring_rows(
+                ui,
+                [
+                    tr("Impeller ring"),
+                    tr("A replaceable wear ring pressed on the impeller"),
+                    tr("Impeller ring thickness"),
+                ],
+                &mut seal.impeller_ring,
+                used.and_then(|s| s.impeller_ring),
+                units,
+            );
+            changed |= ring_rows(
+                ui,
+                [
+                    tr("Casing ring"),
+                    tr("A replaceable wear ring fitted in the casing"),
+                    tr("Casing ring thickness"),
+                ],
+                &mut seal.casing_ring,
+                used.and_then(|s| s.casing_ring),
+                units,
+            );
+        },
+    );
+    changed
+}
+
+/// The angle a back vane starts with when it is made curved, rad (30°).
+const CURVED_ANGLE: f64 = std::f64::consts::FRAC_PI_6;
+
+/// The name of a back vane shape.
+fn vane_shape_name(shape: VaneShape) -> &'static str {
+    match shape {
+        VaneShape::Radial => tr("Radial"),
+        VaneShape::Curved { .. } => tr("Curved"),
+    }
+}
+
+/// The card of the back vanes on the rear face of the hub disk: their switch and, with
+/// them on, number, shape and dimensions. `rear_seal` is the switch of the rear seal,
+/// `None` when the impeller has none; with both on, the card offers a button to turn the
+/// seal off (it never does so by itself). `used` are the vanes as built and `gap` the
+/// tip gap as built, which exceeds the asked clearance when the rear seal collar governs.
+/// Returns whether anything changed.
+fn back_vanes_card(
+    ui: &mut Ui,
+    vanes: &mut BackVaneSettings,
+    rear_seal: Option<&mut bool>,
+    used: Option<&BackVanes>,
+    gap: Option<f64>,
+    units: &DisplayUnits,
+) -> bool {
+    use QuantityKind::Length;
+    let title = tr("Back vanes");
+    let mut changed = false;
+    if !section_info(
+        ui,
+        title,
+        tr(
+            "Short ribs on the back of the hub disk that drag the fluid of the rear chamber \
+             round with the impeller: the pressure on the back falls and so does the axial \
+             thrust (Gülich §9.2.7)",
+        ),
+    ) {
+        return false;
+    }
+    props(ui, "back_vanes", |ui| {
+        changed |= toggle_row(
+            ui,
+            title,
+            tr("Fit the vanes; switched off, the values below are kept"),
+            &mut vanes.enabled,
+        );
+        if !vanes.enabled {
+            return;
+        }
+        changed |= widgets::param_u32(
+            ui,
+            tr("Count"),
+            tr("Automatic: 4 below d₂ = 200 mm, else 6 (Gülich Table 9.3)"),
+            &mut vanes.count,
+            used.map(|v| v.count),
+            1..=24,
+        );
+        label(
+            ui,
+            tr("Shape"),
+            tr("Radial and straight (Gülich §9.2.7), or curved like the main blades"),
+        );
+        widgets::list(ui, |ui| {
+            ComboBox::from_id_salt("back_vane_shape")
+                .selected_text(widgets::noted(ui, vane_shape_name(vanes.shape)))
+                .show_ui(ui, |ui| {
+                    for option in [
+                        VaneShape::Radial,
+                        VaneShape::Curved {
+                            angle: CURVED_ANGLE,
+                        },
+                    ] {
+                        let selected =
+                            std::mem::discriminant(&vanes.shape) == std::mem::discriminant(&option);
+                        if ui
+                            .selectable_label(selected, vane_shape_name(option))
+                            .clicked()
+                            && !selected
+                        {
+                            vanes.shape = option;
+                            changed = true;
+                        }
+                    }
+                })
+        });
+        ui.end_row();
+        if let VaneShape::Curved { angle } = &mut vanes.shape {
+            label(
+                ui,
+                tr("Vane angle β_v"),
+                tr(
+                    "Measured from the circumferential direction, like the blade angle β \
+                     (90° is radial); the vane turns in the sense of the main blades",
+                ),
+            );
+            let mut degrees = angle.to_degrees();
+            let edited = widgets::with_unit(ui, "°", |ui| {
+                ui.add(
+                    DragValue::new(&mut degrees)
+                        .range(5.0..=90.0)
+                        .clamp_existing_to_range(false)
+                        .speed(0.2),
+                )
+            });
+            if edited.changed() {
+                *angle = degrees.to_radians();
+                changed = true;
+            }
+            ui.end_row();
+        }
+        changed |= param_f64(
+            ui,
+            tr("Outer diameter"),
+            tr("Automatic: 0.80·d₂ (Gülich Table 9.3: 0.75 to 0.85)"),
+            &mut vanes.outer_diameter,
+            Length,
+            used.map(|v| 2.0 * v.outer_radius),
+            units,
+            0.001..=2.0,
+        );
+        changed |= param_f64(
+            ui,
+            tr("Inner diameter"),
+            tr(
+                "Automatic: the boss plus a wall on each side (our choice); with the rear seal \
+                 on, no lower than its casing ring",
+            ),
+            &mut vanes.inner_diameter,
+            Length,
+            used.map(|v| 2.0 * v.inner_radius),
+            units,
+            0.001..=2.0,
+        );
+        changed |= param_f64(
+            ui,
+            tr("Height"),
+            tr("Axial height h; automatic: 0.04·r₂ (Gülich Table 9.3: 0.03 to 0.05)"),
+            &mut vanes.height,
+            Length,
+            used.map(|v| v.height),
+            units,
+            0.0005..=0.1,
+        );
+        changed |= param_f64(
+            ui,
+            tr("Thickness"),
+            tr("Circumferential width of a vane; automatic: 2·h (Gülich Table 9.3)"),
+            &mut vanes.thickness,
+            Length,
+            used.map(|v| v.thickness),
+            units,
+            0.0005..=0.2,
+        );
+        changed |= param_f64(
+            ui,
+            tr("Tip clearance"),
+            tr(
+                "Axial, between the vane tips and the casing; automatic: 0.2·h (Gülich Table \
+                 9.3). The value shown is the gap as built, larger than asked when the \
+                 collar of the rear seal governs",
+            ),
+            &mut vanes.tip_clearance,
+            Length,
+            gap.or(used.map(|v| v.tip_clearance)),
+            units,
+            0.0..=0.05,
+        );
+        if let Some(rear) = rear_seal
+            && *rear
+        {
+            label(
+                ui,
+                tr("Rear seal in the way"),
+                tr(
+                    "With the rear seal on, the vanes stop outside its casing ring. Nothing \
+                     changes until you press the button",
+                ),
+            );
+            if ui.button(tr("Turn off the rear seal")).clicked() {
+                *rear = false;
+                changed = true;
+            }
+            ui.end_row();
+        }
+    });
     changed
 }
 
@@ -2666,6 +3028,73 @@ fn blade_properties(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Co
     }
 }
 
+/// Name of a kind of β distribution in the current language.
+fn beta_kind_name(distribution: &BetaDistribution) -> &'static str {
+    tr(match distribution {
+        BetaDistribution::Linear => "linear",
+        BetaDistribution::Smooth { .. } => "smooth (Bézier)",
+        BetaDistribution::Loading { .. } => "by blade loading",
+    })
+}
+
+/// The rows of one loading shape, headed by `place` (hub or shroud); true when it
+/// changed.
+fn loading_rows(ui: &mut Ui, place: &str, shape: &mut LoadingShape) -> bool {
+    let mut changed = false;
+    ui.label(RichText::new(place).strong());
+    ui.end_row();
+    let mut row = |ui: &mut Ui, name: &str, hint: &str, value: &mut f64, range| {
+        label(ui, name, hint);
+        changed |= ui
+            .add(
+                DragValue::new(value)
+                    .range(range)
+                    .speed(0.005)
+                    .max_decimals(3),
+            )
+            .changed();
+        ui.end_row();
+    };
+    row(
+        ui,
+        tr("Leading-edge loading"),
+        tr(
+            "d(r·c_u)/dm̄ at the leading edge over the rise of r·c_u; 0 leaves the edge unloaded, which keeps the suction peak low where cavitation starts",
+        ),
+        &mut shape.leading,
+        -2.0..=5.0,
+    );
+    row(
+        ui,
+        tr("End of the front part m̄₁"),
+        tr(
+            "Where the loading leaves its leading-edge value and turns into the straight middle part",
+        ),
+        &mut shape.fore,
+        0.0..=0.95,
+    );
+    row(
+        ui,
+        tr("Start of the rear part m̄₂"),
+        tr("Where the straight middle part bends down to no loading at the trailing edge"),
+        &mut shape.aft,
+        0.05..=0.98,
+    );
+    row(
+        ui,
+        tr("Middle slope"),
+        tr(
+            "Slope of the straight middle part: above 0 loads the rear of the blade, below 0 its front. A radial impeller needs the rear: near the leading edge the radius is small and early swirl asks for β past 90°",
+        ),
+        &mut shape.slope,
+        -10.0..=10.0,
+    );
+    if shape.fore > shape.aft {
+        shape.aft = shape.fore;
+    }
+    changed
+}
+
 /// Name of a blade shape in the current language.
 fn blade_shape_name(shape: BladeShape) -> &'static str {
     match shape {
@@ -2694,26 +3123,33 @@ fn mean_lines(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                     blade_shape_name(shape),
                 );
             }
-            label(ui, tr("Distribution"), "");
-            let smooth = matches!(input.mean_lines.beta, BetaDistribution::Smooth { .. });
+            label(
+                ui,
+                tr("Distribution"),
+                tr(
+                    "Linear or smooth: β itself between its edge values. By blade loading: the swirl r·c_u rises along the blade as the loading d(r·c_u)/dm̄ shares it out, and β follows from it (inverse design; free-form blades only)",
+                ),
+            );
+            let current = beta_kind_name(&input.mean_lines.beta);
             widgets::list(ui, |ui| {
                 ComboBox::from_id_salt("beta_kind")
-                    .selected_text(crate::widgets::noted(
-                        ui,
-                        tr(if smooth { "smooth (Bézier)" } else { "linear" }),
-                    ))
+                    .selected_text(crate::widgets::noted(ui, current))
                     .show_ui(ui, |ui| {
-                        if ui.selectable_label(!smooth, tr("linear")).clicked() && smooth {
-                            input.mean_lines.beta = BetaDistribution::Linear;
-                            changed = true;
-                        }
-                        if ui.selectable_label(smooth, tr("smooth (Bézier)")).clicked() && !smooth
-                        {
-                            input.mean_lines.beta = BetaDistribution::Smooth {
+                        for option in [
+                            BetaDistribution::Linear,
+                            BetaDistribution::Smooth {
                                 inlet: 0.3,
                                 outlet: 0.3,
-                            };
-                            changed = true;
+                            },
+                            BetaDistribution::loading(),
+                        ] {
+                            let name = beta_kind_name(&option);
+                            if ui.selectable_label(name == current, name).clicked()
+                                && name != current
+                            {
+                                input.mean_lines.beta = option;
+                                changed = true;
+                            }
                         }
                     })
             });
@@ -2737,6 +3173,10 @@ fn mean_lines(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                     .add(DragValue::new(outlet).range(0.0..=1.0).speed(0.005))
                     .changed();
                 ui.end_row();
+            }
+            if let BetaDistribution::Loading { hub, shroud } = &mut input.mean_lines.beta {
+                changed |= loading_rows(ui, tr("Hub"), hub);
+                changed |= loading_rows(ui, tr("Shroud"), shroud);
             }
         });
         if input.properties.shape == BladeShape::FreeForm && section(ui, tr("Wrap angle")) {
@@ -2846,6 +3286,119 @@ fn mean_lines(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: Componen
                 }
             });
     }
+    if let Some(g) = g
+        && section_kind(
+            ui,
+            tr("Blade quality"),
+            tr(
+                "From the velocities on the blade faces with the flow following the blades: they compare designs, they do not predict losses",
+            ),
+            Kind::Checks,
+        )
+    {
+        blade_quality_rows(ui, g);
+    }
+}
+
+/// The rows of the blade-quality indicators of `g`.
+fn blade_quality_rows(ui: &mut Ui, g: &tp_design::impeller::ImpellerGeometry) {
+    use tp_design::impeller::loading::blade_velocities;
+    use tp_design::impeller::quality::{DE_HALLER, blade_quality};
+    let quality = blade_quality(g, &blade_velocities(g));
+    let span = |s: f64| tf("span {}", &[&format!("{s:.2}")]);
+    props(ui, "quality", |ui| {
+        if let Some(outer) = quality.outer() {
+            let ok = outer.deceleration >= DE_HALLER;
+            let text = format!(
+                "{} {:.2}",
+                if ok {
+                    icon::CHECK_CIRCLE
+                } else {
+                    icon::WARNING
+                },
+                outer.deceleration
+            );
+            let color = if ok {
+                Palette::of(ui).done
+            } else {
+                ui.visuals().warn_fg_color
+            };
+            value_info(
+                ui,
+                tr("Deceleration w₂/w₁ (shroud)"),
+                tr(
+                    "de Haller criterion: not below 0.7 on the outer streamline, or the flow stalls early and loses efficiency (Gülich, Chap. 7.2.1)",
+                ),
+                RichText::new(text).color(color),
+            );
+        }
+        if let Some(s) = quality.highest(|s| s.diffusion) {
+            value_info(
+                ui,
+                tr("Suction-face peak / outlet w"),
+                tr(
+                    "Highest suction-face velocity over the mean outlet velocity: how much the suction face decelerates to the trailing edge. Lower is better",
+                ),
+                format!("{:.2} · {}", s.diffusion, span(s.span)),
+            );
+        }
+        if let Some(s) = quality.highest(|s| s.peak_loading) {
+            value_info(
+                ui,
+                tr("Peak loading Δw/w̄"),
+                tr(
+                    "Highest (w_SS − w_PS)/w̄ and where it is along the blade; above 2 the pressure face stops",
+                ),
+                format!(
+                    "{:.2} · m̄ {:.2} · {}",
+                    s.peak_loading,
+                    s.peak_at,
+                    span(s.span)
+                ),
+            );
+        }
+        if let Some(s) = quality.sections.last() {
+            value_info(
+                ui,
+                tr("Leading-edge loading (shroud)"),
+                tr(
+                    "Mean Δw/w̄ over the first tenth of the shroud section: a loaded leading edge lowers the pressure where cavitation starts",
+                ),
+                format!("{:.2}", s.leading_loading),
+            );
+        }
+        if let Some(s) = quality
+            .sections
+            .iter()
+            .min_by(|a, b| a.pressure_minimum.total_cmp(&b.pressure_minimum))
+        {
+            let text = format!("{:.3} · {}", s.pressure_minimum, span(s.span));
+            value_info(
+                ui,
+                tr("Lowest pressure-face w/u₂"),
+                tr(
+                    "Below zero the relative flow on the pressure face turns back and may separate (the last 5 % of the blade, where the flow slips, is left out)",
+                ),
+                if s.pressure_minimum < 0.0 {
+                    RichText::new(format!("{} {text}", icon::WARNING))
+                        .color(ui.visuals().warn_fg_color)
+                } else {
+                    RichText::new(text)
+                },
+            );
+        }
+        value_info(
+            ui,
+            tr("Secondary-flow drive ΔC_p"),
+            tr(
+                "Largest difference of reduced static pressure on the suction face between hub and shroud, over ½ρu₂². Above 0 it draws low-energy fluid to the shroud corner, where the wake forms; loading the hub further back than the shroud lowers it (Zangeneh, Goto & Harada 1998; Gülich, Chap. 8.9.4)",
+            ),
+            format!(
+                "{:.3} · m̄ {:.2}",
+                quality.secondary_flow, quality.secondary_at
+            ),
+        );
+    });
 }
 
 fn profiles(ui: &mut Ui, cx: &mut EditCtx<'_>, project: &Project, id: ComponentId) {
@@ -2917,7 +3470,7 @@ fn edge_value(
     changed
 }
 
-fn edge_shape(ui: &mut Ui, salt: &str, shape: &mut EdgeShape) -> bool {
+pub(crate) fn edge_shape(ui: &mut Ui, salt: &str, shape: &mut EdgeShape) -> bool {
     let mut changed = false;
     widgets::list(ui, |ui| {
         ComboBox::from_id_salt(salt)
