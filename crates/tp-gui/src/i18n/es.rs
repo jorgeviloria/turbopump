@@ -4361,6 +4361,10 @@ pub(super) static MESSAGES: &[(&str, &str)] = &[
         "el CAD deja afilado el corte de agua de las secciones de radios y segmentos",
     ),
     (
+        "the CAD kernel could not join the spiral and the discharge diffuser soundly: the flow domain may part from the design by some tenths of a millimetre",
+        "el núcleo CAD no pudo unir bien la espiral y el difusor de descarga: el dominio fluido puede apartarse del diseño unas décimas de milímetro",
+    ),
+    (
         "the CAD kernel could not cut the rounded cutwater cleanly: the CAD keeps it sharp",
         "el núcleo CAD no pudo recortar limpio el corte de agua redondeado: el CAD lo deja afilado",
     ),

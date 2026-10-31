@@ -23,7 +23,7 @@ jobs:
   test:
     name: Tests (${{ matrix.os }})
     # The first build compiles Open CASCADE from source.
-    timeout-minutes: 120
+    timeout-minutes: 150
     strategy:
       fail-fast: false
       matrix:
@@ -59,20 +59,25 @@ jobs:
           path: target/OCCT-8.0.1
           key: ${{ steps.occt.outputs.cache-primary-key }}
       - run: cargo clippy --workspace --all-targets
-      # A limit per step, so that a hang fails here instead of using up the job.
+      # A limit per step, so that a hang fails here instead of using up the job. On the
+      # Linux runners the workspace tests took 18 minutes and the slow CAD tests more
+      # than 57 (34 of the 36 done, the last two still under way), so 75 were not enough.
       - name: Tests
         if: runner.os != 'Windows'
-        timeout-minutes: 75
+        timeout-minutes: 110
         # The slowest CAD tests are #[ignore]d so that a local `cargo test` is quick;
         # CI still runs them (the other ignored tests need a GPU or are benchmarks).
         # The slow CAD tests print, as they run, what each step of the volute's flow
         # domain gave, to see where a platform's OCCT parts from the others; only those
-        # lines and the results are kept.
+        # lines, the results and the two lines after a panic (its message) are kept.
         run: |
           set -o pipefail
           cargo test --workspace
           TP_CAD_PROFILE=1 cargo test -p tp-cad --lib -- --ignored --nocapture 2>&1 \
-            | grep --line-buffered -E '^\[cad\] .*: (lofts \[|channel fuse [0-9]|rounded tip|domain fuse|holds the design)|^test |panicked|^error|test result'
+            | awk 'keep > 0 { print; fflush(); keep--; next }
+                /^\[cad\] .*: (lofts \[|channel fuse [0-9]|rounded tip|domain fuse|holds the design)|^test |panicked|^error|test result/ {
+                  print; fflush(); if (/panicked/) keep = 2
+                }'
         shell: bash
       # On the Windows runners OCCT ran 3 to 16 times slower than on macOS depending on
       # the operation (diffuser 20 s, reference impeller 9 min, internal volute 28 min,

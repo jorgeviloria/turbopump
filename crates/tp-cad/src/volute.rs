@@ -315,7 +315,7 @@ pub(crate) fn holds_the_design(g: &VoluteGeometry, fluid: &Shape) -> Result<(), 
 /// valid solid at every gap, where the largest gap leaves spiral and diffuser as two
 /// solids; two solids holding both lose less than one without the diffuser, and the
 /// ring joined next may still unite them.
-fn fuse_channel(lofts: &[Shape], pieces: f64) -> Result<Shape, CadError> {
+fn fuse_channel(lofts: &[Shape], pieces: f64) -> Result<(Shape, bool), CadError> {
     let reversed: Vec<Shape> = lofts
         .iter()
         .rev()
@@ -359,18 +359,18 @@ fn fuse_channel(lofts: &[Shape], pieces: f64) -> Result<Shape, CadError> {
 }
 
 /// Of `attempts` (result, sound, share of the pieces' volume), the first sound one,
-/// else the one that kept the most of the pieces.
-fn pick_channel<T>(attempts: impl IntoIterator<Item = (T, bool, f64)>) -> Option<T> {
+/// else the one that kept the most of the pieces; and whether it is sound.
+fn pick_channel<T>(attempts: impl IntoIterator<Item = (T, bool, f64)>) -> Option<(T, bool)> {
     let mut best: Option<(T, f64)> = None;
     for (result, sound, share) in attempts {
         if sound {
-            return Some(result);
+            return Some((result, true));
         }
         if best.as_ref().is_none_or(|(_, b)| share > *b) {
             best = Some((result, share));
         }
     }
-    best.map(|(result, _)| result)
+    best.map(|(result, _)| (result, false))
 }
 
 /// A line on a kernel result for the profile notes: valid, solids, and its volume as a
@@ -386,6 +386,10 @@ fn summary(result: &Result<Shape, CadError>, reference: f64) -> String {
         Err(e) => format!("error {e}"),
     }
 }
+
+/// The warning of a channel the kernel could not join soundly: the union kept is the
+/// one that held the most of its pieces, at a fuzzy gap that may move its walls.
+pub(crate) const UNSOUND_CHANNEL: &str = "the CAD kernel could not join the spiral and the discharge diffuser soundly: the flow domain may part from the design by some tenths of a millimetre";
 
 /// The flow domain of the volute, with the cutwater rounded when it is a fillet and
 /// `round`.
@@ -411,12 +415,16 @@ fn flow_domain(g: &VoluteGeometry, round: bool) -> Result<VoluteCad, CadError> {
             .collect();
         format!("lofts [{}], ring {ring_volume:.4e}", each.join(", "))
     });
-    let mut joined = crate::profile::stage("channel fuse", || fuse_channel(&lofts, pieces))?;
+    let (mut joined, whole) =
+        crate::profile::stage("channel fuse", || fuse_channel(&lofts, pieces))?;
 
     // A rounded cutwater is the union as it is, its intersection edge rounded by the
     // kernel (a fillet) or by the sliver the design's closing cuts off; where neither
     // works, the edge stays sharp.
     let mut notes = Vec::new();
+    if !whole {
+        notes.push(UNSOUND_CHANNEL.to_owned());
+    }
     // Sections of radii and segments are left sharp: their casing does not come out of a
     // rounded flow domain.
     if g.design.cutwater_shape.is_fillet() && g.has_polyline_sides() {
@@ -1414,15 +1422,16 @@ mod tests {
     #[test]
     fn a_channel_that_dropped_a_piece_loses_to_one_that_kept_them() {
         // Two solids that hold both pieces before one solid without the diffuser.
+        // It is not sound, and says so.
         let attempts = [("spiral only", false, 0.640), ("two solids", false, 0.993)];
-        assert_eq!(pick_channel(attempts), Some("two solids"));
+        assert_eq!(pick_channel(attempts), Some(("two solids", false)));
         // A sound union wins whatever comes after it.
         let attempts = [
             ("dropped", false, 0.640),
             ("sound", true, 0.994),
             ("later", true, 0.999),
         ];
-        assert_eq!(pick_channel(attempts), Some("sound"));
+        assert_eq!(pick_channel(attempts), Some(("sound", true)));
         assert_eq!(pick_channel::<&str>([]), None);
     }
     #[test]
